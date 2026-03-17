@@ -31,7 +31,7 @@ scripts/assign-roles.js
 scripts/assign-roles.d.ts
 
 # ─── Databases ───
-db/
+/db/
 prisma/db/
 prisma/dev.db
 *.db
