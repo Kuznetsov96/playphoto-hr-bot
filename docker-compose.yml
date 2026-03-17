@@ -1,0 +1,81 @@
+services:
+  bot:
+    # Local build context for development
+    build: .
+    # Use pre-built image for production
+    image: ghcr.io/kuznetsov96/playphoto-hr-bot:latest
+    stop_grace_period: 60s
+    ports:
+      - "8080:8080"
+    restart: always
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      update_config:
+        order: start-first
+        failure_action: rollback
+        delay: 5s
+        monitor: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    volumes:
+      - ./logs:/app/logs
+      - ./google-service-account.json:/app/google-service-account.json
+
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-playphoto_bot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-playphoto_bot}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD}" ]
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

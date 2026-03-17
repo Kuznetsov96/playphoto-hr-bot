@@ -1,0 +1,553 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String              @id @default(cuid())
+  telegramId           BigInt              @unique
+  username             String?
+  firstName            String?
+  lastName             String?
+  role                 Role                @default(CANDIDATE)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  adminRole            AdminRole?
+  candidate            Candidate?
+  hrProfile            HRProfile?
+  mentorProfile        MentorProfile?
+  pendingReplies       PendingReply[]
+  staffProfile         StaffProfile?
+  supportTickets       SupportTicket[]     @relation("UserTickets")
+  assignedTickets      SupportTicket[]     @relation("AssignedTickets")
+  timelineEvents       UserTimelineEvent[]
+  chatLogs             ChatLog[]
+  outgoingTopics       OutgoingTopic[]
+  lastSupportMessageId Int?
+  isBlocked            Boolean             @default(false)
+}
+
+model Broadcast {
+  id              Int              @id @default(autoincrement())
+  initiatorId     BigInt
+  messageText     String?
+  createdAt       DateTime         @default(now())
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  targetSummary   String?
+  trackedMessages TrackedMessage[]
+}
+
+model TrackedMessage {
+  id             Int            @id @default(autoincrement())
+  broadcastId    Int
+  chatId         BigInt
+  messageId      Int
+  nextPingAt     DateTime?
+  lastPingMsgId  Int?
+  pingIntervalMs Int?
+  pendingReplies PendingReply[]
+  broadcast      Broadcast      @relation(fields: [broadcastId], references: [id])
+}
+
+model PendingReply {
+  id               Int            @id @default(autoincrement())
+  trackedMessageId Int
+  userId           BigInt
+  status           String         @default("pending")
+  respondedAt      DateTime?
+  trackedMessage   TrackedMessage @relation(fields: [trackedMessageId], references: [id])
+  user             User           @relation(fields: [userId], references: [telegramId])
+}
+
+model Candidate {
+  id                   String          @id @default(cuid())
+  userId               String          @unique
+  fullName             String?
+  phone                String?
+  birthDate            DateTime?
+  gender               String?         @default("female")
+  city                 String?
+  source               String?
+  clickSource          String? // Технічне джерело з deep-link (start=source_...)
+  status               CandidateStatus @default(SCREENING)
+  locationId           String?
+  interviewSlotId      String?         @unique
+  discoverySlotId      String?         @unique
+  trainingSlotId       String?         @unique
+  googleMeetLink       String?
+  trainingMeetLink     String?
+  currentStep          FunnelStep      @default(INITIAL_TEST)
+  isWaitlisted         Boolean         @default(false)
+  isOtherCity          Boolean         @default(false)
+  isHRLocked           Boolean         @default(false)
+  isMentorLocked       Boolean         @default(true)
+  interviewCompletedAt DateTime?
+  discoveryCompletedAt DateTime?
+  trainingCompletedAt  DateTime?
+  hrDecision           String?
+  notificationSent     Boolean         @default(false)
+  interviewInvitedAt   DateTime?
+  materialsSent        Boolean         @default(false)
+  materialsSentAt      DateTime?
+  candidateDecision    String?
+  hrScore              Int?
+  mentorScore          Int?
+  hrComment            String?
+  mentorComment        String?
+  appearance           String?
+  tattooPhotoId        String?
+  hasUnreadMessage     Boolean         @default(false)
+  lastSystemMessageId  Int?
+  testPassed           Boolean?
+  ndaConfirmedAt       DateTime?
+  ndaSentAt            DateTime?
+  ndaReminderSentAt    DateTime?
+  firstShiftDate       DateTime?
+  firstShiftTime       String?
+  firstShiftPartnerId  String?
+
+  // Onboarding & Legal Data
+  iban                String?
+  passportNumber      String?
+  passportIssuedAt    DateTime?
+  passportIssuedBy    String?
+  ipn                 String?
+  registrationAddress String?
+  email               String?
+  instagram           String?
+  bankCard            String?
+  passportPhotoIds    String? // Comma-separated file IDs
+
+  // Quiz results
+  quizScore         Int?
+  quizAnswers       String? // JSON string of answers
+  applications      Application[]
+  interviewSlot     InterviewSlot? @relation(fields: [interviewSlotId], references: [id])
+  location          Location?      @relation(fields: [locationId], references: [id])
+  discoverySlot     TrainingSlot?  @relation("CandidateDiscoverySlot", fields: [discoverySlotId], references: [id])
+  trainingSlot      TrainingSlot?  @relation("CandidateTrainingSlot", fields: [trainingSlotId], references: [id])
+  firstShiftPartner StaffProfile?  @relation("CandidateFirstShift", fields: [firstShiftPartnerId], references: [id])
+  user              User           @relation(fields: [userId], references: [id])
+  messages          Message[]
+  lead              Lead?
+
+  @@index([status])
+  @@index([userId])
+  @@index([locationId])
+  @@index([city])
+}
+
+model Lead {
+  id               String        @id @default(cuid())
+  externalId       String        @unique // ID з OLX/Instagram (UserID)
+  platformThreadId String?       @unique // OLX Thread ID
+  platformAdId     String? // OLX Ad ID (Optional context)
+  platform         LeadPlatform
+  name             String?
+  phone            String?
+  lastMessage      String?
+  status           LeadStatus    @default(NEW)
+  topicId          Int? // ID топіка в Telegram
+  candidateId      String?       @unique // Зв'язок, якщо став кандидатом
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  messages         LeadMessage[]
+
+  candidate Candidate? @relation(fields: [candidateId], references: [id])
+
+  @@index([externalId])
+  @@index([status])
+}
+
+model LeadMessage {
+  id        String   @id @default(cuid())
+  leadId    String
+  direction String // "IN" або "OUT"
+  text      String?
+  mediaUrl  String?
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+enum LeadPlatform {
+  INSTAGRAM
+  OLX
+  WORK_UA
+  MANUAL
+}
+
+enum LeadStatus {
+  NEW
+  INVITED
+  IN_PROGRESS
+  CONVERTED
+  CLOSED
+}
+
+model Location {
+  id                     String         @id @default(cuid())
+  name                   String
+  city                   String
+  address                String?
+  npRef                  String? // Nova Poshta Department/Postomat Ref
+  npAddressRef           String? // Nova Poshta Address Ref (for courier delivery)
+  neededCount            Int            @default(0)
+  summaryTemplate        String?
+  isHidden               Boolean        @default(false)
+  isHiddenFromCandidates Boolean        @default(false)
+  googleMapsLink         String?
+  salary                 String?
+  schedule               String?
+  legacyName             String?
+  sheet                  String?
+  terminalId             String?
+  searchId               Int?
+  hasAcquiring           Boolean        @default(false)
+  cashInEnvelope         Boolean        @default(false)
+  fopId                  String?
+  telegramChatId         BigInt?
+  candidates             Candidate[]
+  staff                  StaffProfile[]
+  shifts                 WorkShift[]
+  parcels                Parcel[]
+}
+
+model Application {
+  id          String    @id @default(cuid())
+  candidateId String
+  stage       String
+  data        String?
+  createdAt   DateTime  @default(now())
+  candidate   Candidate @relation(fields: [candidateId], references: [id])
+}
+
+model HRProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model MentorProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model InterviewSession {
+  id        String          @id @default(cuid())
+  startTime DateTime
+  endTime   DateTime
+  createdAt DateTime        @default(now())
+  slots     InterviewSlot[]
+}
+
+model InterviewSlot {
+  id                 String           @id @default(cuid())
+  sessionId          String
+  startTime          DateTime
+  endTime            DateTime
+  isBooked           Boolean          @default(false)
+  googleEventId      String?
+  reminded6h         Boolean          @default(false)
+  reminded10m        Boolean          @default(false)
+  reminded2mHR       Boolean          @default(false)
+  remindedCompletion Boolean          @default(false)
+  candidateId        String?
+  lastReminderMsgId  Int?
+  candidate          Candidate?
+  interviewSession   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([isBooked, startTime])
+  @@index([startTime])
+}
+
+model TrainingSession {
+  id        String         @id @default(cuid())
+  startTime DateTime
+  endTime   DateTime
+  createdAt DateTime       @default(now())
+  slots     TrainingSlot[]
+}
+
+model TrainingSlot {
+  id                 String          @id @default(cuid())
+  sessionId          String
+  startTime          DateTime
+  endTime            DateTime
+  isBooked           Boolean         @default(false)
+  googleEventId      String?
+  reminded6h         Boolean         @default(false)
+  reminded10m        Boolean         @default(false)
+  reminded5mMentor   Boolean         @default(false)
+  remindedCompletion Boolean         @default(false)
+  candidateId        String?
+  lastReminderMsgId  Int?
+  candidate          Candidate?      @relation("CandidateTrainingSlot")
+  candidateDiscovery Candidate?      @relation("CandidateDiscoverySlot")
+  trainingSession    TrainingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  sender      String
+  scope       String?   @default("HR") // "HR" or "MENTOR"
+  content     String?
+  photoId     String?
+  createdAt   DateTime  @default(now())
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+}
+
+model StaffProfile {
+  id                   String      @id @default(cuid())
+  userId               String      @unique
+  fullName             String
+  surnameNameDot       String?
+  phone                String?
+  npPhone              String? // Phone number for Nova Poshta authorization
+  birthDate            DateTime?
+  onboardingDate       DateTime?   @default(now())
+  fopName              String?
+  salaryBalance        Float       @default(0)
+  isActive             Boolean     @default(true)
+  isWelcomeSent        Boolean     @default(false)
+  locationId           String?
+  lastTaskDigestAt     DateTime?
+  location             Location?   @relation(fields: [locationId], references: [id])
+  user                 User        @relation(fields: [userId], references: [id])
+  tasks                Task[]
+  shifts               WorkShift[]
+  firstShiftCandidates Candidate[] @relation("CandidateFirstShift")
+  parcels              Parcel[]    @relation("ResponsibleStaff")
+}
+
+model Parcel {
+  id         String       @id @default(cuid())
+  ttn        String       @unique
+  status     ParcelStatus @default(EXPECTED)
+  locationId String?
+  location   Location?    @relation(fields: [locationId], references: [id])
+
+  recipientPhone String? // For authorization/proxies
+  description    String?
+  deliveryType   String // "Warehouse", "Postomat", "Address"
+
+  scheduledDate DateTime? // Expected delivery date
+  arrivedAt     DateTime?
+
+  responsibleStaffId String?
+  responsibleStaff   StaffProfile? @relation("ResponsibleStaff", fields: [responsibleStaffId], references: [id])
+
+  rejectionCount  Int       @default(0)
+  lastRejectionAt DateTime?
+
+  contentPhotoId String? // Telegram file_id
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([locationId])
+}
+
+enum ParcelStatus {
+  EXPECTED
+  IN_TRANSIT
+  ARRIVED
+  PICKUP_IN_PROGRESS
+  DELIVERED
+  VERIFYING
+  COMPLETED
+  CANCELLED
+}
+
+model WorkShift {
+  id         String       @id @default(cuid())
+  staffId    String
+  locationId String
+  date       DateTime
+  startTime  DateTime?
+  endTime    DateTime?
+  location   Location     @relation(fields: [locationId], references: [id])
+  staff      StaffProfile @relation(fields: [staffId], references: [id])
+
+  @@index([date])
+}
+
+model Task {
+  id                     String       @id @default(cuid())
+  staffId                String
+  taskText               String
+  workDate               DateTime?
+  deadlineTime           String?
+  isCompleted            Boolean      @default(false)
+  city                   String?
+  locationName           String?
+  fileId                 String?
+  createdById            String
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  reminderSentAt         DateTime?
+  overdueAdminNotifiedAt DateTime?
+  staff                  StaffProfile @relation(fields: [staffId], references: [id])
+
+  @@index([workDate])
+  @@index([isCompleted])
+  @@index([staffId])
+}
+
+model SupportTicket {
+  id              Int          @id @default(autoincrement())
+  userId          String
+  status          TicketStatus @default(OPEN)
+  isUrgent        Boolean      @default(false)
+  issueText       String
+  topicId         Int?
+  assignedAdminId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  user            User         @relation("UserTickets", fields: [userId], references: [id])
+  assignedAdmin   User?        @relation("AssignedTickets", fields: [assignedAdminId], references: [id])
+}
+
+model FinanceLog {
+  id           String         @id @default(cuid())
+  type         FinanceLogType
+  amount       Float
+  category     String?
+  comment      String?
+  fopAccount   String?
+  locationName String?
+  isSynced     Boolean        @default(false)
+  createdAt    DateTime       @default(now())
+  adminId      String?
+}
+
+model OutgoingTopic {
+  id        Int      @id @default(autoincrement())
+  chatId    BigInt
+  topicId   Int
+  staffName String?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  isClosed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([isClosed, updatedAt])
+  @@index([userId])
+}
+
+enum Role {
+  CANDIDATE
+  STAFF
+  HR
+  MENTOR
+  ADMIN
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  CO_FOUNDER
+  SUPPORT
+  HR_LEAD
+  MENTOR_LEAD
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+enum FinanceLogType {
+  INCOME
+  EXPENSE
+}
+enum CandidateStatus {
+  SCREENING
+  WAITLIST
+  INTERVIEW_SCHEDULED
+  INTERVIEW_COMPLETED
+  DECISION_PENDING
+  ACCEPTED
+  REJECTED
+  HIRED
+  MANUAL_REVIEW
+  DISCOVERY_SCHEDULED
+  DISCOVERY_COMPLETED
+  TRAINING_SCHEDULED
+  TRAINING_COMPLETED
+  OFFLINE_STAGING
+  AWAITING_FIRST_SHIFT
+  BLOCKER
+
+  // Refactored Final Step Pipeline
+  NDA
+  KNOWLEDGE_TEST
+  STAGING_SETUP
+  STAGING_ACTIVE
+  READY_FOR_HIRE
+}
+
+
+enum FunnelStep {
+  INITIAL_TEST
+  INTERVIEW
+  TRAINING
+  FIRST_SHIFT
+}
+
+model UserTimelineEvent {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  type      String // MESSAGE | SYSTEM_EVENT | STATUS_CHANGE
+  author    String // "USER", "ADMIN", "SYSTEM"
+  text      String? // Текст повідомлення або опис події
+  metadata  String? // JSON з деталями
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ChatLog {
+  id          Int      @id @default(autoincrement())
+  telegramId  BigInt
+  userId      String?
+  direction   String // "IN" = от пользователя, "OUT" = від бота
+  contentType String // "text", "callback", "photo", "video", "document", "sticker", "contact"
+  text        String?
+  mediaFileId String?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([telegramId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model ExternalToken {
+  id           String    @id @default(cuid())
+  service      String    @unique // e.g. "OLX", "INSTAGRAM"
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+  updatedAt    DateTime  @updatedAt
+}

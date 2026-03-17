@@ -1,0 +1,65 @@
+# ─── Dependencies ───
+node_modules/
+
+# ─── Environment & Secrets (CRITICAL) ───
+.env
+.env.*
+!.env.example
+# Core Settings.ini
+google-service-account.json
+monobank_cache.json
+
+# ─── Session & Auth files ───
+*.session
+
+# ─── Build output ───
+/dist/
+/src/generated/prisma/
+
+# ─── Compiled TypeScript artifacts ───
+*.d.ts
+!src/**/*.d.ts
+*.d.ts.map
+*.js.map
+# Root-level compiled JS (keep eslint.config.js, vitest.config.js)
+/check_*.js
+/find_*.js
+/verify_*.js
+prisma/seed.js
+prisma/seed.d.ts
+scripts/assign-roles.js
+scripts/assign-roles.d.ts
+
+# ─── Databases ───
+db/
+prisma/db/
+prisma/dev.db
+*.db
+*.db-shm
+*.db-wal
+
+# ─── Logs ───
+logs/
+*.log
+
+# ─── Sensitive data files ───
+members.txt
+migration.sql
+
+# ─── Server config ───
+*.exp
+pg_hba*.conf
+
+# ─── Backups ───
+backups/
+
+# ─── OS artifacts ───
+.DS_Store
+Thumbs.db
+
+# ─── Test artifacts ───
+canvas-test.png
+
+# ─── Temporary SQL files ───
+prisma/migrations/*.sql
+!prisma/migrations/*/migration.sql
