@@ -46,10 +46,16 @@ export class ScheduleSyncService {
                 keyFile: KEY_PATH,
                 scopes: ['https://www.googleapis.com/auth/spreadsheets'],
             });
+            this.sheets = google.sheets({ version: 'v4', auth: this.auth });
         } else {
-            throw new Error("❌ No Google Service Account file found (google-service-account.json is required)");
+            logger.warn("⚠️ google-service-account.json not found — Google Sheets sync disabled");
+            this.auth = null;
+            this.sheets = null;
         }
-        this.sheets = google.sheets({ version: 'v4', auth: this.auth });
+    }
+
+    private ensureSheets() {
+        if (!this.sheets) throw new Error("Google Sheets not configured (missing google-service-account.json)");
     }
 
     /**
@@ -78,6 +84,7 @@ export class ScheduleSyncService {
      * Syncs blocked users from Blocklist sheet
      */
     async syncBlocklist() {
+        this.ensureSheets();
         logger.info("⏳ Starting blocklist synchronization...");
         try {
             const res = await this.sheets.spreadsheets.values.get({
@@ -135,6 +142,7 @@ export class ScheduleSyncService {
      * Syncs team members from Google Sheet to Database
      */
     async syncTeam(api?: Api) {
+        this.ensureSheets();
         logger.info("⏳ Starting team synchronization...");
         const blocklistRes = await this.syncBlocklist();
         await this.fixLocations();
@@ -170,21 +178,21 @@ export class ScheduleSyncService {
 
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
-            const fullName = String(row[2] || "").trim();      
-            const phone = String(row[3] || "").trim();         
-            const directoryName = String(row[4] || "").trim();  
-            const status = String(row[5] || "").trim();         
-            const surnameNameDot = String(row[13] || "").trim(); 
-            const locName = String(row[14] || "").trim();      
-            const birthDateStr = String(row[15] || "").trim(); 
-            const telegramIdStr = String(row[17] || "").trim(); 
+            const fullName = String(row[2] || "").trim();
+            const phone = String(row[3] || "").trim();
+            const directoryName = String(row[4] || "").trim();
+            const status = String(row[5] || "").trim();
+            const surnameNameDot = String(row[13] || "").trim();
+            const locName = String(row[14] || "").trim();
+            const birthDateStr = String(row[15] || "").trim();
+            const telegramIdStr = String(row[17] || "").trim();
 
             if (!fullName) { skipped++; continue; }
 
             // Normalize status for comparison
             const normalizedStatus = status.toLowerCase();
             const isActive = normalizedStatus === "працює";
-            
+
             // If status is "Закінчення роботи", isActive will be false.
             // This is correct because "працює" is the only explicitly active status.
 
@@ -291,19 +299,20 @@ export class ScheduleSyncService {
 
         const activeAfter = await staffRepository.countActive();
 
-        return { 
-            success: true, 
-            staffAdded, 
-            staffUpdated, 
-            activeBefore, 
-            activeAfter, 
+        return {
+            success: true,
+            staffAdded,
+            staffUpdated,
+            activeBefore,
+            activeAfter,
             teamMapping: teamMappingForSchedule,
-            blocklistRes 
+            blocklistRes
         };
-        }
+    }
 
 
     async syncSchedule(sheetName: string = "Актуальний розклад", existingTeamMap?: { [key: string]: TeamMember }) {
+        this.ensureSheets();
         logger.info(`⏳ Starting schedule sync (v2) from sheet: ${sheetName}...`);
         const teamMap = existingTeamMap || await this.fetchTeamMapping();
         const res = await this.sheets.spreadsheets.values.get({
@@ -343,7 +352,7 @@ export class ScheduleSyncService {
         const shiftsBefore = await workShiftRepository.countInRange(minDate, maxDate).catch(() => 0);
 
         await workShiftRepository.deleteManyByDateRange(minDate, maxDate);
-        
+
         const allLocations = await locationRepository.findAll();
         // BATCH CACHE
         const allUsersWithStaff = await userRepository.findAllWithStaff();
@@ -352,14 +361,14 @@ export class ScheduleSyncService {
         let currentLocation: Location | null = null;
         let currentCity: string | null = null;
         let syncCount = 0;
-        
+
         const cities = Object.values(CITY_NAME_MAP);
         const creationPromises: Promise<any>[] = [];
 
         for (let i = 2; i < rows.length; i++) {
             const row = rows[i];
             if (!row || row.length === 0) continue;
-            
+
             const label = String(row[0] || "").trim();
             if (!label) continue;
 
@@ -372,9 +381,9 @@ export class ScheduleSyncService {
                         for (const [colIdx, date] of Object.entries(dateMap)) {
                             const cell = String(row[parseInt(colIdx)] || "").trim();
                             if (!this.isShiftCode(cell)) continue;
-                            
+
                             const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined) || currentLocation;
-                            
+
                             if (shiftLocation) {
                                 creationPromises.push(workShiftRepository.create({
                                     staff: { connect: { id: staffProfile.id } },
@@ -384,13 +393,13 @@ export class ScheduleSyncService {
                                 syncCount++;
                             }
                         }
-                        continue; 
+                        continue;
                     }
                 }
             }
 
-            const foundCity = cities.find(c => c.toLowerCase() === label.toLowerCase()) || 
-                             Object.keys(CITY_NAME_MAP).find(k => k.toLowerCase() === label.toLowerCase());
+            const foundCity = cities.find(c => c.toLowerCase() === label.toLowerCase()) ||
+                Object.keys(CITY_NAME_MAP).find(k => k.toLowerCase() === label.toLowerCase());
             if (foundCity) {
                 currentCity = CITY_NAME_MAP[foundCity.toLowerCase()] || foundCity;
                 currentLocation = null;
@@ -410,8 +419,8 @@ export class ScheduleSyncService {
             await Promise.all(creationPromises.slice(i, i + batchSize));
         }
 
-        return { 
-            success: true, 
+        return {
+            success: true,
             count: syncCount,
             shiftsBefore,
             shiftsAfter: syncCount
@@ -430,7 +439,7 @@ export class ScheduleSyncService {
         if (!sLoc) return null;
 
         // 1. Direct precise overrides for all 18 spreadsheet locations
-        const overrides: Record<string, {name: string, city: string, exclude?: string}> = {
+        const overrides: Record<string, { name: string, city: string, exclude?: string }> = {
             'drivecity': { name: 'drive', city: 'Львів' },
             'sp даринок': { name: 'даринок', city: 'Київ' },
             'sp київ': { name: 'smile park', city: 'Київ', exclude: 'даринок' },
@@ -516,7 +525,7 @@ export class ScheduleSyncService {
             let score = 0;
             if (sLoc === lName || sLoc === lLegacy) score += 100;
             else if (normalizedSheetLoc === lName || normalizedSheetLoc === lLegacy) score += 90;
-            
+
             const normalizedDbName = lName.replace(/\(.*\)/g, '').trim();
             if (normalizedSheetLoc.includes(normalizedDbName) && normalizedDbName.length > 3) score += 40;
 
@@ -527,7 +536,7 @@ export class ScheduleSyncService {
                 .filter(([_, city]) => city === l.city)
                 .map(([alias]) => alias);
             const sheetMentionsCity = lCity && (normalizedSheetLoc.includes(lCity) || cityAliases.some(a => normalizedSheetLoc.includes(a)));
-            
+
             if (sheetMentionsCity) {
                 score += 50;
             } else {
@@ -546,7 +555,7 @@ export class ScheduleSyncService {
             logger.info({ locStr, bestScore, matched: bestMatch.name, city: bestMatch.city }, "✅ [SYNC] Location matched");
             return bestMatch;
         }
-        
+
         return null;
     }
 
@@ -566,11 +575,11 @@ export class ScheduleSyncService {
     private resolveLocationFromHeader(header: string, allLocations: Location[], cityContext?: string): Location | null {
         const h = header.trim();
         const hLower = h.toLowerCase();
-        
+
         const cityMap: Record<string, string> = {
             'київ': 'Київ', 'львів': 'Львів', 'харків': 'Харків', 'рівне': 'Рівне', 'черкаси': 'Черкаси', 'запоріжжя': 'Запоріжжя', 'коломия': 'Коломия', 'самбір': 'Самбір', 'шептицький': 'Шептицький', 'хмельницький': 'Хмельницький', 'даринок': 'Київ'
         };
-        
+
         let currentCity = cityContext ? cityMap[cityContext.toLowerCase()] || cityContext : undefined;
 
         if (hLower.startsWith('sp ') || hLower.startsWith('fk ')) {
@@ -578,7 +587,7 @@ export class ScheduleSyncService {
             if (cityMap[potentialCity]) currentCity = cityMap[potentialCity];
         }
 
-        const headerAliases: Record<string, {name: string, city?: string}> = {
+        const headerAliases: Record<string, { name: string, city?: string }> = {
             'drivecity': { name: 'drive city', city: 'Львів' },
             'dragonp': { name: 'dragon park', city: 'Львів' },
             'leoland': { name: 'leoland', city: 'Львів' },
@@ -592,7 +601,7 @@ export class ScheduleSyncService {
             'fk львів': { name: 'fly kids', city: 'Львів' },
             'fk рівне': { name: 'fly kids', city: 'Рівне' },
         };
-        
+
         const target = headerAliases[hLower];
         if (target) {
             const found = allLocations.find(l => {
@@ -611,14 +620,14 @@ export class ScheduleSyncService {
             return currentCity ? l.city === currentCity : true;
         });
         if (direct) return direct;
-        
+
         const containsMatch = allLocations.find(l => {
             const matches = hLower.includes(l.name.toLowerCase()) || l.name.toLowerCase().includes(hLower) || hNormalized.includes(l.name.toLowerCase()) || l.name.toLowerCase().includes(hNormalized);
             if (!matches) return false;
             return currentCity ? l.city === currentCity : true;
         });
         if (containsMatch) return containsMatch;
-        
+
         if (hLower.startsWith('карамель')) {
             const suffix = hLower.replace('карамель', '').trim();
             const karamels = allLocations.filter(l => l.name.toLowerCase().includes('karamel'));
@@ -658,6 +667,7 @@ export class ScheduleSyncService {
     }
 
     private async fetchTeamMapping(): Promise<{ [key: string]: TeamMember }> {
+        this.ensureSheets();
         const res = await this.sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID_TEAM,
             range: "'В роботі'!A1:S2000"
@@ -666,11 +676,11 @@ export class ScheduleSyncService {
         const mapping: { [key: string]: TeamMember } = {};
         if (rows) {
             rows.forEach((row: any) => {
-                const fullName = String(row[2] || "").trim();       
-                const directoryName = String(row[4] || "").trim();  
+                const fullName = String(row[2] || "").trim();
+                const directoryName = String(row[4] || "").trim();
                 const surnameNameDot = String(row[13] || "").trim();
-                const locName = String(row[14] || "").trim();      
-                const telegramId = String(row[17] || "").trim();    
+                const locName = String(row[14] || "").trim();
+                const telegramId = String(row[17] || "").trim();
                 if (telegramId && telegramId.length > 5) {
                     const member = { fullName, directoryName, telegramId, surnameNameDot, locationName: locName };
                     if (surnameNameDot && surnameNameDot !== "<>" && surnameNameDot !== "n/a") mapping[surnameNameDot] = member;
@@ -686,6 +696,7 @@ export class ScheduleSyncService {
      * Updates Column G (First Shift) in the Team spreadsheet for a specific photographer.
      */
     async updateFirstShiftDateInSheet(telegramId: string, date: Date) {
+        this.ensureSheets();
         try {
             const res = await this.sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID_TEAM,
