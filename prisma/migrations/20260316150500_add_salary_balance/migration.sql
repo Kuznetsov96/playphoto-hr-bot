@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "StaffProfile" ADD COLUMN "salaryBalance" DOUBLE PRECISION NOT NULL DEFAULT 0;
