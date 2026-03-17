@@ -187,6 +187,8 @@ jobs:
           echo "=== [2/5] Update Environment ==="
           echo "$DOCKER_ENV" | sed 's/6379REDIS_PASSWORD/6379\nREDIS_PASSWORD/' > .env
           chmod 600 .env
+          echo "$SERVICE_ACCOUNT_JSON" > google-service-account.json
+          chmod 600 google-service-account.json
 
           echo "=== [3/5] Database Backup ==="
           mkdir -p backups logs
