@@ -1,0 +1,226 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths-ignore: [ '**.md', 'docs/**', '.gitignore' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: test_db
+        ports: [ 5432:5432 ]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:alpine
+        ports: [ 6379:6379 ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: 📦 Install dependencies
+      run: npm ci --prefer-offline --no-audit
+
+    - name: 🎭 Cache Playwright Browsers
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+        restore-keys: playwright-${{ runner.os }}-
+
+    - name: 💎 Prisma Generate & Schema Check
+      run: |
+        npx prisma generate
+        npx prisma migrate deploy
+        if ! npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code; then
+          echo "❌ Schema drift detected!" && exit 1
+        fi
+      env:
+        DATABASE_URL: postgresql://user:password@localhost:5432/test_db
+
+    - name: 🛠️ Build Project (Type Check)
+      run: npm run build
+
+    - name: 🛡️ Code Quality Checks
+      run: |
+        npm run check-cycles
+        npm run check-menu-ids
+
+    - name: 🧪 Run Unit/Integration Tests
+      run: npm test
+      env:
+        DATABASE_URL: postgresql://user:password@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+        NODE_ENV: test
+        BOT_TOKEN: "123456:ABC-DEF"
+        # Mandatory Chat IDs
+        SUPPORT_CHAT_ID: "-10012345678"
+        LEADS_CHAT_ID: "-10012345678"
+        TEAM_HUB_CHAT_ID: "-10012345678"
+        TEAM_CHANNEL_ID: "-10012345678"
+        # Mandatory ID arrays (comma-separated)
+        ADMIN_IDS: "12345678"
+        CO_FOUNDER_IDS: "12345678"
+        SUPPORT_IDS: "12345678"
+        MENTOR_IDS: "12345678"
+        HR_IDS: "12345678"
+        FINANCE_IDS: "12345678"
+        # Google Service Account dummy
+        SPREADSHEET_ID_TEAM: "dummy"
+        SPREADSHEET_ID_SCHEDULE: "dummy"
+        SPREADSHEET_ID_DDS: "dummy"
+        SPREADSHEET_ID_TECH_CASH: "dummy"
+
+  build-and-push:
+    name: 🐳 Build & Push Docker
+    # Optimization: On main branch, we trust the PR tests that just passed.
+    # We only need 'test' to pass if it's NOT a push to main (e.g. for safety on other branches if needed)
+    # But here, we'll just run it as soon as push to main happens.
+    needs: [] 
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.sha_tag }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set image tag & Lowercase repo
+      id: meta
+      run: |
+        SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+        REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        echo "sha_tag=$SHA_SHORT" >> "$GITHUB_OUTPUT"
+        echo "repo_lc=$REPO_LC" >> "$GITHUB_OUTPUT"
+
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and Push
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: true
+        tags: |
+          ghcr.io/${{ steps.meta.outputs.repo_lc }}:latest
+          ghcr.io/${{ steps.meta.outputs.repo_lc }}:${{ steps.meta.outputs.sha_tag }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy:
+    name: 🚀 Deploy to Server
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Lowercase repo for deploy
+      id: repo
+      run: |
+        REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        echo "repo_lc=$REPO_LC" >> "$GITHUB_OUTPUT"
+
+    - name: 📂 Copy configs to server
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.SERVER_IP }}
+        username: playphoto-mgr
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        source: "docker-compose.yml,package.json,scripts/"
+        target: "/home/playphoto-mgr/playphoto_hr_bot/"
+
+    - name: ⚡ Execute Remote Deploy
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SERVER_IP }}
+        username: playphoto-mgr
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        envs: DOCKER_ENV,IMAGE_TAG
+        script: |
+          set -e
+          PROJECT_DIR="/home/playphoto-mgr/playphoto_hr_bot"
+          cd "$PROJECT_DIR"
+          IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
+          REPO_LC=${{ steps.repo.outputs.repo_lc }}
+
+          echo "=== [1/5] Cleanup Disk ==="
+          df -h / | awk 'NR==2 && $5+0 > 90 {print "Cleaning disk..."}' | xargs -r docker system prune -af
+
+          echo "=== [2/5] Update Environment ==="
+          echo "$DOCKER_ENV" | sed 's/6379REDIS_PASSWORD/6379\nREDIS_PASSWORD/' > .env
+          chmod 600 .env
+
+          echo "=== [3/5] Database Backup ==="
+          mkdir -p backups logs
+          # Extract values to environment to avoid script sourcing .env again
+          export DATABASE_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2-)"
+          export BACKUP_PASSPHRASE="$(grep '^BACKUP_PASSPHRASE=' .env | cut -d= -f2-)"
+          export PROJECT_DIR="$PROJECT_DIR" && export SKIP_GDRIVE_UPLOAD=true
+          bash scripts/backup-db.sh 2>&1
+
+          echo "=== [4/5] Pull & Migrate ==="
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker pull "ghcr.io/$REPO_LC:$IMAGE_TAG"
+          sed -i "s|ghcr.io/$REPO_LC:.*|ghcr.io/$REPO_LC:$IMAGE_TAG|" docker-compose.yml
+          
+          MIGRATION_DB_URL="$(grep '^DATABASE_URL=' .env | cut -d= -f2- | sed 's/@localhost:/@postgres:/')"
+          docker compose run --rm -e DATABASE_URL="$MIGRATION_DB_URL" bot npx prisma migrate deploy
+
+          echo "=== [5/5] Safe Zero-Downtime Restart ==="
+          docker compose up -d --no-deps bot
+
+          echo "Wait for health check..."
+          for i in {1..20}; do
+            sleep 5
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose ps -q bot) 2>/dev/null || echo "starting")
+            echo "Status: $STATUS ($i/20)"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✅ Deployment Successful!" && break
+            fi
+            if [ "$i" -eq 20 ]; then
+              echo "❌ Health check failed! Check logs: docker compose logs bot" && exit 1
+            fi
+          done
+
+          docker image prune -f
+      env:
+        DOCKER_ENV: ${{ secrets.DOCKER_ENV }}
+        SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}

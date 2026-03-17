@@ -1,0 +1,7 @@
+node_modules
+npm-debug.log
+/dist_ignore
+# Note: we REMOVED /dist from here to allow SCP deployments to work with 'docker build'
+.env
+logs
+*.log
