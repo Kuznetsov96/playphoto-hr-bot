@@ -5,7 +5,7 @@ node_modules/
 .env
 .env.*
 !.env.example
-# Core Settings.ini
+\#\ Core\ Settings.ini
 google-service-account.json
 monobank_cache.json
 
