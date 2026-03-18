@@ -364,6 +364,12 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 13. Test Reminders (Every 24h until passed)
             await processTestReminders(bot);
 
+            // 14. Post-staging admin reminder (1h after staging ends)
+            await processPostStagingReminder(bot);
+
+            // 15. Onboarding data reminders (every 24h until filled)
+            await processOnboardingReminders(bot);
+
         } catch (error) {
             logger.error({ err: error }, "❌ Глобальна помилка вокера");
         }
@@ -737,28 +743,7 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
             }
         }
 
-        // 2. Документи/Онбординг (READY_FOR_HIRE, але ще не персонал)
-        const abandonedOnboardingUsers = await prisma.user.findMany({
-            where: {
-                role: "CANDIDATE",
-                staffProfile: null,
-                candidate: {
-                    status: "READY_FOR_HIRE"
-                },
-                updatedAt: { lte: yesterday, gte: twoDaysAgo }
-            },
-            include: { candidate: true }
-        });
-
-        for (const user of abandonedOnboardingUsers) {
-            try {
-                const kb = new InlineKeyboard().text("📝 Заповнити дані", "start_onboarding_data");
-                await bot.api.sendMessage(Number(user.telegramId), CANDIDATE_TEXTS["worker-abandoned-onboarding"], { reply_markup: kb });
-                logger.info({ userId: user.id }, "📢 Надіслано нагадування про онбординг");
-            } catch (e) {
-                logger.warn({ err: e, userId: user.id }, "⚠️ Не вдалося надіслати нагадування про онбординг");
-            }
-        }
+        // 2. Документи/Онбординг — moved to processOnboardingReminders (recurring every 24h)
     } catch (e) {
         logger.error({ err: e }, "❌ Помилка в processAbandonedApplications");
     }
@@ -883,5 +868,98 @@ async function processStalePipelineAlert(bot: Bot<MyContext>) {
         logger.info({ count: lines.length }, "🚨 Stale pipeline alert sent");
     } catch (e) {
         logger.error({ err: e }, "❌ Error in processStalePipelineAlert");
+    }
+}
+
+/**
+ * Post-Staging Reminder: 1 hour after staging end time, remind admin to mark Pass/Fail.
+ * Runs every 5 min. Uses STAGING_ACTIVE + firstShiftDate to detect completed stagings.
+ */
+async function processPostStagingReminder(bot: Bot<MyContext>) {
+    try {
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+        // Find candidates in STAGING_ACTIVE whose staging date has passed 1+ hour ago
+        const candidates = await prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.STAGING_ACTIVE,
+                firstShiftDate: { not: null, lte: oneHourAgo },
+                // notificationSent is true when staging was activated
+                notificationSent: true
+            },
+            include: { user: true, location: true }
+        });
+
+        for (const cand of candidates) {
+            // Throttle: only send once per 23h using user.updatedAt
+            const userUpdate = new Date(cand.user.updatedAt);
+            if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
+
+            try {
+                const name = cand.fullName || "Candidate";
+                const loc = cand.location?.name || cand.city || "";
+                const text = `📸 <b>Staging completed: ${name}</b>\n` +
+                    `📍 ${loc}\n\n` +
+                    `Please mark the result — did the candidate pass or fail? ⚖️`;
+
+                const kb = new InlineKeyboard()
+                    .text("👤 View & Decide", `view_candidate_${cand.id}`);
+
+                if (HR_IDS[0]) {
+                    await bot.api.sendMessage(HR_IDS[0], text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
+                }
+
+                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
+                logger.info({ candId: cand.id }, "📢 Post-staging reminder sent to admin");
+            } catch (e) {
+                logger.warn({ err: e, candId: cand.id }, "⚠️ Failed to send post-staging reminder");
+            }
+        }
+    } catch (e) {
+        logger.error({ err: e }, "❌ Error in processPostStagingReminder");
+    }
+}
+
+/**
+ * Onboarding Reminders: Every 24h, nudge READY_FOR_HIRE candidates who haven't filled data.
+ * Replaces the old one-shot 24-48h window from processAbandonedApplications.
+ */
+async function processOnboardingReminders(bot: Bot<MyContext>) {
+    try {
+        const now = new Date();
+        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const candidates = await prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.READY_FOR_HIRE,
+                // Only candidates who have been in this status for at least 24h
+                user: { updatedAt: { lte: twentyFourHoursAgo } }
+            },
+            include: { user: true }
+        });
+
+        for (const cand of candidates) {
+            // Throttle: only remind once every 23h
+            const userUpdate = new Date(cand.user.updatedAt);
+            if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
+
+            try {
+                const firstName = extractFirstName(cand.fullName || "");
+                const kb = new InlineKeyboard().text("📝 Заповнити дані", "start_onboarding_data");
+                await bot.api.sendMessage(
+                    Number(cand.user.telegramId),
+                    CANDIDATE_TEXTS["worker-abandoned-onboarding"],
+                    { reply_markup: kb }
+                );
+
+                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
+                logger.info({ userId: cand.user.telegramId }, "📢 Onboarding reminder sent (recurring 24h)");
+            } catch (e) {
+                logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
+            }
+        }
+    } catch (e) {
+        logger.error({ err: e }, "❌ Error in processOnboardingReminders");
     }
 }
