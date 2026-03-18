@@ -247,7 +247,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     const { candidateRepository } = await import("../repositories/candidate-repository.js");
                     const { accessService } = await import("../services/access-service.js");
 
-                    const candidate = user.candidate;
+                    const candidate = user.candidate!;
 
                     // Create StaffProfile (isWelcomeSent defaults to false)
                     if (!user.staffProfile) {
