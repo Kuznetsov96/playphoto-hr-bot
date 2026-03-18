@@ -112,6 +112,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
             } else {
                 text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
+                text += "\n\n⏳ Наставниця скоро надішле тобі матеріали для підготовки.";
             }
             kb.text("👩‍🏫 Написати наставниці", "contact_hr");
             break;
@@ -136,6 +137,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
         case CandidateStatus.DISCOVERY_COMPLETED:
             text = CANDIDATE_TEXTS["candidate-discovery-completed"](firstName) + jobDetails;
+            text += "\n\n⏳ Наступний крок готує наставниця. Ми скоро надішлемо тобі доступні варіанти навчання.";
             kb.text("👩‍🏫 Написати наставниці", "contact_hr");
             break;
 
@@ -185,8 +187,17 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             break;
         }
 
+        case CandidateStatus.HIRED:
+            text = `✨ <b>Вітаємо, ${firstName}!</b>\n\nТи вже частина команди PlayPhoto. Натисни /start, щоб відкрити робочий кабінет! 📸`;
+            break;
+
         case CandidateStatus.REJECTED:
             text = CANDIDATE_TEXTS["candidate-rejected"];
+            break;
+
+        case CandidateStatus.BLOCKER:
+            text = `Привіт, ${firstName}! 👋\n\nРаді, що ти повернулась. Якщо хочеш продовжити — напиши нашому HR.`;
+            kb.text("👩‍💼 Написати HR", "contact_hr");
             break;
 
         default:
