@@ -108,7 +108,7 @@ export const hrService = {
             prisma.candidate.count({ where: { status: CandidateStatus.KNOWLEDGE_TEST } }),
             prisma.candidate.count({ where: { status: CandidateStatus.STAGING_SETUP } }),
             prisma.candidate.count({ where: { status: CandidateStatus.STAGING_ACTIVE } }),
-            prisma.candidate.count({ where: { status: CandidateStatus.READY_FOR_HIRE } })
+            prisma.candidate.count({ where: { status: { in: [CandidateStatus.READY_FOR_HIRE, CandidateStatus.AWAITING_FIRST_SHIFT] } } })
         ]);
 
         return {
@@ -155,7 +155,7 @@ export const hrService = {
 
     async getReadyForHireCandidates() {
         return prisma.candidate.findMany({
-            where: { status: CandidateStatus.READY_FOR_HIRE },
+            where: { status: { in: [CandidateStatus.READY_FOR_HIRE, CandidateStatus.AWAITING_FIRST_SHIFT] } },
             include: { user: true, location: true },
             orderBy: { user: { updatedAt: 'asc' } }
         });
