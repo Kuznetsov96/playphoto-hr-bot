@@ -369,6 +369,8 @@ candidateHandlers.on("message:photo", async (ctx) => {
         if (photo) {
             await finishScreening(ctx, "[Фото]", photo.file_id);
         }
+    } else if (ctx.session.step?.startsWith("screening_")) {
+        await ScreenManager.renderScreen(ctx, "📝 Будь ласка, надішли текстову відповідь, а не фото. ✨");
     }
 });
 
@@ -515,5 +517,9 @@ candidateHandlers.callbackQuery(/^cancel_staging_(.+)$/, async (ctx) => {
         if (HR_IDS.length > 0) {
             await ctx.api.sendMessage(HR_IDS[0]!, `⚠️ <b>Internship Cancelled!</b>\n\n👤 Candidate: <b>${cand.fullName}</b>\n🏙️ City: ${cand.city}\n\nShe clicked "I can't come".`, { parse_mode: "HTML" });
         }
-    } catch (e) { }
+    } catch (e) {
+        const { default: logger } = await import("../../../core/logger.js");
+        logger.error({ err: e, candId }, "Failed to cancel staging");
+        await ctx.reply("⚠️ Щось пішло не так. Спробуй ще раз або напиши адміну.");
+    }
 });

@@ -23,9 +23,9 @@ hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
     ctx.session.viewingFromInbox = true; // Show 'Mark as Read' since this comes from notification
     delete ctx.session.selectedSlotId;
 
-    const text = await formatCandidateProfile(ctx as any, candidate as any, { 
-        includeActionLabel: true, 
-        actionLabel: "Please review the profile and make a decision:" 
+    const text = await formatCandidateProfile(ctx as any, candidate as any, {
+        includeActionLabel: true,
+        actionLabel: "Please review the profile and make a decision:"
     });
 
     const { ScreenManager } = await import("../utils/screen-manager.js");
@@ -40,6 +40,32 @@ hrHandlers.callbackQuery("hr_main_calendar", async (ctx) => {
     } catch (e) {
         logger.error({ err: e }, "Failed to navigate to hr_main_calendar");
     }
+});
+
+hrHandlers.callbackQuery("nav_final_step_pipeline", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const { ScreenManager } = await import("../utils/screen-manager.js");
+    await ScreenManager.renderScreen(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu", { pushToStack: true });
+});
+
+hrHandlers.callbackQuery(/^view_candidate_new_(\d+)$/, async (ctx) => {
+    const telegramId = Number(ctx.match![1]);
+    await ctx.answerCallbackQuery();
+
+    const candidate = await candidateRepository.findByTelegramId(telegramId);
+    if (!candidate) return ctx.reply("Candidate not found.");
+
+    ctx.session.candidateData = { id: candidate.id } as any;
+    ctx.session.viewingFromInbox = true;
+    delete ctx.session.selectedSlotId;
+
+    const text = await formatCandidateProfile(ctx as any, candidate as any, {
+        includeActionLabel: true,
+        actionLabel: "Please review the profile and make a decision:"
+    });
+
+    const { ScreenManager } = await import("../utils/screen-manager.js");
+    await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
 });
 
 hrHandlers.command("hr", async (ctx) => {
@@ -74,7 +100,7 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
 
             // Candidate message stays in Ukrainian
             await ctx.api.sendMessage(Number(targetId), `💬 <b>Відповідь адміністратора:</b>\n\n${text}`, { parse_mode: "HTML" });
-            
+
             // Log to history and reset unread ONLY after success
             if (cand) {
                 const { messageRepository } = await import("../repositories/message-repository.js");
@@ -188,11 +214,11 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             try {
                 const dbSlot = await interviewService.createSingleSlot(start);
                 await interviewService.bookSlot(dbSlot.id, candId);
-                
+
                 const cand = await candidateRepository.findById(candId);
                 if (cand) {
-                    await ctx.api.sendMessage(Number(cand.user.telegramId), 
-                        CANDIDATE_TEXTS["hr-manual-interview-assigned"](start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })), 
+                    await ctx.api.sendMessage(Number(cand.user.telegramId),
+                        CANDIDATE_TEXTS["hr-manual-interview-assigned"](start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })),
                         { parse_mode: "HTML" }
                     );
                 }

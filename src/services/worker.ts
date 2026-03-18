@@ -349,6 +349,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
             if (kyivHour === 11 && now.getMinutes() < 5) {
                 await processAbandonedApplications(bot);
+                await processStalePipelineAlert(bot);
             }
 
             // 11.1 NEW: Notify candidates who haven't picked an interview slot (24h after invite)
@@ -729,7 +730,7 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
 
         for (const cand of abandonedScreening) {
             try {
-                await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"]);
+                await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], { parse_mode: "HTML" });
                 logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про анкету");
             } catch (e) {
                 logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування кандидату");
@@ -808,5 +809,79 @@ async function processNDAReminders(bot: Bot<MyContext>) {
         }
     } catch (e) {
         logger.error({ err: e }, "❌ Помилка в processNDAReminders");
+    }
+}
+
+/**
+ * 🛡️ Stale Pipeline Alert: Daily check for candidates stuck in pipeline stages with no follow-up.
+ * Sends consolidated alert to HR so no candidate is lost.
+ */
+async function processStalePipelineAlert(bot: Bot<MyContext>) {
+    try {
+        const now = new Date();
+        const h24 = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const h48 = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+
+        const staleChecks = await Promise.all([
+            // HR hasn't made a decision after interview
+            prisma.candidate.findMany({
+                where: { status: CandidateStatus.INTERVIEW_COMPLETED, user: { updatedAt: { lte: h24 } } },
+                include: { user: true }
+            }),
+            // Mentor hasn't marked discovery result
+            prisma.candidate.findMany({
+                where: { status: CandidateStatus.DISCOVERY_SCHEDULED, user: { updatedAt: { lte: h24 } } },
+                include: { user: true }
+            }),
+            // Mentor hasn't marked training result
+            prisma.candidate.findMany({
+                where: { status: CandidateStatus.TRAINING_SCHEDULED, user: { updatedAt: { lte: h24 } } },
+                include: { user: true }
+            }),
+            // Admin hasn't set up staging
+            prisma.candidate.findMany({
+                where: { status: CandidateStatus.STAGING_SETUP, user: { updatedAt: { lte: h48 } } },
+                include: { user: true }
+            }),
+            // Admin hasn't marked staging result
+            prisma.candidate.findMany({
+                where: { status: CandidateStatus.STAGING_ACTIVE, user: { updatedAt: { lte: h48 } } },
+                include: { user: true }
+            }),
+        ]);
+
+        const [interviewStale, discoveryStale, trainingStale, setupStale, activeStale] = staleChecks;
+
+        const lines: string[] = [];
+        const addSection = (emoji: string, label: string, candidates: typeof interviewStale) => {
+            if (candidates.length === 0) return;
+            lines.push(`${emoji} <b>${label}:</b> ${candidates.length}`);
+            for (const c of candidates) {
+                const days = Math.floor((now.getTime() - new Date(c.user.updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+                lines.push(`  • ${c.fullName || "—"} (${days}d)`);
+            }
+        };
+
+        addSection("⚖️", "Interview — no HR decision", interviewStale);
+        addSection("🔍", "Discovery — no mentor result", discoveryStale);
+        addSection("🎓", "Training — no mentor result", trainingStale);
+        addSection("📸", "Staging Setup — incomplete", setupStale);
+        addSection("⌛", "Active Staging — no result", activeStale);
+
+        if (lines.length === 0) return;
+
+        const msg = `🚨 <b>Stale Pipeline Alert</b>\n\n${lines.join("\n")}\n\nPlease review these candidates in Final Step Pipeline.`;
+
+        for (const hrId of HR_IDS) {
+            try {
+                await bot.api.sendMessage(hrId, msg, { parse_mode: "HTML" });
+            } catch (e) {
+                logger.warn({ err: e, hrId }, "⚠️ Failed to send stale pipeline alert");
+            }
+        }
+
+        logger.info({ count: lines.length }, "🚨 Stale pipeline alert sent");
+    } catch (e) {
+        logger.error({ err: e }, "❌ Error in processStalePipelineAlert");
     }
 }
