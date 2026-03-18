@@ -13,7 +13,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
     deploy:
       update_config:
         order: start-first
@@ -67,7 +67,7 @@ services:
     restart: always
     ports:
       - "127.0.0.1:6379:6379"
-    command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD}" ]
+    command: [ "redis-server" ]
     logging:
       driver: json-file
       options:
