@@ -28,7 +28,6 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-    entrypoint: [ "sh", "-c", "export DATABASE_URL=$(echo \"$DATABASE_URL\" | sed 's/@localhost:/@postgres:/'); npm start" ]
     env_file:
       - .env
     logging:
