@@ -561,7 +561,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             }).row();
         }
 
-        if (cStatus === "READY_FOR_HIRE") {
+        if (cStatus === "READY_FOR_HIRE" || cStatus === "AWAITING_FIRST_SHIFT") {
             range.text("🚀 Finalize Hiring", async (ctx) => {
                 const res = await hrService.confirmFinalSchedule(cand.id);
                 if (res) {

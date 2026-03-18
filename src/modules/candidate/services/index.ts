@@ -15,7 +15,7 @@ export class CandidateService {
         const candidateId = candidate?.id;
         const fullName = candidate?.fullName || "Unknown";
         logger.info({ candidateId, fullName }, "🚀 processOnboardingFinish: Starting background tasks...");
-        
+
         // 1. GOOGLE SHEET REGISTRATION
         try {
             if (!candidate?.user?.telegramId) {
@@ -25,7 +25,7 @@ export class CandidateService {
             logger.debug({ candidateId }, "📝 Attempting Google Sheets registration...");
             const locId = candidate.locationId;
             const loc = locId ? await locationRepository.findById(locId) : null;
-            
+
             const regResult = await teamRegistrationService.registerNewHire({
                 fullName: candidate.fullName || "—",
                 phone: candidate.phone || "—",
@@ -41,20 +41,21 @@ export class CandidateService {
 
             if (regResult && ADMIN_IDS[0]) {
                 logger.info({ candidateId }, "✅ Registration success. Notifying admin...");
-                await api.sendMessage(ADMIN_IDS[0], `✅ <b>${fullName}</b> автоматично додана в таблицю TEAM! 📝`, { parse_mode: "HTML" }).catch(() => {});
+                const locName = loc?.name || candidate.city || "—";
+                await api.sendMessage(ADMIN_IDS[0], `✅ <b>${fullName}</b> auto-added to TEAM sheet!\n📍 ${locName}`, { parse_mode: "HTML" }).catch(() => { });
             }
         } catch (regErr: any) {
             const errorMsg = regErr.message || "Unknown error";
-            logger.error({ 
-                err: errorMsg, 
+            logger.error({
+                err: errorMsg,
                 candidateId,
                 fullName,
                 spreadsheetId: SPREADSHEET_ID_TEAM,
                 stack: regErr.stack
             }, "Failed to auto-register in TEAM sheet");
-            
+
             if (ADMIN_IDS[0]) {
-                await api.sendMessage(ADMIN_IDS[0], `❌ Помилка додавання <b>${fullName}</b> в таблицю TEAM: <code>${errorMsg}</code>`, { parse_mode: "HTML" }).catch(() => {});
+                await api.sendMessage(ADMIN_IDS[0], `❌ Failed to add <b>${fullName}</b> to TEAM sheet: <code>${errorMsg}</code>`, { parse_mode: "HTML" }).catch(() => { });
             }
         }
 
@@ -65,7 +66,7 @@ export class CandidateService {
 
         try {
             const zip = new AdmZip();
-            
+
             const infoContent = `
 CANDIDATE PROFILE
 ----------------
@@ -78,8 +79,9 @@ Instagram: ${candidate.instagram || '—'}
 IBAN: ${candidate.iban || '—'}
 Bank: ${getBankNameByIban(candidate.iban)}
 City: ${candidate.city || '—'}
+Location: ${candidate.location?.name || '—'}
             `.trim();
-            
+
             zip.addFile("Candidate_Info.txt", Buffer.from(infoContent, "utf8"));
 
             for (let i = 0; i < fileIds.length; i++) {
@@ -95,21 +97,24 @@ City: ${candidate.city || '—'}
 
             const zipName = `Docs_${candidate.fullName.replace(/\s+/g, '_')}.zip`;
             const zipPath = path.join(os.tmpdir(), zipName);
-            
+
             zip.writeZip(zipPath);
 
             if (ADMIN_IDS[0]) {
-                const caption = `📁 <b>Нові документи та анкета</b>\n\n` +
-                    `👤 Ім'я: ${candidate.fullName}\n` +
-                    `🏙️ Місто: ${candidate.city || '—'}\n\n` +
-                    `🔒 <i>Вся персональна інформація (тел, email, IBAN) знаходиться всередині архіву.</i>`;
+                const locId = candidate.locationId;
+                const loc = locId ? await locationRepository.findById(locId) : null;
+                const locLabel = loc?.name ? `${candidate.city || '—'} • ${loc.name}` : (candidate.city || '—');
+                const caption = `📁 <b>New documents & profile</b>\n\n` +
+                    `👤 ${candidate.fullName}\n` +
+                    `📍 ${locLabel}\n\n` +
+                    `🔒 <i>Personal data (phone, email, IBAN) is inside the archive.</i>`;
                 await api.sendDocument(ADMIN_IDS[0], new InputFile(zipPath), { caption, parse_mode: "HTML" });
             }
-            await fs.unlink(zipPath).catch(() => {});
+            await fs.unlink(zipPath).catch(() => { });
         } catch (mediaErr) {
             logger.error({ err: mediaErr }, "Failed to process documents media");
         } finally {
-            await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+            await fs.rm(tempDir, { recursive: true, force: true }).catch(() => { });
         }
     }
 }
