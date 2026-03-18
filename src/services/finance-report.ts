@@ -4,6 +4,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { FINANCE_IDS, FOP_DISPLAY_NAMES } from "../config.js";
 import { locationRepository } from "../repositories/location-repository.js";
+import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
 
 // Export for manual testing via command
@@ -117,8 +118,12 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
         let addedCount = 0;
         let log = "";
 
+        // Pre-fetch DDS sheet ONCE instead of per-location (was 36 reads → 1)
+        const existingDds = dryRun ? [] : await ddsService.getTransactionsForDates([dateStr]);
+
         for (const inc of incomes) {
             try {
+                let wroteThisIteration = false;
                 const loc = locationMap.get(inc.locationId);
                 // Fallback FOPs if location not found (should not happen usually)
                 const fopTerminalId = loc?.fopId || "KUZNETSOV";
@@ -146,7 +151,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                     else logger.info(`[SKIP] Cash for ${fullName} (CashInEnvelope)`);
                 } else if (netCash > 0) {
                     const locationLabel = `${fullName} (Готівка)`;
-                    const exists = await ddsService.findTransaction(dateStr, netCash, locationLabel);
+                    const exists = dryRun ? false : ddsService.matchTransaction(existingDds, netCash, locationLabel, dateStr);
 
                     if (exists) {
                         if (dryRun) log += `[SKIP] Cash for ${fullName} - already in DDS\n`;
@@ -164,6 +169,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                             location: locationLabel
                         });
                         addedCount++;
+                        wroteThisIteration = true;
                     }
                 }
 
@@ -175,7 +181,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
 
                     if (netTerminal > 0) {
                         const locationLabel = `${fullName} (Термінал)`;
-                        const exists = await ddsService.findTransaction(dateStr, netTerminal, locationLabel);
+                        const exists = dryRun ? false : ddsService.matchTransaction(existingDds, netTerminal, locationLabel, dateStr);
 
                         if (exists) {
                             if (dryRun) log += `[SKIP] Terminal for ${fullName} - already in DDS\n`;
@@ -193,13 +199,14 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                                 location: locationLabel
                             });
                             addedCount++;
+                            wroteThisIteration = true;
                         }
                     }
                 }
 
                 // Rate Limit Protection (Google Sheets: 60 writes/min)
-                // Sleep 1.5s between locations to be safe
-                if (!dryRun) await new Promise(resolve => setTimeout(resolve, 1500));
+                // Only sleep after actual writes, skip for no-ops
+                if (!dryRun && wroteThisIteration) await new Promise(resolve => setTimeout(resolve, 1500));
             } catch (e: any) {
                 logger.error({ err: e, location: inc.locationName }, "❌ Error syncing location to DDS");
                 // Continue to next location
@@ -220,9 +227,17 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
         const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
         logger.info(`⚖️ Auto-audit for ${dateStr}...`);
 
+        // 0. Pre-warm Monobank caches in parallel with DDS sync
+        const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
+            logger.warn({ err: e }, "❄️ Pre-warm failed, audit will fetch on demand")
+        );
+
         // 1. "Catch-up" Sync: Ensure late-night reports from yesterday are in DDS
         logger.info(`🔄 Catch-up sync for ${dateStr}...`);
         await syncToDDS(dateStr).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
+
+        // Wait for pre-warm to finish (likely already done while DDS sync was running)
+        await preWarmPromise;
 
         // 2. Run Audit
         const { reconciliationService } = await import("./finance/reconciliation-service.js");

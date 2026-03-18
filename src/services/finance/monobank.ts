@@ -85,7 +85,7 @@ class MonobankClient {
     async getClientInfo(onWait?: (msg: string) => void) {
         const cacheKey = `mono:client_info:${this.name}`;
         const metaKey = `mono:metadata:${this.name}`;
-        
+
         // 1. Try Redis Cache (30 min TTL) for full info (with balance)
         try {
             const cached = await redis.get(cacheKey);
@@ -123,7 +123,7 @@ class MonobankClient {
         try {
             const cached = await redis.get(cacheKey);
             if (cached) return JSON.parse(cached);
-        } catch (e) {}
+        } catch (e) { }
         return null;
     }
 
@@ -171,13 +171,13 @@ class MonobankClient {
         try {
             const cached = await redis.get(cacheKey);
             if (cached) return JSON.parse(cached);
-        } catch (e) {}
+        } catch (e) { }
 
         const result = await this.fetchWithAuth(`/personal/statement/${accountId}/${from}/${to}`, onWait);
 
         try {
             await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
-        } catch (e) {}
+        } catch (e) { }
 
         return result;
     }
@@ -365,7 +365,7 @@ export const monobankService = {
                     uahAccounts.forEach((a: any) => {
                         logger.info(`   - Account: IBAN ${a.iban.substring(0, 10)}...${a.iban.slice(-4)}, Type: ${a.type}, ID: ${a.id}`);
                     });
-                    
+
                     if (fopAccounts.length === 0) {
                         logger.warn(`[MONO] ${key} has UAH accounts but NONE matched IBAN list or 'fop' type.`);
                     }
@@ -382,5 +382,39 @@ export const monobankService = {
         });
 
         return await Promise.all(promises);
+    },
+
+    /**
+     * Pre-warm caches for audit: fetches clientInfo + statements for all FOPs.
+     * Each FOP runs in parallel (separate tokens). Cached data avoids 61s waits during actual audit.
+     */
+    async preWarmForAudit(auditDate: Date) {
+        const { MONO_FOP_IBANS } = await import("../../config.js");
+        const from = Math.floor(auditDate.getTime() / 1000);
+        const to = from + 259200; // 72h window
+
+        logger.info(`\u2744\ufe0f Pre-warming Monobank caches for ${auditDate.toLocaleDateString('uk-UA')}...`);
+
+        await Promise.all(Object.entries(monoClients).map(async ([key, client]) => {
+            try {
+                const info = await client.getClientInfo();
+                if (!info?.accounts) return;
+
+                const fopIbans = (MONO_FOP_IBANS[key.toUpperCase()] || []).map((i: string) => i.trim().toUpperCase());
+                const uahAccounts = info.accounts.filter((a: any) => a.currencyCode === 980);
+                const fopAccounts = fopIbans.length > 0
+                    ? uahAccounts.filter((a: any) => a.iban && fopIbans.includes(a.iban.toUpperCase()))
+                    : uahAccounts.filter((a: any) => a.type === 'fop' || (a.iban && a.iban.includes('2600')));
+
+                for (const acc of fopAccounts) {
+                    await client.getStatements(acc.id, from, to);
+                }
+                logger.info(`\u2744\ufe0f [${key.toUpperCase()}] Pre-warmed: ${fopAccounts.length} accounts`);
+            } catch (e: any) {
+                logger.warn(`\u2744\ufe0f [${key.toUpperCase()}] Pre-warm failed: ${e.message}`);
+            }
+        }));
+
+        logger.info(`\u2744\ufe0f Pre-warm complete.`);
     }
 };
