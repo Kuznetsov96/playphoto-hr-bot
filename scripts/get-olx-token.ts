@@ -10,7 +10,7 @@ async function getTokens() {
         console.error("Usage: npx tsx scripts/get-olx-token.ts <authorization_code>");
         process.exit(1);
     }
-    
+
     try {
         const response = await fetch("https://www.olx.ua/api/open/oauth/token", {
             method: "POST",

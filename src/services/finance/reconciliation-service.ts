@@ -72,7 +72,7 @@ export class ReconciliationService {
 
             const from = Math.floor(targetDate.getTime() / 1000);
             const endOfTargetDay = from + 86400;
-            const to = from + 259200; 
+            const to = from + 259200;
 
             const fopKeysToAudit = Object.keys(monoClients)
                 .map(k => k.toUpperCase())
@@ -169,10 +169,10 @@ export class ReconciliationService {
                                     const dln = normalizeFinanceString(tx.location);
                                     return dln.includes(fullNameNorm) && (dln.includes(FINANCE_KEYWORDS.TERMINAL) || dln.includes(FINANCE_KEYWORDS.TERMINAL_EN) || dln.includes(FINANCE_KEYWORDS.ACQUIRING));
                                 });
-                                
+
                                 const ddsTotal = ddsForLoc.reduce((sum: number, tx: any) => sum + tx.amount, 0);
                                 candidates.forEach(c => c.claimed = true);
-                                
+
                                 const expectedAfterFee = termExp * (1 - fee);
                                 const diff = Math.abs(actual - expectedAfterFee) < 0.5 ? 0 : (actual - termExp);
 
@@ -194,7 +194,7 @@ export class ReconciliationService {
                             const totalCash = inc?.totalCash || 0;
                             const totalSalary = inc?.totalSalary || 0;
                             const cashExp = totalCash - totalSalary;
-                            
+
                             if (totalCash > 0 || displaySurnames.length > 0) {
                                 const candidates = pool.filter(item => {
                                     if (item.claimed || item.data.amount <= 0) return false;
@@ -216,7 +216,7 @@ export class ReconciliationService {
                                 const ddsTotal = ddsForLoc.reduce((sum: number, tx: any) => sum + tx.amount, 0);
                                 candidates.forEach(c => c.claimed = true);
                                 const isEnv = !!(locCfg as any).cashInEnvelope;
-                                
+
                                 let diff = isEnv ? 0 : (actual - cashExp);
                                 let autoStatus = isEnv ? 'OK' : (Math.abs(diff) < 0.5 ? 'OK' : (actual === 0 ? 'MISSING' : 'MISMATCH'));
                                 let autoDetails = (candidates.length > 1 ? `(${candidates.length} пл.)` : '') + (isEnv ? ' (конверт)' : '') + (!isEnv && actual > 0 && Math.abs(actual - ddsTotal) > 1 ? ' ⚠️ NOT IN DDS' : '');
@@ -226,14 +226,14 @@ export class ReconciliationService {
                                     const staff = locShifts[0]?.staff;
                                     if (staff) {
                                         const balance = (staff as any)?.salaryBalance || 0;
-                                        
+
                                         // Scenario 1: Recovery of past debt (Excess cash)
                                         if (diff > 0 && Math.abs(diff - balance) < 0.5) {
                                             autoStatus = 'OK';
                                             autoDetails += ` ℹ️ Debt recovered: +${Math.round(diff)} UAH`;
                                             diff = 0;
                                             (locCfg as any).pendingBalanceUpdate = { staffId: staff.id, newBalance: 0 };
-                                        } 
+                                        }
                                         // Scenario 2: Recording new debt (Actual Cash < Total Salary)
                                         else if (totalCash < totalSalary && actual === 0) {
                                             const deficit = totalSalary - totalCash;
@@ -248,9 +248,9 @@ export class ReconciliationService {
                                 if (cashExp > 0 || totalCash > 0 || actual > 0) {
                                     fopMatches.push({
                                         location: `${locCfg.name} (${cityLabel(locCfg)})`,
-                                        type: 'Cash', 
-                                        expected: isEnv ? 0 : (cashExp < 0 ? 0 : cashExp), 
-                                        actual, 
+                                        type: 'Cash',
+                                        expected: isEnv ? 0 : (cashExp < 0 ? 0 : cashExp),
+                                        actual,
                                         diff,
                                         status: autoStatus as any,
                                         details: autoDetails,
@@ -294,24 +294,24 @@ export class ReconciliationService {
                 }
 
                 results.push({ name: key, monoBalance, ddsBalance, diff: monoBalance - ddsBalance, matches: fopMatches });
-                
+
                 // PHASE 3: Collect Remaining
                 pool.forEach(item => {
                     if (item.claimed) return;
                     const combined = ((item.data.description || '') + " " + (item.data.comment || '')).toLowerCase();
-                    
+
                     // Filter out ANY known terminal payouts from unrecognized
                     const isKnownTerminal = allKnownTerminalIds.some(tid => combined.includes(tid));
                     if (isKnownTerminal) return;
 
                     const isDayT = item.data.time >= from && item.data.time < endOfTargetDay;
                     const isPotentialTerminal = combined.includes('pq') || combined.includes('термінал') || combined.includes('terminal');
-                    
+
                     // Logic for Unrecognized:
                     // - On Day T: Show only NON-terminal items (Terminal payouts on Day T belong to Day T-1).
                     // - After Day T: Show only POTENTIAL terminal items (Failed matches for Day T).
                     //   Manual transfers arriving after Day T belong to those respective days (T+1, T+2).
-                    
+
                     if (isDayT) {
                         if (!isPotentialTerminal) {
                             if (item.data.amount > 0) unrecognized.push({ ...item.data, fop: key });
@@ -365,7 +365,7 @@ export class ReconciliationService {
 
             const ok = fop.matches.length - problems.length;
             if (ok > 0) main += `   ✅ <i>${ok} other locations match</i>\n`;
-            
+
             const d = fop.diff;
             main += Math.abs(d) < 0.01 ? `   💰 <b>BALANCE:</b> ✅ <code>${fmt(fop.monoBalance)} UAH</code>\n\n` :
                 `   💰 <b>BALANCE:</b> 🏦 ${fmt(fop.monoBalance)} | 📊 ${fmt(fop.ddsBalance)} (${d > 0 ? '🔺' : '🔻'} ${fmt(Math.abs(d))})\n\n`;
@@ -387,9 +387,9 @@ export class ReconciliationService {
             return chunks;
         };
 
-        return { 
-            main, 
-            unrecognized: formatExtra(`❓ <b>UNRECOGNIZED INCOMING:</b>`, res.unrecognized), 
+        return {
+            main,
+            unrecognized: formatExtra(`❓ <b>UNRECOGNIZED INCOMING:</b>`, res.unrecognized),
             expenses: formatExtra(`💸 <b>EXPENSES (not categorized):</b>`, res.expenses),
             actions
         };
