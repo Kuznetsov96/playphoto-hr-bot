@@ -12,18 +12,19 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
+import { ScreenManager } from "../utils/screen-manager.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
 // --- CALLBACK GUARD: Prevent clicking old buttons ---
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
-    
+
     // Actions that are step-specific
     const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite"];
     const trainingActions = ["book_training_slot_", "reschedule_training_", "start_training_scheduling", "cancel_training_"];
     const onboardingActions = ["send_nda_", "start_quiz", "confirm_nda_", "candidate_start_screening"];
-    
+
     if (![...interviewActions, ...trainingActions, ...onboardingActions].some(a => data.startsWith(a))) {
         return next();
     }
@@ -35,6 +36,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     // 1. Interview actions guard
     if (interviewActions.some(a => data.startsWith(a))) {
         const forbiddenStatuses: CandidateStatus[] = [
+            CandidateStatus.REJECTED,
             CandidateStatus.TRAINING_SCHEDULED,
             CandidateStatus.TRAINING_COMPLETED,
             CandidateStatus.OFFLINE_STAGING,
@@ -143,6 +145,9 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         console.error("Помилка при бронюванні:", e.message);
         if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔");
+        } else if (e.message === "UNDERAGE_CANDIDATE") {
+            await ctx.answerCallbackQuery("Цей етап доступний лише після 17 років.");
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
         } else {
             await ctx.answerCallbackQuery("Сталася помилка.");
         }
@@ -229,7 +234,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 
     if (slots.length === 0) {
         logger.info({ userId: telegramId }, "⏳ [JOURNEY] Candidate start_scheduling: No slots available. Moving to WAITLIST.");
-        
+
         // Auto-move to WAITLIST so HR can see them
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
@@ -240,7 +245,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
         const kb = new InlineKeyboard()
             .text("🔔 Повідомити мене", "no_slots_fit")
             .text("👩‍💼 Написати HR", "contact_hr");
-        
+
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
 
@@ -252,11 +257,11 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
             const alertMsg = `📥 <b>INBOX: No interview slots available!</b>\n\n` +
                 `👤 <b>${name}</b>\n\n` +
                 `This candidate tried to book an interview but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
-            
+
             for (const hrId of HR_IDS) {
                 try {
                     await ctx.api.sendMessage(hrId, alertMsg, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand?.id}`) });
-                } catch (e) {}
+                } catch (e) { }
             }
         }
         return;
@@ -310,7 +315,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         const alertMsg = `📥 <b>INBOX: Candidate cannot find interview slot!</b>\n\n` +
             `👤 <b>${name}</b>\n\n` +
             `This candidate clicked "No date fits". She is now in the WAITLIST. Please contact her! 💬`;
-        
+
         for (const hrId of HR_IDS) {
             try {
                 await ctx.api.sendMessage(hrId, alertMsg, { parse_mode: "HTML" });
@@ -329,9 +334,9 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        { 
-            status: CandidateStatus.REJECTED, 
-            hrDecision: "REJECTED", 
+        {
+            status: CandidateStatus.REJECTED,
+            hrDecision: "REJECTED",
             candidateDecision: "Відмова кандидата (не актуально)",
             isWaitlisted: false,
             notificationSent: true
@@ -349,14 +354,14 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
     const telegramId = ctx.from.id;
     const candidate = await candidateRepository.findByTelegramId(telegramId);
     const isDiscovery = candidate?.status === CandidateStatus.ACCEPTED || candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
-    
+
     const typeText = isDiscovery ? "коротку зустріч-знайомство" : "online-навчання";
 
     const slots = await trainingRepository.findActiveSlots();
 
     if (slots.length === 0) {
         logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate start_training_scheduling: No ${isDiscovery ? 'discovery' : 'training'} slots available. Moving to WAITLIST.`);
-        
+
         // Auto-move to WAITLIST so Mentor can see them
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
@@ -378,11 +383,11 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
             const alertMsg = `📥 <b>INBOX: No ${isDiscovery ? 'discovery' : 'training'} slots available!</b>\n\n` +
                 `👤 <b>${name}</b>\n\n` +
                 `This candidate tried to book ${typeText} but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
-            
+
             for (const mentorId of MENTOR_IDS) {
                 try {
                     await ctx.api.sendMessage(mentorId, alertMsg, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand?.id}`) });
-                } catch (e) {}
+                } catch (e) { }
             }
         }
         return;
@@ -438,8 +443,8 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
         await ctx.answerCallbackQuery(`Бронюємо ${typeText}... ⏳`);
         logger.info({ userId: ctx.from.id, slotId, type: isDiscovery ? 'discovery' : 'training' }, `🎓 [JOURNEY] Booking training/discovery slot`);
-        
-        const result = isDiscovery 
+
+        const result = isDiscovery
             ? await bookingService.bookDiscoverySlot(telegramId, slotId)
             : await bookingService.bookTrainingSlot(telegramId, slotId);
 
@@ -449,16 +454,16 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
         const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `твоя наставниця ${MENTOR_NAME}`;
 
-        let confirmationText = isDiscovery 
+        let confirmationText = isDiscovery
             ? CANDIDATE_TEXTS["discovery-confirm"](MENTOR_NAME, startTime.toLocaleDateString('uk-UA'), startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }))
             : `✅ Вітаємо, <b>${firstName}</b>! Твій час для <b>online-навчання</b> заброньовано.\n\n` +
-              `📅 Дата: <b>${startTime.toLocaleDateString('uk-UA')}</b>\n` +
-              `⏰ Час: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
+            `📅 Дата: <b>${startTime.toLocaleDateString('uk-UA')}</b>\n` +
+            `⏰ Час: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
 
         if ((result as any).googleMeetLink) {
             confirmationText += `\n📹 Google Meet: <a href="${(result as any).googleMeetLink}">Приєднатися до зустрічі</a>\n`;
         }
-        
+
         if (!isDiscovery) {
             confirmationText += `\n${mentorDisplay.charAt(0).toUpperCase() + mentorDisplay.slice(1)} чекатиме на тебе в Google Meet! Готуйся! ✨`;
         }
@@ -504,8 +509,8 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        { 
-            status: CandidateStatus.WAITLIST, 
+        {
+            status: CandidateStatus.WAITLIST,
             isWaitlisted: true,
             currentStep: FunnelStep.TRAINING // Explicitly set step for mentor waitlist
         }
@@ -519,7 +524,7 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
         const alertMsg = `📥 <b>INBOX: Candidate cannot find training slot!</b>\n\n` +
             `👤 <b>${name}</b>\n\n` +
             `This candidate clicked "No date fits" for training. She is now in the WAITLIST. Please contact her! 💬`;
-        
+
         for (const mentorId of MENTOR_IDS) {
             try {
                 await ctx.api.sendMessage(mentorId, alertMsg, { parse_mode: "HTML" });
