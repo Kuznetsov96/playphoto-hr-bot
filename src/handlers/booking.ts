@@ -16,6 +16,14 @@ import { ScreenManager } from "../utils/screen-manager.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
+bookingHandlers.callbackQuery(/^booking_date_header_.+$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+});
+
+bookingHandlers.callbackQuery(/^training_date_header_.+$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+});
+
 // --- CALLBACK GUARD: Prevent clicking old buttons ---
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
@@ -142,7 +150,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         }
 
     } catch (e: any) {
-        console.error("Помилка при бронюванні:", e.message);
+        logger.error({ err: e, slotId, userId: telegramId }, "Помилка при бронюванні співбесіди");
         if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔");
         } else if (e.message === "UNDERAGE_CANDIDATE") {
@@ -168,7 +176,7 @@ bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
         });
 
     } catch (e) {
-        console.error("Помилка при скасуванні:", e);
+        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні співбесіди");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -194,7 +202,7 @@ bookingHandlers.callbackQuery(/^cancel_application_by_candidate_(.+)$/, async (c
         await ctx.answerCallbackQuery("Заявку скасовано");
         await ctx.editMessageText("Зрозуміли, дякуємо, що попередила! 🌸\n\nБажаємо тобі успіхів у пошуках і всього найкращого! ✨");
     } catch (e) {
-        console.error("Error cancelling application:", e);
+        logger.error({ err: e, candidateId, userId: telegramId }, "Помилка при самостійному скасуванні заявки");
         await ctx.answerCallbackQuery("Помилка при скасуванні.");
     }
 });
@@ -220,7 +228,7 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
         await ctx.editMessageText("Добре, давай оберемо інший зручний час: 🗓️✨", { reply_markup: keyboard });
 
     } catch (e) {
-        console.error("Помилка при перенесенні:", e);
+        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при перенесенні співбесіди");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -279,7 +287,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 
     const dates = Object.keys(groupedSlots);
     for (const date of dates) {
-        keyboard.text(`📅 --- ${date} ---`).row();
+        keyboard.text(`📅 --- ${date} ---`, `booking_date_header_${date.replace('.', '_')}`).row();
         const daySlots = groupedSlots[date]!;
         daySlots.forEach((slot, idx) => {
             const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -404,7 +412,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
 
     const dates = Object.keys(groupedSlots);
     for (const date of dates) {
-        keyboard.text(`📅 --- ${date} ---`).row();
+        keyboard.text(`📅 --- ${date} ---`, `training_date_header_${date.replace('.', '_')}`).row();
         const daySlots = groupedSlots[date]!;
         daySlots.forEach((slot: any, idx: number) => {
             const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -490,7 +498,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         }
 
     } catch (e: any) {
-        console.error("Помилка при бронюванні навчання/знайомства:", e.message);
+        logger.error({ err: e, slotId, userId: telegramId }, "Помилка при бронюванні навчання або знайомства");
         if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Цей час вже зайнятий, обери інший.");
         } else {
@@ -547,7 +555,7 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
         });
 
     } catch (e) {
-        console.error("Помилка при скасуванні навчання:", e);
+        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні навчання");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -579,7 +587,7 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         await ctx.editMessageText("Добре, давай оберемо інший зручний час для навчання: 🗓️✨", { reply_markup: keyboard });
 
     } catch (e) {
-        console.error("Помилка при перенесенні навчання:", e);
+        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при перенесенні навчання");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });

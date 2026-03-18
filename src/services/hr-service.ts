@@ -28,7 +28,7 @@ export async function notifyMentors(api: any, candidate: any) {
 }
 function getPostInterviewSummaryText(candidate: any) {
     const firstName = extractFirstName(candidate.fullName || "");
-    
+
     const loc = candidate.location;
     const staticInfo = getLocationDetails(loc?.name);
 
@@ -66,7 +66,7 @@ export const hrService = {
         ] = await Promise.all([
             candidateRepository.countByStatusAndSlot(CandidateStatus.SCREENING, null, { appearance: { not: null }, isOtherCity: false }),
             interviewRepository.countBookedInRange(startOfDay, endOfDay, {
-                candidate: { 
+                candidate: {
                     status: CandidateStatus.INTERVIEW_SCHEDULED,
                     hrDecision: null
                 }
@@ -87,7 +87,7 @@ export const hrService = {
         ]);
 
         const inboxTotal = tattooCount + unreadCount + (noSlotCount || 0) + finalStepStats.total;
-        
+
         return {
             newCandidates,
             todayInterviews,
@@ -169,7 +169,7 @@ export const hrService = {
         const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
         await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), { parse_mode: "HTML", reply_markup: kb });
     },
-    
+
     async pingTest(api: any, candId: string) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return;
@@ -193,7 +193,7 @@ export const hrService = {
             urgentText +
             `📥 <b>New:</b> ${stats.newCandidates}\n` +
             `📅 <b>Interviews Today:</b> ${stats.todayInterviews}\n`;
-        
+
         return text;
     },
 
@@ -228,7 +228,7 @@ export const hrService = {
 
         // Log to Timeline
         const { timelineRepository } = await import("../repositories/timeline-repository.js");
-        await timelineRepository.createEvent(cand.user.id, 'SYSTEM_EVENT', 'ADMIN', `HR прийняв рішення: ${decision}`, { 
+        await timelineRepository.createEvent(cand.user.id, 'SYSTEM_EVENT', 'ADMIN', `HR прийняв рішення: ${decision}`, {
             decision,
             adminId: adminId || 'unknown'
         });
@@ -241,15 +241,15 @@ export const hrService = {
         if (!cand || cand.notificationSent) return false;
 
         const text = getOfferWelcomeText(cand);
-        
+
         try {
             const { trackUserMessage } = await import("../utils/cleanup.js");
             const msg = await api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML" });
             if (msg) await trackUserMessage(Number(cand.user.telegramId), msg.message_id);
-            
-            await candidateRepository.update(candId, { 
+
+            await candidateRepository.update(candId, {
                 status: CandidateStatus.ACCEPTED,
-                notificationSent: true 
+                notificationSent: true
             });
 
             // Notify Mentors ONLY AFTER offer is actually sent
@@ -267,12 +267,12 @@ export const hrService = {
         if (!cand) return false;
 
         await candidateRepository.update(candId, { status: CandidateStatus.SCREENING });
-        
+
         const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
         const { CANDIDATE_TEXTS } = await import("../constants/candidate-texts.js");
-        
+
         await cleanupUserSessionMessages(api, Number(cand.user.telegramId));
-        const msg = await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["hr-manual-review-approved"]).catch(() => {});
+        const msg = await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["hr-manual-review-approved"]).catch(() => { });
         if (msg) await trackUserMessage(Number(cand.user.telegramId), msg.message_id);
 
         return true;
@@ -282,7 +282,7 @@ export const hrService = {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return false;
 
-        await candidateRepository.update(candId, { 
+        await candidateRepository.update(candId, {
             status: CandidateStatus.REJECTED,
             hrDecision: reason === "NOSHOW" ? "NOSHOW" : "REJECTED"
         });
@@ -293,10 +293,10 @@ export const hrService = {
         let text = (STAFF_TEXTS as any)["hr-rejection-general"] || "На жаль, ми не можемо запропонувати тобі співпрацю на даний момент. Дякуємо за інтерес!";
         if (reason === "APPEARANCE") text = (STAFF_TEXTS as any)["hr-rejection-appearance"];
 
-        
+
         try {
             await api.sendMessage(tid, text);
-        } catch (e) {}
+        } catch (e) { }
 
         await accessService.syncUserAccess(cand.user.telegramId, `HR Rejected: ${reason}`);
         return true;
@@ -309,23 +309,23 @@ export const hrService = {
         const { extractFirstName } = await import("../utils/string-utils.js");
         const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
         const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
-        
+
         const tid = Number(cand.user.telegramId);
 
         await cleanupUserSessionMessages(api, tid);
         const locName = cand.location?.name || cand.city || 'вашого міста';
-        const msg = await api.sendMessage(tid, 
+        const msg = await api.sendMessage(tid,
             STAFF_TEXTS["hr-info-broadcast-item"]({ locationName: locName } as any),
-            { 
+            {
                 reply_markup: new InlineKeyboard()
                     .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
                     .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
             }
         );
-        
+
         if (msg) await trackUserMessage(tid, msg.message_id);
-        await candidateRepository.update(candId, { 
-            notificationSent: true, 
+        await candidateRepository.update(candId, {
+            notificationSent: true,
             status: CandidateStatus.SCREENING,
             interviewInvitedAt: new Date()
         });
@@ -377,7 +377,7 @@ export const hrService = {
     },
 
     async getNewCandidates(take = 10) {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.SCREENING, { 
+        return candidateRepository.findByStatusWithUser(CandidateStatus.SCREENING, {
             interviewSlotId: null,
             appearance: { not: null },
             isOtherCity: false
@@ -393,7 +393,7 @@ export const hrService = {
     },
 
     async getWaitlistCandidates() {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, { 
+        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, {
             isWaitlisted: true,
             currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] }
         });
@@ -403,9 +403,9 @@ export const hrService = {
         const candidates = await this.getWaitlistCandidates();
         const activeCities = await locationRepository.findAllCities(true);
         const cities = new Set<string>();
-        candidates.forEach(c => { 
+        candidates.forEach(c => {
             if (c.city && activeCities.includes(c.city)) {
-                cities.add(c.city); 
+                cities.add(c.city);
             }
         });
         return Array.from(cities).sort();
@@ -415,28 +415,28 @@ export const hrService = {
         const candidates = await this.getWaitlistCandidates();
         const cityCands = candidates.filter(c => c.city === city);
         const locations: Record<string, { id: string | null, name: string, count: number }> = {};
-        
+
         cityCands.forEach(c => {
             const locId = c.locationId || "unassigned";
             const locName = c.location?.name || "Unassigned";
             if (!locations[locId]) locations[locId] = { id: c.locationId, name: locName, count: 0 };
             locations[locId]!.count++;
         });
-        
+
         return Object.values(locations).sort((a, b) => b.count - a.count);
     },
 
     async getWaitlistCandidatesByLocationPaginated(city: string, locationId: string | null, page: number, pageSize: number = 5) {
         const candidates = await this.getWaitlistCandidates();
-        const filtered = candidates.filter(c => 
-            c.city === city && 
+        const filtered = candidates.filter(c =>
+            c.city === city &&
             (locationId === null ? c.locationId === null : c.locationId === locationId)
         );
-        
+
         const total = filtered.length;
         const totalPages = Math.ceil(total / pageSize);
         const items = filtered.slice((page - 1) * pageSize, page * pageSize);
-        
+
         return { items, total, totalPages, currentPage: page };
     },
 
@@ -464,9 +464,9 @@ export const hrService = {
     async getCityRecruitmentStats() {
         const locations = await locationRepository.findAllActive();
         const { getLocationPriority } = await import("../utils/location-helpers.js");
-        
+
         const results: any[] = [];
-        
+
         // 1. Map locations
         for (const loc of locations) {
             const candidates = await prisma.candidate.findMany({
@@ -520,10 +520,10 @@ export const hrService = {
             where: {
                 OR: [
                     { startTime: { gte: startOfToday } },
-                    { 
+                    {
                         startTime: { gte: startOfLookback, lt: startOfToday },
                         isBooked: true,
-                        candidate: { 
+                        candidate: {
                             status: { in: [CandidateStatus.INTERVIEW_SCHEDULED, CandidateStatus.INTERVIEW_COMPLETED, CandidateStatus.DECISION_PENDING] },
                             hrDecision: null as any
                         }
@@ -593,7 +593,7 @@ export const hrService = {
         if (botToken) {
             const bot = new Bot(botToken);
             await cleanupUserSessionMessages(bot as any, Number(slot.candidate.user.telegramId));
-            
+
             // The actual message is sent outside this service in some cases, 
             // but for safety we ensure the next message sent will be tracked.
         }
@@ -606,14 +606,14 @@ export const hrService = {
     },
 
     async getStagingCandidates() {
-        return candidateRepository.findByStatusWithUser([CandidateStatus.STAGING_SETUP, CandidateStatus.STAGING_ACTIVE], { 
-            currentStep: FunnelStep.FIRST_SHIFT 
+        return candidateRepository.findByStatusWithUser([CandidateStatus.STAGING_SETUP, CandidateStatus.STAGING_ACTIVE], {
+            currentStep: FunnelStep.FIRST_SHIFT
         });
     },
 
     async getCandidatesReadyForSchedule() {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.READY_FOR_HIRE, { 
-            currentStep: FunnelStep.FIRST_SHIFT 
+        return candidateRepository.findByStatusWithUser(CandidateStatus.READY_FOR_HIRE, {
+            currentStep: FunnelStep.FIRST_SHIFT
         });
     },
 
@@ -759,6 +759,11 @@ export const hrService = {
         const stagingTime = candRecord.firstShiftTime || "15:00-17:00";
         const stagingLoc = candRecord.location;
 
+        let candidateNotified = false;
+        let partnerNotified = false;
+        const candName = shortenName(candRecord.fullName || "Кандидатка");
+        const partnerName = shortenName(member.fullName);
+
         // Notify candidate (UA, Apple Style)
         try {
             let locText = `📍 <b>${stagingLoc?.name || '—'}</b>`;
@@ -775,11 +780,12 @@ export const hrService = {
             const kb = new InlineKeyboard();
             if (partnerUsername) kb.url("💬 Написати напарнику", `https://t.me/${partnerUsername}`).row();
             else if (partnerUser?.telegramId) kb.url("💬 Написати напарнику", `tg://user?id=${partnerUser.telegramId}`).row();
-            
+
             kb.text("❌ Не зможу прийти", `cancel_staging_${candId}`).row();
             kb.text("👨‍💼 Написати Адміну", "contact_hr");
 
             await api.sendMessage(Number(candRecord.user.telegramId), candMsg, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
+            candidateNotified = true;
         } catch (e) { logger.error({ err: e }, "Failed to notify candidate about staging"); }
 
         // Notify partner photographer (UA, Apple Style)
@@ -788,7 +794,7 @@ export const hrService = {
             if (partnerUser?.telegramId) {
                 const candShortName = shortenName(candRecord.fullName || "Кандидатка");
                 const candUsername = candRecord.user.username;
-                
+
                 const partnerMsg = `🤝 <b>Довіряємо тобі наставництво!</b>\n\n` +
                     `Ти — серце нашої команди для нової дівчини. Твій досвід допоможе їй закохатися в роботу так само, як ми. 🤍\n\n` +
                     `👤 <b>${candShortName}</b>\n` +
@@ -801,6 +807,7 @@ export const hrService = {
                 else partnerKb.url("💬 Написати стажерці", `tg://user?id=${candRecord.user.telegramId}`);
 
                 await api.sendMessage(Number(partnerUser.telegramId), partnerMsg, { parse_mode: "HTML", reply_markup: partnerKb });
+                partnerNotified = true;
             }
         } catch (e) { logger.error({ err: e }, "Failed to notify partner about staging"); }
 
@@ -814,7 +821,7 @@ export const hrService = {
             }
         });
 
-        return true;
+        return { candidateNotified, partnerNotified, candName, partnerName };
     },
 
     async notifyWaitlist(api: any, city?: string) {
