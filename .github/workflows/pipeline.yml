@@ -158,7 +158,6 @@ jobs:
         echo "REPO_LC=$REPO_LC" >> "$GITHUB_ENV"
         echo "$DOCKER_ENV" > .env
         echo "$SA_JSON" > google-service-account.json
-        chmod 600 .env google-service-account.json
 
     - name: 📂 Copy configs to server
       uses: appleboy/scp-action@v0.1.7
