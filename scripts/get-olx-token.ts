@@ -5,8 +5,12 @@ import { OLX_CONFIG } from "../src/config.js";
 import fetch from "node-fetch";
 
 async function getTokens() {
-    const code = "cf2f458da04aea59a6efe034669b9725dac4b173";
-    
+    const code = process.argv[2];
+    if (!code) {
+        console.error("Usage: npx tsx scripts/get-olx-token.ts <authorization_code>");
+        process.exit(1);
+    }
+
     try {
         const response = await fetch("https://www.olx.ua/api/open/oauth/token", {
             method: "POST",

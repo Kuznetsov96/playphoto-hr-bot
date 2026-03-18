@@ -60,30 +60,36 @@ class DDSService {
                     fop: String(r[4] || "").toLowerCase().trim(),
                     location: String(r[6] || "").trim()
                 }));
-            
+
             logger.debug({ dateStrings, found: filtered.length, totalRows: rows.length }, "📥 Fetched transactions from DDS");
             return filtered;
-        } catch (error) { 
+        } catch (error) {
             logger.error({ err: error, dateStrings }, "❌ DDS Fetch Error");
-            return []; 
+            return [];
         }
     }
 
     async findTransaction(dateStr: string, amount: number, location: string): Promise<boolean> {
         const existing = await this.getTransactionsForDates([dateStr]);
+        return this.matchTransaction(existing, amount, location, dateStr);
+    }
+
+    /**
+     * Check for duplicate against pre-fetched rows (avoids re-fetching the sheet).
+     */
+    matchTransaction(existing: { date: string; amount: number; fop: string; location: string }[], amount: number, location: string, dateStr?: string): boolean {
         const targetLocNorm = normalizeFinanceString(location);
-        const targetDateNorm = normalizeFinanceDate(dateStr);
-        
+
         const found = existing.some((tx: any) => {
             if (normalizeFinanceString(tx.location) !== targetLocNorm) return false;
-            
+
             const diff = Math.abs(tx.amount - amount);
             if (diff < 0.1) return true; // Точний збіг
 
             // Перевірка на комісію 1.3% (враховуємо обидва напрямки)
             const withFee = Number((amount * 0.987).toFixed(2));
             const fromFee = Number((amount / 0.987).toFixed(2));
-            
+
             return Math.abs(tx.amount - withFee) < 0.1 || Math.abs(tx.amount - fromFee) < 0.1;
         });
 

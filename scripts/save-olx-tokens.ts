@@ -1,12 +1,17 @@
 import prisma from "../src/db/core.js";
 
 async function saveTokens() {
-    const accessToken = "858cfe07cadc83f37324366b6dd1db33408d3955";
-    const refreshToken = "6a38111cb8b20e66aa33364aa70f7dd6e97e50b0";
-    const expiresIn = 86348;
+    const accessToken = process.argv[2];
+    const refreshToken = process.argv[3];
+    const expiresIn = Number(process.argv[4] || 86348);
+
+    if (!accessToken || !refreshToken) {
+        console.error("Usage: npx tsx scripts/save-olx-tokens.ts <accessToken> <refreshToken> [expiresIn]");
+        process.exit(1);
+    }
 
     console.log("⏳ Saving OLX tokens to database...");
-    
+
     try {
         await prisma.externalToken.upsert({
             where: { service: "OLX" },
