@@ -412,6 +412,19 @@ adminRecruitmentHandlers.callbackQuery(/^admin_staging_pass_(.+)$/, async (ctx: 
     }
 });
 
+adminRecruitmentHandlers.callbackQuery(/^admin_staging_fail_(.+)$/, async (ctx: MyContext) => {
+    const candId = ctx.match![1];
+    const existingCand = await candidateRepository.findById(candId!);
+    if (!existingCand || existingCand.status !== "OFFLINE_STAGING") return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-ans-already-processing"]);
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    const { hrService } = await import("../../services/hr-service.js");
+    const result = await hrService.completeOfflineStaging(candId!, false);
+    if (result) {
+        await ctx.answerCallbackQuery("Failed. ❌");
+        await ScreenManager.renderScreen(ctx, `❌ <b>Staging Failed.</b>\n\n<b>${shortenName(result.candidate.fullName || "Candidate")}</b> did not pass.`, new InlineKeyboard().text("📋 Active Staging", "admin_staging_active"));
+    }
+});
+
 adminRecruitmentHandlers.callbackQuery(/^admin_manage_ready_(.+)$/, async (ctx: MyContext) => {
     const candId = ctx.match![1];
     const cand = await candidateRepository.findById(candId!);

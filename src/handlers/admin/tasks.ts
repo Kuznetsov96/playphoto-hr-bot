@@ -3,6 +3,7 @@ import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { taskService } from "../../services/task-service.js";
+import { staffRepository } from "../../repositories/staff-repository.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
@@ -253,6 +254,33 @@ composer.callbackQuery("task_calendar_open", async (ctx: MyContext) => {
     keyboard.text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${new Date().toISOString().split("T")[0]}_0`);
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-calendar-title"], keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery();
+});
+
+// Обробник перегляду файлу завдання
+composer.callbackQuery(/^task_view_file_(.+)$/, async (ctx: MyContext) => {
+    const taskId = ctx.match![1]!;
+    await ctx.answerCallbackQuery();
+    const task = await taskService.getTaskById(taskId);
+    if (!task?.fileId) {
+        await ctx.reply("⚠️ File not found for this task.");
+        return;
+    }
+    await ctx.replyWithDocument(task.fileId).catch(async () => {
+        await ctx.reply("⚠️ Could not retrieve the file. It may have been deleted.");
+    });
+});
+
+// Обробник написання повідомлення співробітнику з деталей завдання
+composer.callbackQuery(/^admin_msg_staff_(.+)$/, async (ctx: MyContext) => {
+    const staffId = ctx.match![1]!;
+    await ctx.answerCallbackQuery();
+    const staff = await staffRepository.findById(staffId);
+    if (!staff) {
+        await ctx.reply("❌ Staff not found.");
+        return;
+    }
+    const { startAdminMessageFlow } = await import("./search.js");
+    await startAdminMessageFlow(ctx, staff.userId);
 });
 
 export default composer;
