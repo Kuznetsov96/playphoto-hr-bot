@@ -173,7 +173,7 @@ jobs:
         host: ${{ secrets.SERVER_IP }}
         username: playphoto-mgr
         key: ${{ secrets.SSH_PRIVATE_KEY }}
-        envs: DOCKER_ENV,IMAGE_TAG
+        envs: DOCKER_ENV,IMAGE_TAG,SERVICE_ACCOUNT_JSON
         script: |
           set -e
           PROJECT_DIR="/home/playphoto-mgr/playphoto_hr_bot"
@@ -218,7 +218,9 @@ jobs:
               echo "✅ Deployment Successful!" && break
             fi
             if [ "$i" -eq 20 ]; then
-              echo "❌ Health check failed! Check logs: docker compose logs bot" && exit 1
+              echo "❌ Health check failed!"
+              docker compose logs bot --tail 50
+              exit 1
             fi
           done
 
