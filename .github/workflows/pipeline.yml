@@ -182,7 +182,11 @@ jobs:
           chmod 600 .env google-service-account.json
 
           echo "=== [1/5] Cleanup Disk ==="
-          df -h / | awk 'NR==2 && $5+0 > 90 {print "Cleaning disk..."}' | xargs -r docker system prune -af
+          DISK_PCT=$(df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %' || df -h / | awk 'NR==2 {print $5+0}')
+          if [ "$DISK_PCT" -gt 90 ] 2>/dev/null; then
+            echo "Disk usage ${DISK_PCT}%, cleaning..."
+            docker system prune -af
+          fi
 
           echo "=== [2/5] Database Backup ==="
           mkdir -p backups logs
