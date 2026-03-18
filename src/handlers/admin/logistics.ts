@@ -68,7 +68,10 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
 
     if (parcel.contentPhotoId) {
         kb.text("🖼 View Photo", `admin_parcel_view_${parcel.id}`).row();
-        kb.text("✅ Everything is fine", `admin_parcel_confirm_${parcel.id}`).row();
+    }
+
+    if (parcel.status !== 'COMPLETED' && parcel.status !== 'CANCELLED') {
+        kb.text("✅ Complete", `admin_parcel_confirm_${parcel.id}`).row();
     }
 
     kb.text("🗑 Delete", `admin_parcel_delete_${parcel.id}`).row();
