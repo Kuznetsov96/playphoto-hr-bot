@@ -25,7 +25,7 @@ quizHandlers.callbackQuery("start_staging_selection", async (ctx) => {
 
     // Guard: only allow date selection for candidates still in setup phase
     if (candidate.status !== CandidateStatus.STAGING_SETUP && candidate.status !== CandidateStatus.KNOWLEDGE_TEST) {
-        return;
+        return ctx.answerCallbackQuery("Цей крок вже пройдено ✨");
     }
 
     const text = `📸 <b>Обери зручний день для стажування</b>\n\n` +
@@ -78,7 +78,12 @@ quizHandlers.callbackQuery("quiz_start_actual", async (ctx) => {
 
 async function sendQuestion(ctx: MyContext) {
     const quizState = (ctx.session as any).quizState;
-    if (!quizState) return;
+    if (!quizState) {
+        // Session lost (e.g. Redis restart) — guide candidate back to quiz start
+        const kb = new InlineKeyboard().text("🚀 Почати тест заново", "start_quiz");
+        await ScreenManager.renderScreen(ctx, "⚠️ <b>Сесія тесту завершилась</b>\n\nНатисни кнопку, щоб розпочати тест заново.", kb);
+        return;
+    }
 
     const questions = quizState.selectedQuestions;
     const question = questions[quizState.currentQuestionIndex];
@@ -179,9 +184,9 @@ async function finishQuiz(ctx: MyContext) {
     } else {
         const failText = `✨ <b>Трішки не вистачило</b>\n\n` +
             `Твій результат: <b>${totalScore} балів</b>. Для проходження потрібно мінімум ${threshold}.\n\n` +
-            `Але не хвилюйся! Давай ще раз пройдемося по тих питаннях, де були помилки, щоб закріпити матеріал. 💪🌸`;
+            `Але не хвилюйся. Переглянь матеріали й спробуй пройти тест ще раз повністю. 💪🌸`;
 
-        const kb = new InlineKeyboard().text("🔄 Спробувати ще раз", "quiz_retry_wrong");
+        const kb = new InlineKeyboard().text("🔄 Пройти тест заново", "start_quiz");
         await ScreenManager.renderScreen(ctx, failText, kb);
     }
 }
@@ -205,21 +210,8 @@ function generateStagingDatePicker() {
 }
 
 quizHandlers.callbackQuery("quiz_retry_wrong", async (ctx) => {
-    const quizState = (ctx.session as any).quizState;
-    if (!quizState || !quizState.wrongQuestionIds || quizState.wrongQuestionIds.length === 0) return ctx.answerCallbackQuery("Помилок не знайдено!");
-
-    const retryQuestions = TRAINING_QUIZ.filter(q => quizState.wrongQuestionIds.includes(q.id));
-
-    (ctx.session as any).quizState = {
-        currentQuestionIndex: 0,
-        score: quizState.score,
-        answers: quizState.answers,
-        selectedQuestions: retryQuestions,
-        wrongQuestionIds: []
-    };
-
-    await ctx.answerCallbackQuery("Спробуймо ще раз! 💪");
-    await sendQuestion(ctx);
+    await ctx.answerCallbackQuery("Починаємо тест заново 💪");
+    await startQuiz(ctx);
 });
 
 quizHandlers.callbackQuery("staging_no_date", async (ctx) => {

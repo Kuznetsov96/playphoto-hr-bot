@@ -500,8 +500,14 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     ctx.session.selectedCandidateId = cand.id;
                     const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
                     if (result) {
+                        const candStatus = result.candidateNotified ? "✅" : "❌";
+                        const partnerStatus = result.partnerNotified ? "✅" : "❌";
+                        const confirmText = `📬 <b>Notifications sent!</b>\n\n` +
+                            `👤 Candidate ${result.candName}: ${candStatus}\n` +
+                            `📸 Partner ${result.partnerName}: ${partnerStatus}\n\n` +
+                            `Status → <b>Active Staging</b>`;
                         await ctx.answerCallbackQuery("Notifications sent! ✅");
-                        await ctx.menu.update();
+                        await ScreenManager.renderScreen(ctx, confirmText, new InlineKeyboard().text("🚀 Final Step Pipeline", "nav_final_step_pipeline"));
                     } else {
                         await ctx.answerCallbackQuery("Error! Check details. ❌");
                     }
@@ -515,7 +521,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 const res = await hrService.completeOfflineStaging(cand.id, true);
                 if (res) {
                     const firstName = extractFirstName(res.candidate.fullName || "");
-                    await ctx.api.sendMessage(Number(res.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
+                    await ctx.api.sendMessage(Number(res.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
                     await ctx.answerCallbackQuery("Passed! ✅");
                     await ctx.menu.update();
                 }

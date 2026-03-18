@@ -157,7 +157,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
             const res = await hrService.completeOfflineStaging(cand.id, true);
             if (res) {
                 const firstName = extractFirstName(res.candidate.fullName || "");
-                await ctx.api.sendMessage(Number(res.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
+                await ctx.api.sendMessage(Number(res.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
                 await ctx.answerCallbackQuery("Passed! ✅");
                 await ctx.menu.update();
             }
@@ -406,7 +406,7 @@ adminRecruitmentHandlers.callbackQuery(/^admin_staging_pass_(.+)$/, async (ctx: 
     const result = await hrService.completeOfflineStaging(candId!, true);
     if (result && result.passed) {
         const firstName = extractFirstName(result.candidate.fullName || "");
-        await ctx.api.sendMessage(Number(result.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
+        await ctx.api.sendMessage(Number(result.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
         await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-ans-success-notified"]);
         await ScreenManager.renderScreen(ctx, `✅ <b>Success!</b>\n\n<b>${shortenName(result.candidate.fullName || "Candidate")}</b> passed!`, new InlineKeyboard().text("📋 Ready for Schedule", "admin_staging_ready"));
     }
