@@ -226,6 +226,7 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
     try {
         const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
         logger.info(`⚖️ Auto-audit for ${dateStr}...`);
+        const incomes = await techCashService.getIncomeForDate(dateStr);
 
         // 0. Pre-warm Monobank caches in parallel with DDS sync
         const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
@@ -234,14 +235,14 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
 
         // 1. "Catch-up" Sync: Ensure late-night reports from yesterday are in DDS
         logger.info(`🔄 Catch-up sync for ${dateStr}...`);
-        await syncToDDS(dateStr).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
+        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
 
         // Wait for pre-warm to finish (likely already done while DDS sync was running)
         await preWarmPromise;
 
         // 2. Run Audit
         const { reconciliationService } = await import("./finance/reconciliation-service.js");
-        const res = await reconciliationService.runReconciliation(dateStr);
+        const res = await reconciliationService.runReconciliation(dateStr, undefined, undefined, incomes);
 
         if (!res.success) {
             logger.error(`❌ Auto-audit failed: ${res.message}`);
