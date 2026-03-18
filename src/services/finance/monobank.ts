@@ -167,7 +167,19 @@ class MonobankClient {
     }
 
     async getStatements(accountId: string, from: number, to: number = Math.floor(Date.now() / 1000), onWait?: (msg: string) => void) {
-        return await this.fetchWithAuth(`/personal/statement/${accountId}/${from}/${to}`, onWait);
+        const cacheKey = `mono:stmts:${this.name}:${accountId}:${from}:${to}`;
+        try {
+            const cached = await redis.get(cacheKey);
+            if (cached) return JSON.parse(cached);
+        } catch (e) {}
+
+        const result = await this.fetchWithAuth(`/personal/statement/${accountId}/${from}/${to}`, onWait);
+
+        try {
+            await redis.set(cacheKey, JSON.stringify(result), 'EX', 300);
+        } catch (e) {}
+
+        return result;
     }
 
     async generateHtmlStatement(accountId: string, from: number, to: number, clientName: string, onWait?: (msg: string) => void) {

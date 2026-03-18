@@ -91,20 +91,23 @@ export class ReconciliationService {
                 const client = (monoClients as any)[key.toLowerCase()];
                 if (!client) return;
                 try {
-                    const fopIbans = MONO_FOP_IBANS[key] || [];
-                    const accountIds = await client.getAccountIdsByIbans(fopIbans);
+                    // Single getClientInfo call — extracts both account IDs and balance
+                    const info = await client.getClientInfo(onProgress ? (msg: string) => onProgress(msg) : undefined);
+                    if (!info || !info.accounts) return;
+
+                    const fopIbans = (MONO_FOP_IBANS[key] || []).map((i: string) => i.trim().toUpperCase());
+                    const uahAccounts = info.accounts.filter((a: any) => a.currencyCode === 980);
+                    const fopAccounts = fopIbans.length > 0
+                        ? uahAccounts.filter((a: any) => a.iban && fopIbans.includes(a.iban.toUpperCase()))
+                        : uahAccounts.filter((a: any) => a.type === 'fop' || (a.iban && a.iban.includes('2600')));
+                    const accountIds = fopAccounts.map((a: any) => a.id);
                     if (accountIds.length === 0) return;
 
                     const txResults = await Promise.all(accountIds.map((id: string) => client.getStatements(id, from, to)));
                     fopPools[key] = txResults.flat().map((tx: any) => ({ data: tx, claimed: false, fop: key }));
 
-                    // REAL Balance from client info
-                    const info = await client.getClientInfo();
-                    if (info && info.accounts) {
-                        fopBalances[key] = info.accounts
-                            .filter((a: any) => accountIds.includes(a.id))
-                            .reduce((sum: number, acc: any) => sum + (acc.balance / 100), 0);
-                    }
+                    // Balance already available from the same getClientInfo response
+                    fopBalances[key] = fopAccounts.reduce((sum: number, acc: any) => sum + (acc.balance / 100), 0);
                 } catch (e) { logger.error({ err: e }, `❌ Mono fetch failed for ${key}`); }
             }));
 
