@@ -12,6 +12,7 @@ import { getUserAdminRole } from "../../middleware/role-check.js";
 import { startExpenseFlow } from "./finance-expense.js";
 import { staffService } from "../../modules/staff/services/index.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import { techCashService } from "../../services/finance/tech-cash.js";
 import logger from "../../core/logger.js";
 
 // --- 3. FINANCE MENU ---
@@ -94,7 +95,7 @@ financeHandlers.callbackQuery("admin_finance_back", async (ctx) => {
     if (telegramId) {
         userRole = await getUserAdminRole(BigInt(telegramId));
     }
-    
+
     const text = "💰 <b>Finance Management</b>";
     const options = {
         parse_mode: "HTML" as const,
@@ -114,11 +115,11 @@ financeHandlers.callbackQuery("admin_finance_back", async (ctx) => {
 financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
     const dateStr = ctx.match![1]!;
     const actions = (global as any).lastAuditActions;
-    
+
     if (!actions?.length) return ctx.answerCallbackQuery("No pending actions. ✨");
-    
+
     await ctx.answerCallbackQuery();
-    
+
     let text = `⚙️ <b>AUDIT ACTION CENTER • ${dateStr}</b>\n\n`;
     const keyboard = new InlineKeyboard();
 
@@ -126,10 +127,10 @@ financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
         const typeIcon = action.type === 'Terminal' ? '💳' : '💵';
         const locName = action.location.split('(')[0]?.trim() || action.location;
         const diffStr = action.diff.toLocaleString('uk-UA');
-        
+
         text += `${idx + 1}. 📍 ${action.location}\n`;
         text += `   ${typeIcon} Mismatch: <b>${diffStr} UAH</b>\n\n`;
-        
+
         keyboard.text(`❓ Ask`, `audit_ask_select:${idx}:${dateStr}`);
         keyboard.text(`✅ Resolve`, `audit_resolve:${idx}:${dateStr}`).row();
     });
@@ -141,9 +142,9 @@ financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
     const idx = parseInt(ctx.match![1]!);
     const dateStr = ctx.match![2]!;
     const action = (global as any).lastAuditActions?.[idx];
-    
+
     if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
-    
+
     if (action.staffIds.length === 1) {
         // Direct send if only 1 person
         return await (financeHandlers as any).callbackQuery.execute(ctx, `audit_ask_send:${idx}:${dateStr}:${action.staffIds[0]}`);
@@ -168,7 +169,7 @@ financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx)
     const idx = parseInt(ctx.match![1]!);
     const dateStr = ctx.match![2]!;
     const targetStaffId = ctx.match![3]!;
-    
+
     const action = (global as any).lastAuditActions?.[idx];
     if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
 
@@ -194,10 +195,10 @@ financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx)
     if (success > 0) {
         const targetName = targetStaffId === 'all' ? 'Everyone' : (staffNames?.[staffIds.indexOf(targetStaffId)] || 'Staff');
         await ctx.answerCallbackQuery(`✅ Sent to ${targetName}`);
-        await ctx.reply(ADMIN_TEXTS["admin-audit-ask-success"]({ 
-            names: targetName, 
-            location, 
-            date: dateStr 
+        await ctx.reply(ADMIN_TEXTS["admin-audit-ask-success"]({
+            names: targetName,
+            location,
+            date: dateStr
         }), { parse_mode: "HTML" });
     } else {
         await ctx.answerCallbackQuery("❌ Send failed.");
@@ -211,10 +212,10 @@ financeHandlers.callbackQuery(/^audit_resolve:(\d+):(.+)$/, async (ctx) => {
 
     // Remove from global actions
     (global as any).lastAuditActions.splice(idx, 1);
-    
+
     await ctx.answerCallbackQuery("✅ Resolved.");
     await ctx.editMessageText(`✅ <b>Resolved:</b> ${action.location} (${action.type})`, { parse_mode: "HTML" });
-    
+
     // Optionally: show center again if actions left
     if ((global as any).lastAuditActions.length > 0) {
         // Redraw action center with a small delay
@@ -270,7 +271,7 @@ async function handleDailyStatus(ctx: MyContext) {
         await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => { });
         await redis.del(redisKeyLoading);
 
-        const sentMsg = await ctx.reply(reportText, { 
+        const sentMsg = await ctx.reply(reportText, {
             parse_mode: "HTML",
             reply_markup: new InlineKeyboard()
                 .text(ADMIN_TEXTS["admin-btn-refresh"], "admin_finance_balances_refresh")
@@ -381,15 +382,37 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
 
     const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
     const statusMsg = await ctx.reply(ADMIN_TEXTS["admin-finance-audit-running"]({ date: dateStr }));
+    let incomes: any[] | undefined;
+
+    // Warm Monobank caches in parallel with DDS catch-up to avoid cold-start waits in manual audits.
+    const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
+        logger.warn({ err: e }, "❄️ Manual audit pre-warm failed, continuing with on-demand fetch")
+    );
 
     // 1. "Catch-up" Sync: Ensure DDS is up to date before auditing
     try {
         const { syncToDDS } = await import("../../services/finance-report.js");
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🔄 Catching up DDS for ${dateStr}...`).catch(() => { });
-        await syncToDDS(dateStr).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
+        incomes = await techCashService.getIncomeForDate(dateStr);
+        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
     } catch (e) {
         logger.error({ err: e }, "❌ Pre-audit sync error");
     }
+
+    await ctx.api.editMessageText(
+        ctx.chat!.id,
+        statusMsg.message_id,
+        `⏳ Preparing Monobank caches for ${dateStr}...`
+    ).catch(() => { });
+
+    // Ensure pre-warm is finished (likely already done while DDS sync ran).
+    await preWarmPromise;
+
+    await ctx.api.editMessageText(
+        ctx.chat!.id,
+        statusMsg.message_id,
+        `⏳ Running full FOP audit for ${dateStr}...`
+    ).catch(() => { });
 
     const { reconciliationService } = await import("../../services/finance/reconciliation-service.js");
 
@@ -411,7 +434,7 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
             .map(([_, val]) => val)
             .filter(Boolean)
             .join('\n\n');
-        
+
         const now = Date.now();
         if (now - lastUpdate > 1500) {
             lastUpdate = now;
@@ -419,7 +442,7 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
         }
     };
 
-    const res = await reconciliationService.runReconciliation(dateStr, undefined, onProgress);
+    const res = await reconciliationService.runReconciliation(dateStr, undefined, onProgress, incomes);
 
     if (!res.success) {
         await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => { });
@@ -430,7 +453,7 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
 
     try {
         await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => { });
-        
+
         let options: any = { parse_mode: "HTML" };
         if (reports.actions && reports.actions.length > 0) {
             options.reply_markup = new InlineKeyboard().text(`⚙️ Audit Actions (${reports.actions.length})`, `admin_audit_actions:${dateStr}`);
