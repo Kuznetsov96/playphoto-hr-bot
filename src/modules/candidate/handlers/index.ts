@@ -33,7 +33,15 @@ const CandidateSchema = z.object({
         .refine(val => !val.startsWith("/"), "Це схоже на команду, введіть ім'я")
         .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
     birthDate: z.date()
-        .refine(date => date < new Date(new Date().getFullYear() - 14, 0, 1), "Мінімальний вік — 14 років")
+        .refine(date => {
+            const today = new Date();
+            let age = today.getFullYear() - date.getFullYear();
+            const m = today.getMonth() - date.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
+                age--;
+            }
+            return age >= 17;
+        }, "Ми приймаємо на роботу лише з 17 років")
         .refine(date => date > new Date(1950, 0, 1), "Введіть реальну дату народження"),
 });
 

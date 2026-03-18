@@ -43,7 +43,12 @@ function cityLabel(locCfg: { city: string; name: string }): string {
 export class ReconciliationService {
     private isAuditRunning = false;
 
-    async runReconciliation(dateStr: string, targetFop?: string, onProgress?: (msg: string) => Promise<void>) {
+    async runReconciliation(
+        dateStr: string,
+        targetFop?: string,
+        onProgress?: (msg: string) => Promise<void>,
+        incomesOverride?: any[]
+    ) {
         if (this.isAuditRunning) return { success: false, message: "Audit is already in progress." };
         this.isAuditRunning = true;
 
@@ -60,7 +65,7 @@ export class ReconciliationService {
                 })(),
                 staffRepository.findActive(),
                 locationRepository.findAllActive(),
-                techCashService.getIncomeForDate(dateStr)
+                incomesOverride ? Promise.resolve(incomesOverride) : techCashService.getIncomeForDate(dateStr)
             ]);
 
             if (dbLocations.length === 0) return { success: false, message: "No active locations." };

@@ -74,6 +74,24 @@ describe('BookingService', () => {
                 .rejects.toThrow('ALREADY_BOOKED');
         });
 
+        it('should throw error for underage candidate even with valid slot', async () => {
+            const txMock = {};
+            const now = new Date();
+            const underageBirthDate = new Date(now.getFullYear() - 16, now.getMonth(), now.getDate());
+
+            vi.mocked(prisma.$transaction).mockImplementationOnce(async (cb: any) => cb(txMock));
+            vi.mocked(interviewRepository.findSlotById).mockResolvedValue({ id: 'slot1', isBooked: false } as any);
+            vi.mocked(candidateRepository.findByTelegramId).mockResolvedValue({
+                id: 'cand1',
+                status: 'SCREENING',
+                hrDecision: null,
+                birthDate: underageBirthDate
+            } as any);
+
+            await expect(bookingService.bookInterviewSlot(12345, 'slot1', 'user'))
+                .rejects.toThrow('UNDERAGE_CANDIDATE');
+        });
+
         it('should successfully book a slot and create google event', async () => {
             const startTime = new Date();
             const endTime = new Date();

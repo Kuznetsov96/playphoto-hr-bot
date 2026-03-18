@@ -5,6 +5,16 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { googleCalendar } from "./google-calendar.js";
 import logger from "../core/logger.js";
 
+function getAge(birthDate: Date): number {
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+    }
+    return age;
+}
+
 export class BookingService {
     async bookInterviewSlot(telegramId: number, slotId: string, username: string | undefined) {
         return prisma.$transaction(async (tx) => {
@@ -18,6 +28,14 @@ export class BookingService {
 
             if (!candidate) {
                 throw new Error("CANDIDATE_NOT_FOUND");
+            }
+
+            // Server-side protection from stale callback buttons and inconsistent states.
+            if (candidate.status === "REJECTED" || candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
+                throw new Error("UNDERAGE_CANDIDATE");
+            }
+            if (candidate.birthDate && getAge(new Date(candidate.birthDate)) < 17) {
+                throw new Error("UNDERAGE_CANDIDATE");
             }
 
             // --- SMART RESCHEDULE LOGIC ---
@@ -78,7 +96,7 @@ export class BookingService {
         if (!slot) return;
 
         if (slot.googleEventId) {
-            await googleCalendar.deleteEvent(slot.googleEventId).catch(() => {});
+            await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
         }
 
         if (slot.candidate) {
