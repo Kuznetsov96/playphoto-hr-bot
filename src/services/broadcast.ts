@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
+import logger from "../core/logger.js";
 import { staffRepository, type StaffWithRelations } from "../repositories/staff-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { broadcastRepository } from "../repositories/broadcast-repository.js";
@@ -223,7 +224,7 @@ export const broadcastService = {
                 }
                 sentCount++;
             } catch (e: any) {
-                console.error(`Failed to broadcast to chat ${chatId}:`, e.message);
+                logger.error({ err: e, chatId }, "Failed to broadcast to chat");
             }
         }
 
@@ -245,7 +246,7 @@ export const broadcastService = {
                 }
                 sentCount++;
             } catch (e: any) {
-                console.error(`Failed to broadcast to user ${userId}:`, e.message);
+                logger.error({ err: e, userId }, "Failed to broadcast to user");
             }
         }
 

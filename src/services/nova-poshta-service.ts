@@ -87,6 +87,23 @@ export class NovaPoshtaService {
     }
 
     /**
+     * Get incoming parcels by recipient phone (auto-discovery)
+     */
+    async getIncomingByPhone(phone: string, dateFrom: string, dateTo: string): Promise<any[] | null> {
+        const results = await this.callApi('InternetDocument', 'getIncomingDocumentsByPhone', {
+            PhoneRecipient: phone,
+            DateTimeFrom: dateFrom,
+            DateTimeTo: dateTo
+        });
+
+        // API returns [{result: [...]}] wrapper
+        if (results && Array.isArray(results) && results[0]?.result) {
+            return results[0].result;
+        }
+        return results;
+    }
+
+    /**
      * Get list of warehouses for a city (useful for manual mapping/lookup)
      */
     async getWarehouses(cityRef: string): Promise<any[] | null> {
