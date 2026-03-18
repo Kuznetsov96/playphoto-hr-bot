@@ -11,7 +11,7 @@ async function saveTokens() {
     }
 
     console.log("⏳ Saving OLX tokens to database...");
-    
+
     try {
         await prisma.externalToken.upsert({
             where: { service: "OLX" },
