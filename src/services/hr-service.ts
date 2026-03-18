@@ -695,6 +695,31 @@ export const hrService = {
         return true;
     },
 
+    async rescheduleCandidate(candId: string) {
+        const cand = await candidateRepository.findById(candId);
+        if (!cand) return false;
+
+        // 1. Find and cancel slot if any (to free it up)
+        if (cand.interviewSlotId) {
+            const { bookingService } = await import("./booking-service.js");
+            await bookingService.cancelInterviewSlot(cand.interviewSlotId);
+        }
+
+        // 2. Set status back to WAITLIST so they can book again
+        await candidateRepository.update(candId, {
+            status: CandidateStatus.WAITLIST,
+            hrDecision: null,
+            notificationSent: false,
+            currentStep: FunnelStep.INTERVIEW
+        });
+
+        // 3. Log to Timeline
+        const { timelineRepository } = await import("../repositories/timeline-repository.js");
+        await timelineRepository.createEvent(cand.user.id, 'STATUS_CHANGE', 'ADMIN', `Кандидата перенаправлено на повторний вибір часу (Reschedule).`);
+
+        return true;
+    },
+
     async getUpcomingSessions() {
         const now = new Date();
         const sessions = await interviewRepository.findActiveSessionsAfter(now);

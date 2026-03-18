@@ -395,12 +395,22 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 await hrService.markNoShow(cand.id);
                 const tid = Number(cand.user.telegramId);
                 try {
-                    const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-rejection-noshow"], {
+                    const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-rejection-noshow"]);
+                    await trackUserMessage(tid, msg.message_id);
+                } catch (e) { }
+                await ctx.answerCallbackQuery("Status: NO-SHOW");
+                await ctx.menu.update();
+            }).row();
+            range.text(STAFF_TEXTS["hr-btn-reschedule"], async (ctx) => {
+                await hrService.rescheduleCandidate(cand.id);
+                const tid = Number(cand.user.telegramId);
+                try {
+                    const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-msg-reschedule"], {
                         reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
                     });
                     await trackUserMessage(tid, msg.message_id);
                 } catch (e) { }
-                await ctx.answerCallbackQuery("Status: NO-SHOW");
+                await ctx.answerCallbackQuery("Status: RESCHEDULE");
                 await ctx.menu.update();
             }).row();
         }
@@ -437,6 +447,18 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
         range.text(STAFF_TEXTS["hr-btn-reject"], async (ctx) => {
             await hrService.makeDecision(ctx.api, cand.id, "REJECTED", ctx.from?.id.toString());
             await ctx.answerCallbackQuery("Rejected ❌");
+            await ctx.menu.update();
+        }).row();
+        range.text(STAFF_TEXTS["hr-btn-reschedule"], async (ctx) => {
+            await hrService.rescheduleCandidate(cand.id);
+            const tid = Number(cand.user.telegramId);
+            try {
+                const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-msg-reschedule"], {
+                    reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
+                });
+                await trackUserMessage(tid, msg.message_id);
+            } catch (e) { }
+            await ctx.answerCallbackQuery("Status: RESCHEDULE");
             await ctx.menu.update();
         }).row();
     }
