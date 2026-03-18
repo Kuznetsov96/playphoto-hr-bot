@@ -203,7 +203,7 @@ export class StaffService {
                     });
                     count++;
                 } catch (e) {
-                    console.error(`Failed to refresh hub for ${s.user.telegramId}:`, e);
+                    logger.error({ err: e, telegramId: s.user.telegramId }, "Failed to refresh hub for staff");
                 }
             }
         }

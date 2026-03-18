@@ -341,6 +341,9 @@ model Parcel {
   locationId String?
   location   Location?    @relation(fields: [locationId], references: [id])
 
+  npAddressRef   String? // NP RecipientAddress Ref (for auto-mapping)
+  npCity         String? // City from NP (for fallback mapping)
+  npAddress      String? // Full address description from NP
   recipientPhone String? // For authorization/proxies
   description    String?
   deliveryType   String // "Warehouse", "Postomat", "Address"

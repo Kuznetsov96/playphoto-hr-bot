@@ -386,7 +386,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     try {
                         const msg = await ctx.api.sendMessage(result.telegramId, result.text, { parse_mode: "HTML" });
                         await trackUserMessage(result.telegramId, msg.message_id);
-                    } catch (e) { }
+                    } catch (e) { logger.warn({ err: e, telegramId: result.telegramId }, "Could not send interview-conducted msg to candidate"); }
                 }
                 await ctx.answerCallbackQuery("Status: CONDUCTED");
                 await ctx.menu.update();
@@ -397,7 +397,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 try {
                     const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-rejection-noshow"]);
                     await trackUserMessage(tid, msg.message_id);
-                } catch (e) { }
+                } catch (e) { logger.warn({ err: e, tid }, "Could not send no-show rejection to candidate"); }
                 await ctx.answerCallbackQuery("Status: NO-SHOW");
                 await ctx.menu.update();
             }).row();
@@ -409,7 +409,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                         reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
                     });
                     await trackUserMessage(tid, msg.message_id);
-                } catch (e) { }
+                } catch (e) { logger.warn({ err: e, tid }, "Could not send reschedule msg to candidate"); }
                 await ctx.answerCallbackQuery("Status: RESCHEDULE");
                 await ctx.menu.update();
             }).row();
@@ -457,7 +457,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
                 });
                 await trackUserMessage(tid, msg.message_id);
-            } catch (e) { }
+            } catch (e) { logger.warn({ err: e, tid }, "Could not send reschedule msg to candidate"); }
             await ctx.answerCallbackQuery("Status: RESCHEDULE");
             await ctx.menu.update();
         }).row();
@@ -870,7 +870,7 @@ hrDayViewMenu.dynamic(async (ctx, range) => {
             range.text("🤷‍♀️ No slots for this date", (ctx) => { }).row();
         }
     } catch (e) {
-        console.error("[HR Dashboard] Critical error in hr-day-view:", e);
+        logger.error({ err: e }, "[HR Dashboard] Critical error in hr-day-view");
         range.text("❌ Error loading slots", (ctx) => ctx.answerCallbackQuery("Please try again")).row();
     }
     range.row().text("➕ Add time", async (ctx) => {

@@ -3,6 +3,10 @@
         "git push": true,
         "gh": true,
         "git add": true,
-        "git commit": true
+        "git commit": true,
+        "ssh": true,
+        "true": true,
+        "break": true,
+        "mkdir": true
     }
 }

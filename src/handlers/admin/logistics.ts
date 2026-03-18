@@ -54,16 +54,18 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
     if (!parcel) return;
 
     const text = `📦 <b>Parcel Details</b>\n\n` +
-                 `<b>TTN:</b> <code>${parcel.ttn}</code>\n` +
-                 `<b>Status:</b> ${parcel.status}\n` +
-                 `<b>Location:</b> ${parcel.location?.name || 'Unknown'}\n` +
-                 `<b>Type:</b> ${parcel.deliveryType}\n` +
-                 `<b>Staff:</b> ${parcel.responsibleStaff?.fullName || 'None'}\n` +
-                 `<b>Rejections:</b> ${parcel.rejectionCount}\n\n` +
-                 `<i>Description: ${parcel.description || 'N/A'}</i>`;
+        `<b>TTN:</b> <code>${parcel.ttn}</code>\n` +
+        `<b>Status:</b> ${parcel.status}\n` +
+        `<b>Location:</b> ${parcel.location?.name || '⚠️ Not assigned'}\n` +
+        `<b>NP City:</b> ${(parcel as any).npCity || 'N/A'}\n` +
+        `<b>NP Address:</b> ${(parcel as any).npAddress || 'N/A'}\n` +
+        `<b>Type:</b> ${parcel.deliveryType}\n` +
+        `<b>Staff:</b> ${parcel.responsibleStaff?.fullName || 'None'}\n` +
+        `<b>Rejections:</b> ${parcel.rejectionCount}\n\n` +
+        `<i>Description: ${parcel.description || 'N/A'}</i>`;
 
     const kb = new InlineKeyboard();
-    
+
     if (parcel.contentPhotoId) {
         kb.text("🖼 View Photo", `admin_parcel_view_${parcel.id}`).row();
         kb.text("✅ Everything is fine", `admin_parcel_confirm_${parcel.id}`).row();
@@ -91,7 +93,7 @@ adminLogisticsHandlers.callbackQuery("admin_logistics_nav", async (ctx) => {
 // Confirm Parcel (Everything is fine)
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    
+
     await prisma.parcel.update({
         where: { id: parcelId },
         data: { status: 'COMPLETED' }
@@ -104,7 +106,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(.+)$/, async (ctx) 
 // Delete Parcel
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    await prisma.parcel.delete({ where: { id: parcelId } }).catch(() => {});
+    await prisma.parcel.delete({ where: { id: parcelId } }).catch(() => { });
     await ctx.answerCallbackQuery("Parcel deleted. 🗑");
     await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.menu_title, "admin-logistics");
 });
@@ -113,7 +115,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(.+)$/, async (ctx) =
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const locations = await prisma.location.findMany({ where: { isHidden: false }, orderBy: { name: 'asc' } });
-    
+
     const kb = new InlineKeyboard();
     locations.forEach(loc => {
         kb.text(loc.name, `admin_parcel_set_loc_${parcelId}_${loc.id}`).row();
@@ -124,15 +126,32 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-// Set Location Action
+// Set Location Action — also learns npAddressRef for future auto-mapping
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_set_loc_(.+)_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const locId = ctx.match[2] as string;
+
+    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
 
     await prisma.parcel.update({
         where: { id: parcelId },
         data: { locationId: locId }
     });
+
+    // Auto-learn: save NP address ref to location for future auto-mapping
+    if (parcel?.npAddressRef) {
+        const location = await prisma.location.findUnique({ where: { id: locId } });
+        if (location && !location.npAddressRef) {
+            await prisma.location.update({
+                where: { id: locId },
+                data: { npAddressRef: parcel.npAddressRef }
+            });
+        }
+    }
+
+    // Notify staff on shift about this parcel now that location is assigned
+    const { logisticsService } = await import("../../services/logistics-service.js");
+    await logisticsService.notifyStaffOnShift(parcelId, parcel?.status || 'EXPECTED');
 
     await ctx.answerCallbackQuery("Location updated! 📍");
     await showParcelDetails(ctx, parcelId);
@@ -148,7 +167,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_details_(.+)$/, async (
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
-    
+
     if (parcel?.contentPhotoId) {
         await ctx.replyWithPhoto(parcel.contentPhotoId, {
             caption: `📸 Content photo for TTN: <code>${parcel.ttn}</code>`,
@@ -177,7 +196,7 @@ adminLogisticsHandlers.on("message:text", async (ctx, next) => {
             StatusCode: '1', // Expected
             CargoDescription: 'Manual Entry'
         };
-        
+
         // Use internal method through any to bypass private if needed, 
         // but better add a public entry point.
         // For now, let's just create it directly.
