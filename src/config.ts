@@ -44,6 +44,7 @@ const envSchema = z.object({
 
     // Nova Poshta
     NOVA_POSHTA_API_KEY: z.string().optional(),
+    NP_RECIPIENT_PHONE: z.string().optional(),
 
     // OLX API
     OLX_CLIENT_ID: z.string().optional(),
@@ -142,6 +143,7 @@ export const MONO_TOKENS = {
 };
 
 export const NOVA_POSHTA_API_KEY = env.NOVA_POSHTA_API_KEY || "";
+export const NP_RECIPIENT_PHONE = env.NP_RECIPIENT_PHONE || "";
 
 export const FOP_DISPLAY_NAMES: Record<string, string> = {
     "KUZNETSOV": "Счёт ФОП Кузнецов",
