@@ -390,7 +390,9 @@ export const monobankService = {
      */
     async preWarmForAudit(auditDate: Date) {
         const { MONO_FOP_IBANS } = await import("../../config.js");
-        const from = Math.floor(auditDate.getTime() / 1000);
+        // Normalize to midnight — must match how reconciliation calculates from/to
+        const midnight = new Date(auditDate.getFullYear(), auditDate.getMonth(), auditDate.getDate());
+        const from = Math.floor(midnight.getTime() / 1000);
         const to = from + 259200; // 72h window
 
         logger.info(`\u2744\ufe0f Pre-warming Monobank caches for ${auditDate.toLocaleDateString('uk-UA')}...`);
