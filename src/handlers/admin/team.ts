@@ -53,9 +53,9 @@ export async function handleBirthdayMonthCallback(ctx: MyContext, month: number)
     const text = await getBirthdaysByMonth(month === 0 ? undefined : month);
     const kb = new InlineKeyboard().text("⬅️ Back to Months", "admin_birthdays_back");
     await ctx.answerCallbackQuery();
-    await ScreenManager.renderScreen(ctx, text, kb, { 
-        pushToStack: true, 
-        manualMenuId: "admin-birthday-list" 
+    await ScreenManager.renderScreen(ctx, text, kb, {
+        pushToStack: true,
+        manualMenuId: "admin-birthday-list"
     });
 }
 
@@ -74,7 +74,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.broadcastData;
         await ScreenManager.renderScreen(ctx, "📅 <b>Schedule</b>", "admin-schedule-dates", { pushToStack: true });
     }).row();
-    
+
     range.text("🏢 Locations", async (ctx) => {
         ctx.session.adminFlow = 'LOCATIONS';
         delete ctx.session.selectedDate;
@@ -83,7 +83,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.broadcastData;
         await ScreenManager.renderScreen(ctx, "🏢 <b>Locations</b>", "admin-team-cities", { pushToStack: true });
     });
-    
+
     range.text("🔍 Staff Search", async (ctx) => {
         ctx.session.adminFlow = 'SEARCH';
         delete ctx.session.selectedDate;
@@ -103,8 +103,44 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 const blocklistBefore = await prisma.user.count({ where: { isBlocked: true } });
 
                 const teamRes = await scheduleSyncService.syncTeam(ctx.api);
+
+                // --- Snapshot shifts BEFORE schedule sync ---
+                const shiftsBefore = await prisma.workShift.findMany({
+                    where: { date: { gte: new Date() } },
+                    select: { staffId: true, date: true, locationId: true }
+                });
+                const beforeMap = new Map<string, Set<string>>();
+                for (const s of shiftsBefore) {
+                    const key = `${s.date.toISOString()}|${s.locationId}`;
+                    if (!beforeMap.has(s.staffId)) beforeMap.set(s.staffId, new Set());
+                    beforeMap.get(s.staffId)!.add(key);
+                }
+
                 const schedRes = await scheduleSyncService.syncSchedule("Актуальний розклад", teamRes.teamMapping);
-                
+
+                // --- Snapshot shifts AFTER schedule sync ---
+                const shiftsAfter = await prisma.workShift.findMany({
+                    where: { date: { gte: new Date() } },
+                    select: { staffId: true, date: true, locationId: true }
+                });
+                const afterMap = new Map<string, Set<string>>();
+                for (const s of shiftsAfter) {
+                    const key = `${s.date.toISOString()}|${s.locationId}`;
+                    if (!afterMap.has(s.staffId)) afterMap.set(s.staffId, new Set());
+                    afterMap.get(s.staffId)!.add(key);
+                }
+
+                // --- Diff: find staff whose schedule actually changed ---
+                const changedStaffIds = new Set<string>();
+                const allStaffIds = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+                for (const sid of allStaffIds) {
+                    const before = beforeMap.get(sid);
+                    const after = afterMap.get(sid);
+                    if (!before && !after) continue;
+                    if (!before || !after || before.size !== after.size) { changedStaffIds.add(sid); continue; }
+                    for (const k of before) { if (!after.has(k)) { changedStaffIds.add(sid); break; } }
+                }
+
                 // --- NEW: Notify New Hires & Mentors ---
                 const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
                 const { staffRepository } = await import("../../repositories/staff-repository.js");
@@ -113,12 +149,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                     where: {
                         isWelcomeSent: false,
                         isActive: true,
-                        shifts: { some: {} },
-                        user: {
-                            candidate: {
-                                status: 'AWAITING_FIRST_SHIFT'
-                            }
-                        }
+                        shifts: { some: {} }
                     },
                     include: { user: { include: { candidate: true } } }
                 });
@@ -126,40 +157,81 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 for (const staff of newHires) {
                     try {
                         if (!staff.user) continue;
-                        
-                        // Use the unified activation service
+                        const staffTgId = Number(staff.user.telegramId);
+
+                        // 1. Send generic welcome & flip role
                         const { staffService } = await import("../../modules/staff/services/index.js");
                         await staffService.finalizeStaffActivation(staff.id, ctx.api);
 
-                        const firstShift = await prisma.workShift.findFirst({
-                            where: { staffId: staff.id },
+                        // 2. Send follow-up with the actual schedule
+                        const upcomingShifts = await prisma.workShift.findMany({
+                            where: { staffId: staff.id, date: { gte: new Date() } },
                             orderBy: { date: 'asc' },
-                            include: { location: true }
+                            include: { location: true },
+                            take: 30
                         });
 
+                        if (upcomingShifts.length > 0) {
+                            let schedMsg = `📅 <b>Твій графік:</b>\n\n`;
+                            for (const s of upcomingShifts) {
+                                const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
+                                const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
+                                schedMsg += `▫️ <code>${dateStr}</code> — ${s.location.name}\n`;
+                            }
+                            schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
+                            const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
+                            await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
+                        }
+
+                        // 3. Notify mentor
+                        const firstShift = upcomingShifts[0];
                         if (firstShift && MENTOR_IDS.length > 0) {
                             const dateStr = firstShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
-                            const mentorMsg = 
+                            const mentorMsg =
                                 `🎓 <b>New Staff Onboarding!</b>\n\n` +
                                 `👤 Name: <b>${staff.fullName}</b>\n` +
                                 `📅 First Shift: <b>${dateStr}</b>\n` +
                                 `📍 Location: <b>${firstShift.location.name}</b>\n\n` +
                                 `Please control their first day and help with adaptation! ✨`;
-                            
+
                             const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${staff.id}`);
-                            await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
+                            await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
                         }
                     } catch (err) {
                         logger.error({ err, staffId: staff.id }, "❌ Failed to send welcome/mentor notification in Full Sync");
                     }
                 }
 
+                // --- Notify existing staff whose schedule actually changed ---
+                let staffNotified = 0;
+                const newHireIds = new Set(newHires.map(h => h.id));
+                if (changedStaffIds.size > 0) {
+                    const staffToNotify = await staffRepository.findMany({
+                        where: {
+                            id: { in: Array.from(changedStaffIds) },
+                            isActive: true,
+                            isWelcomeSent: true
+                        },
+                        include: { user: true }
+                    });
+
+                    for (const s of staffToNotify) {
+                        if (!s.user || newHireIds.has(s.id)) continue;
+                        try {
+                            const updateMsg = `📅 <b>Графік оновлено!</b>\n\nПереглянь свої зміни — можливо, є зміни у датах чи локації. ✨`;
+                            const updateKb = new InlineKeyboard().text("🗓 Мій графік", "staff_hub_nav");
+                            await ctx.api.sendMessage(Number(s.user.telegramId), updateMsg, { parse_mode: "HTML", reply_markup: updateKb }).catch(() => { });
+                            staffNotified++;
+                        } catch { /* skip */ }
+                    }
+                }
+
                 let report = `✅ <b>Sync Complete!</b>\n\n`;
-                
+
                 const teamDelta = (teamRes.activeAfter || 0) - (teamRes.activeBefore || 0);
                 const teamDeltaStr = teamDelta >= 0 ? `+${teamDelta}` : `${teamDelta}`;
                 report += `👥 Team: <b>${teamRes.activeAfter || 0}</b> (${teamDeltaStr})\n`;
-                
+
                 const shiftDelta = (schedRes.shiftsAfter || 0) - (schedRes.shiftsBefore || 0);
                 const shiftDeltaStr = shiftDelta >= 0 ? `+${shiftDelta}` : `${shiftDelta}`;
                 report += `📅 Shifts: <b>${schedRes.shiftsAfter || 0}</b> (${shiftDeltaStr})\n`;
@@ -176,7 +248,10 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 }
 
                 if (newHires.length > 0) {
-                    report += `📢 <b>${newHires.length}</b> new hires notified! ✨`;
+                    report += `📢 <b>${newHires.length}</b> new hires notified! ✨\n`;
+                }
+                if (staffNotified > 0) {
+                    report += `📅 <b>${staffNotified}</b> staff notified about schedule changes`;
                 }
 
                 await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, report, { parse_mode: "HTML" });
@@ -195,7 +270,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         range.text("🎂 Birthdays", async (ctx) => {
             await showBirthdayMenu(ctx);
         });
-        
+
         range.text("⚠️ Inactive", async (ctx) => {
             const report = await staffService.getInactiveStaffReport();
             await ctx.reply(report, { parse_mode: "HTML" });
@@ -243,13 +318,13 @@ adminScheduleDateMenu.dynamic(async (ctx, range) => {
         // Row every 3 buttons
         if ((i - 2 + 1) % 3 === 0) range.row();
     }
-    
+
     // Gaps Button (at the bottom)
     range.row().text(ADMIN_TEXTS["admin-schedule-gaps"], async (ctx) => {
         const { scheduleGapService } = await import("../../services/schedule-gap-service.js");
         const gaps = await scheduleGapService.findGaps(7);
         const report = scheduleGapService.formatGapReport(gaps);
-        
+
         await ScreenManager.renderScreen(ctx, report, new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-back"], "back_to_schedule_dates"), { pushToStack: true });
     });
 

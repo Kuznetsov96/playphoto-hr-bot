@@ -33,7 +33,7 @@ export async function startPreferencesFlow(ctx: MyContext) {
     const now = new Date();
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
     const targetMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth(), 1);
-    
+
     ctx.session.preferencesData = {
         month: targetMonthDate.toLocaleString('uk-UA', { month: 'long' }),
         year: targetMonthDate.getFullYear(),
@@ -49,10 +49,10 @@ export async function startPreferencesFlow(ctx: MyContext) {
 async function renderCalendar(ctx: MyContext) {
     if (!ctx.session.preferencesData) return;
     const { month, selectedDays, year } = ctx.session.preferencesData;
-    
+
     const now = new Date();
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-    
+
     const monthsMap: Record<string, number> = {
         'січень': 0, 'лютий': 1, 'березень': 2, 'квітень': 3, 'травень': 4, 'червень': 5,
         'липень': 6, 'серпень': 7, 'вересень': 8, 'жовтень': 9, 'листопад': 10, 'грудень': 11
@@ -91,7 +91,7 @@ async function renderCalendar(ctx: MyContext) {
     }
     kb.row().text("❌ Скасувати", "pref_cancel_flow");
 
-    const selectionHint = isCurrentMonth 
+    const selectionHint = isCurrentMonth
         ? `<i>(Вибір вихідних доступний з завтрашнього дня)</i>`
         : `<i>(Натисни на дати нижче)</i>`;
 
@@ -117,14 +117,14 @@ preferencesHandlers.callbackQuery(["pref_to_comment", "pref_to_comment_none"], a
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
     if (ctx.callbackQuery?.data === "pref_to_comment_none") ctx.session.preferencesData.selectedDays = [];
     ctx.session.preferencesData.step = 'COMMENT';
-    
+
     const daysStr = ctx.session.preferencesData.selectedDays!.length > 0
         ? ctx.session.preferencesData.selectedDays!.sort((a, b) => a - b).join(", ")
         : "Немає (працюю у будь-який день)";
-        
+
     const text = `🗓 <b>Вибрані вихідні:</b> ${daysStr}\n\nНапиши коментар або додаткові побажання.\n\n👇 <b>Надішли повідомлення</b> або натисни кнопку:`;
     const kb = new InlineKeyboard().text("⬅️ Назад", "pref_back_calendar").row().text("⏩ Без коментаря", "pref_skip_comment");
-    
+
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
     await ctx.answerCallbackQuery();
 });
@@ -148,7 +148,7 @@ preferencesHandlers.callbackQuery("pref_cancel_flow", async (ctx) => {
     await ctx.answerCallbackQuery("❌ Скасовано.");
     delete ctx.session.preferencesData;
     ctx.session.step = "idle";
-    
+
     // Instead of importing showStaffHub, we just show the hub menu
     // User can click /start or we can show a "Back to Menu" button
     await ScreenManager.renderScreen(ctx, "Дію скасовано. Ти можеш повернутися до головного меню: 👇", "staff-main", { forceNew: true });
@@ -160,10 +160,10 @@ async function renderConfirmation(ctx: MyContext) {
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(ctx.from!.id));
     const name = user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
     const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає";
-    
+
     const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${name}</b>\n📅 Місяць: <b>${month} ${year}</b>\n🚫 Вихідні: <b>${daysStr}</b>\n💬 Коментар: ${comment || 'відсутній'}`;
     const kb = new InlineKeyboard().text("✅ Зберегти", "pref_save_final").text("🔄 Спочатку", "pref_restart_flow").row().text("❌ Скасувати", "pref_cancel_flow");
-    
+
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
 }
 
@@ -187,18 +187,18 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     const { selectedDays, comment, month } = ctx.session.preferencesData;
     const telegramId = ctx.from?.id;
     await ctx.answerCallbackQuery();
-    
+
     const waitMsg = await ctx.reply("⏳ Зберігаю...");
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId!));
         const staffNameForTable = user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
         const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає побажань";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
-        
-        const prefData: PreferenceData = { 
-            timestamp, 
-            fullNameDot: staffNameForTable, 
-            unworkableDays: daysStr, 
+
+        const prefData: PreferenceData = {
+            timestamp,
+            fullNameDot: staffNameForTable,
+            unworkableDays: daysStr,
             comment: comment || "",
             telegramId: telegramId!.toString(),
             monthName: month || ""
@@ -216,8 +216,8 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         const isCurrentMonth = (month || "").toLowerCase() === currentMonthName.toLowerCase();
         const shouldMoveToNext = !!ctx.session.preferencesData.forceNextMonth && isCurrentMonth;
 
-        await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => {});
-        
+        await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
+
         if (shouldMoveToNext) {
             const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
             const nextMonthName = nextMonthDate.toLocaleString('uk-UA', { month: 'long' });
@@ -238,19 +238,50 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             ctx.session.step = "idle";
 
             const isNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
-            
+
             if (isNewCandidate) {
+                // Auto-hire: create StaffProfile + flip role, but DON'T send "schedule ready" yet.
+                // The real welcome ("Графік готовий!") comes later when admin syncs shifts.
+                try {
+                    const { staffRepository } = await import("../repositories/staff-repository.js");
+                    const { candidateRepository } = await import("../repositories/candidate-repository.js");
+                    const { accessService } = await import("../services/access-service.js");
+
+                    const candidate = user.candidate!;
+
+                    // Create StaffProfile (isWelcomeSent defaults to false)
+                    if (!user.staffProfile) {
+                        const createData: any = {
+                            user: { connect: { id: user.id } },
+                            fullName: candidate.fullName || "Фотограф",
+                            isActive: true
+                        };
+                        if (candidate.locationId) createData.location = { connect: { id: candidate.locationId } };
+                        await staffRepository.create(createData);
+                    }
+
+                    // Update candidate status to HIRED + flip role to STAFF
+                    await candidateRepository.update(candidate.id, { status: 'HIRED' as any });
+                    await userRepository.update(user.id, { role: 'STAFF' as any });
+
+                    // Sync channel access
+                    await accessService.syncUserAccess(user.telegramId, "Auto-hire after onboarding").catch(() => { });
+
+                    logger.info({ userId: user.id }, "🚀 Auto-hire completed (waiting for schedule sync)");
+                } catch (hireErr) {
+                    logger.error({ err: hireErr, userId: user.id }, "❌ Auto-hire failed, candidate stays in AWAITING_FIRST_SHIFT");
+                }
+
+                // Always show "schedule is being prepared" screen
                 const KNOWLEDGE_BASE_LINK = "https://t.me/+hC9UDoSZb3hiZjFi";
                 const welcomeText = `💫 <b>Вітаємо в команді PlayPhoto!</b>\n\n` +
                     `⏳ <b>Твій графік готується</b>\n\n` +
                     `Ми вже створюємо для тебе перші робочі зміни! ✨\n` +
                     `Як тільки графік буде готовий, ти отримаєш сповіщення тут.\n\n` +
                     `📖 Поки що можеш ознайомитися з нашою <a href="${KNOWLEDGE_BASE_LINK}">Базою знань</a>, щоб підготуватися до першого дня.`;
-                
                 const welcomeKb = new InlineKeyboard()
                     .url("📖 База знань", KNOWLEDGE_BASE_LINK).row()
-                    .text("💬 Підтримка", "open_support_dialog");
-                
+                    .text("🚀 Відкрити Хаб", "staff_hub_nav");
                 await ScreenManager.renderScreen(ctx, welcomeText, welcomeKb, { forceNew: true });
             } else {
                 await ScreenManager.renderScreen(ctx, "✅ <b>Твої побажання успішно збережені!</b>", "staff-main", { forceNew: true });
@@ -259,21 +290,18 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
 
         const { ADMIN_IDS } = await import("../config.js");
         if (ADMIN_IDS.length > 0) {
+            const wasNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
             const adminNotifyText = `📅 <b>New Schedule Preferences!</b>\n\n` +
                 `👤 Staff: <b>${staffNameForTable}</b>\n` +
                 `📅 Month: <b>${month}</b>\n` +
                 `🚫 Weekends: <b>${daysStr}</b>\n` +
                 `💬 Comment: ${comment || 'none'}\n\n` +
-                (shouldMoveToNext ? `⏳ Waiting for the next month to be filled...` : `You can now add them to the Excel schedule! ✨`);
-            
-            const adminKb = new InlineKeyboard();
-            if (!shouldMoveToNext) {
-                adminKb.text("🔄 Sync Schedule Now", "admin_sync_from_pref");
-            }
+                (shouldMoveToNext ? `⏳ Waiting for the next month to be filled...` :
+                    wasNewCandidate ? `✅ Auto-hired! Please add shifts to the schedule.` :
+                        `You can now update the schedule! ✨`);
 
-            await ctx.api.sendMessage(ADMIN_IDS[0]!, adminNotifyText, { 
-                parse_mode: "HTML",
-                reply_markup: adminKb
+            await ctx.api.sendMessage(ADMIN_IDS[0]!, adminNotifyText, {
+                parse_mode: "HTML"
             });
         }
     } catch (e: any) {
@@ -288,7 +316,7 @@ export async function handlePreferenceComment(ctx: MyContext) {
     if (!text) return false;
     ctx.session.preferencesData.comment = text;
     ctx.session.preferencesData.step = 'CONFIRM';
-    await ctx.deleteMessage().catch(() => {});
+    await ctx.deleteMessage().catch(() => { });
     await renderConfirmation(ctx);
     return true;
 }
