@@ -144,15 +144,21 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 // --- NEW: Notify New Hires & Mentors ---
                 const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
                 const { staffRepository } = await import("../../repositories/staff-repository.js");
+                const { AdminRole } = await import("@prisma/client");
                 // Only welcome standard staff/candidates, exclude admins
-                const excludedRoles = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'SUPPORT'];
+                const excludedRoles = [AdminRole.SUPER_ADMIN, AdminRole.CO_FOUNDER, AdminRole.SUPPORT, AdminRole.HR_LEAD, AdminRole.MENTOR_LEAD];
 
                 const newHires = await staffRepository.findMany({
                     where: {
                         isWelcomeSent: false,
                         isActive: true,
                         shifts: { some: {} },
-                        user: { role: { notIn: excludedRoles as any } }
+                        user: { 
+                            OR: [
+                                { adminRole: null },
+                                { adminRole: { notIn: excludedRoles } }
+                            ]
+                        }
                     },
                     include: { user: { include: { candidate: true } } }
                 });
