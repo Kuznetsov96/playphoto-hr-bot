@@ -267,7 +267,7 @@ hrFinalStepActiveMenu.dynamic(async (ctx, range) => {
 hrFinalStepFillingMenu.dynamic(async (ctx, range) => {
     const candidates = await hrService.getFillingDataCandidates();
     for (const cand of candidates) {
-        const waiting = getTimeWaiting(cand.user.updatedAt);
+        const waiting = getTimeWaiting(cand.statusChangedAt || cand.user.updatedAt);
         range.text(`📝 ${formatCompactName(cand.fullName)}${waiting}`, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;
             const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
@@ -286,7 +286,7 @@ hrFinalStepFillingMenu.dynamic(async (ctx, range) => {
 hrFinalStepScheduleMenu.dynamic(async (ctx, range) => {
     const candidates = await hrService.getReadyForScheduleCandidates();
     for (const cand of candidates) {
-        const waiting = getTimeWaiting(cand.user.updatedAt);
+        const waiting = getTimeWaiting(cand.statusChangedAt || cand.user.updatedAt);
         const locName = cand.location?.name ? ` • ${cand.location.name}` : '';
         range.text(`⏳ ${formatCompactName(cand.fullName)}${locName}${waiting}`, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;

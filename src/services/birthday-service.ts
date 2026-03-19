@@ -62,7 +62,8 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                         status: "WAITLIST",
                         hrDecision: null,
                         isWaitlisted: true,
-                        currentStep: "INTERVIEW"
+                        currentStep: "INTERVIEW",
+                        statusChangedAt: new Date()
                     }
                 });
 
