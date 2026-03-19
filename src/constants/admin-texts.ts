@@ -177,12 +177,21 @@ export const ADMIN_TEXTS = {
   "admin-finance-gen-statement": (p: { fopKey: string | number }) => `⏳ Generating statement (${p.fopKey})...`,
   "admin-finance-audit-running": (p: { date: string | number }) => `⏳ Running FOP audit for ${p.date}...`,
   "admin-finance-syncing-dds": (p: { date: string | number }) => `⏳ Syncing DDS for ${p.date}...`,
-  "admin-audit-ask-msg": (p: { location: string, date: string, type: string, diff: string }) => `⚠️ <b>Потрібне уточнення по фінансах</b>\n\n` +
-    `Локація: <b>${p.location}</b>\n` +
-    `Дата: <b>${p.date}</b>\n` +
-    `Тип: <b>${p.type}</b>\n` +
-    `Нестача: <b>${p.diff} грн</b>\n\n` +
-    `Ти не вказав коментар у таблиці. Чому виникла розбіжність або коли ти добереш цю суму? 🙏`,
+  "admin-audit-ask-msg": (p: { location: string, date: string, type: string, diff: string }) =>
+    `🌸 Привіт!
+⚠️ <b>Потрібне уточнення по фінансах</b>
+
+` +
+    `Локація: <b>${p.location}</b>
+` +
+    `Дата: <b>${p.date}</b>
+` +
+    `Тип: <b>${p.type}</b>
+` +
+    `Нестача: <b>${p.diff} грн</b>
+
+` +
+    `Ти не вказала коментар у таблиці. Чому виникла така розбіжність? 🙏`,
   "admin-audit-ask-success": (p: { names: string, location: string, date: string }) => `✅ Asked <b>${p.names}</b> about mismatch at <b>${p.location}</b> (${p.date}).`,
   "admin-stats-general": `📊 Statistics`,
   "admin-stats-by-city": `🏙️ Cities`,
