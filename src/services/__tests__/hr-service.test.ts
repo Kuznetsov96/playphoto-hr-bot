@@ -86,8 +86,8 @@ describe('hrService', () => {
             expect(stats.newCandidates).toBe(5);
             expect(stats.todayInterviews).toBe(3);
             expect(stats.hiredWeek).toBe(2);
-            // inboxTotal = tattooCount(1) + unreadCount(4) + noSlotCount(5) + finalStepStats.total(5) = 15
-            expect(stats.inboxTotal).toBe(15);
+            // inboxTotal = tattooCount(1) + unreadCount(4) + noSlotCount(5) + finalStepStats.total(6) = 16
+            expect(stats.inboxTotal).toBe(16);
         });
     });
 
