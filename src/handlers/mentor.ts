@@ -77,6 +77,25 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
     if (step.startsWith("wait_mentor_custom_time_")) {
         await ctx.deleteMessage().catch(() => {});
         const [candId, date] = step.replace("wait_mentor_custom_time_", "").split("_");
+        
+        if (ctx.session.adminFlow === 'SCHEDULE') {
+            // Update firstShiftDate instead of booking training
+            const [day, month, year] = date!.split('.').map(Number);
+            const [hour, min] = text.split(':').map(Number);
+            const { createKyivDate } = await import("../utils/bot-utils.js");
+            const newDate = createKyivDate(year || new Date().getFullYear(), month! - 1, day!, hour!, min!);
+            
+            await candidateRepository.update(candId!, { 
+                firstShiftDate: newDate,
+                firstShiftTime: text 
+            });
+            
+            await ScreenManager.renderScreen(ctx, `✅ <b>Дата першої зміни оновлена на ${date} ${text}!</b>`, "mentor-action-success");
+            ctx.session.step = "idle";
+            ctx.session.adminFlow = undefined;
+            return;
+        }
+
         const result = await mentorService.bookTrainingSlotFromText(candId!, `${date} ${text}`);
         
         if (result.success) {

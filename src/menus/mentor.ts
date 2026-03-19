@@ -23,7 +23,7 @@ const formatDate = (date: Date) => {
 const getMentorCandidateProfileText = async (ctx: MyContext, candId: string) => {
     const details = await mentorService.getCandidateDetails(candId);
     if (!details || !details.cand) return "Candidate details not found. Please refresh /mentor.";
-    
+
     return await formatCandidateProfile(ctx as any, details.cand as any, {
         includeHistory: true,
         viewerRole: "MENTOR"
@@ -38,7 +38,7 @@ export const updateCalendarDashboard = async (ctx: MyContext) => {
 
     let text = `📅 <b>Calendar</b>\n\n`;
     text += `<b>Today (${dateStr}):</b> ${booked.length} meetings\n`;
-    
+
     if (booked.length > 0) {
         booked.forEach((s: any) => {
             const time = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -46,7 +46,7 @@ export const updateCalendarDashboard = async (ctx: MyContext) => {
             text += `• ${time} - ${cand?.fullName || 'Candidate'}\n`;
         });
     }
-    
+
     text += `\nSelect a date to view or manage schedule:`;
     await ScreenManager.renderScreen(ctx, text, "mentor-training-dates", { pushToStack: true });
 };
@@ -116,7 +116,7 @@ mentorHubMenu.dynamic(async (ctx, range) => {
 mentorInboxMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
     const isWaitlist = ctx.session.filterWaitlist === true;
-    
+
     if (isWaitlist) {
         range.text("🔔 Notify All Waitlist", async (ctx) => {
             const count = await mentorService.notifyWaitlist(ctx.api);
@@ -133,7 +133,7 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
                 await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
             }).row();
         }
-        
+
         range.text("⬅️ Back to Inbox", async (ctx) => {
             ctx.session.filterWaitlist = false;
             await ctx.menu.update();
@@ -202,14 +202,14 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
 // --- MESSAGES LIST ---
 mentorMessagesMenu.dynamic(async (ctx, range) => {
     const candidates = await mentorService.getCandidatesWithUnreadMessages("MENTOR");
-    
+
     if (candidates.length === 0) {
         range.text("No new messages. ✨", (ctx) => ctx.answerCallbackQuery("All read!")).row();
     } else {
         for (const cand of candidates) {
             const lastMsg = (cand as any).messages?.[0]?.content || "Media message";
             const snippet = lastMsg.length > 20 ? lastMsg.substring(0, 17) + "..." : lastMsg;
-            
+
             range.text(`💬 ${cand.fullName}: "${snippet}"`, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
@@ -244,11 +244,11 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
                 await ScreenManager.renderScreen(ctx, `✨ <b>Discovery Passed!</b>\n\nNow please select the <b>Online Internship Date</b> for ${res.candidate.fullName}:`, "mentor-manual-date", { pushToStack: true });
             }
         })
-        .text("❌ Failed", async (ctx) => {
-            await ctx.answerCallbackQuery();
-            await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
-            await ctx.menu.update();
-        }).row();
+            .text("❌ Failed", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
+                await ctx.menu.update();
+            }).row();
     }
     else if (cand.status === "TRAINING_SCHEDULED") {
         range.text("✅ Training Completed", async (ctx) => {
@@ -256,11 +256,11 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             await mentorService.completeTraining(ctx.api, cand.id, 'passed');
             await ctx.menu.update();
         })
-        .text("❌ Failed", async (ctx) => {
-            await ctx.answerCallbackQuery();
-            await mentorService.completeTraining(ctx.api, cand.id, 'failed');
-            await ctx.menu.update();
-        }).row();
+            .text("❌ Failed", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                await mentorService.completeTraining(ctx.api, cand.id, 'failed');
+                await ctx.menu.update();
+            }).row();
     }
     else if (cand.status === "ACCEPTED" || cand.status === "WAITLIST") {
         if (!cand.materialsSent) {
@@ -312,7 +312,7 @@ mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
     const isInternship = cand?.status === "DISCOVERY_COMPLETED" || cand?.status === "DISCOVERY_SCHEDULED";
 
     if (isInternship) {
-        range.text("🗓️ Pick date for Internship:", (ctx) => {}).row();
+        range.text("🗓️ Pick date for Internship:", (ctx) => { }).row();
         const now = new Date();
         for (let i = 0; i < 7; i++) {
             const d = new Date();
@@ -329,7 +329,7 @@ mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
             if ((i + 1) % 2 === 0) range.row();
         }
     } else {
-        range.text("📅 Select Discovery date:", (ctx) => {}).row();
+        range.text("📅 Select Discovery date:", (ctx) => { }).row();
         const dates = await mentorService.getTrainingSlots();
         if (dates.length === 0) {
             range.text("No available slots in calendar", (ctx) => ctx.answerCallbackQuery("Create slots first!")).row();
@@ -355,10 +355,27 @@ mentorManualTimeSelectionMenu.dynamic(async (ctx, range) => {
     const times = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
     times.forEach((t, i) => {
         range.text(t, async (ctx) => {
+            if (ctx.session.adminFlow === 'SCHEDULE') {
+                const [day, month, year] = date!.split('.').map(Number);
+                const [hour, min] = t.split(':').map(Number);
+                const { createKyivDate } = await import("../utils/bot-utils.js");
+                const newDate = createKyivDate(year || new Date().getFullYear(), month! - 1, day!, hour!, min!);
+
+                await candidateRepository.update(candId!, {
+                    firstShiftDate: newDate,
+                    firstShiftTime: t
+                });
+
+                await ctx.answerCallbackQuery(`Updated to ${t}! ✅`);
+                await ScreenManager.renderScreen(ctx, `✅ <b>Дата першої зміни оновлена на ${date} ${t}!</b>`, "mentor-action-success");
+                ctx.session.adminFlow = undefined;
+                return;
+            }
+
             const result = await mentorService.bookTrainingSlotFromText(candId, `${date} ${t}`);
             if (result.success) {
                 if (result.notification) {
-                    await ctx.api.sendMessage(result.notification.telegramId, result.notification.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }).catch(() => {});
+                    await ctx.api.sendMessage(result.notification.telegramId, result.notification.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }).catch(() => { });
                 }
                 await ctx.answerCallbackQuery(`Scheduled for ${t}! ✅`);
                 await ScreenManager.renderScreen(ctx, `✅ <b>Scheduled for ${date} ${t}!</b>\n\nCandidate has been notified.`, "mentor-action-success");
@@ -391,7 +408,7 @@ mentorManualTrainingTimeMenu.dynamic(async (ctx, range) => {
     const freeSlots = slots.filter((s: any) => !s.isBooked);
 
     if (freeSlots.length === 0) {
-        range.text("No free slots", (ctx) => {}).row();
+        range.text("No free slots", (ctx) => { }).row();
     } else {
         for (const slot of freeSlots) {
             const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -485,6 +502,7 @@ mentorOnboardingMenu.dynamic(async (ctx, range) => {
     range.text("🏠 Back", async (ctx) => {
         await ScreenManager.goBack(ctx, await mentorService.getHubText(), "mentor-hub-menu");
     });
+    // Removed 'Update Menu' button for cleaner UX
 });
 
 mentorOnboardingDayMenu.dynamic(async (ctx, range) => {
@@ -494,11 +512,20 @@ mentorOnboardingDayMenu.dynamic(async (ctx, range) => {
     for (const c of filtered) {
         range.text(`👤 ${formatCompactName(c.fullName)}`, async (ctx) => {
             ctx.session.selectedCandidateId = c.id;
-            const text = await getMentorCandidateProfileText(ctx, c.id);
-            await ScreenManager.renderScreen(ctx, text, "mentor-onboarding-details", { pushToStack: true });
+            try {
+                const text = await getMentorCandidateProfileText(ctx, c.id);
+                if (!text) {
+                    await ctx.answerCallbackQuery("Profile not found or incomplete.");
+                    return;
+                }
+                await ScreenManager.renderScreen(ctx, text, "mentor-onboarding-details", { pushToStack: true });
+            } catch (err) {
+                await ctx.answerCallbackQuery("Error opening profile.");
+            }
         }).row();
     }
     range.text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "🚀 Onboarding", "mentor-onboarding"));
+    // Removed 'Update' button for cleaner UX
 });
 
 mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
@@ -517,6 +544,11 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
             range.url("💬 Contact Candidate", `tg://user?id=${tid}`).row();
         }
     }
+
+    range.text("🗓 Edit Date", async (ctx) => {
+        ctx.session.adminFlow = 'SCHEDULE';
+        await ScreenManager.renderScreen(ctx, "<b>Оберіть нову дату першої зміни:</b>", "mentor-manual-date", { pushToStack: true });
+    }).row();
 
     range.text("✅ Successful Onboarding", async (ctx) => {
         await mentorService.completeOnboarding(candId, true);

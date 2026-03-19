@@ -92,11 +92,11 @@ export interface SessionData {
     activeTasksCount?: number;
     clarificationTaskId?: string;
     ticketId?: number; // Must be number based on existing repository
-    selectedCandidateId?: string;
+    selectedCandidateId?: string | undefined;
     selectedSlotId?: string;
     selectedDate?: string;
     selectedTrainingDate?: string;
-    selectedOnboardingDate?: string;
+    selectedOnboardingDate?: string | undefined;
     selectedLocationId?: string;
     selectedUserId?: string;
     selectedUserIdForAdmin?: string;
@@ -114,7 +114,7 @@ export interface SessionData {
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
     taskCreation?: any;
-    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK';
+    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | undefined;
     viewingFromInbox?: boolean;
 }
 
