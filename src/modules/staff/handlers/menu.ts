@@ -204,6 +204,74 @@ export async function showStaffTasks(ctx: MyContext, forceNew: boolean = false) 
 }
 
 /**
+ * Show Logistics (Parcels) view
+ */
+export async function showStaffLogistics(ctx: MyContext) {
+    ctx.session.step = "idle";
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user || !user.staffProfile) return;
+
+    const now = new Date();
+    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+    kyivNow.setHours(0, 0, 0, 0);
+
+    const todayShifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivNow, 1);
+    if (todayShifts.length === 0 || todayShifts[0]?.date.getTime() !== kyivNow.getTime()) {
+        const text = "У тебе сьогодні немає зміни на жодній локації. 🏝";
+        return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
+    }
+
+    const shift = todayShifts[0]!;
+    const prisma = (await import("../../../db/core.js")).default;
+    const parcels = await prisma.parcel.findMany({
+        where: {
+            locationId: shift.locationId,
+            OR: [
+                { status: { in: ['EXPECTED', 'ARRIVED'] } },
+                { status: 'DELIVERED', deliveryType: 'Address', contentPhotoId: null }
+            ]
+        },
+        orderBy: { createdAt: 'desc' }
+    });
+
+    if (parcels.length === 0) {
+        const text = `📭 <b>На вашій локації (${shift.location.name}) зараз немає активних відправлень.</b>`;
+        return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
+    }
+
+    let text = `📦 <b>Посилки на локації ${shift.location.name}:</b>\n\n`;
+    const kb = new InlineKeyboard();
+
+    parcels.forEach((parcel: any, index: number) => {
+        let statusEmoji = "📦";
+        let statusText = "Очікується";
+        if (parcel.status === 'ARRIVED') { statusEmoji = "🏢"; statusText = "У відділенні/поштоматі"; }
+        if (parcel.status === 'DELIVERED') { statusEmoji = "🚚"; statusText = "Доставлено кур'єром"; }
+
+        text += `${index + 1}. ${statusEmoji} <b>ТТН:</b> <code>${parcel.ttn}</code>\n`;
+        text += `   <b>Статус:</b> ${statusText}\n`;
+        if (parcel.description) text += `   <b>Вміст:</b> ${parcel.description}\n`;
+        if (parcel.rejectionCount > 0) text += `   ⚠️ <i>Відмов: ${parcel.rejectionCount}</i>\n`;
+        text += `\n`;
+
+        if (parcel.status === 'ARRIVED') {
+            kb.text(`✅ Забрати #${index + 1}`, `parcel_accept_${parcel.id}`)
+              .text(`❌ Відмовитись`, `parcel_reject_${parcel.id}`).row();
+        } else if (parcel.status === 'DELIVERED') {
+            kb.text(`📸 Додати фото вмісту #${index + 1}`, `parcel_photo_${parcel.id}`).row();
+        }
+    });
+
+    text += `<i>Оберіть посилку, щоб підтвердити отримання.</i> ✨`;
+    kb.text("🏠 Меню", "staff_hub_nav");
+
+    await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
+}
+
+/**
  * Shared logic to start support flow from menu
  */
 export async function startSupportFlow(ctx: MyContext) {
