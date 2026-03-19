@@ -18,6 +18,7 @@ export class ScreenManager {
         'selectedLocationId',
         'selectedSlotId',
         'selectedDate',
+        'selectedOnboardingDate',
         'candidatePage',
         'broadcastCity',
         'broadcastLocationId'

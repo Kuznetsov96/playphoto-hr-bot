@@ -69,6 +69,8 @@ bot.use(async (ctx, next) => {
     if (!ctx.session.candidateData) ctx.session.candidateData = {};
     if (!ctx.session.supportData) ctx.session.supportData = {};
     if (!ctx.session.step) ctx.session.step = "idle";
+    if (!ctx.session.selectedOnboardingDate) ctx.session.selectedOnboardingDate = undefined;
+    if (!ctx.session.selectedCandidateId) ctx.session.selectedCandidateId = undefined;
     
     await next();
 });
