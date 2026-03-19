@@ -3,6 +3,7 @@ import { getPriorityLabel } from "./location-helpers.js";
 import { shortenName } from "./string-utils.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 export interface ProfileFormatOptions {
     locale?: string;
@@ -55,17 +56,17 @@ export async function formatCandidateProfile(
 
     // ── SECTION 1: IDENTITY ──────────────────────────────────────────────
     const displayName = shortenName(candidate.fullName);
-    let text = `👤 <b>${displayName || t('admin-search-no-name')}</b>\n`;
+    let text = `👤 <b>${escapeHtml(displayName) || t('admin-search-no-name')}</b>\n`;
 
     let locationInfo = city;
     if (candidate.location?.name && candidate.location.name !== rawCity && candidate.location.name !== city) {
         locationInfo = city ? `${city} • ${candidate.location.name}` : candidate.location.name;
     }
-    if (locationInfo) text += `📍 ${locationInfo}\n`;
+    if (locationInfo) text += `📍 ${escapeHtml(locationInfo)}\n`;
 
     const username = candidate.user?.username;
     if (username && username.length < 32 && !username.includes('/') && !username.includes('\\')) {
-        text += `📱 @${username}\n`;
+        text += `📱 @${escapeHtml(username)}\n`;
     }
 
     // ── SECTION 2: HR SELECTION STAGE ────────────────────────────────────
@@ -156,7 +157,7 @@ export async function formatCandidateProfile(
 
             const partnerName = candidate.firstShiftPartner?.fullName;
             if (partnerName) {
-                text += `📸 Partner: <b>${shortenName(partnerName)}</b>\n`;
+                text += `📸 Partner: <b>${escapeHtml(shortenName(partnerName))}</b>\n`;
             } else {
                 text += `📸 Partner: <i>not set</i>\n`;
             }
@@ -238,7 +239,7 @@ export async function formatCandidateProfile(
                 const content = decryptedContent && decryptedContent.length > 60
                     ? decryptedContent.substring(0, 57) + "..."
                     : decryptedContent;
-                text += `${icon} <i>${time}:</i> ${content || "[Media]"}\n`;
+                text += `${icon} <i>${time}:</i> ${escapeHtml(content || "[Media]")}\n`;
             }
         }
     }
