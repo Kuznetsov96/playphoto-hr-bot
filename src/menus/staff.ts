@@ -46,6 +46,40 @@ staffHubMenu.dynamic(async (ctx, range) => {
         const { showStaffTasks } = await import("../modules/staff/handlers/menu.js");
         await showStaffTasks(ctx);
     });
+
+    // 5. Logistics (Parcels)
+    const telegramId = ctx.from?.id;
+    if (telegramId) {
+        const { userRepository } = await import("../repositories/user-repository.js");
+        const { workShiftRepository } = await import("../repositories/work-shift-repository.js");
+        const prisma = (await import("../db/core.js")).default;
+        
+        const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+        if (user && user.staffProfile) {
+            const kyivToday = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+            kyivToday.setHours(0, 0, 0, 0);
+            
+            const todayShifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivToday, 1);
+            if (todayShifts.length > 0 && todayShifts[0]?.date.getTime() === kyivToday.getTime()) {
+                const shift = todayShifts[0];
+                const pendingParcelsCount = await prisma.parcel.count({
+                    where: {
+                        locationId: shift.locationId,
+                        OR: [
+                            { status: { in: ['EXPECTED', 'ARRIVED'] } },
+                            { status: 'DELIVERED', deliveryType: 'Address', contentPhotoId: null }
+                        ]
+                    }
+                });
+                
+                const parcelLabel = pendingParcelsCount > 0 ? `📦 Посилки локації (${pendingParcelsCount})` : "📦 Посилки локації";
+                range.row().text(parcelLabel, async (ctx) => {
+                    const { showStaffLogistics } = await import("../modules/staff/handlers/menu.js");
+                    await showStaffLogistics(ctx);
+                });
+            }
+        }
+    }
 });
 
 // --- SUBMENUS (Declared for type safety and navigation) ---
