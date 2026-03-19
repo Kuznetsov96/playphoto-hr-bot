@@ -509,8 +509,10 @@ mentorOnboardingDayMenu.dynamic(async (ctx, range) => {
     const selectedDate = ctx.session.selectedOnboardingDate;
     const candidates = await mentorService.getOnboardingCandidates();
     const filtered = candidates.filter((c: any) => (c.firstShiftDate ? new Date(c.firstShiftDate).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' }) : "No Date") === selectedDate);
+    let index = 0;
     for (const c of filtered) {
-        range.text(`👤 ${formatCompactName(c.fullName)}`, async (ctx) => {
+        const hiddenSpaces = '\u200B'.repeat(index++);
+        range.text(`👤 ${formatCompactName(c.fullName)}${hiddenSpaces}`, async (ctx) => {
             ctx.session.selectedCandidateId = c.id;
             try {
                 const text = await getMentorCandidateProfileText(ctx, c.id);
