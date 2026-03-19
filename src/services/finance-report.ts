@@ -257,8 +257,9 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
             const keyboard = new InlineKeyboard();
             if (reports.actions?.length) {
                 keyboard.text(`⚙️ Audit Actions (${reports.actions.length})`, `admin_audit_actions:${dateStr}`);
-                // Store actions for the callback
-                (global as any).lastAuditActions = reports.actions;
+                // Store actions in Redis (survives restarts, 24h TTL)
+                const { redis } = await import("../core/redis.js");
+                await redis.set(`audit:actions:${dateStr}`, JSON.stringify(reports.actions), 'EX', 86400);
             }
 
             const options: any = { parse_mode: "HTML" };
