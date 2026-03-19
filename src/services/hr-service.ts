@@ -103,21 +103,23 @@ export const hrService = {
     },
 
     async getFinalStepStats() {
-        const [ndaPending, testPending, stagingSetup, activeStaging, readyForHire] = await Promise.all([
+        const [ndaPending, testPending, stagingSetup, activeStaging, fillingData, readyForSchedule] = await Promise.all([
             prisma.candidate.count({ where: { status: CandidateStatus.NDA } }),
             prisma.candidate.count({ where: { status: CandidateStatus.KNOWLEDGE_TEST } }),
             prisma.candidate.count({ where: { status: CandidateStatus.STAGING_SETUP } }),
             prisma.candidate.count({ where: { status: CandidateStatus.STAGING_ACTIVE } }),
-            prisma.candidate.count({ where: { status: { in: [CandidateStatus.READY_FOR_HIRE, CandidateStatus.AWAITING_FIRST_SHIFT] } } })
+            prisma.candidate.count({ where: { status: CandidateStatus.READY_FOR_HIRE } }),
+            prisma.candidate.count({ where: { status: CandidateStatus.AWAITING_FIRST_SHIFT } })
         ]);
 
         return {
-            total: ndaPending + testPending + stagingSetup + activeStaging + readyForHire,
+            total: ndaPending + testPending + stagingSetup + activeStaging + fillingData + readyForSchedule,
             ndaPending,
             testPending,
             stagingSetup,
             activeStaging,
-            readyForHire
+            fillingData,
+            readyForSchedule
         };
     },
 
@@ -153,9 +155,17 @@ export const hrService = {
         });
     },
 
-    async getReadyForHireCandidates() {
+    async getFillingDataCandidates() {
         return prisma.candidate.findMany({
-            where: { status: { in: [CandidateStatus.READY_FOR_HIRE, CandidateStatus.AWAITING_FIRST_SHIFT] } },
+            where: { status: CandidateStatus.READY_FOR_HIRE },
+            include: { user: true, location: true },
+            orderBy: { user: { updatedAt: 'asc' } }
+        });
+    },
+
+    async getReadyForScheduleCandidates() {
+        return prisma.candidate.findMany({
+            where: { status: CandidateStatus.AWAITING_FIRST_SHIFT },
             include: { user: true, location: true },
             orderBy: { user: { updatedAt: 'asc' } }
         });
