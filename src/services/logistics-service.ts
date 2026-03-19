@@ -83,6 +83,15 @@ export class LogisticsService {
     private async processIncomingDocument(doc: any) {
         // getIncomingDocumentsByPhone returns TrackingStatusCode
         // getDocumentList returns StatusCode — handle both
+        
+        const npCity = doc.CityRecipientDescription || '';
+        const npWarehouse = doc.WarehouseRecipientNumber || doc.RecipientWarehouseIndex || '';
+        
+        // Ignore personal support parcels (Харків, відділення 65 та 104)
+        if (npCity.includes('Харків') && (npWarehouse === '65' || npWarehouse === '104')) {
+            return;
+        }
+
         const ttn = doc.Number;
         const statusCode = doc.TrackingStatusCode || doc.StatusCode || '1';
         let parcel = await prisma.parcel.findUnique({ where: { ttn } });
