@@ -159,7 +159,7 @@ export const hrService = {
         return prisma.candidate.findMany({
             where: { status: CandidateStatus.READY_FOR_HIRE },
             include: { user: true, location: true },
-            orderBy: { user: { updatedAt: 'asc' } }
+            orderBy: { statusChangedAt: 'asc' }
         });
     },
 
@@ -167,7 +167,7 @@ export const hrService = {
         return prisma.candidate.findMany({
             where: { status: CandidateStatus.AWAITING_FIRST_SHIFT },
             include: { user: true, location: true },
-            orderBy: { user: { updatedAt: 'asc' } }
+            orderBy: { statusChangedAt: 'asc' }
         });
     },
 
@@ -852,7 +852,8 @@ export const hrService = {
             data: {
                 status: CandidateStatus.STAGING_ACTIVE,
                 currentStep: FunnelStep.FIRST_SHIFT,
-                notificationSent: true
+                notificationSent: true,
+                statusChangedAt: new Date()
             }
         });
 
