@@ -114,7 +114,8 @@ financeHandlers.callbackQuery("admin_finance_back", async (ctx) => {
 
 financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
     const dateStr = ctx.match![1]!;
-    const actions = (global as any).lastAuditActions;
+    const raw = await redis.get(`audit:actions:${dateStr}`);
+    const actions = raw ? JSON.parse(raw) : null;
 
     if (!actions?.length) return ctx.answerCallbackQuery("No pending actions. ✨");
 
@@ -141,13 +142,15 @@ financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
 financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
     const idx = parseInt(ctx.match![1]!);
     const dateStr = ctx.match![2]!;
-    const action = (global as any).lastAuditActions?.[idx];
+    const raw = await redis.get(`audit:actions:${dateStr}`);
+    const actions = raw ? JSON.parse(raw) : null;
+    const action = actions?.[idx];
 
     if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
 
     if (action.staffIds.length === 1) {
-        // Direct send if only 1 person
-        return await (financeHandlers as any).callbackQuery.execute(ctx, `audit_ask_send:${idx}:${dateStr}:${action.staffIds[0]}`);
+        // Direct send — inline the send logic instead of broken .execute()
+        return await sendAuditAsk(ctx, idx, dateStr, action.staffIds[0], action);
     }
 
     await ctx.answerCallbackQuery();
@@ -165,14 +168,7 @@ financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
     });
 });
 
-financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx) => {
-    const idx = parseInt(ctx.match![1]!);
-    const dateStr = ctx.match![2]!;
-    const targetStaffId = ctx.match![3]!;
-
-    const action = (global as any).lastAuditActions?.[idx];
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
-
+async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, targetStaffId: string, action: any) {
     const { staffIds, staffNames, location, type, diff } = action;
     const typeIcon = type === 'Terminal' ? '💳' : '💵';
     const message = ADMIN_TEXTS["admin-audit-ask-msg"]({
@@ -203,27 +199,39 @@ financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx)
     } else {
         await ctx.answerCallbackQuery("❌ Send failed.");
     }
+}
+
+financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx) => {
+    const idx = parseInt(ctx.match![1]!);
+    const dateStr = ctx.match![2]!;
+    const targetStaffId = ctx.match![3]!;
+
+    const raw = await redis.get(`audit:actions:${dateStr}`);
+    const actions = raw ? JSON.parse(raw) : null;
+    const action = actions?.[idx];
+    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
+
+    await sendAuditAsk(ctx, idx, dateStr, targetStaffId, action);
 });
 
 financeHandlers.callbackQuery(/^audit_resolve:(\d+):(.+)$/, async (ctx) => {
     const idx = parseInt(ctx.match![1]!);
-    const action = (global as any).lastAuditActions?.[idx];
+    const dateStr = ctx.match![2]!;
+    const raw = await redis.get(`audit:actions:${dateStr}`);
+    const actions = raw ? JSON.parse(raw) : null;
+    const action = actions?.[idx];
     if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
 
-    // Remove from global actions
-    (global as any).lastAuditActions.splice(idx, 1);
+    // Remove resolved action and update Redis
+    actions.splice(idx, 1);
+    if (actions.length > 0) {
+        await redis.set(`audit:actions:${dateStr}`, JSON.stringify(actions), 'EX', 86400);
+    } else {
+        await redis.del(`audit:actions:${dateStr}`);
+    }
 
     await ctx.answerCallbackQuery("✅ Resolved.");
     await ctx.editMessageText(`✅ <b>Resolved:</b> ${action.location} (${action.type})`, { parse_mode: "HTML" });
-
-    // Optionally: show center again if actions left
-    if ((global as any).lastAuditActions.length > 0) {
-        // Redraw action center with a small delay
-        setTimeout(() => {
-            const dateStr = ctx.match![2]!;
-            (financeHandlers as any).callbackQuery.execute(ctx, `admin_audit_actions:${dateStr}`);
-        }, 1500);
-    }
 });
 
 async function handleDailyStatus(ctx: MyContext) {
@@ -457,7 +465,7 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
         let options: any = { parse_mode: "HTML" };
         if (reports.actions && reports.actions.length > 0) {
             options.reply_markup = new InlineKeyboard().text(`⚙️ Audit Actions (${reports.actions.length})`, `admin_audit_actions:${dateStr}`);
-            (global as any).lastAuditActions = reports.actions;
+            await redis.set(`audit:actions:${dateStr}`, JSON.stringify(reports.actions), 'EX', 86400);
         }
 
         await ctx.reply(reports.main || `No data found for ${dateStr}.`, options);

@@ -154,6 +154,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                     include: { user: { include: { candidate: true } } }
                 });
 
+                let newHiresNotified = 0;
                 for (const staff of newHires) {
                     try {
                         if (!staff.user) continue;
@@ -161,7 +162,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
 
                         // 1. Send generic welcome & flip role
                         const { staffService } = await import("../../modules/staff/services/index.js");
-                        await staffService.finalizeStaffActivation(staff.id, ctx.api);
+                        const welcomed = await staffService.finalizeStaffActivation(staff.id, ctx.api);
 
                         // 2. Send follow-up with the actual schedule
                         const upcomingShifts = await prisma.workShift.findMany({
@@ -171,7 +172,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                             take: 30
                         });
 
-                        if (upcomingShifts.length > 0) {
+                        if (welcomed && upcomingShifts.length > 0) {
                             let schedMsg = `📅 <b>Твій графік:</b>\n\n`;
                             for (const s of upcomingShifts) {
                                 const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
@@ -181,11 +182,12 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                             schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
                             const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
                             await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
+                            newHiresNotified++;
                         }
 
                         // 3. Notify mentor
                         const firstShift = upcomingShifts[0];
-                        if (firstShift && MENTOR_IDS.length > 0) {
+                        if (welcomed && firstShift && MENTOR_IDS.length > 0) {
                             const dateStr = firstShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
                             const mentorMsg =
                                 `🎓 <b>New Staff Onboarding!</b>\n\n` +
@@ -196,6 +198,13 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
 
                             const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${staff.id}`);
                             await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
+                        }
+
+                        // 4. Write first shift date to Team spreadsheet (column G)
+                        if (firstShift) {
+                            await scheduleSyncService.updateFirstShiftDateInSheet(
+                                staff.user.telegramId.toString(), firstShift.date
+                            ).catch(() => { });
                         }
                     } catch (err) {
                         logger.error({ err, staffId: staff.id }, "❌ Failed to send welcome/mentor notification in Full Sync");
@@ -247,8 +256,11 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                     }
                 }
 
-                if (newHires.length > 0) {
-                    report += `📢 <b>${newHires.length}</b> new hires notified! ✨\n`;
+                if (newHiresNotified > 0) {
+                    report += `📢 <b>${newHiresNotified}</b> new hires notified! ✨\n`;
+                }
+                if (newHires.length > newHiresNotified) {
+                    report += `⚠️ <b>${newHires.length - newHiresNotified}</b> new hires unreachable (haven't started bot)\n`;
                 }
                 if (staffNotified > 0) {
                     report += `📅 <b>${staffNotified}</b> staff notified about schedule changes`;

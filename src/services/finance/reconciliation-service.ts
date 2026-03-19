@@ -140,7 +140,7 @@ export class ReconciliationService {
                         const inc = incomes.find(i => i.locationId === locCfg.id);
                         const locShifts = shifts.filter((s: any) => s.locationId === locCfg.id);
                         const displaySurnames = locShifts.map((s: any) => s.staff?.fullName?.split(' ')[0]).filter(Boolean) as string[];
-                        const staffIds = locShifts.map((s: any) => s.staff?.telegramId).filter(Boolean).map(id => String(id));
+                        const staffIds = locShifts.map((s: any) => s.staff?.user?.telegramId).filter(Boolean).map(id => String(id));
                         const isFopMatch = (locCfg as any).fopId?.toUpperCase() === key;
 
                         if (isFopMatch || (isKuz && !!(locCfg as any).searchId)) {
@@ -246,6 +246,12 @@ export class ReconciliationService {
                                             autoDetails += ` ℹ️ Auto-debt: -${Math.round(deficit)} UAH recorded`;
                                             diff = 0;
                                             (locCfg as any).pendingBalanceUpdate = { staffId: staff.id, newBalance: balance + deficit };
+                                        }
+                                        // Scenario 3: Partial deposit — took more than salary, no comment
+                                        else if (diff < 0 && !inc?.comment) {
+                                            const shortage = Math.abs(diff);
+                                            autoDetails += ` ⚠️ Salary shortage: -${Math.round(shortage)} UAH (no comment)`;
+                                            (locCfg as any).pendingBalanceUpdate = { staffId: staff.id, newBalance: balance + shortage };
                                         }
                                     }
                                 }
