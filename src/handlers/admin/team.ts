@@ -144,12 +144,15 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 // --- NEW: Notify New Hires & Mentors ---
                 const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
                 const { staffRepository } = await import("../../repositories/staff-repository.js");
+                // Only welcome standard staff/candidates, exclude admins
+                const excludedRoles = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'SUPPORT'];
 
                 const newHires = await staffRepository.findMany({
                     where: {
                         isWelcomeSent: false,
                         isActive: true,
-                        shifts: { some: {} }
+                        shifts: { some: {} },
+                        user: { role: { notIn: excludedRoles as any } }
                     },
                     include: { user: { include: { candidate: true } } }
                 });
@@ -165,24 +168,28 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                         const welcomed = await staffService.finalizeStaffActivation(staff.id, ctx.api);
 
                         // 2. Send follow-up with the actual schedule
+                        const startOfToday = new Date();
+                        startOfToday.setHours(0, 0, 0, 0);
                         const upcomingShifts = await prisma.workShift.findMany({
-                            where: { staffId: staff.id, date: { gte: new Date() } },
+                            where: { staffId: staff.id, date: { gte: startOfToday } },
                             orderBy: { date: 'asc' },
                             include: { location: true },
                             take: 30
                         });
 
-                        if (welcomed && upcomingShifts.length > 0) {
-                            let schedMsg = `📅 <b>Твій графік:</b>\n\n`;
-                            for (const s of upcomingShifts) {
-                                const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
-                                const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-                                schedMsg += `▫️ <code>${dateStr}</code> — ${s.location.name}\n`;
-                            }
-                            schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
-                            const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
-                            await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
+                        if (welcomed) {
                             newHiresNotified++;
+                            if (upcomingShifts.length > 0) {
+                                let schedMsg = `📅 <b>Твій графік:</b>\n\n`;
+                                for (const s of upcomingShifts) {
+                                    const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
+                                    const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
+                                    schedMsg += `▫️ <code>${dateStr}</code> — ${s.location.name}\n`;
+                                }
+                                schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
+                                const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
+                                await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
+                            }
                         }
 
                         // 3. Notify mentor
