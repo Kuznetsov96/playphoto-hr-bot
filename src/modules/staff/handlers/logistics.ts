@@ -67,10 +67,13 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
         }
     });
 
-    const { logisticsService } = await import("../../../services/logistics-service.js");
-    await logisticsService.notifySupport(parcelId, 'REJECTED');
+    if (newRejectionCount >= 2) {
+        const { logisticsService } = await import("../../../services/logistics-service.js");
+        await logisticsService.notifySupport(parcelId, 'REJECTED');
+    }
 
-    await ctx.editMessageText("Окей, я передам цю задачу наступній зміні. Дякую!", { parse_mode: 'HTML' });
+    const text = `Окей, дякую! 📦\nЦя посилка залишається у списку локації, її зможе забрати інша фотографиня. ✨`;
+    await ctx.editMessageText(text, { parse_mode: 'HTML' });
     await ctx.answerCallbackQuery();
 });
 

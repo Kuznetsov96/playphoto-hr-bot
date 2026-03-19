@@ -4,6 +4,7 @@ import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { taskService } from "./task-service.js";
 import { staffHubMenu } from "../menus/staff.js";
 import logger from "../core/logger.js";
+import prisma from "../db/core.js";
 
 export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
     logger.info("[Cron] Starting daily shift reminders...");
@@ -46,20 +47,27 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 const tasks = await taskService.getStaffActiveTasks(staff.id);
                 const activeTasksCount = tasks.filter(t => !t.isCompleted).length;
                 const taskSummary = activeTasksCount > 0 
-                    ? `
-
-🔴 <b>У тебе є активні завдання (${activeTasksCount})!</b>
-Переглянь їх у розділі «Мої завдання». 👇`
+                    ? `\n\n🔴 <b>У тебе є активні завдання (${activeTasksCount})!</b>\nПереглянь їх у розділі «Мої завдання». 👇`
                     : "";
 
-                const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографе';
-                const greeting = `👋 <b>Доброго ранку, ${firstName}!</b>
+                const pendingParcelsCount = await prisma.parcel.count({
+                    where: {
+                        locationId: shift.locationId,
+                        OR: [
+                            { status: { in: ['EXPECTED', 'ARRIVED'] } },
+                            { status: 'DELIVERED', deliveryType: 'Address', contentPhotoId: null }
+                        ]
+                    }
+                });
 
-Ось твій робочий хаб на сьогодні:`;
+                const parcelsSummary = pendingParcelsCount > 0
+                    ? `\n\n📦 <b>Забрати посилки: ${pendingParcelsCount} шт!</b>\nВідкрий меню «📦 Посилки локації» та обов'язково забери їх сьогодні.`
+                    : "";
+
+                const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографине';
+                const greeting = `👋 <b>Доброго ранку, ${firstName}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
                 
-                const fullText = `${greeting}
-
-${shiftText}${taskSummary}`;
+                const fullText = `${greeting}\n\n${shiftText}${taskSummary}${parcelsSummary}`;
 
                 // Send in quiet mode (disable_notification: true)
                 const sentMsg = await bot.api.sendMessage(Number(telegramId), fullText, {
