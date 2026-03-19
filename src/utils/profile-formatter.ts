@@ -120,9 +120,9 @@ export async function formatCandidateProfile(
             // Onboarding checklist — show what's filled vs pending
             text += `\n📝 <b>Filling Documents</b>\n`;
             const checks = [
-                { label: "Phone",    ok: !!candidate.phone },
-                { label: "Email",    ok: !!candidate.email },
-                { label: "IBAN",     ok: !!candidate.iban },
+                { label: "Phone", ok: !!candidate.phone },
+                { label: "Email", ok: !!candidate.email },
+                { label: "IBAN", ok: !!candidate.iban },
                 { label: "Passport", ok: !!candidate.passportPhotoIds },
                 { label: "Instagram", ok: !!candidate.instagram },
             ];
@@ -133,9 +133,9 @@ export async function formatCandidateProfile(
             if (pending.length === 0) text += `\n<i>All documents submitted — waiting for auto-hire</i>\n`;
         } else {
             const FINAL_LABELS: Record<string, string> = {
-                NDA:            "📑 NDA",
+                NDA: "📑 NDA",
                 KNOWLEDGE_TEST: "📝 Knowledge Test",
-                STAGING_SETUP:  "📸 Staging Setup",
+                STAGING_SETUP: "📸 Staging Setup",
                 STAGING_ACTIVE: "⌛ Active Staging",
             };
             text += `\n${FINAL_LABELS[status] || status}\n`;
