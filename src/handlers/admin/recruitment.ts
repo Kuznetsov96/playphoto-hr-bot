@@ -170,7 +170,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
-    if (isSuper && cand.status === CandidateStatus.TRAINING_COMPLETED && !cand.ndaConfirmedAt) {
+    if (isSuper && (cand.status === CandidateStatus.TRAINING_COMPLETED || (cand.status as string) === "NDA") && !cand.ndaConfirmedAt) {
         range.text("🔔 Ping NDA", async (ctx) => {
             const { NDA_LINK } = await import("../../config.js");
             const firstName = extractFirstName(cand.fullName || "");
