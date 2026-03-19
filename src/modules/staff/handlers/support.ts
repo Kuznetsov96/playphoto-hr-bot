@@ -217,6 +217,70 @@ staffSupportHandlers.callbackQuery(/^ticket_force_close_(\d+)$/, async (ctx) => 
     });
 });
 
+// 9. Onboarding Decision: Pass
+staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
+    const candId = ctx.match[1]!;
+    const ticketId = Number(ctx.match[2]);
+    
+    // Auth check: allow if they are in the support group
+    const { hrService } = await import("../../../services/hr-service.js");
+    const { CANDIDATE_TEXTS } = await import("../../../constants/candidate-texts.js");
+    const { extractFirstName } = await import("../../../utils/string-utils.js");
+
+    try {
+        const res = await hrService.completeOfflineStaging(candId, true);
+        if (res) {
+            const firstName = extractFirstName(res.candidate.fullName || "");
+            
+            // Send warm welcome per user request
+            await ctx.api.sendMessage(
+                Number(res.candidate.user.telegramId), 
+                `🌸 <b>${firstName}</b>, вітаємо з успішним проходженням першої зміни!\n\nТи чудово впоралась! 🎉 Бажаємо плідного шляху та багато крутих кадрів разом з PlayPhoto! ✨`,
+                { parse_mode: "HTML" }
+            );
+            
+            await ctx.answerCallbackQuery("Кандидат успішно пройшов стажування! ✅");
+            
+            // Close the onboarding topic
+            await closeTicket(ctx, ticketId, "ADMIN");
+        }
+    } catch (e: any) {
+        await ctx.answerCallbackQuery(`Помилка: ${e.message}`);
+    }
+});
+
+// 10. Onboarding Decision: Fail
+staffSupportHandlers.callbackQuery(/^onboard_fail_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
+    const candId = ctx.match[1]!;
+    const ticketId = Number(ctx.match[2]);
+    
+    const { hrService } = await import("../../../services/hr-service.js");
+    const { candidateRepository } = await import("../../../repositories/candidate-repository.js");
+    const { extractFirstName } = await import("../../../utils/string-utils.js");
+
+    try {
+        const cand = await candidateRepository.findById(candId);
+        await hrService.completeOfflineStaging(candId, false);
+        
+        // Send warm comforting message to Failed Candidate per user request
+        if (cand && cand.user) {
+            const firstName = extractFirstName(cand.fullName || "");
+            await ctx.api.sendMessage(
+                Number(cand.user.telegramId),
+                `🌸 <b>${firstName}</b>, дякуємо за проведений час на зміні.\n\nНа жаль, на цьому етапі ми не можемо запропонувати співпрацю. Але не засмучуйся, це просто досвід! Бажаємо, щоб наступного разу все вийшло найкращим чином. Успіхів тобі! ✨`,
+                { parse_mode: "HTML" }
+            );
+        }
+
+        await ctx.answerCallbackQuery("Кандидат не пройшов. ❌");
+        
+        // Close the onboarding topic
+        await closeTicket(ctx, ticketId, "ADMIN");
+    } catch (e: any) {
+        await ctx.answerCallbackQuery(`Помилка: ${e.message}`);
+    }
+});
+
 // 7. Transfer Ticket to Another Admin
 // Supports both:
 // - New: ticket_transfer_{ticketId}_{adminTgId}
@@ -575,7 +639,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                     await supportRepository.updateTicket(ticket.id, { topicId: topicId });
 
                     // Send Enhanced Ticket Card to Topic
-                    const cardText = await buildTicketCard(ticket, user, isClarification);
+                    const cardText = await buildTicketCard(ticket, user, isClarification, locationName, locationCity);
                     const buttons = getTicketButtons(ticket.id, ticket.status);
 
                     await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, cardText, {
@@ -796,8 +860,8 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         const outgoingTopic = await supportRepository.findOutgoingTopicByTopicId(topicId);
         if (!outgoingTopic || !outgoingTopic.userId) return false;
 
-        const staffUser = await userRepository.findWithStaffProfileById(outgoingTopic.userId);
-        if (!staffUser || !staffUser.staffProfile) return false;
+        const staffUser = await userRepository.findById(outgoingTopic.userId);
+        if (!staffUser) return false;
 
         try {
             const telegramId = Number(staffUser.telegramId);
@@ -830,15 +894,20 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         }
     }
 
-    // Forward to User (STAFF ONLY logic)
+    // Forward to User (Staff or Candidate fallback)
     const user = await userRepository.findWithStaffProfileById(ticket.userId);
+    let telegramId: number;
+
+    // Resolve target telegram ID (support both Staff and Candidates)
     if (!user || !user.staffProfile) {
-        // Not a staff ticket, let candidate logic handle it
-        return false;
+        const candidateUser = await userRepository.findById(ticket.userId);
+        if (!candidateUser) return false;
+        telegramId = Number(candidateUser.telegramId);
+    } else {
+        telegramId = Number(user.telegramId);
     }
 
     try {
-        const telegramId = Number(user.telegramId);
         await ctx.copyMessage(telegramId);
 
         // Touch updatedAt to track activity
@@ -883,11 +952,11 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         // Status Update & Topic Rename: ONLY FOR STAFF
         // (Previously some logic was here)
 
-        // Log to Timeline (Message from Admin to Staff)
+        // Log to Timeline (Message from Admin to Staff/Candidate)
         const { timelineRepository } = await import("../../../repositories/timeline-repository.js");
         const adminText = ctx.message?.text || ctx.message?.caption || "[Media Reply]";
 
-        await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', adminText, {
+        await timelineRepository.createEvent(ticket.userId, 'MESSAGE', 'ADMIN', adminText, {
             ticketId: ticket.id,
             adminId: ctx.from?.id,
             adminName: ctx.from?.first_name
