@@ -119,7 +119,7 @@ describe('hrService', () => {
             vi.mocked(candidateRepository.findById).mockResolvedValue({ id: 'cand1', user: { id: 'user1', telegramId: 123 } } as any);
             const result = await hrService.makeDecision(mockApi, 'cand1', 'REJECTED');
             expect(result).toBe(true);
-            
+
             // Should NOT have status REJECTED or notificationSent: true immediately
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
                 hrDecision: 'REJECTED',
@@ -135,7 +135,7 @@ describe('hrService', () => {
             vi.mocked(locationRepository.findAllActive).mockResolvedValue([
                 { id: 'loc1', city: 'Kyiv', name: 'Center', neededCount: 5 }
             ] as any);
-            
+
             const prisma = (await import('../../db/core.js')).default;
             vi.mocked(prisma.candidate.findMany).mockResolvedValue([
                 { id: 'cand1', status: 'SCREENING', notificationSent: false }

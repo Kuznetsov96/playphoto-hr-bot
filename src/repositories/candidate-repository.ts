@@ -169,6 +169,10 @@ export class CandidateRepository {
 
     async update(id: string, data: Prisma.CandidateUpdateInput, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
         const client = tx || prisma;
+        // Auto-track status change time
+        if (data.status !== undefined) {
+            (data as any).statusChangedAt = new Date();
+        }
         const candidate = await client.candidate.update({
             where: { id },
             data,
@@ -217,6 +221,9 @@ export class CandidateRepository {
     }
 
     async updateMany(where: Prisma.CandidateWhereInput, data: Prisma.CandidateUpdateManyMutationInput) {
+        if (data.status !== undefined) {
+            (data as any).statusChangedAt = new Date();
+        }
         return prisma.candidate.updateMany({
             where,
             data

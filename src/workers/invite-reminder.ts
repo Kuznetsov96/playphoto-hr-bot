@@ -49,6 +49,7 @@ export async function processInviteReminders(bot: any) {
                         isWaitlisted: true,
                         notificationSent: false, // Reset to allow future invites
                         interviewInvitedAt: null, // Reset time
+                        statusChangedAt: new Date()
                     }
                 });
 

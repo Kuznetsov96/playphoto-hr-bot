@@ -127,6 +127,7 @@ model Candidate {
   // Quiz results
   quizScore         Int?
   quizAnswers       String? // JSON string of answers
+  statusChangedAt   DateTime? // When status last changed
   applications      Application[]
   interviewSlot     InterviewSlot? @relation(fields: [interviewSlotId], references: [id])
   location          Location?      @relation(fields: [locationId], references: [id])
