@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { NOVA_POSHTA_API_KEY } from '../config.js';
+import { NOVA_POSHTA_API_KEY, NP_RECIPIENT_PHONE } from '../config.js';
 import logger from '../core/logger.js';
 
 export interface NPTrackingResult {
@@ -108,6 +108,26 @@ export class NovaPoshtaService {
      */
     async getWarehouses(cityRef: string): Promise<any[] | null> {
         return this.callApi('Address', 'getWarehouses', { CityRef: cityRef });
+    }
+
+    /**
+     * Create electronic proxy (Довірена особа / Інший отримувач)
+     */
+    async createTrustee(ttn: string, trusteePhone: string): Promise<boolean> {
+        // Method 'orderTrustee' (or similar 'changeEW') is used to assign a trustee
+        const result = await this.callApi('AdditionalService', 'save', {
+            OrderType: 'orderTrustee',
+            IntDocNumber: ttn,
+            CustomerPhone: NP_RECIPIENT_PHONE, // Sender/Main Recipient's phone authorizing the proxy
+            TrusteePhone: trusteePhone
+        });
+
+        if (!result) {
+            logger.warn({ ttn, trusteePhone }, '📦 NP Proxy API failed. Ensure the API key has privileges for orderTrustee, or try through the mobile app.');
+            return false;
+        }
+
+        return true;
     }
 }
 
