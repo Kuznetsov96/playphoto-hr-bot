@@ -25,7 +25,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
     logger.info(`🎂 Greeting candidates with birthday on ${day}/${month}...`);
     const candidates = await candidateRepository.findBirthdaysToday(day, month);
     const { default: prisma } = await import("../db/core.js");
-    
+
     const standardGreeting = `<b>Сьогодні — чудовий привід почати нову главу!</b> ✨\n\n` +
         `Нехай цей рік буде наповнений цікавими відкриттями, творчим натхненням та людьми, які дарують радість. ` +
         `Бажаємо, щоб кожен наступний кадр твого життя був наповнений лише світлими емоціями.\n\n` +
@@ -47,7 +47,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             const birthDate = new Date(c.birthDate!);
             const today = new Date();
             let age = today.getFullYear() - birthDate.getFullYear();
-            
+
             // Check if it's exactly 17th birthday for a previously rejected girl
             const isExactly17 = age === 17;
             const wasUnderage = c.hrDecision === "REJECTED_SYSTEM_UNDERAGE";
@@ -55,7 +55,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
 
             if (isExactly17 && wasUnderage && isFemale) {
                 logger.info({ candidateId: c.id }, "🎈 Candidate turned 17! Activating...");
-                
+
                 await prisma.candidate.update({
                     where: { id: c.id },
                     data: {
@@ -71,7 +71,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             } else {
                 await bot.api.sendMessage(tid, standardGreeting, { parse_mode: "HTML" });
             }
-            
+
             successCount++;
         } catch (e) {
             logger.error({ err: e, candidateId: c.id }, "Failed to send birthday greeting to candidate");
@@ -84,9 +84,9 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
         if (mainAdminId) {
             const report = `🎂 <b>Candidate Birthdays Report</b>\n\nToday <b>${successCount}</b> candidates were greeted automatically.`;
             try {
-                await bot.api.sendMessage(mainAdminId, report, { 
-                    parse_mode: "HTML", 
-                    disable_notification: true 
+                await bot.api.sendMessage(mainAdminId, report, {
+                    parse_mode: "HTML",
+                    disable_notification: true
                 });
             } catch (e) {
                 logger.error({ err: e, adminId: mainAdminId }, "Failed to send candidate birthday report to main admin");
@@ -280,7 +280,7 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
     // 1. Run immediate check if not done today
     const runCheck = async () => {
         const todayKey = `bday_checked:${new Date().toLocaleDateString('en-GB', { timeZone: 'Europe/Kyiv' }).replace(/\//g, '-')}`;
-        
+
         // Check if already done today
         const alreadyDone = await redis.get(todayKey);
         if (alreadyDone) {
@@ -303,11 +303,11 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
     // 2. Schedule next check
     const scheduleNext = () => {
         const now = new Date();
-        
+
         // Use a stable way to calculate delay until 9 AM Kyiv
         const kyivTimeStr = now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" });
         const kyivNow = new Date(kyivTimeStr);
-        
+
         let nextRunKyiv = new Date(kyivNow);
         nextRunKyiv.setHours(9, 0, 0, 0);
 
@@ -316,9 +316,9 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
         }
 
         const delay = nextRunKyiv.getTime() - kyivNow.getTime();
-        
+
         // For logging, we show the next run time in Kyiv
-        logger.info(`🎂 Birthday loop: Next check scheduled at ${nextRunKyiv.getHours().toString().padStart(2, '0')}:${nextRunKyiv.getMinutes().toString().padStart(2, '0')} Kyiv time (in ${Math.round(delay/1000/60)} min)`);
+        logger.info(`🎂 Birthday loop: Next check scheduled at ${nextRunKyiv.getHours().toString().padStart(2, '0')}:${nextRunKyiv.getMinutes().toString().padStart(2, '0')} Kyiv time (in ${Math.round(delay / 1000 / 60)} min)`);
 
         setTimeout(() => {
             runCheck().finally(() => {

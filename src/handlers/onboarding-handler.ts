@@ -24,6 +24,50 @@ const STEPS = {
     FINAL: 'ONB_FINAL'
 };
 
+// Determines the first onboarding step that hasn't been completed yet
+export function getFirstMissingStep(candidate: any): string {
+    if (!candidate.fullName) return STEPS.FULL_NAME;
+    if (!candidate.birthDate) return STEPS.BIRTH_DATE;
+    if (!candidate.phone) return STEPS.PHONE;
+    if (!candidate.email) return STEPS.EMAIL;
+    const photoIds = candidate.passportPhotoIds ? candidate.passportPhotoIds.split(',').filter(Boolean) : [];
+    if (photoIds.length < 1) return STEPS.PASSPORT_FRONT;
+    if (photoIds.length < 2) return STEPS.PASSPORT_BACK;
+    if (photoIds.length < 3) return STEPS.PASSPORT_ANNEX;
+    if (!candidate.iban) return STEPS.IBAN;
+    if (!candidate.instagram) return STEPS.INSTAGRAM;
+    return STEPS.FINAL;
+}
+
+// Returns the missing field labels for smart reminders
+export function getMissingFieldLabels(candidate: any): string[] {
+    const missing: string[] = [];
+    if (!candidate.fullName) missing.push("ПІБ");
+    if (!candidate.birthDate) missing.push("дату народження");
+    if (!candidate.phone) missing.push("телефон");
+    if (!candidate.email) missing.push("email");
+    const photoIds = candidate.passportPhotoIds ? candidate.passportPhotoIds.split(',').filter(Boolean) : [];
+    if (photoIds.length < 3) missing.push("фото документів");
+    if (!candidate.iban) missing.push("IBAN");
+    if (!candidate.instagram) missing.push("Instagram");
+    return missing;
+}
+
+function getStepPrompt(step: string): string {
+    switch (step) {
+        case STEPS.FULL_NAME: return "Напиши, будь ласка, своє повне Прізвище, Ім'я та По Батькові (як у паспорті):";
+        case STEPS.BIRTH_DATE: return "🎈 <b>Коли твій день народження?</b>\n\nНапиши у форматі ДД.ММ.РРРР (наприклад, 15.05.2000):";
+        case STEPS.PHONE: return "📱 <b>Твій номер телефону:</b>\n\nНапиши у форматі +380...";
+        case STEPS.EMAIL: return "📧 <b>Твій Email:</b>\n\nВін потрібен для офіційного листування та NDA:";
+        case STEPS.PASSPORT_FRONT: return "📸 <b>Тепер документи.</b>\n\nНадішли, будь ласка, фото <b>лицьової сторони</b> паспорта (або ID-картки). Також можна використовувати скріншот з застосунку <b>Дія</b>. 📱";
+        case STEPS.PASSPORT_BACK: return "📸 Надішли фото <b>зворотної сторони</b> (ID-картка), 2-гу сторінку паспорта або скріншот з застосунку <b>Дія</b>:";
+        case STEPS.PASSPORT_ANNEX: return "📸 Тепер фото <b>прописки</b> (паперовий додаток до ID-картки, відповідна сторінка паспорта або скріншот з <b>Дії</b>):";
+        case STEPS.IBAN: return `🏦 <b>Реквізити (IBAN).</b>\n\nНадішли свій номер рахунку <b>IBAN (бажано Monobank)</b>. Він починається на UA...\n\n<i>Ці дані необхідні виключно для автоматичного заповнення твого договору NDA.</i>`;
+        case STEPS.INSTAGRAM: return "📱 <b>Твій Instagram:</b>\n\nНапиши нік або посилання (наприклад, <code>@account</code>):";
+        default: return "";
+    }
+}
+
 // --- MENUS ---
 export const onboardingConfirmBirthDateMenu = new Menu<MyContext>("onb-confirm-bd");
 menuRegistry.register(onboardingConfirmBirthDateMenu);
@@ -62,17 +106,35 @@ onboardingHandlers.callbackQuery("start_onboarding_data", async (ctx) => {
         return;
     }
 
-    // Critical: Initialize session with fresh data to avoid state leakage from previous attempts
+    // Resume from first missing field instead of starting over
+    const resumeStep = getFirstMissingStep(candidate);
+
+    if (resumeStep === STEPS.FINAL) {
+        // All data already collected — go straight to finish
+        ctx.session.candidateData = { step: STEPS.FINAL, passportPhotoIds: [] };
+        await finishOnboarding(ctx, candidate);
+        return;
+    }
+
     ctx.session.candidateData = {
-        step: STEPS.FULL_NAME,
-        passportPhotoIds: []
+        step: resumeStep,
+        passportPhotoIds: candidate.passportPhotoIds ? candidate.passportPhotoIds.split(',').filter(Boolean) : []
     };
 
-    const startText = `🔒 <b>Твої дані під захистом.</b>\n\n` +
-        `Ми використовуємо сучасні стандарти безпеки, щоб твої документи залишалися суворо конфіденційними. Вони використовуються виключно для підготовки договору та початку нашої співпраці.\n\n` +
-        `Напиши, будь ласка, своє повне Прізвище, Ім'я та По Батькові (як у паспорті):`;
-
-    await ScreenManager.renderScreen(ctx, startText, undefined, { pushToStack: true });
+    // If resuming from step 1, show welcome text; otherwise show the step prompt directly
+    if (resumeStep === STEPS.FULL_NAME) {
+        const startText = `🔒 <b>Твої дані під захистом.</b>\n\n` +
+            `Ми використовуємо сучасні стандарти безпеки, щоб твої документи залишалися суворо конфіденційними. Вони використовуються виключно для підготовки договору та початку нашої співпраці.\n\n` +
+            `Напиши, будь ласка, своє повне Прізвище, Ім'я та По Батькові (як у паспорті):`;
+        await ScreenManager.renderScreen(ctx, startText, undefined, { pushToStack: true });
+    } else if (resumeStep === STEPS.BIRTH_DATE && candidate.birthDate) {
+        // Birth date exists but step says it's missing — show confirmation
+        const bdStr = candidate.birthDate.toLocaleDateString('uk-UA');
+        ctx.session.candidateData.step = STEPS.BIRTH_DATE;
+        await ScreenManager.renderScreen(ctx, `🎈 <b>Твоя дата народження:</b> ${bdStr}\n\nВсе правильно?`, "onb-confirm-bd", { pushToStack: true });
+    } else {
+        await ScreenManager.renderScreen(ctx, getStepPrompt(resumeStep), undefined, { pushToStack: true });
+    }
 });
 
 onboardingHandlers.on("message:text", async (ctx, next) => {
@@ -96,16 +158,15 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>\n\nСпробуй ще раз (Прізвище Ім'я По Батькові):`);
                 return;
             }
-            ctx.session.candidateData.fullName = val.data;
+            await candidateRepository.update(candidate.id, { fullName: val.data } as any);
 
             const bd = candidate.birthDate;
             if (bd) {
                 const bdStr = bd.toLocaleDateString('uk-UA');
-                // Ensure we stay in ONB flow but wait for button click
                 await ScreenManager.renderScreen(ctx, `🎈 <b>Твоя дата народження:</b> ${bdStr}\n\nВсе правильно?`, "onb-confirm-bd", { pushToStack: true });
             } else {
                 ctx.session.candidateData.step = STEPS.BIRTH_DATE;
-                await ScreenManager.renderScreen(ctx, "🎈 <b>Коли твій день народження?</b>\n\nНапиши у форматі ДД.ММ.РРРР (наприклад, 15.05.2000):", undefined, { pushToStack: true });
+                await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.BIRTH_DATE), undefined, { pushToStack: true });
             }
         }
         else if (step === STEPS.BIRTH_DATE) {
@@ -119,10 +180,10 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>\n\nБудь ласка, спробуй ще раз:`);
                 return;
             }
-            ctx.session.candidateData.birthDate = date.toISOString();
+            await candidateRepository.update(candidate.id, { birthDate: date } as any);
 
             ctx.session.candidateData.step = STEPS.PHONE;
-            await ScreenManager.renderScreen(ctx, "📱 <b>Твій номер телефону:</b>\n\nНапиши у форматі +380...", undefined, { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.PHONE), undefined, { pushToStack: true });
         }
         else if (step === STEPS.PHONE) {
             const sanitized = text.replace(/\s+/g, '').replace(/-/g, '').replace(/\(/g, '').replace(/\)/g, '');
@@ -131,10 +192,10 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>\n\nПриклад: +380931234567`);
                 return;
             }
-            ctx.session.candidateData.phone = val.data;
+            await candidateRepository.update(candidate.id, { phone: val.data } as any);
 
             ctx.session.candidateData.step = STEPS.EMAIL;
-            await ScreenManager.renderScreen(ctx, "📧 <b>Твій Email:</b>\n\nВін потрібен для офіційного листування та NDA:", undefined, { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.EMAIL), undefined, { pushToStack: true });
         }
         else if (step === STEPS.EMAIL) {
             const val = CandidateSchema.shape.email.safeParse(text.toLowerCase());
@@ -142,10 +203,10 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>`);
                 return;
             }
-            ctx.session.candidateData.email = val.data;
+            await candidateRepository.update(candidate.id, { email: val.data } as any);
 
             ctx.session.candidateData.step = STEPS.PASSPORT_FRONT;
-            await ScreenManager.renderScreen(ctx, "📸 <b>Тепер документи.</b>\n\nНадішли, будь ласка, фото <b>лицьової сторони</b> паспорта (або ID-картки). Також можна використовувати скріншот з застосунку <b>Дія</b>. 📱", undefined, { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.PASSPORT_FRONT), undefined, { pushToStack: true });
         }
         else if ([STEPS.PASSPORT_FRONT, STEPS.PASSPORT_BACK, STEPS.PASSPORT_ANNEX].includes(step)) {
             // User sent text instead of photo
@@ -157,14 +218,18 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 await ScreenManager.renderScreen(ctx, "⚠️ <b>Це не схоже на IBAN.</b>\n\nВін має починатися на UA і містити 29 символів. Спробуй ще раз:");
                 return;
             }
-            ctx.session.candidateData.iban = ibanVal;
+            await candidateRepository.update(candidate.id, { iban: ibanVal } as any);
+
             ctx.session.candidateData.step = STEPS.INSTAGRAM;
-            await ScreenManager.renderScreen(ctx, "📱 <b>Твій Instagram:</b>\n\nНапиши нік або посилання (наприклад, <code>@account</code>):", undefined, { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.INSTAGRAM), undefined, { pushToStack: true });
         }
         else if (step === STEPS.INSTAGRAM) {
-            ctx.session.candidateData.instagram = text;
+            await candidateRepository.update(candidate.id, { instagram: text } as any);
+
             ctx.session.candidateData.step = STEPS.FINAL;
-            await finishOnboarding(ctx, candidate);
+            // Re-fetch candidate with all saved data
+            const updatedCandidate = await candidateRepository.findByTelegramId(Number(telegramId));
+            await finishOnboarding(ctx, updatedCandidate!);
         }
     } catch (e) {
         logger.error({ err: e, step }, "Onboarding data save failed");
@@ -189,6 +254,10 @@ onboardingHandlers.on("message:photo", async (ctx, next) => {
     }
     ctx.session.candidateData.passportPhotoIds.push(photo!.file_id);
 
+    // Save photo to DB immediately
+    const updatedPhotoIds = ctx.session.candidateData.passportPhotoIds.join(',');
+    await candidateRepository.update(candidate.id, { passportPhotoIds: updatedPhotoIds } as any);
+
     try {
         if (step === STEPS.PASSPORT_FRONT) {
             ctx.session.candidateData.step = STEPS.PASSPORT_BACK;
@@ -198,11 +267,7 @@ onboardingHandlers.on("message:photo", async (ctx, next) => {
             await ScreenManager.renderScreen(ctx, "✅ Отримали! Тепер фото <b>прописки</b> (паперовий додаток до ID-картки, відповідна сторінка паспорта або скріншот з <b>Дії</b>):", undefined, { pushToStack: true });
         } else {
             ctx.session.candidateData.step = STEPS.IBAN;
-            const ibanText = `✅ Всі фото отримали!\n\n` +
-                `🏦 <b>Реквізити (IBAN).</b>\n\n` +
-                `Надішли свій номер рахунку <b>IBAN (бажано Monobank)</b>. Він починається на UA...\n\n` +
-                `<i>Ці дані необхідні виключно для автоматичного заповнення твого договору NDA.</i>`;
-            await ScreenManager.renderScreen(ctx, ibanText, undefined, { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.IBAN), undefined, { pushToStack: true });
         }
     } catch (e) {
         logger.error({ err: e, step }, "Onboarding photo handling failed");
@@ -217,29 +282,13 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     logger.info({ candidateId }, "🏁 Starting finishOnboarding...");
 
     try {
-        const data = ctx.session.candidateData;
-        if (!data) {
-            throw new Error("Candidate data missing in session");
-        }
-
-        const bd = data.birthDate ? new Date(data.birthDate) : existingCandidate.birthDate;
-
-        logger.debug({ candidateId }, "💾 Updating candidate in DB...");
-        // DB Persistence: Save all accumulated data exactly once at the end.
-        // We use await here to ensure DB is updated before showing next screen
+        // All fields already saved incrementally — just update status
         const updatedCandidate = await candidateRepository.update(candidateId, {
-            fullName: data.fullName || existingCandidate.fullName,
-            birthDate: bd,
-            phone: data.phone || existingCandidate.phone,
-            email: data.email || existingCandidate.email,
-            iban: data.iban || existingCandidate.iban,
-            instagram: data.instagram || existingCandidate.instagram,
-            passportPhotoIds: data.passportPhotoIds ? data.passportPhotoIds.join(',') : existingCandidate.passportPhotoIds,
             status: 'AWAITING_FIRST_SHIFT',
             currentStep: FunnelStep.FIRST_SHIFT
         } as any);
 
-        logger.debug({ candidateId }, "✅ DB Update done. Preparing final screen...");
+        logger.debug({ candidateId }, "✅ Status updated. Preparing final screen...");
 
         // Safe Job Offloading: Process heavy media & admin messages in background
         import("../modules/candidate/services/index.js").then(({ candidateService }) => {

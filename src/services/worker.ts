@@ -933,28 +933,32 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
         const candidates = await prisma.candidate.findMany({
             where: {
                 status: CandidateStatus.READY_FOR_HIRE,
-                // Only candidates who have been in this status for at least 24h
                 user: { updatedAt: { lte: twentyFourHoursAgo } }
             },
             include: { user: true }
         });
 
+        const { getMissingFieldLabels } = await import("../handlers/onboarding-handler.js");
+
         for (const cand of candidates) {
-            // Throttle: only remind once every 23h
             const userUpdate = new Date(cand.user.updatedAt);
             if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
 
             try {
-                const firstName = extractFirstName(cand.fullName || "");
-                const kb = new InlineKeyboard().text("📝 Заповнити дані", "start_onboarding_data");
-                await bot.api.sendMessage(
-                    Number(cand.user.telegramId),
-                    CANDIDATE_TEXTS["worker-abandoned-onboarding"],
-                    { reply_markup: kb }
-                );
+                const missing = getMissingFieldLabels(cand);
+                const kb = new InlineKeyboard().text("📝 Продовжити", "start_onboarding_data");
+
+                let text: string;
+                if (missing.length === 0) {
+                    text = "Привіт! 👋 Схоже, всі дані вже заповнені — натисни кнопку нижче, щоб завершити оформлення! ✨";
+                } else {
+                    text = `Привіт! 👋\n\nЗалишилось заповнити: <b>${missing.join(", ")}</b>.\nЦе займе буквально пару хвилин! ✨`;
+                }
+
+                await bot.api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logger.info({ userId: cand.user.telegramId }, "📢 Onboarding reminder sent (recurring 24h)");
+                logger.info({ userId: cand.user.telegramId, missing: missing.length }, "📢 Smart onboarding reminder sent");
             } catch (e) {
                 logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
             }

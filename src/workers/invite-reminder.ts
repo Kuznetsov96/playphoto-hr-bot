@@ -35,13 +35,13 @@ export async function processInviteReminders(bot: any) {
 
         for (const cand of pendingCandidates) {
             if (!cand.interviewInvitedAt) continue;
-            
+
             const invitedTime = cand.interviewInvitedAt.getTime();
 
             // Check if older than 48 hours -> Reset
             if (invitedTime <= resetThreshold.getTime()) {
                 logger.info({ candId: cand.id }, "🔄 [WORKER] 48h passed. Resetting candidate to WAITLIST.");
-                
+
                 await prisma.candidate.update({
                     where: { id: cand.id },
                     data: {
@@ -55,9 +55,9 @@ export async function processInviteReminders(bot: any) {
 
                 try {
                     await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_48H_RESET, { parse_mode: "HTML" });
-                } catch (e) {}
-                
-            } 
+                } catch (e) { }
+
+            }
             // Check if older than 24 hours but NOT older than 48 hours -> Ping
             // To avoid spamming ping, we need a flag. Wait, we don't have a specific `pingSent` flag in DB.
             // But we can check if it's exactly between 24h and 25h, OR add a field.
@@ -67,7 +67,7 @@ export async function processInviteReminders(bot: any) {
                 // To avoid sending multiple times, if worker runs hourly, this is safe if we mark it somehow.
                 // However, without a flag, we might send it twice if the worker runs twice within the 2-hour window.
                 // A safer way is to just send it if it hasn't been sent.
-                
+
                 // Let's use the time window: 24h to 24h 59m
                 if (invitedTime <= pingThreshold.getTime() && invitedTime > pingThreshold.getTime() - 60 * 60 * 1000) {
                     logger.info({ candId: cand.id }, "🔄 [WORKER] 24h passed. Sending ping.");
@@ -78,7 +78,7 @@ export async function processInviteReminders(bot: any) {
                                 .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
                                 .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
                         });
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             }
         }

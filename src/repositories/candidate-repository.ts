@@ -77,9 +77,9 @@ export class CandidateRepository {
 
     async countUnreadByScope(scope: "HR" | "MENTOR"): Promise<number> {
         const mentorStatuses = [
-            CandidateStatus.ACCEPTED, 
+            CandidateStatus.ACCEPTED,
             CandidateStatus.REJECTED,
-            CandidateStatus.DISCOVERY_SCHEDULED, 
+            CandidateStatus.DISCOVERY_SCHEDULED,
             CandidateStatus.DISCOVERY_COMPLETED,
             CandidateStatus.TRAINING_SCHEDULED,
             CandidateStatus.TRAINING_COMPLETED,
@@ -116,9 +116,9 @@ export class CandidateRepository {
     async findUnreadByScope(scope: "HR" | "MENTOR"): Promise<CandidateWithRelations[]> {
         // Aggressive status-based filtering for HR scope
         const mentorStatuses = [
-            CandidateStatus.ACCEPTED, 
+            CandidateStatus.ACCEPTED,
             CandidateStatus.REJECTED,
-            CandidateStatus.DISCOVERY_SCHEDULED, 
+            CandidateStatus.DISCOVERY_SCHEDULED,
             CandidateStatus.DISCOVERY_COMPLETED,
             CandidateStatus.TRAINING_SCHEDULED,
             CandidateStatus.TRAINING_COMPLETED,
@@ -140,17 +140,17 @@ export class CandidateRepository {
                     ]
                 } : {})
             },
-            include: { 
-                user: true, 
-                location: true, 
-                firstShiftPartner: { include: { user: true } }, 
-                discoverySlot: true, 
-                trainingSlot: true, 
-                interviewSlot: true, 
+            include: {
+                user: true,
+                location: true,
+                firstShiftPartner: { include: { user: true } },
+                discoverySlot: true,
+                trainingSlot: true,
+                interviewSlot: true,
                 messages: {
                     orderBy: { createdAt: 'desc' },
                     take: 1
-                } 
+                }
             },
             orderBy: { user: { createdAt: 'desc' } }
         }) as unknown as CandidateWithRelations[];
@@ -182,8 +182,8 @@ export class CandidateRepository {
         // If status changed, sync channel access in background
         if (data.status !== undefined && candidate.user?.telegramId) {
             import("../services/access-service.js").then(({ accessService }) => {
-                accessService.syncUserAccess(candidate.user.telegramId).catch(() => {});
-            }).catch(() => {});
+                accessService.syncUserAccess(candidate.user.telegramId).catch(() => { });
+            }).catch(() => { });
         }
 
         return candidate;
@@ -267,7 +267,7 @@ export class CandidateRepository {
                 where: { candidateId },
                 data: { isBooked: false, candidateId: null }
             });
-            
+
             // Unlink lead if exists
             await tx.lead.updateMany({
                 where: { candidateId },
