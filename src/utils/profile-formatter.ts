@@ -116,14 +116,30 @@ export async function formatCandidateProfile(
 
     // ── SECTION 4: FINAL STEP PIPELINE (new statuses) ────────────────────
     if (isFinalStep) {
-        const FINAL_LABELS: Record<string, string> = {
-            NDA:            "📑 NDA",
-            KNOWLEDGE_TEST: "📝 Knowledge Test",
-            STAGING_SETUP:  "📸 Staging Setup",
-            STAGING_ACTIVE: "⌛ Active Staging",
-            READY_FOR_HIRE: "✅ Ready for Hire",
-        };
-        text += `\n${FINAL_LABELS[status] || status}\n`;
+        if (status === "READY_FOR_HIRE") {
+            // Onboarding checklist — show what's filled vs pending
+            text += `\n📝 <b>Filling Documents</b>\n`;
+            const checks = [
+                { label: "Phone",    ok: !!candidate.phone },
+                { label: "Email",    ok: !!candidate.email },
+                { label: "IBAN",     ok: !!candidate.iban },
+                { label: "Passport", ok: !!candidate.passportPhotoIds },
+                { label: "Instagram", ok: !!candidate.instagram },
+            ];
+            const done = checks.filter(c => c.ok);
+            const pending = checks.filter(c => !c.ok);
+            if (done.length > 0) text += `✅ ${done.map(c => c.label).join(", ")}\n`;
+            if (pending.length > 0) text += `⏳ ${pending.map(c => c.label).join(", ")}\n`;
+            if (pending.length === 0) text += `\n<i>All documents submitted — waiting for auto-hire</i>\n`;
+        } else {
+            const FINAL_LABELS: Record<string, string> = {
+                NDA:            "📑 NDA",
+                KNOWLEDGE_TEST: "📝 Knowledge Test",
+                STAGING_SETUP:  "📸 Staging Setup",
+                STAGING_ACTIVE: "⌛ Active Staging",
+            };
+            text += `\n${FINAL_LABELS[status] || status}\n`;
+        }
 
         // Staging details
         if (["STAGING_SETUP", "STAGING_ACTIVE"].includes(status)) {
@@ -153,32 +169,56 @@ export async function formatCandidateProfile(
     }
 
     // ── SECTION 5: OLD STAGING / ONBOARDING ──────────────────────────────
-    if (isOldStaging && candidate.firstShiftDate) {
-        const header = status === "HIRED" ? `🚀 <b>ONBOARDING</b>` : `📸 <b>OFFLINE STAGING</b>`;
-        text += `\n${header}\n`;
+    if (isOldStaging) {
+        if (status === "AWAITING_FIRST_SHIFT") {
+            text += `\n⏳ <b>Ready for Schedule</b>\n`;
+            text += `<i>Add to Google Sheets → Full Sync</i>\n`;
 
-        if (candidate.quizScore !== null && candidate.quizScore !== undefined) {
-            text += `Test: <b>${candidate.quizScore}/53</b>\n`;
+            // Show staging as past event
+            if (candidate.firstShiftDate) {
+                const stagingDate = new Date(candidate.firstShiftDate).toLocaleDateString('uk-UA', {
+                    day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv'
+                });
+                text += `📸 Staging: ${stagingDate}`;
+                if (candidate.quizScore != null) text += ` • Test: ${candidate.quizScore}/53`;
+                text += `\n`;
+            }
+
+            // Show how long waiting
+            if (candidate.statusChangedAt) {
+                const diffMs = Date.now() - new Date(candidate.statusChangedAt).getTime();
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                const waitStr = diffDays > 0 ? `${diffDays}d` : `${diffHours}h`;
+                text += `⏰ Waiting: <b>${waitStr}</b>\n`;
+            }
+        } else if (candidate.firstShiftDate) {
+            const header = status === "HIRED" ? `🚀 <b>ONBOARDING</b>` : `📸 <b>OFFLINE STAGING</b>`;
+            text += `\n${header}\n`;
+
+            if (candidate.quizScore !== null && candidate.quizScore !== undefined) {
+                text += `Test: <b>${candidate.quizScore}/53</b>\n`;
+            }
+
+            const shiftDate = new Date(candidate.firstShiftDate);
+            const stagingDate = shiftDate.toLocaleDateString('uk-UA', {
+                day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv'
+            });
+
+            let shiftTime = candidate.firstShiftTime;
+            if (!shiftTime && candidate.location?.schedule) {
+                const schedule = candidate.location.schedule;
+                const isWeekend = [0, 6].includes(shiftDate.getDay());
+                const match = isWeekend
+                    ? schedule.match(/Сб-Нд\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i)
+                    : schedule.match(/Пн-Пт\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i);
+                if (match) shiftTime = match[1];
+            }
+
+            text += `Date: <b>${stagingDate}</b>`;
+            if (shiftTime) text += ` • <b>${shiftTime}</b>`;
+            text += `\n`;
         }
-
-        const shiftDate = new Date(candidate.firstShiftDate);
-        const stagingDate = shiftDate.toLocaleDateString('uk-UA', {
-            day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv'
-        });
-
-        let shiftTime = candidate.firstShiftTime;
-        if (!shiftTime && candidate.location?.schedule) {
-            const schedule = candidate.location.schedule;
-            const isWeekend = [0, 6].includes(shiftDate.getDay());
-            const match = isWeekend
-                ? schedule.match(/Сб-Нд\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i)
-                : schedule.match(/Пн-Пт\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i);
-            if (match) shiftTime = match[1];
-        }
-
-        text += `Date: <b>${stagingDate}</b>`;
-        if (shiftTime) text += ` • <b>${shiftTime}</b>`;
-        text += `\n`;
     }
 
     // ── SECTION 6: MESSAGE HISTORY (inbox only) ───────────────────────────
