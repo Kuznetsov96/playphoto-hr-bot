@@ -28,7 +28,7 @@ const t = (key: string, args?: any) => {
 export class StaffService {
     async getProfileText(profile: StaffProfile, isSelfView: boolean = true, viewerRole?: AdminRole | null) {
         const isEn = viewerRole === 'SUPER_ADMIN' || viewerRole === 'CO_FOUNDER' || viewerRole === 'SUPPORT';
-        
+
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -62,11 +62,11 @@ export class StaffService {
             if (earliestShift) {
                 const today = new Date();
                 const shiftDate = new Date(earliestShift.date);
-                
+
                 const isToday = today.getFullYear() === shiftDate.getFullYear() &&
-                                today.getMonth() === shiftDate.getMonth() &&
-                                today.getDate() === shiftDate.getDate();
-                
+                    today.getMonth() === shiftDate.getMonth() &&
+                    today.getDate() === shiftDate.getDate();
+
                 if (isToday) {
                     text += t('admin-profile-first-shift');
                 }
@@ -139,7 +139,7 @@ export class StaffService {
         const telegramId = Number(staff.user.telegramId);
         const firstName = staff.fullName.split(' ')[1] || staff.fullName;
 
-        const welcomeText = 
+        const welcomeText =
             `🌟 <b>Вітаємо в команді, ${firstName}!</b>\n\n` +
             `Твій перший робочий графік готовий! Ти вже можеш переглянути свої зміни в головному меню. 📸\n\n` +
             `🤝 <b>Твоя перша зміна:</b> Наша <b>наставниця</b> допоможе тобі онлайн з усіма технічними питаннями та адаптацією. Не хвилюйся, ми всьому навчимо! ✨\n\n` +
@@ -153,30 +153,29 @@ export class StaffService {
             .text("🚀 Відкрити Хаб", "staff_hub_nav").row()
             .url("📖 База знань", TEAM_CHANNEL_LINK);
 
+        // Always mark as processed to prevent repeated attempts on every sync
+        await staffRepository.update(staff.id, { isWelcomeSent: true });
+
+        // Update user role
+        if (staff.user.role === Role.CANDIDATE) {
+            await userRepository.update(staff.userId, { role: Role.STAFF });
+        }
+
+        // Update candidate status to HIRED
+        const candidate = await candidateRepository.findByUserId(staff.userId);
+        if (candidate && candidate.status !== CandidateStatus.HIRED) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.HIRED,
+                notificationSent: true
+            });
+        }
+
         try {
             await api.sendMessage(telegramId, welcomeText, { parse_mode: "HTML", reply_markup: kb });
-            
-            // 1. Mark welcome as sent
-            await staffRepository.update(staff.id, { isWelcomeSent: true });
-
-            // 2. Update user role
-            if (staff.user.role === Role.CANDIDATE) {
-                await userRepository.update(staff.userId, { role: Role.STAFF });
-            }
-
-            // 3. Update candidate status to HIRED
-            const candidate = await candidateRepository.findByUserId(staff.userId);
-            if (candidate && candidate.status !== CandidateStatus.HIRED) {
-                await candidateRepository.update(candidate.id, { 
-                    status: CandidateStatus.HIRED,
-                    notificationSent: true 
-                });
-            }
-
             logger.info({ staffId, telegramId }, "✅ Finalized staff activation and sent welcome");
             return true;
         } catch (e) {
-            logger.error({ err: e, staffId, telegramId }, "❌ Failed to send final welcome message");
+            logger.warn({ err: e, staffId, telegramId }, "⚠️ Welcome message not delivered (user may not have started the bot)");
             return false;
         }
     }

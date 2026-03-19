@@ -16,7 +16,7 @@ export class WorkShiftRepository {
             where: {
                 date: { gte: start, lt: end }
             },
-            include: { staff: true, location: true }
+            include: { staff: { include: { user: true } }, location: true }
         });
     }
 
