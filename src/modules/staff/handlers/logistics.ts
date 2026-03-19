@@ -39,13 +39,24 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
         }
     });
 
-    // Ask for phone confirmation
-    const phoneToUse = user.staffProfile.npPhone || user.staffProfile.phone || '';
-    const kb = new InlineKeyboard()
-        .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`)
-        .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+    // Ask for phone confirmation and format to 12 digits minimum (e.g. 380...)
+    let phoneToUse = (user.staffProfile.npPhone || user.staffProfile.phone || '').replace(/\D/g, '');
+    if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) {
+        phoneToUse = '38' + phoneToUse;
+    }
+    const isValid = phoneToUse.length === 12 && phoneToUse.startsWith('380');
 
-    await ctx.editMessageText(LOGISTICS_TEXTS_STAFF.ask_phone(phoneToUse), {
+    const kb = new InlineKeyboard();
+    if (isValid) {
+        kb.text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row();
+    }
+    kb.text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+
+    const askText = isValid 
+        ? LOGISTICS_TEXTS_STAFF.ask_phone(`+${phoneToUse}`)
+        : `⚠️ <b>Номер телефону відсутній або некоректний.</b>\nДля створення повноцінного доручення Нової Пошти потрібен правильний номер (380...).\n\nБудь ласка, оберіть «Змінити номер» і введіть його.`;
+
+    await ctx.editMessageText(askText, {
         parse_mode: 'HTML',
         reply_markup: kb
     });
@@ -80,9 +91,26 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
 // 3. Confirm Phone
 staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const user = await prisma.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        include: { staffProfile: true }
+    });
+
+    let phoneToUse = (user?.staffProfile?.npPhone || user?.staffProfile?.phone || '').replace(/\D/g, '');
+    if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) phoneToUse = '38' + phoneToUse;
+
+    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+    if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
+        const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
+        await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
+    }
+
     const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
     
-    await ctx.editMessageText("Чудово! Доручення оформлено. Натисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨", {
+    await ctx.editMessageText("Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨", {
         parse_mode: 'HTML',
         reply_markup: kb
     });
@@ -111,8 +139,14 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
 
     if (step.startsWith('awaiting_np_phone_')) {
         const parcelId = step.replace('awaiting_np_phone_', '');
-        const phone = ctx.message?.text?.trim();
-        if (phone && phone.match(/^\d{10,12}$/)) {
+        const rawText = ctx.message?.text?.trim() || '';
+        let phone = rawText.replace(/\D/g, ''); // Extract only digits
+
+        if (phone.length === 10 && phone.startsWith('0')) {
+            phone = '38' + phone;
+        }
+
+        if (phone.length === 12 && phone.startsWith('380')) {
             const telegramId = ctx.from.id;
             const user = await prisma.user.findUnique({
                 where: { telegramId: BigInt(telegramId) },
@@ -126,9 +160,20 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             }
             ctx.session.step = 'idle';
             const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
-            await ctx.reply("Номер збережено! Натисни кнопку нижче, як забереш посилку.", { reply_markup: kb });
+            
+            // Auto-trigger the API request if we just saved the phone. 
+            // The logic normally triggers on "Confirm", but here they just entered it correctly.
+            // But wait, the previous logic just showed "Number saved! Press the button below when you pick it up".
+            // So we need to trigger createTrustee right here!
+            const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+            if (parcel) {
+                const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
+                await novaPoshtaService.createTrustee(parcel.ttn, phone);
+            }
+
+            await ctx.reply("Номер збережено і API-запит відправлено! Натисни кнопку нижче, як забереш посилку та зробиш фото. ✨", { reply_markup: kb });
         } else {
-            await ctx.reply("Будь ласка, введи коректний номер (наприклад, 380991234567).");
+            await ctx.reply("⚠️ Некоректний формат.\nБудь ласка, введіть номер телефону в форматі 380... (наприклад: 380991234567).");
         }
         return;
     }
