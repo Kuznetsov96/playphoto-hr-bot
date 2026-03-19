@@ -61,8 +61,10 @@ export const hrFinalStepSetupMenu = new Menu<MyContext>("hr-final-step-setup");
 menuRegistry.register(hrFinalStepSetupMenu);
 export const hrFinalStepActiveMenu = new Menu<MyContext>("hr-final-step-active");
 menuRegistry.register(hrFinalStepActiveMenu);
-export const hrFinalStepReadyMenu = new Menu<MyContext>("hr-final-step-ready");
-menuRegistry.register(hrFinalStepReadyMenu);
+export const hrFinalStepFillingMenu = new Menu<MyContext>("hr-final-step-filling");
+menuRegistry.register(hrFinalStepFillingMenu);
+export const hrFinalStepScheduleMenu = new Menu<MyContext>("hr-final-step-schedule");
+menuRegistry.register(hrFinalStepScheduleMenu);
 
 // --- DASHBOARD MENUS ---
 export const hrDashboardDatesMenu = new Menu<MyContext>("hr-dashboard-dates");
@@ -182,9 +184,14 @@ hrFinalStepMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, "⌛ <b>Active Staging</b>", "hr-final-step-active", { pushToStack: true });
     }).row();
 
-    range.text(`✅ Reply to Hire (${stats.readyForHire})`, async (ctx) => {
+    range.text(`📝 Filling Data (${stats.fillingData})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "✅ <b>Ready for Hire</b>", "hr-final-step-ready", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "📝 <b>Filling Documents</b>\nWaiting for candidates to submit their data.", "hr-final-step-filling", { pushToStack: true });
+    }).row();
+
+    range.text(`⏳ Ready for Schedule (${stats.readyForSchedule})`, async (ctx) => {
+        ctx.session.candidatePage = 1;
+        await ScreenManager.renderScreen(ctx, "⏳ <b>Ready for Schedule</b>\nAdd to Google Sheets → Full Sync.", "hr-final-step-schedule", { pushToStack: true });
     }).row();
 
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
@@ -256,15 +263,39 @@ hrFinalStepActiveMenu.dynamic(async (ctx, range) => {
     });
 });
 
-// Ready for Hire List
-hrFinalStepReadyMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getReadyForHireCandidates();
+// Filling Data List (READY_FOR_HIRE — waiting for candidate to submit documents)
+hrFinalStepFillingMenu.dynamic(async (ctx, range) => {
+    const candidates = await hrService.getFillingDataCandidates();
     for (const cand of candidates) {
-        range.text(`✅ ${formatCompactName(cand.fullName)}`, async (ctx) => {
+        const waiting = getTimeWaiting(cand.user.updatedAt);
+        range.text(`📝 ${formatCompactName(cand.fullName)}${waiting}`, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;
             const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
             await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
         }).row();
+    }
+    if (candidates.length === 0) {
+        range.text("All candidates submitted! ✨", (ctx) => ctx.answerCallbackQuery()).row();
+    }
+    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
+        await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
+    });
+});
+
+// Ready for Schedule List (AWAITING_FIRST_SHIFT — completed docs, need schedule + sync)
+hrFinalStepScheduleMenu.dynamic(async (ctx, range) => {
+    const candidates = await hrService.getReadyForScheduleCandidates();
+    for (const cand of candidates) {
+        const waiting = getTimeWaiting(cand.user.updatedAt);
+        const locName = cand.location?.name ? ` • ${cand.location.name}` : '';
+        range.text(`⏳ ${formatCompactName(cand.fullName)}${locName}${waiting}`, async (ctx) => {
+            ctx.session.candidateData = { id: cand.id } as any;
+            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
+            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
+        }).row();
+    }
+    if (candidates.length === 0) {
+        range.text("No one waiting! 🎉", (ctx) => ctx.answerCallbackQuery()).row();
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
@@ -561,20 +592,6 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             }).row();
         }
 
-        if (cStatus === "READY_FOR_HIRE" || cStatus === "AWAITING_FIRST_SHIFT") {
-            range.text("🚀 Finalize Hiring", async (ctx) => {
-                const res = await hrService.confirmFinalSchedule(cand.id);
-                if (res) {
-                    const { MENTOR_IDS } = await import("../config.js");
-                    const mentorMsg = `🚀 <b>New photographer hired!</b>\n👤 Name: <b>${res.candidate.fullName}</b>`;
-                    for (const mId of MENTOR_IDS) {
-                        await ctx.api.sendMessage(mId, mentorMsg, { parse_mode: "HTML" }).catch(() => { });
-                    }
-                    await ctx.answerCallbackQuery("Hired! 🚀");
-                    await ctx.menu.update();
-                }
-            }).row();
-        }
     }
 
     // 3. CORE ACTIONS
@@ -955,4 +972,5 @@ hrFinalStepMenu.register(hrFinalStepNDAMenu);
 hrFinalStepMenu.register(hrFinalStepTestMenu);
 hrFinalStepMenu.register(hrFinalStepSetupMenu);
 hrFinalStepMenu.register(hrFinalStepActiveMenu);
-hrFinalStepMenu.register(hrFinalStepReadyMenu);
+hrFinalStepMenu.register(hrFinalStepFillingMenu);
+hrFinalStepMenu.register(hrFinalStepScheduleMenu);
