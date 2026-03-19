@@ -123,7 +123,8 @@ testingHandlers.callbackQuery(/^confirm_nda_(.+)$/, async (ctx: MyContext) => {
     if (!cand) return ctx.answerCallbackQuery("Кандидат не знайдений. ❌");
 
     await candidateRepository.update(candId, {
-        ndaConfirmedAt: new Date()
+        ndaConfirmedAt: new Date(),
+        status: "KNOWLEDGE_TEST" as any
     } as any);
 
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
