@@ -85,7 +85,10 @@ export async function buildTicketCard(
             } | null;
         } | null;
     },
-    isClarification: boolean = false
+    isClarification: boolean = false,
+    locationNameOverride: string | null = null,
+    locationCityOverride: string | null = null,
+    isOnboarding: boolean = false
 ): Promise<string> {
     const statusIcons = {
         OPEN: "⚠️ <b>OPEN</b>",
@@ -100,13 +103,16 @@ export async function buildTicketCard(
 
     // Location with city
     let locationText = "Unknown";
-    const loc = user.staffProfile?.location || user.candidate?.location;
-
-    if (loc) {
-        locationText = loc.city ? `${loc.name} (${loc.city})` : loc.name;
-    } else if (fullName.includes("FK")) {
-        // Last resort: check if name contains location code like "FK 1"
-        locationText = fullName.split(' ').pop() || "Unknown";
+    
+    if (locationNameOverride) {
+        locationText = locationCityOverride ? `${locationNameOverride} (${locationCityOverride})` : locationNameOverride;
+    } else {
+        const loc = user.staffProfile?.location || user.candidate?.location;
+        if (loc) {
+            locationText = loc.city ? `${loc.name} (${loc.city})` : loc.name;
+        } else if (fullName.includes("FK")) {
+            locationText = fullName.split(' ').pop() || "Unknown";
+        }
     }
     locationText = escapeHtml(locationText);
 
@@ -122,7 +128,8 @@ export async function buildTicketCard(
 
     // Build compact card
     const clarHeader = isClarification ? "❓ <b>TASK CLARIFICATION</b>\n" : "";
-    let card = `${clarHeader}${urgentPrefix}🎫 <b>Ticket #${ticket.id}</b> | ${statusText}\n\n`;
+    const onboardHeader = isOnboarding ? "🎓 <b>ОНБОРДИНГ (ПЕРША ЗМІНА)</b>\n" : "";
+    let card = `${onboardHeader}${clarHeader}${urgentPrefix}🎫 <b>Ticket #${ticket.id}</b> | ${statusText}\n\n`;
     card += `👤 ${shortenName(fullName)}`;
     if (username) card += ` (${username})`;
     card += `\n`;
@@ -183,7 +190,13 @@ export function buildTopicTitle(
 /**
  * Gets inline keyboard buttons based on ticket status
  */
-export function getTicketButtons(ticketId: number, status: TicketStatus, isSimplified: boolean = false): InlineKeyboard {
+export function getTicketButtons(
+    ticketId: number, 
+    status: TicketStatus, 
+    isSimplified: boolean = false,
+    isOnboarding: boolean = false,
+    candidateId: string | null = null
+): InlineKeyboard {
     const keyboard = new InlineKeyboard();
 
     // Get admin IDs for transfer buttons
@@ -208,6 +221,12 @@ export function getTicketButtons(ticketId: number, status: TicketStatus, isSimpl
     } else {
         // CLOSED - no buttons
         return keyboard;
+    }
+
+    if (isOnboarding && candidateId) {
+        keyboard.row();
+        keyboard.text("✅ Pass Staging", `onboard_pass_${candidateId}_${ticketId}`);
+        keyboard.text("❌ Fail", `onboard_fail_${candidateId}_${ticketId}`);
     }
 
     return keyboard;

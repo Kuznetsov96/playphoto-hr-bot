@@ -37,10 +37,6 @@ supportHandlers.callbackQuery("end_support_chat", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-/**
- * Handles incoming messages related to support/messaging from CANDIDATES.
- * Direct person-to-person routing via Bot.
- */
 export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>): Promise<boolean> {
     const telegramId = ctx.from?.id;
     if (!telegramId) return false;
@@ -48,34 +44,106 @@ export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>):
     const step = ctx.session.step || "idle";
     if (step !== "support_chat") return false;
 
-    // Ignore commands or empty media
     if (!ctx.message?.text && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.video) return false;
 
     try {
         const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
         if (!candidate || !candidate.user) return false;
 
-        const { MENTOR_IDS, HR_IDS, ADMIN_IDS } = await import("../config.js");
+        const { MENTOR_IDS, HR_IDS, ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
+        const { supportService } = await import("../services/support-service.js");
+        const { supportRepository } = await import("../repositories/support-repository.js");
         
-        // Contextual Routing Logic (Apple Style: Precise Role Responsibility)
+        const isMentorStage = [
+            'ACCEPTED', 'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
+            'TRAINING_SCHEDULED', 'TRAINING_COMPLETED', 'NDA', 'KNOWLEDGE_TEST',
+            'AWAITING_FIRST_SHIFT', 'READY_FOR_HIRE'
+        ].includes(candidate.status) || candidate.hrDecision === 'ACCEPTED' || candidate.materialsSent;
+
+        const isStagingStage = ['STAGING_SETUP', 'STAGING_ACTIVE', 'OFFLINE_STAGING'].includes(candidate.status);
+        const isOnboarding = isStagingStage || isMentorStage;
+
+        // Check if there's an active ticket or outgoing topic for the candidate
+        const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
+        const activeOutgoingTopic = !activeTicket ? await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id) : null;
+
+        // If they already have an active TOPIC in Support group, just forward there
+        if ((activeTicket && activeTicket.topicId) || activeOutgoingTopic) {
+            const topicId = activeTicket?.topicId || activeOutgoingTopic?.topicId;
+            try {
+                if (ctx.message && topicId) {
+                    await ctx.api.copyMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id, {
+                        message_thread_id: topicId
+                    });
+                     // Touch updatedAt
+                    if (activeTicket) await supportRepository.touchTicket(activeTicket.id).catch(() => {});
+                    // Log to Timeline
+                    const { timelineRepository } = await import("../repositories/timeline-repository.js");
+                    await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', ctx.message?.text || ctx.message?.caption || "[Media]", {
+                        ticketId: activeTicket?.id,
+                        outgoingTopicId: activeOutgoingTopic?.id
+                    });
+                }
+            } catch (e) {
+                logger.error({ err: e }, "Failed to forward candidate message to topic");
+                await ctx.reply("Сталася помилка при відправці повідомлення. Спробуйте пізніше.");
+            }
+            ctx.session.step = "idle";
+            await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
+            return true;
+        }
+
+        const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+
+        // If NO active topic, BUT they are in Onboarding stage, CREATE a SupportTicket and Topic!
+        if (isOnboarding) {
+            try {
+                const ticket = await supportService.createTicket(candidate.user.id, msgText);
+                
+                // Create topic in Support chat
+                const { buildTopicTitle, buildTicketCard, getTicketButtons } = await import("../utils/ticket-card.js");
+                const locationCity = candidate.city || null;
+                const locationName = candidate.location?.name || null;
+                
+                const topicTitle = buildTopicTitle(ticket.id, candidate.fullName || "Кандидат", locationName, "OPEN", false, false, locationCity);
+                const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
+                await supportRepository.updateTicket(ticket.id, { topicId: topic.message_thread_id });
+
+                const cardText = await buildTicketCard(
+                    ticket, 
+                    { telegramId: BigInt(telegramId), username: ctx.from?.username || null, staffProfile: null, candidate: candidate as any },
+                    false, locationName, locationCity, true
+                );
+                
+                // Only show Pass/Fail if they are strictly in Staging or Awaiting First Shift
+                const isEvaluating = ['STAGING_ACTIVE', 'OFFLINE_STAGING', 'AWAITING_FIRST_SHIFT'].includes(candidate.status);
+                const buttons = getTicketButtons(ticket.id, "OPEN", false, isEvaluating, candidate.id);
+
+                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, cardText, {
+                    message_thread_id: topic.message_thread_id,
+                    parse_mode: "HTML",
+                    reply_markup: buttons
+                });
+
+                if (ctx.message) {
+                    await ctx.api.copyMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id, {
+                        message_thread_id: topic.message_thread_id
+                    });
+                }
+
+                ctx.session.step = "idle";
+                await ctx.reply("✅ Чат з ментором створено! Відповіді прийдуть прямо сюди. ✨");
+                return true;
+                
+            } catch (e) {
+                logger.error({ err: e }, "Failed to create onboarding topic for candidate");
+                // IF it fails, fallback to standard DM forwarding below
+            }
+        }
+
+        // --- FALLBACK / HR STAGE: Send DMs to responsible admins ---
         let categoryLabel = "HR";
         let targetAdminIds = HR_IDS;
-
-        const isMentorStage = [
-            'ACCEPTED', 
-            'DISCOVERY_SCHEDULED',
-            'DISCOVERY_COMPLETED',
-            'TRAINING_SCHEDULED', 
-            'TRAINING_COMPLETED',
-            'NDA',
-            'KNOWLEDGE_TEST',
-            'AWAITING_FIRST_SHIFT',
-            'READY_FOR_HIRE'
-        ].includes(candidate.status) || 
-        candidate.hrDecision === 'ACCEPTED' || // Immediate transition after HR decision
-        candidate.materialsSent;
-
-        const isStagingStage = candidate.status === 'STAGING_SETUP' || candidate.status === 'STAGING_ACTIVE' || candidate.status === 'OFFLINE_STAGING';
 
         if (isStagingStage) {
             categoryLabel = "Admin (Staging)";
@@ -85,7 +153,6 @@ export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>):
             targetAdminIds = MENTOR_IDS;
         }
 
-        // Fallback to Admin if no IDs configured
         if (targetAdminIds.length === 0) targetAdminIds = ADMIN_IDS;
 
         if (targetAdminIds.length === 0) {
@@ -93,34 +160,29 @@ export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>):
             return true;
         }
 
-        // Forward Message to all responsible Admins
         const adminMsgText = 
             `💬 <b>Message from Candidate (${categoryLabel})</b>\n` +
             `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
             `📍 City: ${candidate.city || "—"}\n\n` +
-            `<b>Text:</b> ${ctx.message?.text || ctx.message?.caption || "[Media]"}`;
+            `<b>Text:</b> ${msgText}`;
 
         const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
 
         let delivered = false;
         for (const adminId of targetAdminIds) {
             try {
-                await bot.api.sendMessage(adminId, adminMsgText, {
+                await bot.api.sendMessage(Number(adminId), adminMsgText, {
                     parse_mode: "HTML",
                     reply_markup: adminKb
                 });
                 delivered = true;
-            } catch (e) {
-                logger.error({ err: e, adminId }, "Failed to deliver message to specific admin");
-            }
+            } catch (e) {}
         }
 
         if (!delivered && ADMIN_IDS.length > 0) {
-            // Last resort: send to the very first admin in config
-            await bot.api.sendMessage(ADMIN_IDS[0]!, adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => {});
+            await bot.api.sendMessage(Number(ADMIN_IDS[0]!), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => {});
         }
 
-        // Log to History & Timeline
         try {
             const { messageRepository } = await import("../repositories/message-repository.js");
             const { timelineRepository } = await import("../repositories/timeline-repository.js");
@@ -129,19 +191,14 @@ export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>):
                 candidate: { connect: { id: candidate.id } },
                 sender: "USER",
                 scope: isMentorStage ? "MENTOR" : "HR",
-                content: ctx.message?.text || ctx.message?.caption || "[Media Message]"
+                content: msgText
             });
 
-            await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', ctx.message?.text || ctx.message?.caption || "[Media Message]", {
-                category: categoryLabel
-            });
-            
+            await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, { category: categoryLabel });
             await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
-        } catch (e) {
-            logger.error({ err: e }, "Failed to log support message to DB");
-        }
+        } catch (e) { }
 
-        ctx.session.step = "idle"; // Reset to idle after sending one message
+        ctx.session.step = "idle";
         await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
 
         return true;
