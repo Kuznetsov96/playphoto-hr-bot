@@ -100,6 +100,12 @@ export async function startWorker(bot: Bot<MyContext>) {
             for (const slot of slots6h) {
                 if (!slot.candidate) continue;
                 try {
+                    logger.info({
+                        candidateId: slot.candidate.id,
+                        slotId: slot.id,
+                        telegramId: slot.candidate.user.telegramId
+                    }, "Sending 6h interview reminder");
+
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                     const firstName = extractFirstName(slot.candidate.fullName || "Кандидатко");
                     const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `наша HR ${HR_NAME}`;
@@ -110,7 +116,9 @@ export async function startWorker(bot: Bot<MyContext>) {
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
-                } catch (e) { }
+                } catch (e) {
+                    logger.error({ err: e, candidateId: slot.candidate?.id, slotId: slot.id }, "Failed to send 6h interview reminder");
+                }
             }
 
             // 3. Нагадування Кандидату про Співбесіду (10 хвилин)
@@ -120,6 +128,12 @@ export async function startWorker(bot: Bot<MyContext>) {
             for (const slot of slots10m) {
                 if (!slot.candidate) continue;
                 try {
+                    logger.info({
+                        candidateId: slot.candidate.id,
+                        slotId: slot.id,
+                        telegramId: slot.candidate.user.telegramId
+                    }, "Sending 10m interview reminder");
+
                     const meetLink = slot.candidate.googleMeetLink;
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                     const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `наша HR ${HR_NAME}`;
