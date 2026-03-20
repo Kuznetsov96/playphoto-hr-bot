@@ -78,10 +78,13 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const isMentorStage = [
             'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
             'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
-            'STAGING_ACTIVE', 'AWAITING_FIRST_SHIFT', 'READY_FOR_HIRE'
+            'AWAITING_FIRST_SHIFT', 'HIRED'
         ].includes(candidate.status);
 
-        const isSetupStage = ['NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING'].includes(candidate.status);
+        const isSetupStage = [
+            'NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING',
+            'STAGING_ACTIVE', 'READY_FOR_HIRE'
+        ].includes(candidate.status);
         // Note: Automatic forum topic creation by candidates is disabled. 
         // Topics are created only when a Mentor/Admin initiates contact via Search -> Message.
 
