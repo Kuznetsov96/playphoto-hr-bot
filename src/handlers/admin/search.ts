@@ -202,7 +202,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
                 if (location) locationPart = ` | ${location.name} (${location.city})`;
 
                 const isOnboarding = candidate?.status === 'STAGING_ACTIVE' || candidate?.status === 'DISCOVERY_SCHEDULED' || candidate?.status === 'TRAINING_SCHEDULED' || candidate?.status === 'TRAINING_COMPLETED';
-                const prefix = isOnboarding ? '🎓 ОНБОРДИНГ' : '📤';
+                const prefix = isOnboarding ? '🎓 ONBOARDING' : '📤';
                 const topicTitle = `${prefix} | ${surname}${locationPart}`;
                 const topic = await ctx.api.createForumTopic(SUPPORT_CHAT_ID, topicTitle);
                 createdTopicId = topic.message_thread_id;
