@@ -24,7 +24,8 @@ quizHandlers.callbackQuery("start_staging_selection", async (ctx) => {
     if (!candidate) return;
 
     // Guard: only allow date selection for candidates still in setup phase
-    if (candidate.status !== CandidateStatus.STAGING_SETUP && candidate.status !== CandidateStatus.KNOWLEDGE_TEST) {
+    const allowedStatuses: CandidateStatus[] = [CandidateStatus.STAGING_SETUP, CandidateStatus.KNOWLEDGE_TEST, CandidateStatus.OFFLINE_STAGING];
+    if (!allowedStatuses.includes(candidate.status)) {
         return ctx.answerCallbackQuery("Цей крок вже пройдено ✨");
     }
 
@@ -255,8 +256,9 @@ quizHandlers.callbackQuery(/^staging_date_(.+)$/, async (ctx) => {
         const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
         if (candidate) {
             // Guard: only allow date change for candidates in setup phase
-            if (candidate.status !== CandidateStatus.STAGING_SETUP && candidate.status !== CandidateStatus.KNOWLEDGE_TEST) {
-                return;
+            const allowedStatuses: CandidateStatus[] = [CandidateStatus.STAGING_SETUP, CandidateStatus.KNOWLEDGE_TEST, CandidateStatus.OFFLINE_STAGING];
+            if (!allowedStatuses.includes(candidate.status)) {
+                return ctx.answerCallbackQuery("Ви вже пройшли цей етап ✨");
             }
 
             const [d, m] = date.split('.').map(Number);
