@@ -100,7 +100,13 @@ adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx,
         await ctx.deleteMessage().catch(() => {});
 
         try {
-            await ctx.api.sendMessage(targetId, `💬 <b>Message from PlayPhoto:</b>\n\n${replyText}`, { parse_mode: "HTML" });
+            const { InlineKeyboard } = await import("grammy");
+            const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+
+            await ctx.api.sendMessage(targetId, `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${replyText}`, { 
+                parse_mode: "HTML",
+                reply_markup: replyKb
+            });
             await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent to the candidate.", "admin-main");
             
             const { userRepository } = await import("../../repositories/user-repository.js");
