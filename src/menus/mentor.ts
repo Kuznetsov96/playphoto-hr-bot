@@ -554,6 +554,9 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
         }
         range.text("✍️ Message (Forum)", async (ctx) => {
             const { startAdminMessageFlow } = await import("../handlers/admin/search.js");
+            if (!cand.userId) {
+                return ctx.answerCallbackQuery("⚠️ User ID відсутній у базі даних").catch(() => {});
+            }
             await startAdminMessageFlow(ctx, cand.userId);
         }).row();
     }
