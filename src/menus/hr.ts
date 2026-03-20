@@ -480,6 +480,12 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             await ctx.answerCallbackQuery("Rejected ❌");
             await ctx.menu.update();
         }).row();
+
+        range.text(STAFF_TEXTS["hr-btn-change-location"], async (ctx) => {
+            ctx.session.selectedCandidateId = cand.id;
+            await ScreenManager.renderScreen(ctx, "📍 <b>Select new location:</b>", "hr-change-location-unified", { pushToStack: true });
+        }).row();
+
         range.text(STAFF_TEXTS["hr-btn-reschedule"], async (ctx) => {
             await hrService.rescheduleCandidate(cand.id);
             const tid = Number(cand.user.telegramId);
