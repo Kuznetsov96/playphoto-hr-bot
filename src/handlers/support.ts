@@ -85,8 +85,13 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             'NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING',
             'STAGING_ACTIVE', 'READY_FOR_HIRE'
         ].includes(candidate.status);
-        // Note: Automatic forum topic creation by candidates is disabled. 
-        // Topics are created only when a Mentor/Admin initiates contact via Search -> Message.
+
+        // All early-funnel statuses → HR DMs
+        const isHRStage = [
+            'SCREENING', 'WAITLIST', 'MANUAL_REVIEW',
+            'INTERVIEW_SCHEDULED', 'INTERVIEW_COMPLETED',
+            'DECISION_PENDING', 'ACCEPTED', 'REJECTED', 'BLOCKER'
+        ].includes(candidate.status);
 
         // Check if there's an active ticket or outgoing topic for the candidate
         const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
@@ -120,7 +125,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
         const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
 
-        // --- FALLBACK / HR STAGE: Send DMs to responsible admins ---
+        // --- Route by stage to responsible person ---
         let categoryLabel = "HR";
         let targetAdminIds = HR_IDS;
 
@@ -130,7 +135,11 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         } else if (isMentorStage) {
             categoryLabel = "Mentor";
             targetAdminIds = MENTOR_IDS;
+        } else if (isHRStage) {
+            categoryLabel = "HR";
+            targetAdminIds = HR_IDS;
         }
+        // Unknown/future status → also defaults to HR_IDS
 
         if (targetAdminIds.length === 0) targetAdminIds = ADMIN_IDS;
 
