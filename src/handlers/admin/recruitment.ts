@@ -108,10 +108,48 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
 
     const userRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
     const isHr = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER' || userRole === 'HR_LEAD';
-    const isMentor = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER' || userRole === 'MENTOR_LEAD';
+    const isMentor = userRole === 'SUPER_ADMIN' || userRole === 'MENTOR_LEAD';
     const isSuper = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER';
 
     // 1. PRIMARY ACTION
+    if (isMentor && cand.status === "DISCOVERY_SCHEDULED") {
+        range.text("✅ Discovery Passed", async (ctx) => {
+            delete ctx.session.adminFlow;
+            await ctx.answerCallbackQuery();
+            const { mentorService } = await import("../../services/mentor-service.js");
+            const res = await mentorService.completeDiscovery(ctx.api, cand.id, 'passed');
+            if (res) {
+                await ScreenManager.renderScreen(ctx, `✨ <b>Discovery Passed!</b>\n\nNow please select the <b>Online Internship Date</b> for ${res.candidate.fullName}:`, "mentor-manual-date", { pushToStack: true });
+            }
+        }).text(ADMIN_TEXTS["admin-btn-fail"], async (ctx) => {
+            await ctx.answerCallbackQuery();
+            const { mentorService } = await import("../../services/mentor-service.js");
+            await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
+            await ctx.menu.update();
+        }).row();
+    }
+
+    if (isMentor && cand.status === "DISCOVERY_COMPLETED") {
+        range.text("🗓 Assign Online Internship", async (ctx) => {
+            delete ctx.session.adminFlow;
+            await ScreenManager.renderScreen(ctx, `🗓 <b>Assign Online Internship</b>\n\nPlease select the date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
+        }).row();
+    }
+
+    if (isMentor && cand.status === "TRAINING_SCHEDULED") {
+        range.text("✅ Training Completed", async (ctx) => {
+            await ctx.answerCallbackQuery();
+            const { mentorService } = await import("../../services/mentor-service.js");
+            await mentorService.completeTraining(ctx.api, cand.id, 'passed');
+            await ctx.menu.update();
+        }).text(ADMIN_TEXTS["admin-btn-fail"], async (ctx) => {
+            await ctx.answerCallbackQuery();
+            const { mentorService } = await import("../../services/mentor-service.js");
+            await mentorService.completeTraining(ctx.api, cand.id, 'failed');
+            await ctx.menu.update();
+        }).row();
+    }
+
     if (isHr && ["SCREENING", "WAITLIST"].includes(cand.status)) {
         range.text("🗓️ Re-invite to Interview", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
