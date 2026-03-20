@@ -11,7 +11,7 @@ import { candidateModule } from "../modules/candidate/index.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { staffSupportHandlers, handleSupportGroupMessage } from "../modules/staff/handlers/support.js";
-import { supportHandlers } from "./support.js";
+import { supportHandlers, handleSupportMessage } from "./support.js";
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
@@ -102,7 +102,7 @@ handlers.use(leadsHandlers);
 // 1. Core System Handlers (High Priority: Support, HR, Admin, Mentor, Commands)
 handlers.use(commandHandlers);
 handlers.use(quizHandlers);
-handlers.use(onboardingHandlers);
+// onboardingHandlers moved to guest context for better support routing priority
 handlers.use(accessHandlers); // ✅ NEW: Handle join requests & membership sync
 
 // Handle NDA resend from Status Card
@@ -244,8 +244,21 @@ handlers.use(async (ctx, next) => {
     } else {
         // --- CANDIDATE / GUEST CONTEXT ---
         const guestApp = new Composer<MyContext>();
+
+        // 1. Support & Communication Priority
+        guestApp.on("message", async (ctx, next) => {
+            const handled = await handleSupportMessage(ctx);
+            if (handled) return;
+            await next();
+        });
+
+        // 2. Automated Funnels
+        guestApp.use(onboardingHandlers);
         guestApp.use(bookingHandlers);
+
+        // 3. Module Logic & Catch-all
         guestApp.use(candidateModule);
+        
         await guestApp.middleware()(ctx, next);
     }
 });
