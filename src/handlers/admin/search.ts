@@ -93,8 +93,9 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
             if (!user) throw new Error("User not found in DB");
 
             // 1. Deliver to User — include a reply button so candidate can respond without funnel interception
+            const senderName = ctx.from?.first_name || 'PlayPhoto';
             const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-            await ctx.api.sendMessage(Number(targetTgId), `💌 <b>Повідомлення від адміна:</b>\n\n${messageText}`, {
+            await ctx.api.sendMessage(Number(targetTgId), `📩 <b>Від ${senderName}:</b>\n\n${messageText}`, {
                 parse_mode: "HTML",
                 reply_markup: replyKb
             });
@@ -255,8 +256,9 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
     }
 
     try {
+        const senderName = ctx.from?.first_name || 'PlayPhoto';
         const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-        await ctx.api.sendMessage(Number(user.telegramId), escapeHtml(messageTextStr), {
+        await ctx.api.sendMessage(Number(user.telegramId), `📩 <b>Від ${senderName}:</b>\n\n${escapeHtml(messageTextStr)}`, {
             parse_mode: "HTML",
             reply_markup: replyKb
         });
