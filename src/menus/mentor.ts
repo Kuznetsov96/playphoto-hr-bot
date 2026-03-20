@@ -544,15 +544,18 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
 
     const details = await mentorService.getCandidateDetails(candId);
     const cand = details?.cand;
-
     if (cand) {
         const username = cand.user?.username;
         const tid = Number(cand.user?.telegramId);
         if (username) {
-            range.url("💬 Contact Candidate", `https://t.me/${username}`).row();
+            range.url("💬 Contact Candidate", `https://t.me/${username}`);
         } else if (tid) {
-            range.url("💬 Contact Candidate", `tg://user?id=${tid}`).row();
+            range.url("💬 Contact Candidate", `tg://user?id=${tid}`);
         }
+        range.text("✍️ Message (Forum)", async (ctx) => {
+            const { startAdminMessageFlow } = await import("../handlers/admin/search.js");
+            await startAdminMessageFlow(ctx, cand.userId);
+        }).row();
     }
 
     range.text("🗓 Edit Date", async (ctx) => {
