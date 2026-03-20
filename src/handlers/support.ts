@@ -79,10 +79,11 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
             'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
             'STAGING_ACTIVE', 'AWAITING_FIRST_SHIFT', 'READY_FOR_HIRE'
-        ].includes(candidate.status) || (candidate.hrDecision === 'ACCEPTED' && candidate.materialsSent);
+        ].includes(candidate.status);
 
         const isSetupStage = ['NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING'].includes(candidate.status);
-        const isOnboarding = isMentorStage; // Create Forum topics ONLY for active Mentor-led stages
+        // Note: Automatic forum topic creation by candidates is disabled. 
+        // Topics are created only when a Mentor/Admin initiates contact via Search -> Message.
 
         // Check if there's an active ticket or outgoing topic for the candidate
         const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
@@ -115,52 +116,6 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         }
 
         const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
-
-        // If NO active topic, BUT they are in Onboarding stage, CREATE a SupportTicket and Topic!
-        if (isOnboarding) {
-            try {
-                const ticket = await supportService.createTicket(candidate.user.id, msgText);
-                
-                // Create topic in Support chat
-                const { buildTopicTitle, buildTicketCard, getTicketButtons } = await import("../utils/ticket-card.js");
-                const locationCity = candidate.city || null;
-                const locationName = candidate.location?.name || null;
-                
-                const topicTitle = buildTopicTitle(ticket.id, candidate.fullName || "Кандидат", locationName, "OPEN", false, false, locationCity);
-                const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
-                await supportRepository.updateTicket(ticket.id, { topicId: topic.message_thread_id });
-
-                const cardText = await buildTicketCard(
-                    ticket, 
-                    { telegramId: BigInt(telegramId), username: ctx.from?.username || null, staffProfile: null, candidate: candidate as any },
-                    false, locationName, locationCity, true
-                );
-                
-                // Only show Pass/Fail if they are strictly in Staging or Awaiting First Shift
-                const isEvaluating = ['STAGING_ACTIVE', 'OFFLINE_STAGING', 'AWAITING_FIRST_SHIFT'].includes(candidate.status);
-                const buttons = getTicketButtons(ticket.id, "OPEN", false, isEvaluating, candidate.id);
-
-                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, cardText, {
-                    message_thread_id: topic.message_thread_id,
-                    parse_mode: "HTML",
-                    reply_markup: buttons
-                });
-
-                if (ctx.message) {
-                    await ctx.api.copyMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id, {
-                        message_thread_id: topic.message_thread_id
-                    });
-                }
-
-                ctx.session.step = "idle";
-                await ctx.reply("✅ Чат з ментором створено! Відповіді прийдуть прямо сюди. ✨");
-                return true;
-                
-            } catch (e) {
-                logger.error({ err: e }, "Failed to create onboarding topic for candidate");
-                // IF it fails, fallback to standard DM forwarding below
-            }
-        }
 
         // --- FALLBACK / HR STAGE: Send DMs to responsible admins ---
         let categoryLabel = "HR";
