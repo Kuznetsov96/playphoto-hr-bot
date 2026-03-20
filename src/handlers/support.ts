@@ -37,12 +37,33 @@ supportHandlers.callbackQuery("end_support_chat", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>): Promise<boolean> {
+export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
     const telegramId = ctx.from?.id;
     if (!telegramId) return false;
 
     const step = ctx.session.step || "idle";
-    if (step !== "support_chat") return false;
+    
+    // 1. Explicit support mode
+    if (step === "support_chat") {
+        // Continue
+    } else {
+        // 2. Implicit support mode: Check if there's an active ticket or outgoing topic
+        try {
+            const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
+            if (!candidate || !candidate.user) return false;
+
+            const { supportRepository } = await import("../repositories/support-repository.js");
+            const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
+            const activeOutgoingTopic = !activeTicket ? await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id) : null;
+
+            if (!((activeTicket && activeTicket.topicId) || activeOutgoingTopic)) {
+                return false; // No active conversation to route to
+            }
+        } catch (e) {
+            logger.error({ err: e }, "Failed to check active support session in handleSupportMessage");
+            return false;
+        }
+    }
 
     if (!ctx.message?.text && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.video) return false;
 
@@ -171,7 +192,7 @@ export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>):
         let delivered = false;
         for (const adminId of targetAdminIds) {
             try {
-                await bot.api.sendMessage(Number(adminId), adminMsgText, {
+                await ctx.api.sendMessage(Number(adminId), adminMsgText, {
                     parse_mode: "HTML",
                     reply_markup: adminKb
                 });
@@ -180,7 +201,7 @@ export async function handleSupportMessage(ctx: MyContext, bot: Bot<MyContext>):
         }
 
         if (!delivered && ADMIN_IDS.length > 0) {
-            await bot.api.sendMessage(Number(ADMIN_IDS[0]!), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => {});
+            await ctx.api.sendMessage(Number(ADMIN_IDS[0]!), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => {});
         }
 
         try {
