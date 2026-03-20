@@ -152,7 +152,9 @@ export class BookingService {
         return prisma.$transaction(async (tx) => {
             const slot = await trainingRepository.findSlotById(slotId, tx);
 
-            if (!slot || slot.isBooked) throw new Error("ALREADY_BOOKED");
+            if (!slot || slot.isBooked || slot.candidateId || slot.candidateDiscovery) {
+                throw new Error("ALREADY_BOOKED");
+            }
 
             const candidate = await candidateRepository.findByTelegramId(telegramId, tx);
 
@@ -216,7 +218,9 @@ export class BookingService {
         return prisma.$transaction(async (tx) => {
             const slot = await trainingRepository.findSlotById(slotId, tx);
 
-            if (!slot || slot.isBooked) throw new Error("ALREADY_BOOKED");
+            if (!slot || slot.isBooked || slot.candidateId || slot.candidateDiscovery) {
+                throw new Error("ALREADY_BOOKED");
+            }
 
             const candidate = await candidateRepository.findByTelegramId(telegramId, tx);
 
