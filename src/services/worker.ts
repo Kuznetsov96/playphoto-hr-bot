@@ -238,13 +238,13 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e) { }
             }
 
-            // 6.5 Mentor Reminder (2 minutes)
-            const twoMinFutureMentor = new Date(nowTime + 2 * 60 * 1000);
-            const trainingSlots2mMentor = await trainingRepository.findForReminder('reminded5mMentor', twoMinFutureMentor);
+            // 6.5 Mentor Reminder (5 minutes)
+            const fiveMinFutureMentor = new Date(nowTime + 5 * 60 * 1000);
+            const trainingSlots5mMentor = await trainingRepository.findForReminder('reminded5mMentor', fiveMinFutureMentor);
 
             const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
 
-            for (const slot of trainingSlots2mMentor) {
+            for (const slot of trainingSlots5mMentor) {
                 if (MENTORS.length === 0) break;
                 try {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
@@ -255,7 +255,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink;
                     const city = cand.city || "Not specified";
 
-                    let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in 2 minutes!</b>\n\n` +
+                    let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in 5 minutes!</b>\n\n` +
                         `👤 Candidate: <b>${name}</b>\n` +
                         `🏙️ City: <b>${city}</b>\n`;
 
@@ -264,7 +264,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     }
 
                     const kb = new InlineKeyboard().text("👤 Profile", `view_candidate_${cand.id}`);
-                    await bot.api.sendMessage(MENTORS[0]!, text, { parse_mode: "HTML", reply_markup: kb });
+                    
+                    for (const mentorId of MENTORS) {
+                        await bot.api.sendMessage(mentorId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
+                    }
+                    
                     await trainingRepository.updateSlot(slot.id, { reminded5mMentor: true });
                 } catch (e) { }
             }
