@@ -76,13 +76,13 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const { supportRepository } = await import("../repositories/support-repository.js");
         
         const isMentorStage = [
-            'ACCEPTED', 'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
-            'TRAINING_SCHEDULED', 'TRAINING_COMPLETED', 'NDA', 'KNOWLEDGE_TEST',
-            'AWAITING_FIRST_SHIFT', 'READY_FOR_HIRE'
-        ].includes(candidate.status) || candidate.hrDecision === 'ACCEPTED' || candidate.materialsSent;
+            'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
+            'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
+            'STAGING_ACTIVE', 'AWAITING_FIRST_SHIFT', 'READY_FOR_HIRE'
+        ].includes(candidate.status) || (candidate.hrDecision === 'ACCEPTED' && candidate.materialsSent);
 
-        const isStagingStage = ['STAGING_SETUP', 'STAGING_ACTIVE', 'OFFLINE_STAGING'].includes(candidate.status);
-        const isOnboarding = isStagingStage || isMentorStage;
+        const isSetupStage = ['NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING'].includes(candidate.status);
+        const isOnboarding = isMentorStage; // Create Forum topics ONLY for active Mentor-led stages
 
         // Check if there's an active ticket or outgoing topic for the candidate
         const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
@@ -166,8 +166,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         let categoryLabel = "HR";
         let targetAdminIds = HR_IDS;
 
-        if (isStagingStage) {
-            categoryLabel = "Admin (Staging)";
+        if (isSetupStage) {
+            categoryLabel = "Admin (Setup)";
             targetAdminIds = ADMIN_IDS;
         } else if (isMentorStage) {
             categoryLabel = "Mentor";
