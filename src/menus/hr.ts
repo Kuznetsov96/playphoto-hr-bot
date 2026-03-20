@@ -493,9 +493,51 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             await ctx.menu.update();
         }).row();
     }
+    const uRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
+
+    // 2.2 MENTOR ACTIONS (Discovery & Training)
+    const isMentor = uRole === 'SUPER_ADMIN' || uRole === 'MENTOR_LEAD';
+    if (isMentor) {
+        if (cStatus === "DISCOVERY_SCHEDULED") {
+            range.text("✅ Discovery Passed", async (ctx) => {
+                delete ctx.session.adminFlow;
+                await ctx.answerCallbackQuery();
+                const { mentorService } = await import("../services/mentor-service.js");
+                const res = await mentorService.completeDiscovery(ctx.api, cand.id, 'passed');
+                if (res) {
+                    await ScreenManager.renderScreen(ctx, `✨ <b>Discovery Passed!</b>\n\nNow please select the <b>Online Internship Date</b> for ${res.candidate.fullName}:`, "mentor-manual-date", { pushToStack: true });
+                }
+            }).text("❌ Failed", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                const { mentorService } = await import("../services/mentor-service.js");
+                await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
+                await ctx.menu.update();
+            }).row();
+        }
+
+        if (cStatus === "DISCOVERY_COMPLETED") {
+            range.text("🗓 Assign Online Internship", async (ctx) => {
+                delete ctx.session.adminFlow;
+                await ScreenManager.renderScreen(ctx, `🗓 <b>Assign Online Internship</b>\n\nPlease select the date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
+            }).row();
+        }
+
+        if (cStatus === "TRAINING_SCHEDULED") {
+            range.text("✅ Training Completed", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                const { mentorService } = await import("../services/mentor-service.js");
+                await mentorService.completeTraining(ctx.api, cand.id, 'passed');
+                await ctx.menu.update();
+            }).text("❌ Failed", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                const { mentorService } = await import("../services/mentor-service.js");
+                await mentorService.completeTraining(ctx.api, cand.id, 'failed');
+                await ctx.menu.update();
+            }).row();
+        }
+    }
 
     // 2.5 FINAL STEP ACTIONS (SUPER_ADMIN ONLY)
-    const uRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
     const isSuperAdmin = uRole === 'SUPER_ADMIN';
 
     if (isSuperAdmin) {
