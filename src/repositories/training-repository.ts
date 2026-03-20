@@ -61,7 +61,18 @@ export class TrainingRepository {
 
     async findFutureSlots(): Promise<any[]> {
         const slots = await prisma.trainingSlot.findMany({
-            where: { startTime: { gte: new Date() } },
+            where: {
+                OR: [
+                    { startTime: { gte: new Date() } },
+                    { 
+                        isBooked: true,
+                        OR: [
+                            { candidate: { status: CandidateStatus.TRAINING_SCHEDULED } },
+                            { candidateDiscovery: { status: "DISCOVERY_SCHEDULED" as any } }
+                        ]
+                    }
+                ]
+            },
             include: { 
                 candidate: true,
                 candidateDiscovery: true
