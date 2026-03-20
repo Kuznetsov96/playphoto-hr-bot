@@ -14,11 +14,17 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 export const adminSearchHandlers = new Composer<MyContext>();
 
 export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
+    // MUST answer the callback query first to prevent Telegram loading spinner
+    await ctx.answerCallbackQuery().catch(() => {});
+
     ctx.session.adminFlow = 'SEARCH';
     delete ctx.session.taskData;
     delete ctx.session.broadcastData;
+
     const user = await userRepository.findById(userId);
-    if (!user) return ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-history-user-not-found"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-home"], "admin_main_back"));
+    if (!user) {
+        return ScreenManager.renderScreen(ctx, "⚠️ Дані користувача відсутні в базі. Зверніться до адміна.", new InlineKeyboard().text("← Back", "admin_main_back"));
+    }
 
     const candidate = await candidateRepository.findByUserId(userId);
     const staff = await staffRepository.findByUserId(userId);
