@@ -36,17 +36,13 @@ export class TrainingRepository {
             const cand = slot.candidate;
             const discCand = slot.candidateDiscovery;
 
-            if (cand) {
-                // For training: only show if still in TRAINING_SCHEDULED
-                return cand.status === CandidateStatus.TRAINING_SCHEDULED;
-            }
+            // Non-exclusive logic: show if EITHER candidate is still in scheduled status
+            let isActiveTraining = cand && cand.status === CandidateStatus.TRAINING_SCHEDULED;
+            let isActiveDiscovery = discCand && (discCand.status as any) === "DISCOVERY_SCHEDULED";
 
-            if (discCand) {
-                // For discovery: only show if still in DISCOVERY_SCHEDULED (using string literal for any cast)
-                return (discCand.status as string) === "DISCOVERY_SCHEDULED";
-            }
+            if (isActiveTraining || isActiveDiscovery) return true;
 
-            return false; // Booked but no candidate? Should not happen.
+            return false; // Both candidates moved on or no candidate linked
         });
     }
 
@@ -81,13 +77,16 @@ export class TrainingRepository {
         });
 
         // Filter out ghost slots (booked but candidate moved on)
+        // Filter out ghost slots (booked but candidate moved on)
         return slots.filter(slot => {
             if (!slot.isBooked) return true;
             const cand = slot.candidate;
             const discCand = slot.candidateDiscovery;
-            if (cand) return cand.status === CandidateStatus.TRAINING_SCHEDULED;
-            if (discCand) return (discCand.status as any) === "DISCOVERY_SCHEDULED";
-            return false;
+            
+            let isActiveTraining = cand && cand.status === CandidateStatus.TRAINING_SCHEDULED;
+            let isActiveDiscovery = discCand && (discCand.status as any) === "DISCOVERY_SCHEDULED";
+
+            return isActiveTraining || isActiveDiscovery;
         });
     }
 
