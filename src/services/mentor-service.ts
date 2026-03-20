@@ -107,6 +107,19 @@ export class MentorService {
             "REJECTED": "❌ Rejected"
         };
 
+        if (!cand.user) {
+            logger.error({ candId }, "Candidate user record missing in database");
+            return {
+                cand,
+                text: `👤 <b>${cand.fullName}</b>\n` +
+                      `🎂 Age: ${age}\n` +
+                      `🏙️ City: ${cand.city}\n` +
+                      `📍 Location: ${locName}\n` +
+                      `⚠️ <b>User record missing in database</b>\n` +
+                      `🏷️ Status: <b>${statusMap[cand.status] || cand.status}</b>`
+            };
+        }
+
         const text = `👤 <b>${cand.fullName}</b>\n` +
             `🎂 Age: ${age}\n` +
             `🏙️ City: ${cand.city}\n` +
@@ -175,9 +188,12 @@ export class MentorService {
             isWaitlisted: false
         });
 
-        await cleanupUserSessionMessages(new Bot(process.env.BOT_TOKEN!) as any, Number(cand.user.telegramId));
+        if (cand.user) {
+            await cleanupUserSessionMessages(new Bot(process.env.BOT_TOKEN!) as any, Number(cand.user.telegramId));
+            return { telegramId: Number(cand.user.telegramId), text: msgText };
+        }
 
-        return { telegramId: Number(cand.user.telegramId), text: msgText };
+        return null;
     }
 
     async notifyWaitlist(api: any) {
@@ -190,15 +206,17 @@ export class MentorService {
                 const text = `Привіт, ${firstName}! ✨\n\nЗ'явилися нові вільні вікна для нашої зустрічі. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
                 const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
                 
-                await api.sendMessage(Number(cand.user.telegramId), text, { reply_markup: kb });
-                
-                await candidateRepository.update(cand.id, {
-                    status: "ACCEPTED",
-                    isWaitlisted: false,
-                    materialsSent: true,
-                    materialsSentAt: new Date()
-                });
-                successCount++;
+                if (cand.user) {
+                    await api.sendMessage(Number(cand.user.telegramId), text, { reply_markup: kb });
+                    
+                    await candidateRepository.update(cand.id, {
+                        status: "ACCEPTED",
+                        isWaitlisted: false,
+                        materialsSent: true,
+                        materialsSentAt: new Date()
+                    });
+                    successCount++;
+                }
             } catch (e) {
                 logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify waitlist candidate");
             }
@@ -218,7 +236,9 @@ export class MentorService {
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
             const msgKey = result === 'failed' ? "mentor-discovery-failed" : "mentor-discovery-no-show";
-            await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS[msgKey]).catch(() => {});
+            if (cand.user) {
+                await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS[msgKey]).catch(() => {});
+            }
         }
 
         return { candidate: cand, result };
@@ -245,17 +265,21 @@ export class MentorService {
                               `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
 
             const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
-            await api.sendMessage(Number(cand.user.telegramId), 
-                CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails), 
-                { parse_mode: "HTML", reply_markup: kb }
-            ).catch(() => {});
+            if (cand.user) {
+                await api.sendMessage(Number(cand.user.telegramId), 
+                    CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails), 
+                    { parse_mode: "HTML", reply_markup: kb }
+                ).catch(() => {});
+            }
 
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
             await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["mentor-training-failed"]).catch(() => {});
         }
 
-        await accessService.syncUserAccess(cand.user.telegramId, `Training result: ${result.toUpperCase()}`);
+        if (cand.user) {
+            await accessService.syncUserAccess(cand.user.telegramId, `Training result: ${result.toUpperCase()}`);
+        }
         return { candidate: cand, result };
     }
 
@@ -277,11 +301,15 @@ export class MentorService {
             if (cand.locationId) {
                 try { await locationRepository.update(cand.locationId, { neededCount: { decrement: 1 } }); } catch (e) { }
             }
-            await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: SUCCESS (HIRED)");
+            if (cand.user) {
+                await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: SUCCESS (HIRED)");
+            }
             return { candidate: cand, success: true };
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
-            await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: FAILED");
+            if (cand.user) {
+                await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: FAILED");
+            }
             return { candidate: cand, success: false };
         }
     }
