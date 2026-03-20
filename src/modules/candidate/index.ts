@@ -29,7 +29,7 @@ candidateModule.use(supportHandlers);
 // 3. Handle Messages (Support Flow for Candidates)
 candidateModule.on("message", async (ctx, next) => {
     // Attempt to handle as support message
-    const handled = await handleSupportMessage(ctx, bot);
+    const handled = await handleSupportMessage(ctx);
     if (handled) return;
 
     // --- CATCH-ALL FOR CANDIDATES ---
