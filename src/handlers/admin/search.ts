@@ -30,7 +30,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
-    const canCreateTopic = hasPermission(role, 'SUPPORT_CHAT');
+    const canCreateTopic = hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING');
 
     ctx.session.step = `admin_msg_${userId}`;
 
@@ -187,7 +187,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
-    const canCreateTopic = hasPermission(role, 'SUPPORT_CHAT');
+    const canCreateTopic = hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING');
 
     if (SUPPORT_CHAT_ID && canCreateTopic) {
         try {
@@ -201,7 +201,9 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
                 let locationPart = '';
                 if (location) locationPart = ` | ${location.name} (${location.city})`;
 
-                const topicTitle = `📤 ${surname}${locationPart}`;
+                const isOnboarding = candidate?.status === 'STAGING_ACTIVE' || candidate?.status === 'DISCOVERY_SCHEDULED' || candidate?.status === 'TRAINING_SCHEDULED' || candidate?.status === 'TRAINING_COMPLETED';
+                const prefix = isOnboarding ? '🎓 ОНБОРДИНГ' : '📤';
+                const topicTitle = `${prefix} | ${surname}${locationPart}`;
                 const topic = await ctx.api.createForumTopic(SUPPORT_CHAT_ID, topicTitle);
                 createdTopicId = topic.message_thread_id;
 
