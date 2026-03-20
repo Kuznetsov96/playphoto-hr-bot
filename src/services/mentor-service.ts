@@ -33,13 +33,28 @@ export class MentorService {
         const end = new Date(today.setHours(23, 59, 59, 999));
         
         const trainingToday = await trainingRepository.countBookedSlotsByDateRange(start, end);
-        const onboardingCount = await candidateRepository.countByStatus(CandidateStatus.HIRED, false).then(async () => {
-            return prisma.candidate.count({ where: { status: "HIRED", isMentorLocked: true } });
+
+        // Overdue meetings: booked slots in the past, still in SCHEDULED status
+        const overdue = await prisma.trainingSlot.count({
+            where: {
+                startTime: { lt: new Date() },
+                isBooked: true,
+                OR: [
+                    { candidate: { status: CandidateStatus.TRAINING_SCHEDULED } },
+                    { candidateDiscovery: { status: "DISCOVERY_SCHEDULED" as any } }
+                ]
+            }
+        });
+
+        const onboardingCount = await prisma.candidate.count({ 
+            where: { status: CandidateStatus.HIRED, isMentorLocked: true } 
         });
 
         return { 
             actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount, 
-            trainingToday, 
+            calendarCount: trainingToday + overdue,
+            trainingToday,
+            overdue,
             onboardingCount, 
             newAcceptedCount, 
             awaitingBookingCount,
@@ -53,9 +68,14 @@ export class MentorService {
         const stats = await this.getStats();
         const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
         
+        let calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday}`;
+        if (stats.overdue > 0) {
+            calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday} <a href="">(⚠️ ${stats.overdue} pending)</a>`;
+        }
+
         return `🎓 <b>Mentor Hub</b>\n\n` +
             `📥 <b>Inbox:</b> ${totalInbox}\n` +
-            `📅 <b>Calendar:</b> ${stats.trainingToday}\n` +
+            `${calendarText}\n` +
             `🚀 <b>Onboarding:</b> ${stats.onboardingCount}\n`;
     }
 
