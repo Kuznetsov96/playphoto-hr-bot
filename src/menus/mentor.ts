@@ -233,11 +233,13 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
 
     if (cand.status === "DISCOVERY_COMPLETED") {
         range.text("🗓 Assign Online Internship", async (ctx) => {
+            delete ctx.session.adminFlow;
             await ScreenManager.renderScreen(ctx, `🗓 <b>Assign Online Internship</b>\n\nPlease select the date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
         }).row();
     }
     else if (cand.status === "DISCOVERY_SCHEDULED") {
         range.text("✅ Discovery Passed", async (ctx) => {
+            delete ctx.session.adminFlow;
             await ctx.answerCallbackQuery();
             const res = await mentorService.completeDiscovery(ctx.api, cand.id, 'passed');
             if (res) {
