@@ -468,14 +468,20 @@ mentorTrainingDayViewMenu.dynamic(async (ctx, range) => {
     for (const slot of slots) {
         const time = (slot as any).startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
         if (slot.isBooked) {
-            const cand = (slot as any).candidate || (slot as any).candidateDiscovery;
-            const isDiscovery = !!(slot as any).candidateDiscovery;
-            range.text(`${isDiscovery ? '🔍' : '🎓'} ${time} - ${formatCompactName(cand?.fullName || 'Candidate')}`, async (ctx) => {
-                if (!cand) return;
-                ctx.session.selectedCandidateId = cand.id;
-                const text = await getMentorCandidateProfileText(ctx, cand.id);
-                await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
-            }).row();
+            const candidates = [];
+            if (slot.candidate) candidates.push({ cand: slot.candidate, type: '🎓' });
+            if (slot.candidateDiscovery) candidates.push({ cand: slot.candidateDiscovery, type: '🔍' });
+
+            for (const { cand, type } of candidates) {
+                const statusLabel = cand.status === "REJECTED" ? " (❌)" : 
+                                  cand.status === "HIRED" ? " (✅)" : "";
+                
+                range.text(`${type} ${time} - ${formatCompactName(cand.fullName)}${statusLabel}`, async (ctx) => {
+                    ctx.session.selectedCandidateId = cand.id;
+                    const text = await getMentorCandidateProfileText(ctx, cand.id);
+                    await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
+                }).row();
+            }
         } else {
             range.text(`🔘 ${time}`, (ctx) => ctx.answerCallbackQuery("Available")).text("🗑️", async (ctx) => {
                 const res = await mentorService.deleteTrainingSlot(slot.id);
