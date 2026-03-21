@@ -5,7 +5,7 @@ export const NP_LOCATIONS_MAP = [
     { name: 'Fly Kids Львів', city: 'Львів', npPoints: ['25'] },
     { name: 'Smile Park Lviv', city: 'Львів', npPoints: ['36716'] },
     { name: 'Smile Park Київ', city: 'Київ', npPoints: ['38007'] },
-    { name: 'Smile Park (Даринок) Київ', city: 'Київ', npPoints: ['3095', '78'] },
+    { name: 'Smile Park (Darynok)', city: 'Київ', npPoints: ['3095', '78'] },
     { name: 'Fly Kids Київ', city: 'Київ', npPoints: ['371', '39911'] },
     { name: 'Volkland 1 (Бабурка)', city: 'Запоріжжя', npPoints: ['6179', '6'] },
     { name: 'Volkland 2 (Шевчик)', city: 'Запоріжжя', npPoints: ['6177', '50236'] },
