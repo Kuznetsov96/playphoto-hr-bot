@@ -201,10 +201,10 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 .row()
                 .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`);
 
-            const text = `📸 <b>Нове фото вмісту!</b>\n\n` +
-                `<b>ТТН:</b> <code>${parcel.ttn}</code>\n` +
-                `<b>Локація:</b> ${parcel.location?.name || 'Невідомо'}\n` +
-                `<b>Від:</b> ${parcel.responsibleStaff?.fullName || 'Фотограф'}\n\n` +
+            const text = `📸 <b>New content photo!</b>\n\n` +
+                `<b>TTN:</b> <code>${parcel.ttn}</code>\n` +
+                `<b>Location:</b> ${parcel.location?.name || 'Unknown'}\n` +
+                `<b>Sent by:</b> ${parcel.responsibleStaff?.fullName || 'Photographer'}\n\n` +
                 `Будь ласка, перевірте вміст та підтвердіть отримання. ✨`;
 
             const options: any = { 
