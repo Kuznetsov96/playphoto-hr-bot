@@ -494,14 +494,21 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
     logMsg(`🔍 [SUPPORT] Active ticket check: ${activeTicket ? `Found #${activeTicket.id}, topicId: ${activeTicket.topicId}, status: ${activeTicket.status}` : 'No active ticket'}`);
 
     // --- AUTO-AUDIT TICKET LOGIC ---
-    if (!activeTicket && ctx.message?.text?.includes("Потрібне уточнення по фінансах")) {
+    const isAuditMsg = (text?: string) => text?.includes("Потрібне уточнення по фінансах");
+    const currentText = ctx.message?.text || ctx.message?.caption;
+    const repliedText = ctx.message?.reply_to_message?.text || ctx.message?.reply_to_message?.caption;
+
+    if (!activeTicket && (isAuditMsg(currentText) || isAuditMsg(repliedText))) {
         // This is a reply to an audit question - auto-create ticket
-        const locMatch = ctx.message.text.match(/Локація: <b>(.+?)<\/b>/);
+        const sourceText = isAuditMsg(currentText) ? currentText! : repliedText!;
+        const locMatch = sourceText.match(/Локація: <b>(.+?)<\/b>/);
         const locationRaw: string = locMatch ? locMatch[1]! : "Unknown";
 
         try {
             const { supportService } = await import("../../../services/support-service.js");
-            const ticket = await supportService.createTicket(user.id, `Finance Audit Reply: ${ctx.message.text}`);
+            // Use current text (the photographer's answer) as the ticket text, with audit context
+            const answerText = ctx.message?.text || ctx.message?.caption || "[Медіа]";
+            const ticket = await supportService.createTicket(user.id, `Finance Audit Reply: ${answerText}\n\nContext: ${sourceText}`);
 
             const topicTitle = `❓ Finance Audit: ${locationRaw.split('(')[0]?.trim() || 'Unknown'}`;
             const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
@@ -509,7 +516,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             await supportRepository.updateTicket(ticket.id, { topicId: topic.message_thread_id });
 
             // Send context to topic
-            await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `💰 <b>Finance Audit Reply</b>\n👤 Staff: ${user.staffProfile.fullName}\n\n${ctx.message.text}`, {
+            await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `💰 <b>Finance Audit Reply</b>\n👤 Staff: ${user.staffProfile.fullName}\n\n${sourceText}\n\n<b>Відповідь:</b> ${answerText}`, {
                 message_thread_id: topic.message_thread_id,
                 parse_mode: "HTML",
                 reply_markup: new InlineKeyboard().text("🔒 Resolve & Close", `admin_close_ticket_${ticket.id}`)
@@ -823,18 +830,6 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                         }).catch(() => {});
                     }
                     
-                    logMsg(`✅ [SUPPORT] Message copied successfully to topic ${targetTopicId}, returning true`);
-
-                    // Touch updatedAt to track activity
-                    if (activeTicket) {
-                        await supportRepository.updateTicket(activeTicket.id, { updatedAt: new Date() }).catch(() => { });
-                    } else if (activeOutgoingTopic) {
-                        await prisma.outgoingTopic.update({
-                            where: { id: activeOutgoingTopic.id },
-                            data: { updatedAt: new Date() }
-                        }).catch(() => { });
-                    }
-
                     logMsg(`✅ [SUPPORT] Message copied successfully to topic ${targetTopicId}, returning true`);
                     // Log to Timeline (Message from Staff)
                     const { timelineRepository } = await import("../../../repositories/timeline-repository.js");
