@@ -35,9 +35,17 @@ const CITY_MAP: Record<string, string> = {
     'Хмельницький': 'Khmelnytskyi', 'Львів': 'Lviv', 'Київ': 'Kyiv', 'даринок': 'Kyiv'
 };
 
-function cityLabel(locCfg: { city: string; name: string }): string {
+function cityLabel(locCfg: { city: string; name: string; sheet?: string | null }): string {
     const cityRaw = locCfg.city.replace(/[^\p{L}\p{N}\s]/gu, '').trim();
-    return CITY_MAP[cityRaw] || cityRaw;
+    const city = CITY_MAP[cityRaw] || cityRaw;
+
+    // Sub-location distinction for Kyiv (Smile Park etc)
+    if (city === 'Kyiv' && locCfg.sheet) {
+        const sL = locCfg.sheet.toLowerCase();
+        if (sL.includes('даринок')) return 'Darynok';
+        if (sL.includes('троєщина')) return 'Troieshchyna';
+    }
+    return city;
 }
 
 export class ReconciliationService {
