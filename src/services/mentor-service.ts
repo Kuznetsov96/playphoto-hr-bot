@@ -285,8 +285,9 @@ export class MentorService {
 
     async getOnboardingCandidates() {
         return await candidateRepository.findByStatusWithUser(CandidateStatus.HIRED, {
-            isMentorLocked: true
-        });
+            isMentorLocked: true,
+            fullName: { not: null } // Ensure they are valid
+        }).then(cands => cands.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')));
     }
 
     async completeOnboarding(candId: string, success: boolean) {
