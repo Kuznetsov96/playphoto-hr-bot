@@ -580,6 +580,70 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
         return true;
     }
 
+    // NEW: Handle Broadcast Decline Reason
+    if (ctx.session.step === "broadcast_decline_reason") {
+        const broadcastId = ctx.session.broadcastId;
+        const reason = ctx.message?.text || ctx.message?.caption || "[Медіа]";
+        
+        const logMsg = (msg: string) => logger.info(msg);
+        logMsg(`📝 [SUPPORT] Creating decline ticket for broadcast #${broadcastId} by ${user.staffProfile.fullName}`);
+
+        try {
+            const { supportService } = await import("../../../services/support-service.js");
+            const ticketText = `❌ <b>Не згодна з розсилкою #${broadcastId}</b>\n\n<b>Причина:</b> ${reason}`;
+            const ticket = await supportService.createTicket(user.id, ticketText);
+
+            // Create Topic in Support Chat
+            const { buildTopicTitle, buildTicketCard, getTicketButtons } = await import("../../../utils/ticket-card.js");
+            
+            let locationName = user.staffProfile.location?.name || null;
+            let locationCity = user.staffProfile.location?.city || null;
+            const closestShift = await workShiftRepository.findClosestShiftWithLocation(user.staffProfile.id, new Date());
+            if (closestShift?.location) {
+                locationName = closestShift.location.name;
+                locationCity = closestShift.location.city;
+            }
+
+            const topicTitle = buildTopicTitle(ticket.id, user.staffProfile.fullName, locationName, TicketStatus.OPEN, true, false, locationCity);
+            const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
+            const topicId = topic.message_thread_id;
+
+            await supportRepository.updateTicket(ticket.id, { topicId });
+
+            const cardText = await buildTicketCard(ticket, user, false, locationName, locationCity);
+            const buttons = getTicketButtons(ticket.id, ticket.status);
+
+            await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, cardText, {
+                message_thread_id: topicId,
+                parse_mode: "HTML",
+                reply_markup: buttons
+            });
+
+            // Copy user's message to topic
+            if (ctx.message && topicId) {
+                await ctx.api.copyMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id, {
+                    message_thread_id: topicId
+                });
+            }
+
+            await ctx.reply(STAFF_TEXTS["broadcast-ans-decline"], {
+                reply_markup: {
+                    inline_keyboard: [[{ text: STAFF_TEXTS["staff-btn-home"], callback_data: "staff_hub_nav" }]]
+                }
+            });
+
+            ctx.session.step = "idle";
+            delete ctx.session.broadcastId;
+            return true;
+        } catch (e) {
+            logger.error({ err: e }, "❌ Failed to create broadcast decline ticket");
+            ctx.session.step = "idle";
+            delete ctx.session.broadcastId;
+            await ctx.reply("Сталася помилка. Твій протест не зафіксовано в системі тікетів, але статус розсилки оновлено. Звернись до куратора. 🌸");
+            return true;
+        }
+    }
+
     // B. If Step is 'create_ticket' -> Create New Ticket
     if (ctx.session.step === "create_ticket") {
         if (activeOutgoingTopic) {
