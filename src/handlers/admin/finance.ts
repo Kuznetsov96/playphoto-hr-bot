@@ -126,7 +126,7 @@ financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
     const keyboard = new InlineKeyboard();
     actions.forEach((action: any, idx: number) => {
         const askedIcon = action.asked ? ' 💬' : '';
-        const locName = action.location.split('(')[0]?.trim() || action.location;
+        const locName = action.location;
         keyboard.text(`${idx + 1}. 📍 ${locName}${askedIcon}`, `audit_action_detail:${idx}:${dateStr}`).row();
     });
 
