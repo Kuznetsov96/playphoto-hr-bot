@@ -8,7 +8,7 @@ import { InlineKeyboard, Composer } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 import { formatCandidateProfile } from "../utils/profile-formatter.js";
-import { formatCompactName } from "../utils/string-utils.js";
+import { formatCompactName, shortenName } from "../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 
@@ -311,10 +311,10 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
 mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
     const candId = ctx.session.selectedCandidateId;
     const cand = candId ? await candidateRepository.findById(candId) : null;
-    const isInternship = cand?.status === "DISCOVERY_COMPLETED" || cand?.status === "DISCOVERY_SCHEDULED";
+    const isManualDatePicker = cand?.status === "DISCOVERY_COMPLETED" || cand?.status === "DISCOVERY_SCHEDULED" || cand?.status === "HIRED" || ctx.session.adminFlow === 'SCHEDULE';
 
-    if (isInternship) {
-        range.text("🗓️ Pick date for Internship:", (ctx) => { }).row();
+    if (isManualDatePicker) {
+        range.text(ctx.session.adminFlow === 'SCHEDULE' ? "🗓️ Оберіть дату зміни:" : "🗓️ Pick date for Internship:", (ctx) => { }).row();
         const now = new Date();
         for (let i = 0; i < 7; i++) {
             const d = new Date();
@@ -322,7 +322,7 @@ mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
             const day = d.getDate().toString().padStart(2, '0');
             const month = (d.getMonth() + 1).toString().padStart(2, '0');
             const dateStr = `${day}.${month}`;
-            const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+            const dayName = d.toLocaleDateString('uk-UA', { weekday: 'short' });
 
             range.text(`${dayName}, ${dateStr}`, async (ctx) => {
                 ctx.session.selectedTrainingDate = dateStr;
@@ -520,7 +520,7 @@ mentorOnboardingDayMenu.dynamic(async (ctx, range) => {
     let index = 0;
     for (const c of filtered) {
         const hiddenSpaces = '\u200B'.repeat(index++);
-        range.text(`👤 ${formatCompactName(c.fullName)}${hiddenSpaces}`, async (ctx) => {
+        range.text(`👤 ${shortenName(c.fullName || "")}${hiddenSpaces}`, async (ctx) => {
             ctx.session.selectedCandidateId = c.id;
             try {
                 const text = await getMentorCandidateProfileText(ctx, c.id);
