@@ -131,6 +131,13 @@ taskFlowHandlers.callbackQuery("task_back_text", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
+taskFlowHandlers.callbackQuery("task_back_date", async (ctx) => {
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    ctx.session.taskData.step = 'SELECT_DATE';
+    await renderDateSelection(ctx);
+    await ctx.answerCallbackQuery();
+});
+
 async function renderConfirmation(ctx: MyContext) {
     const data = ctx.session.taskData;
     if (!data) return;
@@ -154,15 +161,14 @@ taskFlowHandlers.callbackQuery("task_cancel_flow", async (ctx) => {
     delete ctx.session.taskData;
     await ctx.answerCallbackQuery("Cancelled.");
     
+    const kb = new InlineKeyboard();
     if (staffId) {
-        // Return to staff profile
-        await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-team"], `view_staff_${staffId}`);
-    } else {
-        const kb = new InlineKeyboard()
-            .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
-            .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
-        await ScreenManager.renderScreen(ctx, "❌ Task creation cancelled.", kb);
+        kb.text("👤 Back to Profile", `view_staff_${staffId}`).row();
     }
+    kb.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities").row()
+      .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
+
+    await ScreenManager.renderScreen(ctx, "❌ Task creation cancelled.", kb);
 });
 
 taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
