@@ -367,6 +367,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
             if (kyivHour === 11 && now.getMinutes() < 5) {
                 await processAbandonedApplications(bot);
+                await processAutoRejectInactiveCandidates(bot);
                 // processStalePipelineAlert disabled: HR/Mentor/Admin see their queues in the bot menus
             }
 
@@ -911,5 +912,96 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
         }
     } catch (e) {
         logger.error({ err: e }, "❌ Error in processOnboardingReminders");
+    }
+}
+
+/**
+ * Auto-archive workflow: 
+ * - На 5-й день надсилає фінальне попередження.
+ * - На 7-й день переводить у REJECTED.
+ */
+async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
+    try {
+        const { default: prisma } = await import("../db/core.js");
+        const now = new Date();
+        const cutoff5Days = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
+        const cutoff6Days = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+        const cutoff7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+        // 1. ACCEPTED (Sent materials, but didn't book)
+        const idleAccepted = await prisma.candidate.findMany({
+            where: {
+                status: "ACCEPTED", materialsSent: true, discoverySlotId: null, trainingSlotId: null,
+                materialsSentAt: { lte: cutoff5Days }
+            },
+            include: { user: true }
+        });
+
+        // 2. NDA (Sent NDA, but didn't confirm)
+        const idleNDA = await prisma.candidate.findMany({
+            where: {
+                status: "NDA", ndaConfirmedAt: null,
+                ndaSentAt: { lte: cutoff5Days }
+            },
+            include: { user: true }
+        });
+
+        // 3. KNOWLEDGE_TEST (Confirmed NDA, but didn't pass test)
+        const idleTest = await prisma.candidate.findMany({
+            where: {
+                status: "KNOWLEDGE_TEST", testPassed: { not: true },
+                ndaConfirmedAt: { lte: cutoff5Days }
+            },
+            include: { user: true }
+        });
+
+        // 4. STAGING_SETUP (Passed test, didn't choose date)
+        const idleStagingSetup = await prisma.candidate.findMany({
+            where: {
+                status: "STAGING_SETUP",
+                statusChangedAt: { lte: cutoff5Days }
+            },
+            include: { user: true }
+        });
+
+        const allIdle = [...idleAccepted, ...idleNDA, ...idleTest, ...idleStagingSetup];
+
+        for (const cand of allIdle) {
+            try {
+                let referenceDate = cand.materialsSentAt || cand.ndaSentAt || cand.ndaConfirmedAt || cand.statusChangedAt;
+                // Fallback to avoid dropping candidates without these timestamps but they shouldn't match the queries above anyway
+                if (!referenceDate) continue;
+
+                if (referenceDate <= cutoff7Days) {
+                    // Day 7: Reject
+                    let rejectReason = "на стажування";
+                    if (cand.status === "KNOWLEDGE_TEST" || cand.status === "STAGING_SETUP") rejectReason = "після тестування";
+                    
+                    await bot.api.sendMessage(Number(cand.user.telegramId), 
+                        `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
+                    
+                    await prisma.candidate.update({
+                        where: { id: cand.id },
+                        data: { status: "REJECTED", statusChangedAt: new Date() }
+                    });
+                    logger.info({ userId: cand.user.telegramId }, "🚫 Кандидата автоматично переведено в REJECTED (7 днів неактивності)");
+                } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
+                    // Day 5: Warning (We run this once a day, so it will hit exactly once)
+                    let contextStr = "на твій наступний крок";
+                    switch (cand.status) {
+                        case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставницею"; break;
+                        case "NDA": contextStr = "на ознайомлення з NDA (правилами команди)"; break;
+                        case "KNOWLEDGE_TEST": contextStr = "на проходження фінального тесту"; break;
+                        case "STAGING_SETUP": contextStr = "на вибір дати для першого стажування на локації"; break;
+                    }
+                    
+                    await bot.api.sendMessage(Number(cand.user.telegramId), 
+                        `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
+                    logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 5-денне попередження про неактивність");
+                }
+            } catch (e) {}
+        }
+    } catch (e) {
+        logger.error({ err: e }, "❌ Помилка в processAutoRejectInactiveCandidates");
     }
 }
