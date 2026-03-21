@@ -352,7 +352,7 @@ export const hrService = {
                 city,
                 OR: [
                     { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
-                    { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
+                    { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
                 ],
                 ...(locationId ? { locationId } : {})
             },
@@ -484,7 +484,7 @@ export const hrService = {
                     locationId: loc.id,
                     OR: [
                         { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
-                        { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
+                        { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
                     ]
                 }
             });
