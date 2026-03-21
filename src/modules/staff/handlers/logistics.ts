@@ -199,7 +199,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             const kb = new InlineKeyboard()
                 .text("🖼 View Photo", `admin_parcel_view_${parcelId}`)
                 .row()
-                .text("✅ Everything is fine", `admin_parcel_confirm_${parcelId}`);
+                .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`);
 
             const text = `📸 <b>Нове фото вмісту!</b>\n\n` +
                 `<b>ТТН:</b> <code>${parcel.ttn}</code>\n` +
