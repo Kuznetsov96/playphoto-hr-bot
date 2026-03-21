@@ -195,15 +195,6 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             ctx.session.step = 'idle';
             await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
 
-            // Notify Support (English)
-            const kyivTime = new Date().toLocaleString('uk-UA', { 
-                timeZone: 'Europe/Kyiv',
-                hour: '2-digit',
-                minute: '2-digit',
-                day: '2-digit',
-                month: '2-digit'
-            });
-
             const kb = new InlineKeyboard()
                 .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
                 .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
@@ -211,8 +202,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
                 ttn: parcel.ttn,
                 location: parcel.location?.name || 'Unknown',
-                sender: parcel.responsibleStaff?.fullName || 'Photographer',
-                time: kyivTime
+                sender: parcel.responsibleStaff?.fullName || 'Photographer'
             });
 
             const options: any = { 
