@@ -159,9 +159,20 @@ handlers.callbackQuery(/^broadcast_confirm_ok_(.+)$/, async (ctx) => {
 handlers.callbackQuery(/^broadcast_confirm_decline_(.+)$/, async (ctx) => {
     const broadcastId = parseInt(ctx.match![1]!);
     if (isNaN(broadcastId)) return ctx.answerCallbackQuery("Invalid ID");
-    await ctx.answerCallbackQuery("Understood!");
+    
+    await broadcastService.confirmDecline(ctx, broadcastId);
+    
+    // Set session step to wait for reason
+    ctx.session.step = "broadcast_decline_reason";
+    ctx.session.broadcastId = broadcastId;
+
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
-    await ctx.reply(STAFF_TEXTS["broadcast-ans-decline"]);
+    await ctx.reply(STAFF_TEXTS["broadcast-ask-decline-reason"], {
+        parse_mode: "HTML",
+        reply_markup: {
+            inline_keyboard: [[{ text: STAFF_TEXTS["hr-btn-cancel"], callback_data: "staff_hub_nav" }]]
+        }
+    });
 });
 
 // Reordered: Support handlers first to avoid Admin/HR Menu interference (greedy matches)

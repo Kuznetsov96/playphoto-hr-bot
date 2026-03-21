@@ -287,7 +287,7 @@ export const broadcastService = {
         }
     },
 
-    async confirmRead(ctx: MyContext, broadcastId: number) {
+  async confirmRead(ctx: MyContext, broadcastId: number) {
         const userId = ctx.from?.id;
         const chatId = ctx.chat?.id;
         if (!userId || !chatId) return;
@@ -309,6 +309,31 @@ export const broadcastService = {
             await ctx.answerCallbackQuery("✅ Thank you! Confirmed.");
         } else {
             await ctx.answerCallbackQuery("✅ Recorded.");
+        }
+    },
+
+    async confirmDecline(ctx: MyContext, broadcastId: number) {
+        const userId = ctx.from?.id;
+        const chatId = ctx.chat?.id;
+        if (!userId || !chatId) return;
+
+        const tracked = await trackedMessageRepository.findFirst({
+            broadcastId: broadcastId,
+            chatId: BigInt(chatId)
+        });
+
+        if (!tracked) return;
+
+        const pending = await pendingReplyRepository.findFirst({
+            trackedMessageId: tracked.id,
+            userId: BigInt(userId)
+        });
+
+        if (pending) {
+            await pendingReplyRepository.update(pending.id, { status: "declined", respondedAt: new Date() });
+            await ctx.answerCallbackQuery("Understood.");
+        } else {
+            await ctx.answerCallbackQuery("Recorded.");
         }
     },
 
