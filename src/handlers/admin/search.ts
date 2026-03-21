@@ -1,7 +1,7 @@
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { InlineKeyboard, Composer } from "grammy";
 import type { MyContext } from "../../types/context.js";
-import { SUPPORT_CHAT_ID } from "../../config.js";
+import { SUPPORT_CHAT_ID, ADMIN_IDS } from "../../config.js";
 import { userRepository } from "../../repositories/user-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
@@ -75,6 +75,26 @@ adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
 
     ctx.session.step = `admin_reply_direct_${telegramId}`;
     await ScreenManager.renderScreen(ctx, `Write response for candidate (ID: ${telegramId}): ✍️\n\n<i>Message will be delivered directly to her bot chat.</i>`, new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "cancel_step"), { pushToStack: true });
+});
+
+adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => {
+    const topicId = Number(ctx.match![1]!);
+    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-topic-ans-fwd-ok"]);
+
+    const kuznetsovId = ADMIN_IDS[0];
+    if (!kuznetsovId) {
+        logger.error("[ADMIN_FWD] Kuznetsov ID not found in ADMIN_IDS");
+        return;
+    }
+
+    if (ctx.callbackQuery.message) {
+        try {
+            await ctx.api.copyMessage(kuznetsovId, SUPPORT_CHAT_ID, ctx.callbackQuery.message.message_id);
+            logger.info({ topicId, kuznetsovId }, "[ADMIN_FWD] Forwarded topic card to Kuznetsov");
+        } catch (e: any) {
+            logger.error({ err: e }, "[ADMIN_FWD] Failed to copy message to Kuznetsov");
+        }
+    }
 });
 
 adminSearchHandlers.on("message:text", async (ctx, next) => {
