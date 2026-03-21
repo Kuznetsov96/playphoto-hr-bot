@@ -13,6 +13,7 @@ import { startExpenseFlow } from "./finance-expense.js";
 import { staffService } from "../../modules/staff/services/index.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { techCashService } from "../../services/finance/tech-cash.js";
+import { userRepository } from "../../repositories/user-repository.js";
 import logger from "../../core/logger.js";
 
 // --- 3. FINANCE MENU ---
@@ -184,6 +185,37 @@ async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, target
     for (const sid of sendIds) {
         try {
             await ctx.api.sendMessage(Number(sid), message, { parse_mode: "HTML" });
+            
+            // --- NEW: Create Support Thread Immediately ---
+            const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(sid));
+            if (user) {
+                const { supportService } = await import("../../services/support-service.js");
+                const { supportRepository } = await import("../../repositories/support-repository.js");
+                const { TEAM_CHATS } = await import("../../config.js");
+                
+                const ticket = await supportService.createTicket(user.id, `Finance Audit Context: ${message}`);
+                
+                const topicTitle = `❓ Audit: ${location.split('(')[0]?.trim() || 'Unknown'}`;
+                const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
+                
+                await supportRepository.updateTicket(ticket.id, { topicId: topic.message_thread_id });
+                
+                // Add first message to topic for context
+                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, 
+                    `💰 <b>Finance Audit Required</b>\n` +
+                    `👤 Staff: ${user.staffProfile?.fullName || 'Staff'}\n` +
+                    `📍 Location: ${location}\n` +
+                    `📅 Date: ${dateStr}\n\n` +
+                    `<i>Request sent to photographer. Awaiting reply...</i>`, 
+                    {
+                        message_thread_id: topic.message_thread_id,
+                        parse_mode: "HTML",
+                        reply_markup: new InlineKeyboard().text("🔒 Resolve & Close", `admin_close_ticket_${ticket.id}`)
+                    }
+                );
+            }
+            // ----------------------------------------------
+            
             success++;
         } catch (e) { logger.error({ err: e, sid }, "Ask fail"); }
     }
