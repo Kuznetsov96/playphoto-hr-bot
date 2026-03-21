@@ -105,7 +105,9 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(?:direct_)?(.+)$/, 
     });
 
     await ctx.answerCallbackQuery("Parcel confirmed! ✅");
-    if (isDirect) {
+
+    if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
+        // Safety: if triggered from support chat (even via old menu), stay silent
         const text = `✅ <b>Parcel confirmed and archived.</b>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
@@ -125,7 +127,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(?:direct_)?(.+)$/, a
     await prisma.parcel.delete({ where: { id: parcelId } }).catch(() => { });
     await ctx.answerCallbackQuery("Parcel deleted. 🗑");
 
-    if (isDirect) {
+    if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
         const text = `🗑 <b>Parcel deleted.</b>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
