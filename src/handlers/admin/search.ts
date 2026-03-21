@@ -1,4 +1,5 @@
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
+import { STAFF_TEXTS } from "../../constants/staff-texts.js";
 import { InlineKeyboard, Composer } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { SUPPORT_CHAT_ID, ADMIN_IDS } from "../../config.js";
@@ -89,10 +90,22 @@ adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => 
 
     if (ctx.callbackQuery.message) {
         try {
-            await ctx.api.copyMessage(kuznetsovId, SUPPORT_CHAT_ID, ctx.callbackQuery.message.message_id);
-            logger.info({ topicId, kuznetsovId }, "[ADMIN_FWD] Forwarded topic card to Kuznetsov");
+            const forwarded = await ctx.api.copyMessage(kuznetsovId, SUPPORT_CHAT_ID, ctx.callbackQuery.message.message_id);
+
+            // Add "Go to topic" button for Kuznetsov
+            const chatIdStr = String(SUPPORT_CHAT_ID);
+            const cleanChatId = chatIdStr.startsWith('-100')
+                ? chatIdStr.substring(4)
+                : chatIdStr.replace('-', '');
+
+            const topicUrl = `https://t.me/c/${cleanChatId}/${topicId}`;
+            const keyboard = new InlineKeyboard().url(STAFF_TEXTS["support-btn-go-to-topic"], topicUrl);
+
+            await ctx.api.editMessageReplyMarkup(kuznetsovId, forwarded.message_id, { reply_markup: keyboard });
+            
+            logger.info({ topicId, kuznetsovId }, "[ADMIN_FWD] Forwarded topic card with Go to Topic button");
         } catch (e: any) {
-            logger.error({ err: e }, "[ADMIN_FWD] Failed to copy message to Kuznetsov");
+            logger.error({ err: e }, "[ADMIN_FWD] Failed to copy/edit message to Kuznetsov");
         }
     }
 });
