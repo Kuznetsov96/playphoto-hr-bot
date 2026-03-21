@@ -314,7 +314,7 @@ mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
     const isManualDatePicker = cand?.status === "DISCOVERY_COMPLETED" || cand?.status === "DISCOVERY_SCHEDULED" || cand?.status === "HIRED" || ctx.session.adminFlow === 'SCHEDULE';
 
     if (isManualDatePicker) {
-        range.text(ctx.session.adminFlow === 'SCHEDULE' ? "🗓️ Оберіть дату зміни:" : "🗓️ Pick date for Internship:", (ctx) => { }).row();
+        range.text(ctx.session.adminFlow === 'SCHEDULE' ? "🗓️ Select shift date:" : "🗓️ Pick date for Internship:", (ctx) => { }).row();
         const now = new Date();
         for (let i = 0; i < 7; i++) {
             const d = new Date();
@@ -322,7 +322,7 @@ mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
             const day = d.getDate().toString().padStart(2, '0');
             const month = (d.getMonth() + 1).toString().padStart(2, '0');
             const dateStr = `${day}.${month}`;
-            const dayName = d.toLocaleDateString('uk-UA', { weekday: 'short' });
+            const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
 
             range.text(`${dayName}, ${dateStr}`, async (ctx) => {
                 ctx.session.selectedTrainingDate = dateStr;
@@ -369,7 +369,7 @@ mentorManualTimeSelectionMenu.dynamic(async (ctx, range) => {
                 });
 
                 await ctx.answerCallbackQuery(`Updated to ${t}! ✅`);
-                await ScreenManager.renderScreen(ctx, `✅ <b>Дата першої зміни оновлена на ${date} ${t}!</b>`, "mentor-action-success");
+                await ScreenManager.renderScreen(ctx, `✅ <b>First shift date updated to ${date} ${t}!</b>`, "mentor-action-success");
                 ctx.session.adminFlow = undefined;
                 return;
             }
@@ -563,7 +563,7 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
 
     range.text("🗓 Edit Date", async (ctx) => {
         ctx.session.adminFlow = 'SCHEDULE';
-        await ScreenManager.renderScreen(ctx, "<b>Оберіть нову дату першої зміни:</b>", "mentor-manual-date", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "<b>Select new date for first shift:</b>", "mentor-manual-date", { pushToStack: true });
     }).row();
 
     range.text("✅ Successful Onboarding", async (ctx) => {
