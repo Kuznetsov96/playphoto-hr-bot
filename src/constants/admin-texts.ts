@@ -174,6 +174,7 @@ export const ADMIN_TEXTS = {
   "admin-finance-audit": `⚖️ Audit`,
   "admin-finance-statement": `📋 7-day Statement`,
   "admin-finance-collecting": `⏳ Collecting data...`,
+  "admin-finance-report-loading": `⏳ <b>Generating report and syncing with DDS...</b>`,
   "admin-finance-gen-statement": (p: { fopKey: string | number }) => `⏳ Generating statement (${p.fopKey})...`,
   "admin-finance-audit-running": (p: { date: string | number }) => `⏳ Running FOP audit for ${p.date}...`,
   "admin-finance-syncing-dds": (p: { date: string | number }) => `⏳ Syncing DDS for ${p.date}...`,
