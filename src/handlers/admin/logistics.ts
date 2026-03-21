@@ -106,7 +106,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(?:direct_)?(.+)$/, 
 
     await ctx.answerCallbackQuery("Parcel confirmed! ✅");
     if (isDirect) {
-        const text = `✅ <b>ТТН підтверджена та архівована.</b>`;
+        const text = `✅ <b>Parcel confirmed and archived.</b>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
         } else {
@@ -126,7 +126,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(?:direct_)?(.+)$/, a
     await ctx.answerCallbackQuery("Parcel deleted. 🗑");
 
     if (isDirect) {
-        const text = `🗑 <b>ТТН видалена.</b>`;
+        const text = `🗑 <b>Parcel deleted.</b>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
         } else {
@@ -196,13 +196,13 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
 
     if (parcel?.contentPhotoId) {
         const kb = new InlineKeyboard()
-            .text("✅ Все окей", `admin_parcel_confirm_direct_${parcel.id}`)
-            .text("🗑 Видалити", `admin_parcel_delete_direct_${parcel.id}`)
+            .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcel.id}`)
+            .text("🗑 Delete", `admin_parcel_delete_direct_${parcel.id}`)
             .row()
-            .text("⬅️ До списку", "admin_logistics_nav");
+            .text("⬅️ Back to list", "admin_logistics_nav");
 
         const options: any = {
-            caption: `📸 Фото вмісту ТТН: <code>${parcel.ttn}</code>\n📍 Локація: ${parcel.location?.name || 'Невідомо'}`,
+            caption: `📸 <b>Content Photo for TTN:</b> <code>${parcel.ttn}</code>\n📍 <b>Location:</b> ${parcel.location?.name || 'Unknown'}`,
             parse_mode: 'HTML',
             reply_markup: kb
         };
