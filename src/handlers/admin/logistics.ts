@@ -194,17 +194,33 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_details_(.+)$/, async (
 // View Parcel Photo
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true } });
+    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true, responsibleStaff: true } });
 
     if (parcel?.contentPhotoId) {
+        const kyivTime = (parcel.updatedAt || new Date()).toLocaleString('uk-UA', { 
+            timeZone: 'Europe/Kyiv',
+            hour: '2-digit',
+            minute: '2-digit',
+            day: '2-digit',
+            month: '2-digit'
+        });
+
         const kb = new InlineKeyboard()
             .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcel.id}`)
-            .text("🗑 Delete", `admin_parcel_delete_direct_${parcel.id}`)
-            .row()
-            .text("⬅️ Back to list", "admin_logistics_nav");
+            .text("🗑 Delete", `admin_parcel_delete_direct_${parcel.id}`);
+
+        // Only show navigation in private bot chat
+        if (ctx.chat?.type === 'private') {
+            kb.row().text("⬅️ Back to list", "admin_logistics_nav");
+        }
 
         const options: any = {
-            caption: `📸 <b>Content Photo for TTN:</b> <code>${parcel.ttn}</code>\n📍 <b>Location:</b> ${parcel.location?.name || 'Unknown'}`,
+            caption: LOGISTICS_TEXTS_ADMIN.new_photo_caption({
+                ttn: parcel.ttn,
+                location: parcel.location?.name || 'Unknown',
+                sender: parcel.responsibleStaff?.fullName || 'Photographer',
+                time: kyivTime
+            }),
             parse_mode: 'HTML',
             reply_markup: kb
         };

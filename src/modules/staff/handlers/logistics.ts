@@ -196,22 +196,31 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
 
             // Notify Support (English)
-            const kb = new InlineKeyboard()
-                .text("🖼 View Photo", `admin_parcel_view_${parcelId}`)
-                .row()
-                .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`);
+            const kyivTime = new Date().toLocaleString('uk-UA', { 
+                timeZone: 'Europe/Kyiv',
+                hour: '2-digit',
+                minute: '2-digit',
+                day: '2-digit',
+                month: '2-digit'
+            });
 
-            const text = `📸 <b>New content photo!</b>\n\n` +
-                `<b>TTN:</b> <code>${parcel.ttn}</code>\n` +
-                `<b>Location:</b> ${parcel.location?.name || 'Unknown'}\n` +
-                `<b>Sent by:</b> ${parcel.responsibleStaff?.fullName || 'Photographer'}\n\n` +
-                `Будь ласка, перевірте вміст та підтвердіть отримання. ✨`;
+            const kb = new InlineKeyboard()
+                .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
+                .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
+
+            const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
+                ttn: parcel.ttn,
+                location: parcel.location?.name || 'Unknown',
+                sender: parcel.responsibleStaff?.fullName || 'Photographer',
+                time: kyivTime
+            });
 
             const options: any = { 
-                caption: text,
+                caption,
                 parse_mode: 'HTML', 
                 reply_markup: kb
             };
+            
             if (TEAM_CHATS.LOGISTICS !== undefined) {
                 options.message_thread_id = TEAM_CHATS.LOGISTICS;
             }
