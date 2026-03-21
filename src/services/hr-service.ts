@@ -491,8 +491,8 @@ export const hrService = {
             // ONLY count those who haven't been notified yet (or waitlist)
             const freshCount = candidates.filter(c => c.status === CandidateStatus.WAITLIST || !c.notificationSent).length;
 
-            // Show location if it has an active need OR fresh candidates
-            if (freshCount > 0 || loc.neededCount > 0) {
+            // Show location ONLY if it has an active need (vacancies)
+            if (loc.neededCount > 0) {
                 const priority = getLocationPriority(loc.neededCount);
                 results.push({
                     city: loc.city,
