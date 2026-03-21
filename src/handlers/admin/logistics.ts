@@ -94,9 +94,10 @@ adminLogisticsHandlers.callbackQuery("admin_logistics_nav", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-// Confirm Parcel (Everything is fine)
-adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(.+)$/, async (ctx) => {
+// Confirm Parcel (Everything is fine) - matches both admin_parcel_confirm_TTN AND admin_parcel_confirm_direct_TTN
+adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(?:direct_)?(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
+    const isDirect = ctx.callbackQuery.data.includes('_direct_');
 
     await prisma.parcel.update({
         where: { id: parcelId },
@@ -104,15 +105,36 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(.+)$/, async (ctx) 
     });
 
     await ctx.answerCallbackQuery("Parcel confirmed! ✅");
-    await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.confirmed, "admin-logistics");
+    if (isDirect) {
+        const text = `✅ <b>ТТН підтверджена та архівована.</b>`;
+        if (ctx.callbackQuery.message?.photo) {
+            await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
+        } else {
+            await ctx.editMessageText(text, { parse_mode: 'HTML' });
+        }
+    } else {
+        await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.confirmed, "admin-logistics");
+    }
 });
 
-// Delete Parcel
-adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(.+)$/, async (ctx) => {
+// Delete Parcel - matches both admin_parcel_delete_TTN AND admin_parcel_delete_direct_TTN
+adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(?:direct_)?(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
+    const isDirect = ctx.callbackQuery.data.includes('_direct_');
+    
     await prisma.parcel.delete({ where: { id: parcelId } }).catch(() => { });
     await ctx.answerCallbackQuery("Parcel deleted. 🗑");
-    await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.menu_title, "admin-logistics");
+
+    if (isDirect) {
+        const text = `🗑 <b>ТТН видалена.</b>`;
+        if (ctx.callbackQuery.message?.photo) {
+            await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
+        } else {
+            await ctx.editMessageText(text, { parse_mode: 'HTML' });
+        }
+    } else {
+        await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.menu_title, "admin-logistics");
+    }
 });
 
 // Select Location Menu
@@ -174,8 +196,8 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
 
     if (parcel?.contentPhotoId) {
         const kb = new InlineKeyboard()
-            .text("✅ Все окей", `admin_parcel_confirm_${parcel.id}`)
-            .text("🗑 Видалити", `admin_parcel_delete_${parcel.id}`)
+            .text("✅ Все окей", `admin_parcel_confirm_direct_${parcel.id}`)
+            .text("🗑 Видалити", `admin_parcel_delete_direct_${parcel.id}`)
             .row()
             .text("⬅️ До списку", "admin_logistics_nav");
 
