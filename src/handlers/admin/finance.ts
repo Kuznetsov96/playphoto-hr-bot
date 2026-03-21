@@ -59,9 +59,14 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
                 return;
             }
             await ctx.answerCallbackQuery().catch(() => { });
-            const { sendDailyIncomeReport } = await import("../../services/finance-report.js");
-            const { bot } = await import("../../core/bot.js");
-            await sendDailyIncomeReport(bot as any, ctx.chat!.id, true);
+            const statusMsg = await ctx.reply(ADMIN_TEXTS["admin-finance-report-loading"], { parse_mode: "HTML" });
+            try {
+                const { sendDailyIncomeReport } = await import("../../services/finance-report.js");
+                const { bot } = await import("../../core/bot.js");
+                await sendDailyIncomeReport(bot as any, ctx.chat!.id, true);
+            } finally {
+                await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
+            }
         });
     }
 
