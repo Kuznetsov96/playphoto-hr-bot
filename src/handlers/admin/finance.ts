@@ -123,20 +123,50 @@ financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
 
     let text = `⚙️ <b>AUDIT ACTION CENTER • ${dateStr}</b>\n\n`;
     const keyboard = new InlineKeyboard();
-
     actions.forEach((action: any, idx: number) => {
-        const typeIcon = action.type === 'Terminal' ? '💳' : '💵';
+        const askedIcon = action.asked ? ' 💬' : '';
         const locName = action.location.split('(')[0]?.trim() || action.location;
-        const diffStr = action.diff.toLocaleString('uk-UA');
-
-        text += `${idx + 1}. 📍 ${action.location}\n`;
-        text += `   ${typeIcon} Mismatch: <b>${diffStr} UAH</b>\n\n`;
-
-        keyboard.text(`❓ Ask`, `audit_ask_select:${idx}:${dateStr}`);
-        keyboard.text(`✅ Resolve`, `audit_resolve:${idx}:${dateStr}`).row();
+        keyboard.text(`${idx + 1}. 📍 ${locName}${askedIcon}`, `audit_action_detail:${idx}:${dateStr}`).row();
     });
 
-    await ctx.reply(text, { parse_mode: "HTML", reply_markup: keyboard });
+    try {
+        await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: keyboard });
+    } catch (e) {
+        await ctx.reply(text, { parse_mode: "HTML", reply_markup: keyboard });
+    }
+});
+
+financeHandlers.callbackQuery(/^audit_action_detail:(\d+):(.+)$/, async (ctx) => {
+    const idx = parseInt(ctx.match![1]!);
+    const dateStr = ctx.match![2]!;
+    const raw = await redis.get(`audit:actions:${dateStr}`);
+    const actions = raw ? JSON.parse(raw) : null;
+    const action = actions?.[idx];
+
+    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
+
+    await ctx.answerCallbackQuery();
+
+    const typeIcon = action.type === 'Terminal' ? '💳' : '💵';
+    const diffStr = action.diff.toLocaleString('uk-UA');
+    const staffStr = action.staffNames?.length ? `\n👤 Staff: <b>${action.staffNames.join(', ')}</b>` : '';
+
+    let text = `⚙️ <b>ACTION DETAILS</b>\n\n`;
+    text += `📍 <b>${action.location}</b>\n`;
+    text += `${typeIcon} Mismatch: <b>${diffStr} UAH</b>${staffStr}\n\n`;
+
+    if (action.asked) {
+        const askedAt = action.askedAt ? new Date(action.askedAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }) : '';
+        text += `💬 <i>Already asked at ${askedAt}</i>\n\n`;
+    }
+
+    const keyboard = new InlineKeyboard();
+    const askLabel = action.asked ? `❓ Re-ask Staff` : `❓ Ask Staff`;
+    keyboard.text(askLabel, `audit_ask_select:${idx}:${dateStr}`);
+    keyboard.text(`✅ Resolve`, `audit_resolve:${idx}:${dateStr}`).row();
+    keyboard.text(`⬅️ Back`, `admin_audit_actions:${dateStr}`);
+
+    await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: keyboard });
 });
 
 financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
@@ -160,7 +190,7 @@ financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
         keyboard.text(name, `audit_ask_send:${idx}:${dateStr}:${sid}`);
     });
     keyboard.text("👥 All", `audit_ask_send:${idx}:${dateStr}:all`).row();
-    keyboard.text("⬅️ Back", `admin_audit_actions:${dateStr}`);
+    keyboard.text("⬅️ Back", `audit_action_detail:${idx}:${dateStr}`);
 
     await ctx.editMessageText(`Whom to ask about 📍 <b>${action.location}</b>?`, {
         parse_mode: "HTML",
@@ -191,11 +221,24 @@ async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, target
     if (success > 0) {
         const targetName = targetStaffId === 'all' ? 'Everyone' : (staffNames?.[staffIds.indexOf(targetStaffId)] || 'Staff');
         await ctx.answerCallbackQuery(`✅ Sent to ${targetName}`);
+
+        // Mark as asked in Redis
+        const currentActionsRaw = await redis.get(`audit:actions:${dateStr}`);
+        const currentActions = currentActionsRaw ? JSON.parse(currentActionsRaw) : [];
+        if (currentActions[idx]) {
+            currentActions[idx].asked = true;
+            currentActions[idx].askedAt = Date.now();
+            await redis.set(`audit:actions:${dateStr}`, JSON.stringify(currentActions), 'EX', 86400);
+        }
+
         await ctx.reply(ADMIN_TEXTS["admin-audit-ask-success"]({
             names: targetName,
             location,
             date: dateStr
-        }), { parse_mode: "HTML" });
+        }), {
+            parse_mode: "HTML",
+            reply_markup: new InlineKeyboard().text("⬅️ Back to Action", `audit_action_detail:${idx}:${dateStr}`)
+        });
     } else {
         await ctx.answerCallbackQuery("❌ Send failed.");
     }
@@ -231,7 +274,14 @@ financeHandlers.callbackQuery(/^audit_resolve:(\d+):(.+)$/, async (ctx) => {
     }
 
     await ctx.answerCallbackQuery("✅ Resolved.");
-    await ctx.editMessageText(`✅ <b>Resolved:</b> ${action.location} (${action.type})`, { parse_mode: "HTML" });
+    const keyboard = actions.length > 0 
+        ? new InlineKeyboard().text("⬅️ Back to Action Center", `admin_audit_actions:${dateStr}`)
+        : undefined;
+
+    await ctx.editMessageText(`✅ <b>Resolved:</b> ${action.location} (${action.type})`, { 
+        parse_mode: "HTML",
+        ...(keyboard ? { reply_markup: keyboard } : {})
+    });
 });
 
 async function handleDailyStatus(ctx: MyContext) {
