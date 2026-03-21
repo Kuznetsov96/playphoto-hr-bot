@@ -196,13 +196,11 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             break;
 
         case CandidateStatus.BLOCKER:
-            text = `Привіт, ${firstName}! 👋\n\nРаді, що ти повернулась. Якщо хочеш продовжити — напиши нашому HR.`;
-            kb.text("👩‍💼 Написати HR", "contact_hr");
+            text = `Привіт, ${firstName}! 👋\n\nРаді, що ти повернулась. Наразі твоя анкета заблокована. Бажаємо успіхів! ✨`;
             break;
 
         default:
             text = CANDIDATE_TEXTS["candidate-default-status"](firstName);
-            kb.text("👩‍💼 Написати HR", "contact_hr");
             break;
     }
 
