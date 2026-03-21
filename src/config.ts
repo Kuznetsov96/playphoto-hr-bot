@@ -69,7 +69,8 @@ const envSchema = z.object({
     IBAN_KUZNETSOV: z.string().optional(),
     IBAN_KARPUK: z.string().optional(),
     IBAN_GUPALOVA: z.string().optional(),
-    IBAN_POSREDNIKOVA: z.string().optional()
+    IBAN_POSREDNIKOVA: z.string().optional(),
+    IBAN_EXCLUDED: z.string().optional()
 });
 
 // 2. Parse and Validate
@@ -158,6 +159,11 @@ export const MONO_FOP_IBANS: Record<string, string[]> = {
     GUPALOVA: (env.IBAN_GUPALOVA || "").split(',').map(s => s.trim()).filter(Boolean),
     POSREDNIKOVA: (env.IBAN_POSREDNIKOVA || "").split(',').map(s => s.trim()).filter(Boolean)
 };
+
+export const EXCLUDED_IBANS: string[] = [
+    "UA143220010000026001300023231", // ФОП Кузнецов (requested for exclusion)
+    ...(env.IBAN_EXCLUDED || "").split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+].map(s => s.toUpperCase());
 
 export const DDS_BALANCE_CELLS: Record<string, string> = {
     KUZNETSOV: "'ДДС месяц'!C3",

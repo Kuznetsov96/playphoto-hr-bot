@@ -1,6 +1,6 @@
 import { monobankService, monoClients } from "./monobank.js";
 import { ddsService } from "./dds.js";
-import { DDS_BALANCE_CELLS, FOP_DISPLAY_NAMES, MONO_FOP_IBANS } from "../../config.js";
+import { DDS_BALANCE_CELLS, FOP_DISPLAY_NAMES, MONO_FOP_IBANS, EXCLUDED_IBANS } from "../../config.js";
 import { techCashService } from "./tech-cash.js";
 import { normalizeFinanceString, FINANCE_KEYWORDS } from "./utils.js";
 import logger from "../../core/logger.js";
@@ -102,9 +102,10 @@ export class ReconciliationService {
 
                     const fopIbans = (MONO_FOP_IBANS[key] || []).map((i: string) => i.trim().toUpperCase());
                     const uahAccounts = info.accounts.filter((a: any) => a.currencyCode === 980);
-                    const fopAccounts = fopIbans.length > 0
+                    const fopAccounts = (fopIbans.length > 0
                         ? uahAccounts.filter((a: any) => a.iban && fopIbans.includes(a.iban.toUpperCase()))
-                        : uahAccounts.filter((a: any) => a.type === 'fop' || (a.iban && a.iban.includes('2600')));
+                        : uahAccounts.filter((a: any) => a.type === 'fop' || (a.iban && a.iban.includes('2600'))))
+                        .filter((a: any) => !a.iban || !EXCLUDED_IBANS.includes(a.iban.toUpperCase()));
                     const accountIds = fopAccounts.map((a: any) => a.id);
                     if (accountIds.length === 0) return;
 
