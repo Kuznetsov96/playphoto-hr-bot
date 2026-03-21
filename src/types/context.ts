@@ -116,6 +116,7 @@ export interface SessionData {
     taskCreation?: any;
     adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | undefined;
     viewingFromInbox?: boolean;
+    broadcastId?: number;
 }
 
 export type MyContext = Context & SessionFlavor<SessionData> & ConversationFlavor<Context & SessionFlavor<SessionData>> & MenuFlavor & {
