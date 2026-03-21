@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 import * as fs from "fs";
 import * as path from "path";
-import { MONO_TOKENS } from "../../config.js";
+import { MONO_TOKENS, EXCLUDED_IBANS } from "../../config.js";
 import { redis } from "../../core/redis.js";
 import prisma from "../../db/core.js";
 import logger from "../../core/logger.js";
@@ -162,7 +162,8 @@ class MonobankClient {
 
         // 2. Fallback: Only if NO IBANs are configured, try to detect FOP-like accounts
         return uahAccounts
-            .filter((acc: any) => acc.type === 'fop' || (acc.iban && acc.iban.includes('2600')))
+            .filter((acc: any) => (acc.type === 'fop' || (acc.iban && acc.iban.includes('2600'))) && 
+                                  (!acc.iban || !EXCLUDED_IBANS.includes(acc.iban.toUpperCase())))
             .map((acc: any) => acc.id);
     }
 
@@ -348,7 +349,7 @@ export const monobankService = {
                     // IBAN detection: 2600 is for business/FOP in Ukraine
                     if (accIban.includes('2600')) return true;
                     return false;
-                });
+                }).filter((acc: any) => !acc.iban || !EXCLUDED_IBANS.includes(acc.iban.toUpperCase()));
 
                 // Extreme Fallback: If still nothing but we have only one UAH account, it's likely it
                 if (fopAccounts.length === 0 && uahAccounts.length === 1) {
@@ -404,9 +405,10 @@ export const monobankService = {
 
                 const fopIbans = (MONO_FOP_IBANS[key.toUpperCase()] || []).map((i: string) => i.trim().toUpperCase());
                 const uahAccounts = info.accounts.filter((a: any) => a.currencyCode === 980);
-                const fopAccounts = fopIbans.length > 0
+                const fopAccounts = (fopIbans.length > 0
                     ? uahAccounts.filter((a: any) => a.iban && fopIbans.includes(a.iban.toUpperCase()))
-                    : uahAccounts.filter((a: any) => a.type === 'fop' || (a.iban && a.iban.includes('2600')));
+                    : uahAccounts.filter((a: any) => a.type === 'fop' || (a.iban && a.iban.includes('2600'))))
+                    .filter((a: any) => !a.iban || !EXCLUDED_IBANS.includes(a.iban.toUpperCase()));
 
                 for (const acc of fopAccounts) {
                     await client.getStatements(acc.id, from, to);
