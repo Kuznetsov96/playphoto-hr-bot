@@ -6,6 +6,7 @@ import { workShiftRepository } from '../repositories/work-shift-repository.js';
 import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP } from '../constants/logistics-constants.js';
+import { locationRepository } from '../repositories/location-repository.js';
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -167,10 +168,8 @@ export class LogisticsService {
         if (warehouseNumber) {
             const mapEntry = NP_LOCATIONS_MAP.find(e => e.npPoints.includes(warehouseNumber));
             if (mapEntry) {
-                const byName = await prisma.location.findFirst({
-                    where: { name: mapEntry.name, isHidden: false }
-                });
-                if (byName) return byName;
+                const byName = await locationRepository.findByName(mapEntry.name);
+                if (byName && (!mapEntry.city || byName.city === mapEntry.city)) return byName;
             }
         }
 
