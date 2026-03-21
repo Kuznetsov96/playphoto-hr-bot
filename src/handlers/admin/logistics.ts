@@ -197,14 +197,6 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true, responsibleStaff: true } });
 
     if (parcel?.contentPhotoId) {
-        const kyivTime = (parcel.updatedAt || new Date()).toLocaleString('uk-UA', { 
-            timeZone: 'Europe/Kyiv',
-            hour: '2-digit',
-            minute: '2-digit',
-            day: '2-digit',
-            month: '2-digit'
-        });
-
         const kb = new InlineKeyboard()
             .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcel.id}`)
             .text("🗑 Delete", `admin_parcel_delete_direct_${parcel.id}`);
@@ -218,8 +210,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
             caption: LOGISTICS_TEXTS_ADMIN.new_photo_caption({
                 ttn: parcel.ttn,
                 location: parcel.location?.name || 'Unknown',
-                sender: parcel.responsibleStaff?.fullName || 'Photographer',
-                time: kyivTime
+                sender: parcel.responsibleStaff?.fullName || 'Photographer'
             }),
             parse_mode: 'HTML',
             reply_markup: kb
