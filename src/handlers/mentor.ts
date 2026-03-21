@@ -90,7 +90,7 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
                 firstShiftTime: text 
             });
             
-            await ScreenManager.renderScreen(ctx, `✅ <b>Дата першої зміни оновлена на ${date} ${text}!</b>`, "mentor-action-success");
+            await ScreenManager.renderScreen(ctx, `✅ <b>First shift date updated to ${date} ${text}!</b>`, "mentor-action-success");
             ctx.session.step = "idle";
             ctx.session.adminFlow = undefined;
             return;
