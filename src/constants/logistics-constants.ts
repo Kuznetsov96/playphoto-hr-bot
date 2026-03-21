@@ -41,5 +41,11 @@ export const LOGISTICS_TEXTS_ADMIN = {
     'btn_view_photo': '🖼 View Content Photo',
     'alert_not_picked_up': (ttn: string, days: number) => `⚠️ <b>ALARM:</b> Parcel <code>${ttn}</code> has not been picked up for ${days} days!`,
     'confirmed': '✅ Parcel confirmed and cleared from active list.',
-    'new_photo_alert': (ttn: string, loc: string) => `📸 <b>New Content Photo Received!</b>\n\nParcel: <code>${ttn}</code>\nLocation: ${loc}\n\nPlease verify the contents.`
+    'new_photo_alert': (ttn: string, loc: string) => `📸 <b>New Content Photo Received!</b>\n\nParcel: <code>${ttn}</code>\nLocation: ${loc}\n\nPlease verify the contents.`,
+    'new_photo_caption': (p: { ttn: string, location: string, sender: string, time: string }) => 
+        `📸 <b>Content Photo for TTN:</b> <code>${p.ttn}</code>\n` +
+        `📍 <b>Location:</b> ${p.location}\n` +
+        `👤 <b>Photographer:</b> ${p.sender}\n` +
+        `🕐 <b>Received:</b> ${p.time}\n\n` +
+        `<i>Please verify the contents and confirm receipt.</i> ✨`
 };
