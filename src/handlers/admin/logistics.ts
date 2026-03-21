@@ -18,8 +18,9 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
         where: {
             status: { notIn: ['COMPLETED', 'CANCELLED'] }
         },
-        include: { location: true },
-        orderBy: { createdAt: 'desc' }
+        include: { location: true, responsibleStaff: true },
+        orderBy: { updatedAt: 'desc' },
+        take: 8
     });
 
     if (activeParcels.length === 0) {
@@ -169,13 +170,26 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_details_(.+)$/, async (
 // View Parcel Photo
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true } });
 
     if (parcel?.contentPhotoId) {
-        await ctx.replyWithPhoto(parcel.contentPhotoId, {
-            caption: `📸 Content photo for TTN: <code>${parcel.ttn}</code>`,
-            parse_mode: 'HTML'
-        });
+        const kb = new InlineKeyboard()
+            .text("✅ Все окей", `admin_parcel_confirm_${parcel.id}`)
+            .text("🗑 Видалити", `admin_parcel_delete_${parcel.id}`)
+            .row()
+            .text("⬅️ До списку", "admin_logistics_nav");
+
+        const options: any = {
+            caption: `📸 Фото вмісту ТТН: <code>${parcel.ttn}</code>\n📍 Локація: ${parcel.location?.name || 'Невідомо'}`,
+            parse_mode: 'HTML',
+            reply_markup: kb
+        };
+
+        if (TEAM_CHATS.LOGISTICS) {
+            options.message_thread_id = TEAM_CHATS.LOGISTICS;
+        }
+
+        await ctx.api.sendPhoto(ctx.chat!.id, parcel.contentPhotoId, options);
         await ctx.answerCallbackQuery();
     } else {
         await ctx.answerCallbackQuery("No photo available.");

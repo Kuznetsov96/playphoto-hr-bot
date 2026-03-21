@@ -189,7 +189,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                     contentPhotoId: photo.file_id,
                     status: 'VERIFYING'
                 },
-                include: { location: true }
+                include: { location: true, responsibleStaff: true }
             });
 
             ctx.session.step = 'idle';
@@ -201,9 +201,14 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 .row()
                 .text("✅ Everything is fine", `admin_parcel_confirm_${parcelId}`);
 
-            const text = `📸 <b>New Content Photo Received!</b>\n\nParcel: <code>${parcel.ttn}</code>\nLocation: ${parcel.location?.name || 'Unknown'}\n\nPlease verify the contents.`;
+            const text = `📸 <b>Нове фото вмісту!</b>\n\n` +
+                `<b>ТТН:</b> <code>${parcel.ttn}</code>\n` +
+                `<b>Локація:</b> ${parcel.location?.name || 'Невідомо'}\n` +
+                `<b>Від:</b> ${parcel.responsibleStaff?.fullName || 'Фотограф'}\n\n` +
+                `Будь ласка, перевірте вміст та підтвердіть отримання. ✨`;
 
             const options: any = { 
+                caption: text,
                 parse_mode: 'HTML', 
                 reply_markup: kb
             };
@@ -211,7 +216,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 options.message_thread_id = TEAM_CHATS.LOGISTICS;
             }
 
-            await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, text, options);
+            await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photo.file_id, options);
         } else {
             await ctx.reply("Будь ласка, надішли саме фото. 📸");
         }
