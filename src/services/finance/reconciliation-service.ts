@@ -244,33 +244,14 @@ export class ReconciliationService {
                                 let autoStatus = isEnv ? 'OK' : (Math.abs(diff) < 0.5 ? 'OK' : (actual === 0 ? 'MISSING' : 'MISMATCH'));
                                 let autoDetails = (candidates.length > 1 ? `(${candidates.length} пл.)` : '') + (isEnv ? ' (конверт)' : '') + (!isEnv && actual > 0 && Math.abs(actual - ddsTotal) > 1 ? ' ⚠️ NOT IN DDS' : '');
 
-                                // --- AUTO-BALANCE LOGIC (Solo Shifts Only) ---
-                                if (locShifts.length === 1 && !isEnv && autoStatus !== 'OK') {
-                                    const staff = locShifts[0]?.staff;
-                                    if (staff) {
-                                        const balance = (staff as any)?.salaryBalance || 0;
-
-                                        // Scenario 1: Recovery of past debt (Excess cash)
-                                        if (diff > 0 && Math.abs(diff - balance) < 0.5) {
-                                            autoStatus = 'OK';
-                                            autoDetails += ` ℹ️ Debt recovered: +${Math.round(diff)} UAH`;
-                                            diff = 0;
-                                            (locCfg as any).pendingBalanceUpdate = { staffId: staff.id, newBalance: 0 };
-                                        }
-                                        // Scenario 2: Recording new debt (Actual Cash < Total Salary)
-                                        else if (totalCash < totalSalary && actual === 0) {
-                                            const deficit = totalSalary - totalCash;
-                                            autoStatus = 'OK';
-                                            autoDetails += ` ℹ️ Auto-debt: -${Math.round(deficit)} UAH recorded`;
-                                            diff = 0;
-                                            (locCfg as any).pendingBalanceUpdate = { staffId: staff.id, newBalance: balance + deficit };
-                                        }
-                                        // Scenario 3: Partial deposit — took more than salary, no comment
-                                        else if (diff < 0 && !inc?.comment) {
-                                            const shortage = Math.abs(diff);
-                                            autoDetails += ` ⚠️ Salary shortage: -${Math.round(shortage)} UAH (no comment)`;
-                                            (locCfg as any).pendingBalanceUpdate = { staffId: staff.id, newBalance: balance + shortage };
-                                        }
+                                // --- INFORMATIVE LABELS (no DB writes) ---
+                                if (!isEnv && autoStatus !== 'OK') {
+                                    if (totalCash < totalSalary && actual === 0) {
+                                        const deficit = totalSalary - totalCash;
+                                        autoDetails += ` ℹ️ Salary > Cash: -${Math.round(deficit)} UAH (no transfer expected)`;
+                                    } else if (diff < 0 && !inc?.comment) {
+                                        const shortage = Math.abs(diff);
+                                        autoDetails += ` ⚠️ Salary shortage: -${Math.round(shortage)} UAH (no comment)`;
                                     }
                                 }
 
@@ -309,19 +290,6 @@ export class ReconciliationService {
                     }
                 });
 
-                for (const locCfg of relevantLocs) {
-                    const balanceUpdate = (locCfg as any).pendingBalanceUpdate;
-                    if (balanceUpdate) {
-                        try {
-                            const { staffRepository } = await import("../../repositories/staff-repository.js");
-                            await staffRepository.update(balanceUpdate.staffId, { salaryBalance: balanceUpdate.newBalance } as any);
-                            logger.info({ staffId: balanceUpdate.staffId, newBalance: balanceUpdate.newBalance }, "✅ Salary balance updated automatically");
-                        } catch (e) {
-                            logger.error({ err: e }, "❌ Failed to update salary balance");
-                        }
-                    }
-                }
-
                 results.push({ name: key, monoBalance, ddsBalance, diff: monoBalance - ddsBalance, matches: fopMatches });
 
                 // PHASE 3: Collect Remaining
@@ -355,7 +323,7 @@ export class ReconciliationService {
                     }
                 });
             }
-            return { success: true, results, unrecognized, expenses, incomes };
+            return { success: true, results, unrecognized, expenses, incomes, allStaff };
         } finally { this.isAuditRunning = false; }
     }
 
@@ -400,7 +368,19 @@ export class ReconciliationService {
                 `   💰 <b>BALANCE:</b> 🏦 ${fmt(fop.monoBalance)} | 📊 ${fmt(fop.ddsBalance)} (${d > 0 ? '🔺' : '🔻'} ${fmt(Math.abs(d))})\n\n`;
         });
 
-        const formatExtra = (title: string, list: any[]) => {
+        // Build staff surname → debt map for unrecognized hints
+        const staffDebtMap = new Map<string, { name: string; balance: number }>();
+        if (res.allStaff) {
+            for (const s of res.allStaff) {
+                const balance = (s as any).salaryBalance || 0;
+                if (balance > 0 && s.fullName) {
+                    const surname = s.fullName.split(' ')[0];
+                    if (surname) staffDebtMap.set(normalizeFinanceString(surname), { name: s.fullName, balance });
+                }
+            }
+        }
+
+        const formatExtra = (title: string, list: any[], addDebtHint = false) => {
             const chunks: string[] = [];
             if (!list?.length) return chunks;
             let current = `${title}\n`;
@@ -408,7 +388,17 @@ export class ReconciliationService {
                 const combined = ((tx.description || '') + " " + (tx.comment || '')).toLowerCase();
                 const tidMatch = combined.match(/pq\d+/);
                 const tidInfo = tidMatch ? ` [ID: <code>${tidMatch[0].toUpperCase()}</code>]` : '';
-                const line = `   • ${tx.amount / 100} UAH - <i>${esc(tx.description || '')} ${esc(tx.comment || '')}</i> [${esc(tx.fop)}]${tidInfo}\n`;
+                let debtHint = '';
+                if (addDebtHint && tx.amount > 0) {
+                    const normDesc = normalizeFinanceString(tx.description || '');
+                    for (const [normSurname, info] of staffDebtMap) {
+                        if (normDesc.includes(normSurname)) {
+                            debtHint = ` 💡 Debt: ${info.balance} UAH`;
+                            break;
+                        }
+                    }
+                }
+                const line = `   • ${tx.amount / 100} UAH - <i>${esc(tx.description || '')} ${esc(tx.comment || '')}</i> [${esc(tx.fop)}]${tidInfo}${debtHint}\n`;
                 if (current.length + line.length > 4000) { chunks.push(current); current = `${title} (cont.)\n`; }
                 current += line;
             });
@@ -418,7 +408,7 @@ export class ReconciliationService {
 
         return {
             main,
-            unrecognized: formatExtra(`❓ <b>UNRECOGNIZED INCOMING:</b>`, res.unrecognized),
+            unrecognized: formatExtra(`❓ <b>UNRECOGNIZED INCOMING:</b>`, res.unrecognized, true),
             expenses: formatExtra(`💸 <b>EXPENSES (not categorized):</b>`, res.expenses),
             actions
         };
