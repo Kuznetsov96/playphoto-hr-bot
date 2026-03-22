@@ -577,8 +577,6 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
         const tid = Number(cand.user?.telegramId);
         if (username) {
             range.url("💬 Contact Candidate", `https://t.me/${username}`);
-        } else if (tid) {
-            range.url("💬 Contact Candidate", `tg://user?id=${tid}`);
         }
         range.text("✍️ Message (Forum)", async (ctx) => {
             const { startAdminMessageFlow } = await import("../handlers/admin/search.js");
