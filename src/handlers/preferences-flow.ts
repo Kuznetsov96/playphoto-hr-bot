@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { preferencesService } from "../services/preferences-service.js";
 import type { PreferenceData } from "../services/preferences-service.js";
+import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 
@@ -19,6 +20,43 @@ preferencesHandlers.callbackQuery("pref_fill", async (ctx) => {
     await startPreferencesFlow(ctx);
 });
 
+preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!userId) return ctx.answerCallbackQuery();
+
+    // Mark all pending preference replies as declined → stops pinger
+    await pendingReplyRepository.updateMany(
+        { userId: BigInt(userId), status: "pending" },
+        { status: "declined", respondedAt: new Date() }
+    );
+
+    // Log opt-out to Google Sheets so admin sees who refused
+    try {
+        const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
+        const fullName = user?.staffProfile?.fullName || user?.candidate?.fullName || "Невідомий";
+        const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
+
+        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
+        const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
+
+        await preferencesService.savePreference({
+            timestamp,
+            fullNameDot: fullName,
+            unworkableDays: "🚫 Відмовилась заповнювати",
+            comment: "",
+            telegramId: userId.toString(),
+            monthName,
+            logOnly: true
+        });
+    } catch (e) {
+        logger.error({ err: e, userId }, "Failed to log pref opt-out to Sheets");
+    }
+
+    await ctx.answerCallbackQuery("🚫 Нагадування вимкнено.");
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+});
+
 export async function startPreferencesFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -32,7 +70,14 @@ export async function startPreferencesFlow(ctx: MyContext) {
 
     const now = new Date();
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-    const targetMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth(), 1);
+
+    const isNewCandidate = user?.candidate?.currentStep === "FIRST_SHIFT";
+    const isLateInMonth = kyivNow.getDate() >= 23;
+
+    // Active staff after 23rd → jump straight to next month
+    // New candidates after 23rd → start with current month, then chain to next
+    const monthOffset = (!isNewCandidate && isLateInMonth) ? 1 : 0;
+    const targetMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + monthOffset, 1);
 
     ctx.session.preferencesData = {
         month: targetMonthDate.toLocaleString('uk-UA', { month: 'long' }),
@@ -40,7 +85,7 @@ export async function startPreferencesFlow(ctx: MyContext) {
         selectedDays: [],
         comment: "",
         step: 'CALENDAR',
-        forceNextMonth: kyivNow.getDate() >= 23
+        forceNextMonth: isNewCandidate && isLateInMonth
     };
 
     await renderCalendar(ctx);
@@ -210,6 +255,12 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         } catch {
             await preferencesService.savePreference(prefData);
         }
+
+        // Mark pending reply as confirmed → stops pinger reminders
+        await pendingReplyRepository.updateMany(
+            { userId: BigInt(telegramId!), status: "pending" },
+            { status: "confirmed", respondedAt: new Date() }
+        );
 
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         const currentMonthName = kyivNow.toLocaleString('uk-UA', { month: 'long' });
