@@ -7,6 +7,7 @@ import { adminMenu } from "./admin/index.js";
 import { cleanupMessages, trackMessage } from "../utils/cleanup.js";
 import { checkBirthdays } from "../services/birthday-service.js";
 import { userRepository } from "../repositories/user-repository.js";
+import prisma from "../db/core.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { staffService } from "../modules/staff/services/index.js";
@@ -91,6 +92,12 @@ commandHandlers.command("start", async (ctx) => {
         }
 
         ctx.session.step = "idle";
+
+        // Clear bot-blocked flag (user unblocked bot and pressed /start)
+        await prisma.user.updateMany({
+            where: { telegramId: BigInt(userId), botBlockedAt: { not: null } },
+            data: { botBlockedAt: null }
+        }).catch(() => {});
 
         // 0. Handle Deep-links (Broadcast Query & Source Tracking)
         if (payload?.startsWith("bcq_")) {
