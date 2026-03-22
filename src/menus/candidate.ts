@@ -16,11 +16,15 @@ candidateGenderMenu
     .text(CANDIDATE_TEXTS["candidate-btn-gender-female"], async (ctx) => {
         ctx.session.candidateData.gender = "female";
         ctx.session.step = "screening_birthdate";
+        const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
+        await persistCandidate(ctx, { gender: "female" });
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birthday"], undefined, { pushToStack: true });
     })
     .text(CANDIDATE_TEXTS["candidate-btn-gender-male"], async (ctx) => {
         ctx.session.candidateData.gender = "male";
         ctx.session.step = "screening_birthdate";
+        const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
+        await persistCandidate(ctx, { gender: "male" });
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birthday"], undefined, { pushToStack: true });
     })
     .row()
@@ -35,7 +39,9 @@ candidateCityMenu.dynamic(async (ctx, range) => {
         range.text(city, async (ctx) => {
             ctx.session.candidateData.city = city;
             ctx.session.candidateData.locationIds = [];
-            
+            const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
+            await persistCandidate(ctx, { city });
+
             const locations = await locationRepository.findByCity(city, true);
             if (locations.length === 0) {
                 const { handleNoVacancies } = await import("../modules/candidate/handlers/index.js");
