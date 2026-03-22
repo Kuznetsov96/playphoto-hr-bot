@@ -30,6 +30,7 @@ model User {
   outgoingTopics       OutgoingTopic[]
   lastSupportMessageId Int?
   isBlocked            Boolean             @default(false)
+  botBlockedAt         DateTime?           // Auto-set when bot gets 403, cleared on /start
 }
 
 model Broadcast {

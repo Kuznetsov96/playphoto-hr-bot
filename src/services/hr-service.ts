@@ -345,8 +345,14 @@ export const hrService = {
             return true;
         } catch (e: any) {
             logger.warn({ err: e, candId, tid }, "inviteCandidate: failed to send invitation");
-            // Still mark as notified to avoid retrying blocked users
             await candidateRepository.update(candId, { notificationSent: true }).catch(() => {});
+            // Mark user as bot-blocked so they're excluded from future broadcasts
+            if (e.error_code === 403) {
+                await prisma.user.update({
+                    where: { id: cand.user.id },
+                    data: { botBlockedAt: new Date() }
+                }).catch(() => {});
+            }
             return false;
         }
     },
@@ -358,6 +364,7 @@ export const hrService = {
         const candidates = await prisma.candidate.findMany({
             where: {
                 city,
+                user: { botBlockedAt: null },
                 OR: [
                     { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
                     { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
@@ -366,13 +373,12 @@ export const hrService = {
             },
             include: { user: true },
             orderBy: {
-                // Older candidates first
-                id: 'asc' // Assuming cuid or similar that is roughly time-sortable. Ideally createdAt if available.
+                id: 'asc'
             }
         });
 
         const filtered = candidates.filter(c => {
-            if (c.status === CandidateStatus.WAITLIST) return true; // Waitlist candidates always included
+            if (c.status === CandidateStatus.WAITLIST) return true;
             return includeNotified || !c.notificationSent;
         });
 
@@ -490,6 +496,7 @@ export const hrService = {
             const candidates = await prisma.candidate.findMany({
                 where: {
                     locationId: loc.id,
+                    user: { botBlockedAt: null },
                     OR: [
                         { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
                         { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
