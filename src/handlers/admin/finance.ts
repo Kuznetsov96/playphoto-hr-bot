@@ -134,6 +134,7 @@ financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
         const locName = action.location;
         keyboard.text(`${idx + 1}. 📍 ${locName}${askedIcon}`, `audit_action_detail:${idx}:${dateStr}`).row();
     });
+    keyboard.text(`⬅️ Back`, `admin_finance_back`);
 
     try {
         await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: keyboard });
