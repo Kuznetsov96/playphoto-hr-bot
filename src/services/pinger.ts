@@ -32,9 +32,11 @@ async function runPinger(bot: Bot<MyContext>) {
             // 2. Format ping message
             let text = "";
             const isPrivate = Number(msg.chatId) > 0;
+            const isPreferences = msg.broadcast?.messageText?.includes("Побажання");
 
-            if (isPrivate) {
-                // Private chat reminder
+            if (isPrivate && isPreferences) {
+                text = `🔔 <b>Нагадування!</b>\nТи ще не заповнив побажання по графіку. Натисни кнопку нижче 👇`;
+            } else if (isPrivate) {
                 text = `🔔 <b>Нагадування!</b>\nБудь ласка, натисніть кнопку "Підтвердити" у повідомленні вище 👆`;
             } else {
                 // Group chat reminder with mentions
@@ -56,9 +58,8 @@ async function runPinger(bot: Bot<MyContext>) {
                 }
             }
 
-            // 4. Build keyboard for ping (Apple HIG: Contextual actions)
+            // 4. Build keyboard for ping
             const kb = new InlineKeyboard();
-            const isPreferences = msg.broadcast?.messageText?.includes("Побажання");
 
             if (isPreferences) {
                 kb.text("🗓 Заповнити зараз", "pref_fill");
