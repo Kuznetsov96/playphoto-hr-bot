@@ -824,10 +824,14 @@ hrBroadcastConfirmMenu.text("✅ Confirm & Send", async (ctx) => {
 
     const newCandidates = await hrService.getBroadcastCandidates(city, false, locationId, limit);
     await ctx.answerCallbackQuery("Broadcast started...");
+    let sent = 0;
     for (const cand of newCandidates) {
-        await hrService.inviteCandidate(ctx.api, cand.id);
+        const ok = await hrService.inviteCandidate(ctx.api, cand.id);
+        if (ok) sent++;
     }
-    await ctx.reply(`📢 Broadcast finished! Sent ${newCandidates.length} invitations.`);
+    const failedCount = newCandidates.length - sent;
+    const failedNote = failedCount > 0 ? ` (${failedCount} unreachable)` : '';
+    await ctx.reply(`📢 Broadcast finished! Sent ${sent}/${newCandidates.length} invitations.${failedNote}`);
     delete ctx.session.broadcastLocationId;
     delete (ctx.session as any).broadcastLimit;
     await ScreenManager.goBack(ctx, "📣 <b>Broadcasts & Tools</b>", "hr-tools");
