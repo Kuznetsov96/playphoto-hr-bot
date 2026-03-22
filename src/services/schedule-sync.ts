@@ -451,6 +451,8 @@ export class ScheduleSyncService {
             'volkland 1': { name: 'volkland 1', city: 'Запоріжжя' },
             'volkland 2': { name: 'volkland 2', city: 'Запоріжжя' },
             'volkland 3': { name: 'volkland 3', city: 'Запоріжжя' },
+            'volkland': { name: 'volkland 1', city: 'Запоріжжя' },
+            'волкланд': { name: 'volkland 1', city: 'Запоріжжя' },
             'карамель к': { name: 'karamel', city: 'Коломия' },
             'карамель с': { name: 'karamel', city: 'Самбір' },
             'карамель ч': { name: 'karamel', city: 'Шептицький' },
@@ -486,6 +488,7 @@ export class ScheduleSyncService {
             .replace(/^leoland$/g, 'leoland')
             .replace(/^leo$/g, 'leoland')
             .replace(/^dh\s+/g, 'dytyache horyshche ')
+            .replace(/^волкланд/g, 'volkland')
             .replace(/^карамель\s+к$/g, 'карамель коломия')
             .replace(/^карамель\s+с$/g, 'карамель самбір')
             .replace(/^карамель\s+ч$/g, 'карамель шептицький');
@@ -499,6 +502,7 @@ export class ScheduleSyncService {
             ["drive", "дриве", "драйв"],
             ["fly kids", "флай кідс", "fk"],
             ["smile park", "смайл парк", "sp"],
+            ["volkland", "волкланд"]
         ];
 
         const getGroups = (text: string) => {
