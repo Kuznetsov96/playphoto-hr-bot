@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { NOVA_POSHTA_API_KEY, NP_RECIPIENT_PHONE } from '../config.js';
+import { NOVA_POSHTA_API_KEY } from '../config.js';
 import logger from '../core/logger.js';
 
 export interface NPTrackingResult {
@@ -111,19 +111,26 @@ export class NovaPoshtaService {
     }
 
     /**
-     * Create electronic proxy (Довірена особа / Інший отримувач)
+     * Change recipient on a parcel (Зміна даних отримувача)
+     * Uses AdditionalServiceGeneral.save with OrderType=orderChangeEW
      */
-    async createTrustee(ttn: string, trusteePhone: string): Promise<boolean> {
-        // Method 'orderTrustee' (or similar 'changeEW') is used to assign a trustee
-        const result = await this.callApi('AdditionalService', 'save', {
-            OrderType: 'orderTrustee',
+    async createTrustee(ttn: string, recipientPhone: string, recipientName?: string): Promise<boolean> {
+        const methodProperties: Record<string, string> = {
+            OrderType: 'orderChangeEW',
             IntDocNumber: ttn,
-            CustomerPhone: NP_RECIPIENT_PHONE, // Sender/Main Recipient's phone authorizing the proxy
-            TrusteePhone: trusteePhone
-        });
+            RecipientPhone: recipientPhone,
+            PayerType: 'Recipient',
+            PaymentMethod: 'Cash'
+        };
+
+        if (recipientName) {
+            methodProperties.RecipientContactName = recipientName;
+        }
+
+        const result = await this.callApi('AdditionalServiceGeneral', 'save', methodProperties);
 
         if (!result) {
-            logger.warn({ ttn, trusteePhone }, '📦 NP Proxy API failed. Ensure the API key has privileges for orderTrustee, or try through the mobile app.');
+            logger.warn({ ttn, recipientPhone, recipientName }, '📦 NP changeEW API failed. Check API key privileges or try through the NP mobile app.');
             return false;
         }
 

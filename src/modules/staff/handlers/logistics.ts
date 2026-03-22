@@ -105,11 +105,11 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
         const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-        await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
+        await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse, user?.staffProfile?.fullName);
     }
 
     const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
-    
+
     await ctx.editMessageText("Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨", {
         parse_mode: 'HTML',
         reply_markup: kb
@@ -161,14 +161,11 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             ctx.session.step = 'idle';
             const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
             
-            // Auto-trigger the API request if we just saved the phone. 
-            // The logic normally triggers on "Confirm", but here they just entered it correctly.
-            // But wait, the previous logic just showed "Number saved! Press the button below when you pick it up".
-            // So we need to trigger createTrustee right here!
+            // Auto-trigger the API request if we just saved the phone.
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
             if (parcel) {
                 const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-                await novaPoshtaService.createTrustee(parcel.ttn, phone);
+                await novaPoshtaService.createTrustee(parcel.ttn, phone, user?.staffProfile?.fullName);
             }
 
             await ctx.reply("Номер збережено і API-запит відправлено! Натисни кнопку нижче, як забереш посилку та зробиш фото. ✨", { reply_markup: kb });
