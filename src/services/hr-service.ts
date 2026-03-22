@@ -322,25 +322,33 @@ export const hrService = {
 
         const tid = Number(cand.user.telegramId);
 
-        await cleanupUserSessionMessages(api, tid);
-        const locName = cand.location?.name || cand.city || 'вашого міста';
-        const msg = await api.sendMessage(tid,
-            STAFF_TEXTS["hr-info-broadcast-item"]({ locationName: locName } as any),
-            {
-                reply_markup: new InlineKeyboard()
-                    .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
-                    .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
-            }
-        );
+        try {
+            await cleanupUserSessionMessages(api, tid);
+            const locName = cand.location?.name || cand.city || 'вашого міста';
+            const msg = await api.sendMessage(tid,
+                STAFF_TEXTS["hr-info-broadcast-item"]({ locationName: locName } as any),
+                {
+                    parse_mode: "HTML",
+                    reply_markup: new InlineKeyboard()
+                        .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
+                        .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
+                }
+            );
 
-        if (msg) await trackUserMessage(tid, msg.message_id);
-        await candidateRepository.update(candId, {
-            notificationSent: true,
-            status: CandidateStatus.SCREENING,
-            interviewInvitedAt: new Date()
-        });
+            if (msg) await trackUserMessage(tid, msg.message_id);
+            await candidateRepository.update(candId, {
+                notificationSent: true,
+                status: CandidateStatus.SCREENING,
+                interviewInvitedAt: new Date()
+            });
 
-        return true;
+            return true;
+        } catch (e: any) {
+            logger.warn({ err: e, candId, tid }, "inviteCandidate: failed to send invitation");
+            // Still mark as notified to avoid retrying blocked users
+            await candidateRepository.update(candId, { notificationSent: true }).catch(() => {});
+            return false;
+        }
     },
 
     async getBroadcastCandidates(city: string, includeNotified: boolean = false, locationId?: string | null, limit?: number) {
