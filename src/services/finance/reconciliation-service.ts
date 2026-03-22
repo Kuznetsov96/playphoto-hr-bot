@@ -213,7 +213,9 @@ export class ReconciliationService {
 
                         if (isKuz) {
                             const totalCash = inc?.totalCash || 0;
-                            const totalSalary = inc?.totalSalary || 0;
+                            const perPersonSalary = inc?.totalSalary || 0;
+                            const staffCount = Math.max(locShifts.length, 1);
+                            const totalSalary = perPersonSalary * staffCount;
                             const cashExp = totalCash - totalSalary;
 
                             if (totalCash > 0 || displaySurnames.length > 0) {
