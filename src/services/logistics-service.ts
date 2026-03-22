@@ -37,7 +37,10 @@ export class LogisticsService {
             // 2. Sync existing active parcels via Tracking API (Manual & Auto)
             await this.syncActiveParcelsStatus();
 
-            // 3. Check for stale parcels (ARRIVED > 2 days)
+            // 3. Remind staff to upload content photo (2h after pickup)
+            await this.remindPhotoUpload();
+
+            // 4. Check for stale parcels (ARRIVED > 2 days)
             await this.checkStaleParcels();
         } catch (error) {
             logger.error({ err: error }, '📦 Error during logistics sync');
@@ -396,6 +399,44 @@ export class LogisticsService {
             case '10':
             case '11': return 'COMPLETED';
             default: return 'EXPECTED';
+        }
+    }
+
+    /**
+     * Reminds staff to upload content photo 2h after picking up a parcel
+     */
+    private async remindPhotoUpload() {
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+        const parcels = await prisma.parcel.findMany({
+            where: {
+                status: { in: ['PICKUP_IN_PROGRESS', 'DELIVERED'] },
+                contentPhotoId: null,
+                photoReminderSentAt: null,
+                responsibleStaffId: { not: null },
+                updatedAt: { lt: twoHoursAgo }
+            },
+            include: { responsibleStaff: { include: { user: true } }, location: true }
+        });
+
+        for (const parcel of parcels) {
+            const tid = parcel.responsibleStaff?.user?.telegramId;
+            if (!tid) continue;
+
+            const kb = new InlineKeyboard()
+                .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+
+            await bot.api.sendMessage(Number(tid),
+                `⏰ <b>Нагадування:</b> будь ласка, завантаж фото вмісту посилки <code>${parcel.ttn}</code> (${parcel.location?.name || ''}).\n\nНатисни кнопку нижче: 📸`,
+                { parse_mode: 'HTML', reply_markup: kb }
+            ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send photo reminder'));
+
+            await prisma.parcel.update({
+                where: { id: parcel.id },
+                data: { photoReminderSentAt: new Date() }
+            });
+
+            logger.info({ ttn: parcel.ttn }, '📦 Photo upload reminder sent');
         }
     }
 

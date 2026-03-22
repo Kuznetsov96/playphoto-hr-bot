@@ -178,13 +178,20 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
     if (step.startsWith('awaiting_parcel_photo_')) {
         const parcelId = step.replace('awaiting_parcel_photo_', '');
         const photo = ctx.message?.photo?.[ctx.message.photo.length - 1];
-        
+
         if (photo) {
+            const telegramId = ctx.from?.id;
+            const uploader = telegramId ? await prisma.user.findUnique({
+                where: { telegramId: BigInt(telegramId) },
+                include: { staffProfile: true }
+            }) : null;
+
             const parcel = await prisma.parcel.update({
                 where: { id: parcelId },
-                data: { 
+                data: {
                     contentPhotoId: photo.file_id,
-                    status: 'VERIFYING'
+                    status: 'VERIFYING',
+                    ...(uploader?.staffProfile ? { responsibleStaffId: uploader.staffProfile.id } : {})
                 },
                 include: { location: true, responsibleStaff: true }
             });
