@@ -165,7 +165,14 @@ export class ReconciliationService {
                                     }
                                     if ((locCfg as any).searchId) {
                                         const idRegex = new RegExp(`(?:ф[оo]т[оo]|друк|ф|№|#|ід|id|п)[\\.\\s:]*${String((locCfg as any).searchId)}(\\D|$)`, 'i');
-                                        if (idRegex.test(combined)) return true;
+                                        if (idRegex.test(combined)) {
+                                            // If the transaction description contains a staff surname,
+                                            // it's likely a staff P2P transfer (not a client terminal payment)
+                                            // — skip it here so it can be matched as cash instead
+                                            const normC = normalizeFinanceString(combined);
+                                            const isStaffTx = displaySurnames.some(s => normC.includes(normalizeFinanceString(s)));
+                                            if (!isStaffTx) return true;
+                                        }
                                     }
                                     if (isFopMatch && !((locCfg as any).terminalId) && !((locCfg as any).searchId) && inc) {
                                         return normalizeFinanceString(combined).includes(normalizeFinanceString(inc.locationName));
