@@ -54,11 +54,23 @@ export const updateCalendarDashboard = async (ctx: MyContext) => {
 // --- MENUS (Declared first) ---
 export const mentorRootMenu = new Menu<MyContext>("mentor-root");
 menuRegistry.register(mentorRootMenu);
-export const mentorHubMenu = new Menu<MyContext>("mentor-hub-menu");
+export const mentorHubMenu = new Menu<MyContext>("mentor-hub-menu", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorHubMenu);
-export const mentorInboxMenu = new Menu<MyContext>("mentor-inbox");
+export const mentorInboxMenu = new Menu<MyContext>("mentor-inbox", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorInboxMenu);
-export const mentorMessagesMenu = new Menu<MyContext>("mentor-messages");
+export const mentorMessagesMenu = new Menu<MyContext>("mentor-messages", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorMessagesMenu);
 export const mentorInboxDetailsMenu = new Menu<MyContext>("mentor-inbox-details");
 menuRegistry.register(mentorInboxDetailsMenu);
@@ -68,13 +80,29 @@ export const mentorManualTimeSelectionMenu = new Menu<MyContext>("mentor-manual-
 menuRegistry.register(mentorManualTimeSelectionMenu);
 export const mentorManualTrainingTimeMenu = new Menu<MyContext>("mentor-manual-time");
 menuRegistry.register(mentorManualTrainingTimeMenu);
-export const mentorTrainingDatesMenu = new Menu<MyContext>("mentor-training-dates");
+export const mentorTrainingDatesMenu = new Menu<MyContext>("mentor-training-dates", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorTrainingDatesMenu);
-export const mentorTrainingDayViewMenu = new Menu<MyContext>("mentor-training-day-view");
+export const mentorTrainingDayViewMenu = new Menu<MyContext>("mentor-training-day-view", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorTrainingDayViewMenu);
-export const mentorOnboardingMenu = new Menu<MyContext>("mentor-onboarding");
+export const mentorOnboardingMenu = new Menu<MyContext>("mentor-onboarding", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorOnboardingMenu);
-export const mentorOnboardingDayMenu = new Menu<MyContext>("mentor-onboarding-day");
+export const mentorOnboardingDayMenu = new Menu<MyContext>("mentor-onboarding-day", {
+    onMenuOutdated: async (ctx) => {
+        await ctx.menu.update();
+    },
+});
 menuRegistry.register(mentorOnboardingDayMenu);
 export const mentorOnboardingDetailsMenu = new Menu<MyContext>("mentor-onboarding-details");
 menuRegistry.register(mentorOnboardingDetailsMenu);
