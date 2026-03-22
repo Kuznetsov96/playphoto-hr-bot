@@ -9,8 +9,9 @@ export interface PreferenceData {
     fullNameDot: string;    // B: Surname Name. (Col N from employee table)
     unworkableDays: string; // D: Comma-separated days or "Немає побажань за вихідними"
     comment: string;        // E: Photographer's comment
-    telegramId?: string;    
-    monthName?: string;     
+    telegramId?: string;
+    monthName?: string;
+    logOnly?: boolean;      // If true, only append to log sheet, skip 'В роботі' update
 }
 
 class PreferencesService {
@@ -70,7 +71,7 @@ class PreferencesService {
             });
 
             // --- 2. Update 'В роботі' sheet (Column S for Current Month, T for Next) ---
-            if (data.telegramId && data.monthName) {
+            if (data.telegramId && data.monthName && !data.logOnly) {
                 const response = await this.sheets.spreadsheets.values.get({
                     spreadsheetId: this.spreadsheetId,
                     range: "'В роботі'!A:R",
