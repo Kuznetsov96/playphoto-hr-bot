@@ -47,7 +47,7 @@ const CandidateSchema = z.object({
 
 // --- CORE LOGIC ---
 
-async function persistCandidate(ctx: MyContext, data: any) {
+export async function persistCandidate(ctx: MyContext, data: any) {
     const { userRepository, candidateRepository } = ctx.di;
     const telegramId = BigInt(ctx.from?.id || 0);
 
@@ -344,6 +344,7 @@ candidateHandlers.on("message:text", async (ctx, next) => {
                 if (val.success) {
                     ctx.session.candidateData.birthDate = date.toISOString();
                     ctx.session.step = "screening_city";
+                    await persistCandidate(ctx, { birthDate: date });
                     await triggerPrompt(ctx, "screening_city");
                 } else {
                     await ScreenManager.renderScreen(ctx, `⚠️ ${val.error.issues[0]?.message}\n\n${CANDIDATE_TEXTS["candidate-ask-birthday"]}`);
@@ -385,6 +386,7 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](targetLoc?.name || city, city));
         return;
     }
+    await persistCandidate(ctx, { city, locationId: finalLocationId });
     ctx.session.step = "screening_appearance_prompt";
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance");
 }
@@ -394,6 +396,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
 
     ctx.session.candidateData.appearance = appearance;
     if (tattooPhotoId) ctx.session.candidateData.tattooPhotoId = tattooPhotoId;
+    await persistCandidate(ctx, { appearance, ...(tattooPhotoId ? { tattooPhotoId } : {}) });
 
     if (!ctx.session.candidateData.source) {
         ctx.session.step = "screening_source";
