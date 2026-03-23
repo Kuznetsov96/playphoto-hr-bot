@@ -6,6 +6,7 @@ import type { PreferenceData } from "../services/preferences-service.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
+import { redis } from "../core/redis.js";
 
 
 export const preferencesHandlers = new Composer<MyContext>();
@@ -36,18 +37,11 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
         const fullName = user?.staffProfile?.fullName || user?.candidate?.fullName || "Невідомий";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
 
-        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-        const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
-        const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
-
         await preferencesService.savePreference({
             timestamp,
             fullNameDot: fullName,
             unworkableDays: "🚫 Відмовилась заповнювати",
-            comment: "",
-            telegramId: userId.toString(),
-            monthName,
-            logOnly: true
+            comment: ""
         });
     } catch (e) {
         logger.error({ err: e, userId }, "Failed to log pref opt-out to Sheets");
@@ -244,9 +238,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             timestamp,
             fullNameDot: staffNameForTable,
             unworkableDays: daysStr,
-            comment: comment || "",
-            telegramId: telegramId!.toString(),
-            monthName: month || ""
+            comment: comment || ""
         };
 
         try {
@@ -261,6 +253,10 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             { userId: BigInt(telegramId!), status: "pending" },
             { status: "confirmed", respondedAt: new Date() }
         );
+
+        // Mark this user as having filled preferences for this month → broadcast will skip them
+        const prefFilledKey = `pref_filled:${telegramId}:${month}`;
+        await redis.set(prefFilledKey, "1", "EX", 40 * 24 * 60 * 60); // 40 days TTL
 
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         const currentMonthName = kyivNow.toLocaleString('uk-UA', { month: 'long' });
@@ -339,21 +335,23 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             }
         }
 
-        const { ADMIN_IDS } = await import("../config.js");
-        if (ADMIN_IDS.length > 0) {
-            const wasNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
-            const adminNotifyText = `📅 <b>New Schedule Preferences!</b>\n\n` +
-                `👤 Staff: <b>${staffNameForTable}</b>\n` +
-                `📅 Month: <b>${month}</b>\n` +
-                `🚫 Weekends: <b>${daysStr}</b>\n` +
-                `💬 Comment: ${comment || 'none'}\n\n` +
-                (shouldMoveToNext ? `⏳ Waiting for the next month to be filled...` :
-                    wasNewCandidate ? `✅ Auto-hired! Please add shifts to the schedule.` :
-                        `You can now update the schedule! ✨`);
+        // Only notify admin for new candidates (auto-hire), not for regular staff filling monthly preferences
+        const wasNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
+        if (wasNewCandidate) {
+            const { ADMIN_IDS } = await import("../config.js");
+            if (ADMIN_IDS.length > 0) {
+                const adminNotifyText = `📅 <b>New Schedule Preferences!</b>\n\n` +
+                    `👤 Staff: <b>${staffNameForTable}</b>\n` +
+                    `📅 Month: <b>${month}</b>\n` +
+                    `🚫 Weekends: <b>${daysStr}</b>\n` +
+                    `💬 Comment: ${comment || 'none'}\n\n` +
+                    (shouldMoveToNext ? `⏳ Waiting for the next month to be filled...` :
+                        `✅ Auto-hired! Please add shifts to the schedule.`);
 
-            await ctx.api.sendMessage(ADMIN_IDS[0]!, adminNotifyText, {
-                parse_mode: "HTML"
-            });
+                await ctx.api.sendMessage(ADMIN_IDS[0]!, adminNotifyText, {
+                    parse_mode: "HTML"
+                });
+            }
         }
     } catch (e: any) {
         logger.error({ err: e }, "Pref save failed");

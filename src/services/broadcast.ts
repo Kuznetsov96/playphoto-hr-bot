@@ -9,6 +9,7 @@ import { trackedMessageRepository } from "../repositories/tracked-message-reposi
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
 import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
+import { redis } from "../core/redis.js";
 import fs from "fs";
 
 interface BroadcastStats {
@@ -228,8 +229,25 @@ export const broadcastService = {
             }
         }
 
+        // For preferences broadcasts, determine the target month to check if users already filled
+        let prefMonthName: string | null = null;
+        if (buttonType === 'preferences') {
+            const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+            const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
+            prefMonthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
+        }
+
         for (const userId of users) {
             try {
+                // Skip users who already filled preferences for this month (via menu button)
+                if (prefMonthName) {
+                    const alreadyFilled = await redis.get(`pref_filled:${userId}:${prefMonthName}`);
+                    if (alreadyFilled) {
+                        logger.info({ userId, month: prefMonthName }, "⏭️ Skipping preferences broadcast — already filled");
+                        continue;
+                    }
+                }
+
                 const sentMsg = await send(userId, false);
                 if (buttonType !== 'none') {
                     const tracked = await trackedMessageRepository.create({

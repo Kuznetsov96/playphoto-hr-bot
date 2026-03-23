@@ -2,22 +2,19 @@ import { existsSync } from "fs";
 import { google } from "googleapis";
 import path from "path";
 import logger from "../core/logger.js";
-import { SPREADSHEET_ID_TEAM } from "../config.js";
+import { SPREADSHEET_ID_SCHEDULE } from "../config.js";
 
 export interface PreferenceData {
     timestamp: string;      // A: Date and time of filling
-    fullNameDot: string;    // B: Surname Name. (Col N from employee table)
-    unworkableDays: string; // D: Comma-separated days or "Немає побажань за вихідними"
+    fullNameDot: string;    // B: Surname Name.
+    unworkableDays: string; // D: Comma-separated days or "Немає побажань"
     comment: string;        // E: Photographer's comment
-    telegramId?: string;
-    monthName?: string;
-    logOnly?: boolean;      // If true, only append to log sheet, skip 'В роботі' update
 }
 
 class PreferencesService {
     private auth: any;
     private sheets: any;
-    private spreadsheetId = SPREADSHEET_ID_TEAM;
+    private spreadsheetId = SPREADSHEET_ID_SCHEDULE;
 
     constructor() {
         const KEY_PATH = path.join(process.cwd(), 'google-service-account.json');
@@ -44,7 +41,7 @@ class PreferencesService {
     }
 
     /**
-     * Appends preference data to the spreadsheet and updates the main 'В роботі' list.
+     * Appends preference data to the 'Недоступность' sheet in the schedule spreadsheet.
      */
     async savePreference(data: PreferenceData) {
         try {
@@ -69,44 +66,6 @@ class PreferencesService {
                 insertDataOption: 'INSERT_ROWS',
                 requestBody: { values: logValues },
             });
-
-            // --- 2. Update 'В роботі' sheet (Column S for Current Month, T for Next) ---
-            if (data.telegramId && data.monthName && !data.logOnly) {
-                const response = await this.sheets.spreadsheets.values.get({
-                    spreadsheetId: this.spreadsheetId,
-                    range: "'В роботі'!A:R",
-                });
-
-                const rows = response.data.values || [];
-                let targetRowIndex = -1;
-
-                // Find employee row by Telegram ID (Column R is index 17)
-                for (let i = 1; i < rows.length; i++) {
-                    const row = rows[i];
-                    if (row && String(row[17]) === String(data.telegramId)) {
-                        targetRowIndex = i + 1;
-                        break;
-                    }
-                }
-
-                if (targetRowIndex !== -1) {
-                    const now = new Date();
-                    const currentMonthName = now.toLocaleString('uk-UA', { month: 'long' });
-                    
-                    // Determine column: S (index 18) or T (index 19)
-                    const isCurrentMonth = data.monthName.toLowerCase() === currentMonthName.toLowerCase();
-                    const column = isCurrentMonth ? 'S' : 'T';
-                    
-                    await this.sheets.spreadsheets.values.update({
-                        spreadsheetId: this.spreadsheetId,
-                        range: `'В роботі'!${column}${targetRowIndex}`,
-                        valueInputOption: 'USER_ENTERED',
-                        requestBody: { values: [[formattedDays]] },
-                    });
-                    
-                    logger.info({ fullName: data.fullNameDot, month: data.monthName, column }, "✅ Availability updated in 'В роботі' sheet");
-                }
-            }
 
             logger.info({ fullName: data.fullNameDot }, "✅ Preference saved to Google Sheets log");
             return true;
