@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import path from "path";
 import fs from "fs";
 import type { Location } from "@prisma/client";
+import { candidateRepository } from "../repositories/candidate-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
@@ -290,7 +291,14 @@ export class ScheduleSyncService {
                 }
 
                 if (isActive && user.role === "CANDIDATE") {
-                    await userRepository.update(user.id, { role: "STAFF" });
+                    // Only promote to STAFF if candidate finished the funnel
+                    const cand = await candidateRepository.findByUserId(user.id);
+                    const hireReady = cand && (cand.status === "AWAITING_FIRST_SHIFT" || cand.status === "HIRED");
+                    if (hireReady) {
+                        await userRepository.update(user.id, { role: "STAFF" });
+                    } else {
+                        logger.warn({ fullName, status: cand?.status }, "⚠️ [SYNC] Skipping role→STAFF: candidate still in recruitment funnel");
+                    }
                 }
             } catch (err) {
                 logger.error({ err, fullName }, "❌ Error syncing staff member");
