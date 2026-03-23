@@ -89,7 +89,7 @@ export async function startPreferencesFlow(ctx: MyContext) {
                 .text("✏️ Змінити побажання", "pref_force_edit")
                 .text("⬅️ Назад", "staff_hub_nav");
             await ScreenManager.renderScreen(ctx,
-                `✅ <b>Ти вже заповнив/ла побажання на цей місяць!</b>\n\nЯкщо хочеш змінити — натисни кнопку нижче.`,
+                `✅ <b>Ти вже заповнила побажання на цей місяць!</b>\n\nЯкщо хочеш змінити — натисни кнопку нижче.`,
                 kb, { forceNew: true });
             return;
         }
