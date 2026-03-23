@@ -21,6 +21,12 @@ preferencesHandlers.callbackQuery("pref_fill", async (ctx) => {
     await startPreferencesFlow(ctx);
 });
 
+preferencesHandlers.callbackQuery("pref_force_edit", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    ctx.session.preferencesData = { step: 'CALENDAR', forceEdit: true };
+    await startPreferencesFlow(ctx);
+});
+
 preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return ctx.answerCallbackQuery();
@@ -72,6 +78,23 @@ export async function startPreferencesFlow(ctx: MyContext) {
     // New candidates after 23rd → start with current month, then chain to next
     const monthOffset = (!isNewCandidate && isLateInMonth) ? 1 : 0;
     const targetMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + monthOffset, 1);
+
+    const fullName = user?.staffProfile?.fullName || user?.candidate?.fullName || "";
+
+    // Check if photographer already filled preferences — offer to update
+    if (!isNewCandidate && fullName) {
+        const alreadyFilled = await preferencesService.hasExistingPreference(fullName);
+        if (alreadyFilled && !ctx.session.preferencesData?.forceEdit) {
+            const kb = new InlineKeyboard()
+                .text("✏️ Змінити побажання", "pref_force_edit")
+                .text("⬅️ Назад", "staff_hub_nav");
+            await ScreenManager.renderScreen(ctx,
+                `✅ <b>Ти вже заповнив/ла побажання на цей місяць!</b>\n\nЯкщо хочеш змінити — натисни кнопку нижче.`,
+                kb, { forceNew: true });
+            return;
+        }
+    }
+    delete ctx.session.preferencesData?.forceEdit;
 
     ctx.session.preferencesData = {
         month: targetMonthDate.toLocaleString('uk-UA', { month: 'long' }),

@@ -41,37 +41,72 @@ class PreferencesService {
     }
 
     /**
-     * Appends preference data to the 'Недоступность' sheet in the schedule spreadsheet.
+     * Saves preference data to the 'Недоступность' sheet.
+     * If the photographer already has an entry — overwrites it.
+     * Otherwise writes to the first empty row (starting from row 2).
      */
     async savePreference(data: PreferenceData) {
         try {
-            // Add a single quote prefix to prevent Google Sheets from auto-formatting numbers as dates
-            const formattedDays = data.unworkableDays.startsWith("'") 
-                ? data.unworkableDays 
+            const formattedDays = data.unworkableDays.startsWith("'")
+                ? data.unworkableDays
                 : `'${data.unworkableDays}`;
 
-            // --- 1. Save to 'Недоступность' log sheet ---
-            const logValues = [[
-                data.timestamp,
-                data.fullNameDot,
-                "", 
-                formattedDays,
-                data.comment
-            ]];
+            const rowData = [data.timestamp, data.fullNameDot, "", formattedDays, data.comment];
 
-            await this.sheets.spreadsheets.values.append({
+            // Read existing data to find photographer or first empty row
+            const response = await this.sheets.spreadsheets.values.get({
                 spreadsheetId: this.spreadsheetId,
-                range: 'Недоступность!A:E',
+                range: 'Недоступность!A2:E500',
+            });
+            const rows: string[][] = response.data.values || [];
+
+            // Find existing row by name (column B = index 1)
+            let targetRow = -1;
+            let firstEmptyRow = -1;
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                if (row && row[1] && row[1].trim() === data.fullNameDot.trim()) {
+                    targetRow = i + 2; // +2 because data starts at row 2
+                    break;
+                }
+                if (firstEmptyRow === -1 && (!row || !row[1])) {
+                    firstEmptyRow = i + 2;
+                }
+            }
+
+            // If not found in existing rows, use first empty row or append after last
+            if (targetRow === -1) {
+                targetRow = firstEmptyRow !== -1 ? firstEmptyRow : rows.length + 2;
+            }
+
+            await this.sheets.spreadsheets.values.update({
+                spreadsheetId: this.spreadsheetId,
+                range: `Недоступность!A${targetRow}:E${targetRow}`,
                 valueInputOption: 'USER_ENTERED',
-                insertDataOption: 'INSERT_ROWS',
-                requestBody: { values: logValues },
+                requestBody: { values: [rowData] },
             });
 
-            logger.info({ fullName: data.fullNameDot }, "✅ Preference saved to Google Sheets log");
+            logger.info({ fullName: data.fullNameDot, row: targetRow }, "✅ Preference saved to Google Sheets");
             return true;
         } catch (error: any) {
             logger.error({ err: error.message, fullName: data.fullNameDot }, "❌ Failed to save preference");
             throw error;
+        }
+    }
+
+    /**
+     * Checks if a photographer already has preferences in the sheet.
+     */
+    async hasExistingPreference(fullName: string): Promise<boolean> {
+        try {
+            const response = await this.sheets.spreadsheets.values.get({
+                spreadsheetId: this.spreadsheetId,
+                range: 'Недоступность!B2:B500',
+            });
+            const rows: string[][] = response.data.values || [];
+            return rows.some(row => row[0]?.trim() === fullName.trim());
+        } catch {
+            return false;
         }
     }
 }
