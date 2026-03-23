@@ -885,8 +885,7 @@ export const hrService = {
         let successCount = 0;
         for (const cand of candidates) {
             try {
-                const firstName = extractFirstName(cand.fullName || "");
-                const text = `Привіт, ${firstName}! ✨\n\nЗ'явилися нові вільні вікна для співбесіди. Тисни кнопку нижче, щоб обрати зручний час для здзвону! 👇`;
+                const text = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для співбесіди. Тисни кнопку нижче, щоб обрати зручний час для здзвону! 👇`;
                 const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_scheduling");
 
                 await api.sendMessage(Number(cand.user.telegramId), text, { reply_markup: kb });
@@ -905,10 +904,8 @@ export const hrService = {
     }
 };
 
-function getOfferWelcomeText(candidate: any) {
-    const firstName = extractFirstName(candidate.fullName || "");
-
-    return `<b>Вітаємо, ${firstName}! Ти успішно пройшла співбесіду. 📸✨</b>\n\n` +
+function getOfferWelcomeText(_candidate: any) {
+    return `<b>Вітаємо! Ти успішно пройшла співбесіду. 📸✨</b>\n\n` +
         `Ми з радістю запрошуємо тебе пройти навчання та познайомитися з нашою командою ближче.\n\n` +
         `<b>Що далі?</b>\n` +
         `Найближчим часом тобі напише наставниця. Вона допоможе зорієнтуватися та надішле все необхідне для старту.\n\n` +
