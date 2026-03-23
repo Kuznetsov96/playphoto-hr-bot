@@ -178,7 +178,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                     const firstName = extractFirstName(cand.fullName || "Candidate");
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `your mentor ${MENTOR_NAME}`;
+                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `наставниця ${MENTOR_NAME}`;
 
                     const typeText = isDiscovery ? "discovery" : "training";
                     const msg = await bot.api.sendMessage(
@@ -186,7 +186,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-6h"](firstName, typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👩‍🏫 Write to Mentor", "contact_hr")
+                            reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -223,7 +223,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink; // Both use same field for now
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `your mentor ${MENTOR_NAME}`;
+                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `наставниця ${MENTOR_NAME}`;
 
                     const typeText = isDiscovery ? "discovery" : "training";
                     await bot.api.sendMessage(
@@ -231,7 +231,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👩‍🏫 Mentors", "contact_hr")
+                            reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });

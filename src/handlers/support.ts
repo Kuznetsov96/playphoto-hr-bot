@@ -52,6 +52,14 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
             if (!candidate || !candidate.user) return false;
 
+            // Mentor-stage candidates should never be routed to support tickets implicitly
+            const isMentorStageImplicit = [
+                'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
+                'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
+                'AWAITING_FIRST_SHIFT'
+            ].includes(candidate.status);
+            if (isMentorStageImplicit) return false;
+
             const { supportRepository } = await import("../repositories/support-repository.js");
             const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
             const activeOutgoingTopic = !activeTicket ? await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id) : null;
@@ -74,11 +82,11 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const { MENTOR_IDS, HR_IDS, ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
         const { supportService } = await import("../services/support-service.js");
         const { supportRepository } = await import("../repositories/support-repository.js");
-        
+
         const isMentorStage = [
             'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
             'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
-            'AWAITING_FIRST_SHIFT', 'HIRED'
+            'AWAITING_FIRST_SHIFT'
         ].includes(candidate.status);
 
         const isSetupStage = [
@@ -92,6 +100,67 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             'INTERVIEW_SCHEDULED', 'INTERVIEW_COMPLETED',
             'DECISION_PENDING', 'ACCEPTED', 'REJECTED', 'BLOCKER'
         ].includes(candidate.status);
+
+        // Candidates in mentor stage → always DM mentors directly, skip support tickets
+        // Only HIRED staff use the support ticket/topic system
+        if (isMentorStage) {
+            const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+            let categoryLabel = "Mentor";
+            let targetAdminIds = MENTOR_IDS.length > 0 ? MENTOR_IDS : ADMIN_IDS;
+
+            if (targetAdminIds.length === 0) {
+                await ctx.reply("Вибачте, зараз немає активної наставниці. Спробуйте пізніше.");
+                ctx.session.step = "idle";
+                return true;
+            }
+
+            const adminMsgText =
+                `💬 <b>Message from Candidate (${categoryLabel})</b>\n` +
+                `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
+                `📍 City: ${candidate.city || "—"}\n` +
+                `📊 Status: <b>${candidate.status}</b>\n\n` +
+                `<b>Text:</b> ${msgText}`;
+
+            const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
+
+            let delivered = false;
+            for (const adminId of targetAdminIds) {
+                try {
+                    await ctx.api.sendMessage(Number(adminId), adminMsgText, {
+                        parse_mode: "HTML",
+                        reply_markup: adminKb
+                    });
+                    delivered = true;
+                } catch (e) {
+                    logger.warn({ err: e, adminId }, "Failed to deliver mentor-stage message to mentor");
+                }
+            }
+
+            if (!delivered && ADMIN_IDS.length > 0) {
+                await ctx.api.sendMessage(Number(ADMIN_IDS[0]!), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => {});
+            }
+
+            try {
+                const { messageRepository } = await import("../repositories/message-repository.js");
+                const { timelineRepository } = await import("../repositories/timeline-repository.js");
+
+                await messageRepository.create({
+                    candidate: { connect: { id: candidate.id } },
+                    sender: "USER",
+                    scope: "MENTOR",
+                    content: msgText
+                });
+
+                await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, { category: categoryLabel });
+                await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
+            } catch (e) {
+                logger.error({ err: e }, "Failed to log mentor-stage message");
+            }
+
+            ctx.session.step = "idle";
+            await ctx.reply("✅ Повідомлення надіслано наставниці! Вона відповість найближчим часом. ✨");
+            return true;
+        }
 
         // Check if there's an active ticket or outgoing topic for the candidate
         const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
