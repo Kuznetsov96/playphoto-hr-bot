@@ -48,6 +48,7 @@ export interface SessionData {
         selectedDays?: number[];
         comment?: string;
         forceNextMonth?: boolean;
+        forceEdit?: boolean;
     };
 
     slotBuilder?: {
