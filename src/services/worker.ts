@@ -147,16 +147,19 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e) { }
             }
 
-            // 4. HR Reminder (2 minutes)
-            const twoMinFuture = new Date(nowTime + 2 * 60 * 1000);
-            const slots2mHR = await interviewRepository.findForReminder('reminded2mHR', twoMinFuture);
+            // 4. HR Reminder (~2 minutes, window 1-4 min before start)
+            const fourMinFuture = new Date(nowTime + 4 * 60 * 1000);
+            const oneMinFuture = new Date(nowTime + 1 * 60 * 1000);
+            const slots2mHR = (await interviewRepository.findForReminder('reminded2mHR', fourMinFuture))
+                .filter(s => s.startTime >= oneMinFuture);
 
             for (const slot of slots2mHR) {
                 if (HR_IDS.length === 0) break;
                 try {
                     const name = slot.candidate?.fullName || "Candidate";
                     const meetLink = slot.candidate?.googleMeetLink;
-                    let text = `🕵️‍♀️ <b>${HR_NAME}, interview in 2 minutes!</b>\n\n👤 Candidate: <b>${name}</b>\n`;
+                    const minsLeft = Math.max(1, Math.round((slot.startTime.getTime() - nowTime) / 60000));
+                    let text = `🕵️‍♀️ <b>${HR_NAME}, interview in ${minsLeft} min!</b>\n\n👤 Candidate: <b>${name}</b>\n`;
                     if (meetLink) {
                         text += `🔗 <b>Meet:</b> <a href="${meetLink}">Enter Room</a>`;
                     }
@@ -238,9 +241,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e) { }
             }
 
-            // 6.5 Mentor Reminder (5 minutes)
-            const fiveMinFutureMentor = new Date(nowTime + 5 * 60 * 1000);
-            const trainingSlots5mMentor = await trainingRepository.findForReminder('reminded5mMentor', fiveMinFutureMentor);
+            // 6.5 Mentor Reminder (~5 minutes, window 2-7 min before start)
+            const sevenMinFutureMentor = new Date(nowTime + 7 * 60 * 1000);
+            const twoMinFutureMentor = new Date(nowTime + 2 * 60 * 1000);
+            const trainingSlots5mMentor = (await trainingRepository.findForReminder('reminded5mMentor', sevenMinFutureMentor))
+                .filter(s => s.startTime >= twoMinFutureMentor);
 
             const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
 
@@ -255,7 +260,8 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink;
                     const city = cand.city || "Not specified";
 
-                    let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in 5 minutes!</b>\n\n` +
+                    const minsLeft = Math.max(1, Math.round((slot.startTime.getTime() - nowTime) / 60000));
+                    let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in ${minsLeft} min!</b>\n\n` +
                         `👤 Candidate: <b>${name}</b>\n` +
                         `🏙️ City: <b>${city}</b>\n`;
 
@@ -470,10 +476,9 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
                 const userUpdate = new Date(cand.user.updatedAt);
                 if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
 
-                const firstName = extractFirstName(cand.fullName || "");
                 const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
 
-                const text = `Привіт, ${firstName}! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
+                const text = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
 
                 await bot.api.sendMessage(Number((cand as any).user.telegramId), text, {
                     parse_mode: "HTML",

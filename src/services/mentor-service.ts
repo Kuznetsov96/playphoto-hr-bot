@@ -173,9 +173,9 @@ export class MentorService {
         let msgText = "";
         
         if (cand.status === "WAITLIST") {
-            msgText = `Привіт, ${firstName}! ✨\n\nЗ'явилися нові вільні вікна для нашої короткої зустрічі-знайомства. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
+            msgText = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для нашої короткої зустрічі-знайомства. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
         } else if (cand.materialsSent && !cand.discoverySlotId) {
-            msgText = `Привіт, ${firstName}! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
+            msgText = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
         } else {
             msgText = CANDIDATE_TEXTS["discovery-invite"](firstName, KNOWLEDGE_BASE_LINK);
         }
@@ -202,8 +202,7 @@ export class MentorService {
         let successCount = 0;
         for (const cand of filtered) {
             try {
-                const firstName = extractFirstName(cand.fullName || "");
-                const text = `Привіт, ${firstName}! ✨\n\nЗ'явилися нові вільні вікна для нашої зустрічі. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
+                const text = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для нашої зустрічі. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
                 const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
                 
                 if (cand.user) {

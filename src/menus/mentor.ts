@@ -199,7 +199,7 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
             if (cand.status === "DISCOVERY_COMPLETED") {
                 icon = "✅";
             } else if (cand.materialsSent) {
-                icon = "📚";
+                icon = cand.mentorReminderSent ? "📚🔔" : "📚";
                 if (cand.materialsSentAt) {
                     const diff = new Date().getTime() - new Date(cand.materialsSentAt).getTime();
                     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -310,6 +310,7 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             range.text("🔔 Send Reminder", async (ctx) => {
                 const result = await mentorService.sendMaterials(ctx.api, cand.id);
                 if (result) {
+                    await candidateRepository.update(cand.id, { mentorReminderSent: true });
                     await ctx.api.sendMessage(result.telegramId, result.text, {
                         parse_mode: "HTML",
                         reply_markup: new InlineKeyboard().text("🗓️ Обрати час знайомства", "start_training_scheduling")
