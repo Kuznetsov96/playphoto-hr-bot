@@ -71,9 +71,13 @@ class GoogleCalendarService {
             attendees: attendees,
         };
 
-        const staticLink = details.calendarType === 'training' 
-            ? MEET_LINK_TRAINING 
+        const staticLink = details.calendarType === 'training'
+            ? MEET_LINK_TRAINING
             : MEET_LINK_HIRING;
+
+        if (!staticLink) {
+            logger.warn({ calendarType: details.calendarType }, "⚠️ No static Meet link configured (MEET_LINK_TRAINING / MEET_LINK_HIRING). Candidates will not receive a meeting link!");
+        }
 
         if (staticLink) {
             baseEvent.description += `\n\n📹 Google Meet: ${staticLink}`;

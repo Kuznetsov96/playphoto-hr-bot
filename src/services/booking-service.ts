@@ -208,7 +208,7 @@ export class BookingService {
 
                 return { ...updatedSlot, googleMeetLink: googleEvent.meetLink };
             } catch (e) {
-                console.error("Failed to create Google Calendar event for discovery:", e);
+                logger.error({ err: e, candidateId: candidate.id, slotId }, "Failed to create Google Calendar event for discovery");
                 return updatedSlot;
             }
         });
@@ -274,7 +274,7 @@ export class BookingService {
 
                 return { ...updatedSlot, googleMeetLink: googleEvent.meetLink };
             } catch (e) {
-                console.error("Failed to create Google Calendar event for training:", e);
+                logger.error({ err: e, candidateId: candidate.id, slotId }, "Failed to create Google Calendar event for training");
                 return updatedSlot;
             }
         });
