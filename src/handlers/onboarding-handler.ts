@@ -292,8 +292,17 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
 
         // Safe Job Offloading: Process heavy media & admin messages in background
         import("../modules/candidate/services/index.js").then(({ candidateService }) => {
-            candidateService.processOnboardingFinish(ctx.api, updatedCandidate).catch(e => {
+            candidateService.processOnboardingFinish(ctx.api, updatedCandidate).catch(async (e) => {
                 logger.error({ err: e, candidateId }, "Failed in background processOnboardingFinish");
+                try {
+                    const { ADMIN_IDS } = await import("../config.js");
+                    if (ADMIN_IDS[0]) {
+                        await ctx.api.sendMessage(ADMIN_IDS[0],
+                            `⚠️ <b>Onboarding background task failed</b>\n\n👤 ${updatedCandidate.fullName || candidateId}\n\nCandidate moved to AWAITING_FIRST_SHIFT but TEAM sheet registration or document processing may have failed.\nError: ${e?.message || 'Unknown'}`,
+                            { parse_mode: "HTML" }
+                        ).catch(() => {});
+                    }
+                } catch {}
             });
         }).catch(e => {
             logger.error({ err: e, candidateId }, "Failed to import candidateService");

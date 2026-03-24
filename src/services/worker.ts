@@ -969,6 +969,19 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
             include: { user: true }
         });
 
+        // 5. AWAITING_FIRST_SHIFT (Onboarding done, but didn't fill preferences — longer grace period)
+        const cutoff10Days = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+        const cutoff11Days = new Date(now.getTime() - 11 * 24 * 60 * 60 * 1000);
+        const cutoff12Days = new Date(now.getTime() - 12 * 24 * 60 * 60 * 1000);
+
+        const idleAwaitingFirstShift = await prisma.candidate.findMany({
+            where: {
+                status: "AWAITING_FIRST_SHIFT",
+                statusChangedAt: { lte: cutoff10Days }
+            },
+            include: { user: true }
+        });
+
         const allIdle = [...idleAccepted, ...idleNDA, ...idleTest, ...idleStagingSetup];
 
         for (const cand of allIdle) {
@@ -981,10 +994,10 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     // Day 7: Reject
                     let rejectReason = "на стажування";
                     if (cand.status === "KNOWLEDGE_TEST" || cand.status === "STAGING_SETUP") rejectReason = "після тестування";
-                    
-                    await bot.api.sendMessage(Number(cand.user.telegramId), 
+
+                    await bot.api.sendMessage(Number(cand.user.telegramId),
                         `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
-                    
+
                     await prisma.candidate.update({
                         where: { id: cand.id },
                         data: { status: "REJECTED", statusChangedAt: new Date() }
@@ -999,10 +1012,34 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                         case "KNOWLEDGE_TEST": contextStr = "на проходження фінального тесту"; break;
                         case "STAGING_SETUP": contextStr = "на вибір дати для першого стажування на локації"; break;
                     }
-                    
-                    await bot.api.sendMessage(Number(cand.user.telegramId), 
+
+                    await bot.api.sendMessage(Number(cand.user.telegramId),
                         `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
                     logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 5-денне попередження про неактивність");
+                }
+            } catch (e) {}
+        }
+
+        // AWAITING_FIRST_SHIFT: longer grace period (warn day 10, reject day 12)
+        for (const cand of idleAwaitingFirstShift) {
+            try {
+                const refDate = cand.statusChangedAt;
+                if (!refDate) continue;
+
+                if (refDate <= cutoff12Days) {
+                    await bot.api.sendMessage(Number(cand.user.telegramId),
+                        `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді щодо завершення підготовки до першої зміни, ми змушені скасувати твою заявку. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`
+                    ).catch(() => {});
+                    await prisma.candidate.update({
+                        where: { id: cand.id },
+                        data: { status: "REJECTED", statusChangedAt: new Date() }
+                    });
+                    logger.info({ userId: cand.user.telegramId }, "🚫 AWAITING_FIRST_SHIFT → REJECTED (12 днів неактивності)");
+                } else if (refDate <= cutoff10Days && refDate > cutoff11Days) {
+                    await bot.api.sendMessage(Number(cand.user.telegramId),
+                        `Привіт! ✨ Ми все ще чекаємо на завершення підготовки до першої зміни. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді протягом 2 днів, ми автоматично скасуємо твою заявку. 🌸`
+                    ).catch(() => {});
+                    logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 10-денне попередження (AWAITING_FIRST_SHIFT)");
                 }
             } catch (e) {}
         }

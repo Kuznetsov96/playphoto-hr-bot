@@ -179,8 +179,10 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
     if (isSuper && isReadyForStaging && (cand.status === CandidateStatus.TRAINING_COMPLETED || cand.status === CandidateStatus.OFFLINE_STAGING) && !cand.notificationSent) {
         range.text("🚀 Confirm & Notify Staging", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
-            const success = await hrService.sendStagingNotifications(ctx.api, cand.id);
-            if (success) {
+            const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
+            if (result && 'error' in result) {
+                await ctx.answerCallbackQuery(`❌ ${result.error}`);
+            } else if (result) {
                 await ctx.answerCallbackQuery("Success! Candidate and partner notified. ✅");
                 await ctx.menu.update();
             } else {
