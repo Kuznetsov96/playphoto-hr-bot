@@ -106,6 +106,7 @@ export const TRAINING_CALENDAR_ID = env.TRAINING_CALENDAR_ID;
 export const MEET_LINK_HIRING = env.MEET_LINK_HIRING;
 export const MEET_LINK_TRAINING = env.MEET_LINK_TRAINING;
 export const NDA_LINK = env.NDA_LINK || "";
+if (!NDA_LINK) console.warn("⚠️  NDA_LINK is not set — NDA flow will send messages without a document link");
 export const KNOWLEDGE_BASE_LINK = env.KNOWLEDGE_BASE_LINK || "https://t.me/+hC9UDoSZb3hiZjFi";
 export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge base channel
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
