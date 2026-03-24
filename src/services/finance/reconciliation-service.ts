@@ -279,10 +279,14 @@ export class ReconciliationService {
                     if (item.claimed) return;
                     const val = item.data.amount / 100;
                     const idx = ddsTxs.findIndex((tx: any) => {
-                        const isFop = normalizeFinanceString(tx.fop).includes(targetFopNorm);
+                        const dfn = normalizeFinanceString(tx.fop);
+                        const isFop = dfn.includes(targetFopNorm) || targetFopNorm.includes(dfn) || (fopSurnameNorm.length > 3 && dfn.includes(fopSurnameNorm));
                         if (!isFop) return false;
-                        const diff = Math.abs(val - tx.amount);
-                        return diff < 0.1 || Math.abs(val * 0.987 - tx.amount) < 0.1 || Math.abs(val / 0.987 - tx.amount) < 0.1;
+
+                        const absVal = Math.abs(val);
+                        const absTx = Math.abs(tx.amount);
+                        const diff = Math.abs(absVal - absTx);
+                        return diff < 0.1 || Math.abs(absVal * 0.987 - absTx) < 0.1 || Math.abs(absVal / 0.987 - absTx) < 0.1;
                     });
                     if (idx !== -1) {
                         item.claimed = true;
