@@ -122,6 +122,12 @@ testingHandlers.callbackQuery(/^confirm_nda_(.+)$/, async (ctx: MyContext) => {
     const cand = await candidateRepository.findById(candId);
     if (!cand) return ctx.answerCallbackQuery("Кандидат не знайдений. ❌");
 
+    // Idempotency: skip if already confirmed
+    if (cand.ndaConfirmedAt || cand.status !== "NDA") {
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+        return ctx.answerCallbackQuery("✅ NDA вже підтверджено!");
+    }
+
     await candidateRepository.update(candId, {
         ndaConfirmedAt: new Date(),
         status: "KNOWLEDGE_TEST" as any

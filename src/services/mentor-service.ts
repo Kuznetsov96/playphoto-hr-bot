@@ -4,7 +4,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { accessService } from "./access-service.js";
-import { KNOWLEDGE_BASE_LINK, NDA_LINK } from "../config.js";
+import { ADMIN_IDS, KNOWLEDGE_BASE_LINK, NDA_LINK } from "../config.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { createKyivDate } from "../utils/bot-utils.js";
@@ -265,10 +265,19 @@ export class MentorService {
 
             const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
             if (cand.user) {
-                await api.sendMessage(Number(cand.user.telegramId), 
-                    CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails), 
+                await api.sendMessage(Number(cand.user.telegramId),
+                    CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails),
                     { parse_mode: "HTML", reply_markup: kb }
-                ).catch(() => {});
+                ).catch((err: any) => {
+                    logger.error({ err, candidateId: cand.id, telegramId: cand.user.telegramId }, "Failed to send NDA message to candidate");
+                    const mainAdmin = ADMIN_IDS[0];
+                    if (mainAdmin) {
+                        api.sendMessage(mainAdmin,
+                            `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
+                            { parse_mode: "HTML" }
+                        ).catch(() => {});
+                    }
+                });
             }
 
         } else {

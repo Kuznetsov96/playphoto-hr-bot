@@ -600,7 +600,9 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 range.text("🚀 Notify & Send to Staging", async (ctx) => {
                     ctx.session.selectedCandidateId = cand.id;
                     const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
-                    if (result) {
+                    if (result && 'error' in result) {
+                        await ctx.answerCallbackQuery(`❌ ${result.error}`);
+                    } else if (result) {
                         const candStatus = result.candidateNotified ? "✅" : "❌";
                         const partnerStatus = result.partnerNotified ? "✅" : "❌";
                         const confirmText = `📬 <b>Notifications sent!</b>\n\n` +
