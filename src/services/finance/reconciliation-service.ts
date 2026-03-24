@@ -66,13 +66,14 @@ export class ReconciliationService {
             const nextDate = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
 
             const prevDate = new Date(targetDate.getTime() - 24 * 60 * 60 * 1000);
-            const [shifts, ddsTxs, allStaff, dbLocations, incomes] = await Promise.all([
+            const prevDateStr = `${String(prevDate.getDate()).padStart(2, '0')}.${String(prevDate.getMonth() + 1).padStart(2, '0')}.${prevDate.getFullYear()}`;
+            const [shifts, ddsTxs, ddsTxsPrev, allStaff, dbLocations, incomes] = await Promise.all([
                 workShiftRepository.findWithRelationsByDateRange(targetDate, nextDate),
                 (async () => {
-                    const prevDateStr = `${String(prevDate.getDate()).padStart(2, '0')}.${String(prevDate.getMonth() + 1).padStart(2, '0')}.${prevDate.getFullYear()}`;
                     const nextDateStr = `${String(nextDate.getDate()).padStart(2, '0')}.${String(nextDate.getMonth() + 1).padStart(2, '0')}.${nextDate.getFullYear()}`;
-                    return ddsService.getTransactionsForDates([prevDateStr, dateStr, nextDateStr]);
+                    return ddsService.getTransactionsForDates([dateStr, nextDateStr]);
                 })(),
+                ddsService.getTransactionsForDates([prevDateStr]),
                 staffRepository.findActive(),
                 locationRepository.findAllActive(),
                 incomesOverride ? Promise.resolve(incomesOverride) : techCashService.getIncomeForDate(dateStr)
@@ -277,10 +278,13 @@ export class ReconciliationService {
                 }
 
                 // Phase 2.7: Cleanup with DDS (Strict 1.3% check)
+                // Use extended DDS pool (Day T-1 + Day T + Day T+1) to catch transactions
+                // recorded in DDS on a prior date but appearing in Monobank on audit day
+                const ddsCleanupPool = [...ddsTxs, ...ddsTxsPrev];
                 pool.forEach(item => {
                     if (item.claimed) return;
                     const val = item.data.amount / 100;
-                    const idx = ddsTxs.findIndex((tx: any) => {
+                    const idx = ddsCleanupPool.findIndex((tx: any) => {
                         const dfn = normalizeFinanceString(tx.fop);
                         const isFop = dfn.includes(targetFopNorm) || targetFopNorm.includes(dfn) || (fopSurnameNorm.length > 3 && dfn.includes(fopSurnameNorm));
                         if (!isFop) return false;
@@ -292,7 +296,7 @@ export class ReconciliationService {
                     });
                     if (idx !== -1) {
                         item.claimed = true;
-                        ddsTxs.splice(idx, 1);
+                        ddsCleanupPool.splice(idx, 1);
                     }
                 });
 
