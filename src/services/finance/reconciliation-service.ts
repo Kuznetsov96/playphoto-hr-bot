@@ -65,11 +65,13 @@ export class ReconciliationService {
             const targetDate = new Date(Number(y), Number(m) - 1, Number(d));
             const nextDate = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
 
+            const prevDate = new Date(targetDate.getTime() - 24 * 60 * 60 * 1000);
             const [shifts, ddsTxs, allStaff, dbLocations, incomes] = await Promise.all([
                 workShiftRepository.findWithRelationsByDateRange(targetDate, nextDate),
                 (async () => {
+                    const prevDateStr = `${String(prevDate.getDate()).padStart(2, '0')}.${String(prevDate.getMonth() + 1).padStart(2, '0')}.${prevDate.getFullYear()}`;
                     const nextDateStr = `${String(nextDate.getDate()).padStart(2, '0')}.${String(nextDate.getMonth() + 1).padStart(2, '0')}.${nextDate.getFullYear()}`;
-                    return ddsService.getTransactionsForDates([dateStr, nextDateStr]);
+                    return ddsService.getTransactionsForDates([prevDateStr, dateStr, nextDateStr]);
                 })(),
                 staffRepository.findActive(),
                 locationRepository.findAllActive(),
