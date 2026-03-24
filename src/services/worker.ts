@@ -800,9 +800,9 @@ async function processNDAReminders(bot: Bot<MyContext>) {
 
                 const firstName = extractFirstName(cand.fullName || "Кандидатко");
                 const { NDA_LINK } = await import("../config.js");
-                const kb = new InlineKeyboard()
-                    .url("📋 Прочитати NDA", NDA_LINK).row()
-                    .text("✅ Я все прочитала та згодна", `confirm_nda_${cand.id}`);
+                const kb = new InlineKeyboard();
+                if (NDA_LINK) kb.url("📋 Прочитати NDA", NDA_LINK).row();
+                kb.text("✅ Я все прочитала та згодна", `confirm_nda_${cand.id}`);
 
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), {
                     parse_mode: "HTML",
