@@ -6,7 +6,7 @@
 export function normalizeFinanceString(s: string | null | undefined): string {
     if (!s) return "";
     return s.toLowerCase()
-        .replace(/[\s\(\)\-\.]/g, '') // Remove spaces, brackets, dashes, dots
+        .replace(/[\s\(\)\-\.\'ʼ’`´ʻ‘"«»ьъ]/g, '') // Remove spaces, brackets, dashes, dots, apostrophes, quotes, and soft/hard signs
         .replace(/[іiїи]/g, 'i')       // Handle Latin/Ukrainian/Russian i-sounds
         .replace(/[еє]/g, 'e')        // Handle e/є
         .trim();
