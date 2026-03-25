@@ -279,6 +279,14 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
                 await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
                 await ctx.menu.update();
             }).row();
+        range.text("🗓 Reschedule Discovery", async (ctx) => {
+            await ctx.answerCallbackQuery();
+            if (cand.discoverySlotId) {
+                const { bookingService } = await import("../services/booking-service.js");
+                await bookingService.cancelDiscoverySlot(cand.discoverySlotId);
+            }
+            await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Discovery</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
+        }).row();
     }
     else if (cand.status === "TRAINING_SCHEDULED") {
         range.text("✅ Training Completed", async (ctx) => {
@@ -291,6 +299,14 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
                 await mentorService.completeTraining(ctx.api, cand.id, 'failed');
                 await ctx.menu.update();
             }).row();
+        range.text("🗓 Reschedule Training", async (ctx) => {
+            await ctx.answerCallbackQuery();
+            if (cand.trainingSlotId) {
+                const { bookingService } = await import("../services/booking-service.js");
+                await bookingService.cancelTrainingSlot(cand.trainingSlotId);
+            }
+            await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Training</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
+        }).row();
     }
     else if (cand.status === "ACCEPTED" || cand.status === "WAITLIST") {
         if (!cand.materialsSent) {
@@ -340,7 +356,7 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
 mentorManualTrainingDateMenu.dynamic(async (ctx, range) => {
     const candId = ctx.session.selectedCandidateId;
     const cand = candId ? await candidateRepository.findById(candId) : null;
-    const isManualDatePicker = cand?.status === "DISCOVERY_COMPLETED" || cand?.status === "DISCOVERY_SCHEDULED" || cand?.status === "HIRED" || ctx.session.adminFlow === 'SCHEDULE';
+    const isManualDatePicker = cand?.status === "DISCOVERY_COMPLETED" || cand?.status === "DISCOVERY_SCHEDULED" || cand?.status === "TRAINING_SCHEDULED" || cand?.status === "HIRED" || ctx.session.adminFlow === 'SCHEDULE';
 
     if (isManualDatePicker) {
         range.text(ctx.session.adminFlow === 'SCHEDULE' ? "🗓️ Select shift date:" : "🗓️ Pick date for Internship:", (ctx) => { }).row();
@@ -403,7 +419,10 @@ mentorManualTimeSelectionMenu.dynamic(async (ctx, range) => {
                 return;
             }
 
-            const result = await mentorService.bookTrainingSlotFromText(candId, `${date} ${t}`);
+            const isDiscoveryReschedule = cand.status === "DISCOVERY_SCHEDULED";
+            const result = isDiscoveryReschedule
+                ? await mentorService.bookDiscoverySlotFromText(candId, `${date} ${t}`)
+                : await mentorService.bookTrainingSlotFromText(candId, `${date} ${t}`);
             if (result.success) {
                 if (result.notification) {
                     await ctx.api.sendMessage(result.notification.telegramId, result.notification.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }).catch(() => { });
