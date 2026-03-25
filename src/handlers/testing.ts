@@ -71,11 +71,14 @@ testingHandlers.callbackQuery(/^test_2_(bad|good)_(.+)$/, async (ctx) => {
     const cand = await candidateRepository.findById(candId);
     if (!cand) return;
 
+    // Idempotency: skip if test already completed
+    if (cand.testPassed || cand.status === "OFFLINE_STAGING") return;
+
     const finalScore = ctx.session.candidateData?.trainingScore || 0;
 
     const kb = new InlineKeyboard().text("👨‍💼 Написати Адміністратору", "contact_hr");
 
-    await ctx.reply(CANDIDATE_TEXTS["training-test-success"], { 
+    await ctx.reply(CANDIDATE_TEXTS["training-test-success"], {
         parse_mode: "HTML",
         reply_markup: kb
     });
