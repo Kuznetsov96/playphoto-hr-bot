@@ -109,6 +109,13 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     if (bookingLocks.has(telegramId)) {
         return await ctx.answerCallbackQuery("⏳ Зачекай, бронювання вже в процесі...");
     }
+
+    // Idempotency: check if candidate already has a booked interview
+    const existingCand = await candidateRepository.findByTelegramId(telegramId);
+    if (existingCand?.interviewSlotId) {
+        return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньовану співбесіду!");
+    }
+
     bookingLocks.add(telegramId);
 
     try {
@@ -440,6 +447,13 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
     if (bookingLocks.has(telegramId)) {
         return await ctx.answerCallbackQuery("⏳ Зачекай, бронювання вже в процесі...");
     }
+
+    // Idempotency: check if candidate already has a booked training/discovery
+    const existingCand = await candidateRepository.findByTelegramId(telegramId);
+    if (existingCand?.trainingSlotId || existingCand?.discoverySlotId) {
+        return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис!");
+    }
+
     bookingLocks.add(telegramId);
 
     try {
