@@ -96,8 +96,12 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
             return;
         }
 
-        const result = await mentorService.bookTrainingSlotFromText(candId!, `${date} ${text}`);
-        
+        const candForCustomTime = await candidateRepository.findById(candId!);
+        const isDiscoveryReschedule = candForCustomTime?.status === "DISCOVERY_SCHEDULED";
+        const result = isDiscoveryReschedule
+            ? await mentorService.bookDiscoverySlotFromText(candId!, `${date} ${text}`)
+            : await mentorService.bookTrainingSlotFromText(candId!, `${date} ${text}`);
+
         if (result.success) {
             if (result.notification) {
                 await ctx.api.sendMessage(result.notification.telegramId, result.notification.text, { parse_mode: "HTML", link_preview_options: { is_disabled: true } }).catch(() => {});
