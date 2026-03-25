@@ -477,6 +477,13 @@ export class MentorService {
             }
         }).catch(() => {});
 
+        // Cancel old training slot if candidate already has one (reschedule safety net)
+        const cand = await candidateRepository.findById(candId);
+        if (cand?.trainingSlotId) {
+            const { bookingService } = await import("./booking-service.js");
+            await bookingService.cancelTrainingSlot(cand.trainingSlotId);
+        }
+
         const session = await trainingRepository.createSession({ startTime: start, endTime: blockEnd });
         const slot = await trainingRepository.createSlot({
             startTime: start,
@@ -501,6 +508,77 @@ export class MentorService {
             notification: {
                 telegramId: Number((await candidateRepository.findById(candId))?.user.telegramId),
                 text: CANDIDATE_TEXTS["training-manual-invite"](dateStr, timeStr, channelLink, KNOWLEDGE_BASE_LINK)
+            }
+        };
+    }
+
+    async bookDiscoverySlotFromText(candId: string, text: string) {
+        const regex = /^(\d{1,2})[./](\d{1,2})(?:\.(\d{4}))?\s+(\d{1,2}):(\d{2})$/;
+        const match = text.match(regex);
+        if (!match) return { success: false, error: "⚠️ Invalid format. Example: 15.02 14:00" };
+
+        const [_, day, month, year, startH, startM] = match.map(Number);
+        const start = createKyivDate(year || new Date().getFullYear(), month! - 1, day!, startH!, startM!);
+        const end = new Date(start.getTime() + 20 * 60 * 1000);
+        const blockEnd = new Date(start.getTime() + 30 * 60 * 1000);
+
+        const overlap = await prisma.trainingSession.findFirst({
+            where: {
+                AND: [
+                    { startTime: { lt: blockEnd } },
+                    { endTime: { gt: start } }
+                ]
+            },
+            include: { slots: { include: { candidate: true } } }
+        });
+
+        const isStrictlyOccupied = overlap && overlap.slots.some(s =>
+            s.isBooked && s.candidate && !["HIRED", "REJECTED"].includes(s.candidate.status)
+        );
+
+        if (isStrictlyOccupied) {
+            return { success: false, error: `✨ This time slot is already occupied. Please choose another window. 📅` };
+        }
+
+        await prisma.trainingSession.deleteMany({
+            where: {
+                AND: [
+                    { startTime: { lt: blockEnd } },
+                    { endTime: { gt: start } }
+                ]
+            }
+        }).catch(() => {});
+
+        // Cancel old discovery slot if candidate already has one (reschedule safety net)
+        const cand = await candidateRepository.findById(candId);
+        if (cand?.discoverySlotId) {
+            const { bookingService } = await import("./booking-service.js");
+            await bookingService.cancelDiscoverySlot(cand.discoverySlotId);
+        }
+
+        const session = await trainingRepository.createSession({ startTime: start, endTime: blockEnd });
+        const slot = await trainingRepository.createSlot({
+            startTime: start,
+            endTime: end,
+            isBooked: true,
+            candidateDiscovery: { connect: { id: candId } },
+            trainingSession: { connect: { id: session.id } }
+        });
+
+        await candidateRepository.update(candId, {
+            status: "DISCOVERY_SCHEDULED",
+            discoverySlot: { connect: { id: slot.id } }
+        });
+
+        const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+        const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
+
+        return {
+            success: true,
+            message: `✅ Scheduled for ${dateStr} ${timeStr}`,
+            notification: {
+                telegramId: Number(cand?.user?.telegramId),
+                text: CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](dateStr, timeStr)
             }
         };
     }
