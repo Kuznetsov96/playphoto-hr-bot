@@ -795,14 +795,14 @@ export const hrService = {
 
         if (!candRecord || !candRecord.location || !candRecord.firstShiftDate) {
             logger.error({ candId }, "Cannot send staging notifications: missing base data");
-            return false;
+            return { error: "Missing location or shift date" };
         }
 
         // --- SMART PARTNER LOOKUP ---
         let member = candRecord.firstShiftPartner as any;
         if (!member) {
             logger.warn({ candId }, "Cannot send staging notifications: partner missing");
-            return false;
+            return { error: "Partner not assigned" };
         }
 
         const dateStr = new Date(candRecord.firstShiftDate).toLocaleDateString('uk-UA');
