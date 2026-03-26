@@ -434,15 +434,11 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
     await ctx.answerCallbackQuery();
 
     const telegramId = ctx.from.id;
-    const candidate = await candidateRepository.findByTelegramId(telegramId);
-    const isDiscovery = candidate?.status === CandidateStatus.ACCEPTED || candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
-
-    const typeText = isDiscovery ? "коротку зустріч-знайомство" : "online-навчання";
 
     const slots = await trainingRepository.findActiveSlots();
 
     if (slots.length === 0) {
-        logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate start_training_scheduling: No ${isDiscovery ? 'discovery' : 'training'} slots available. Moving to WAITLIST.`);
+        logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate start_training_scheduling: No discovery slots available. Moving to WAITLIST.`);
 
         // Auto-move to WAITLIST so Mentor can see them
         await candidateRepository.updateMany(
@@ -450,7 +446,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
             { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: FunnelStep.TRAINING }
         );
 
-        const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на ${typeText}. ✨`;
+        const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на коротку зустріч-знайомство. ✨`;
         const kb = new InlineKeyboard()
             .text("🔔 Повідомити мене", "training_no_slots_fit")
             .text("👩‍🏫 Написати наставниці", "contact_hr");
@@ -462,9 +458,9 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         if (MENTOR_IDS && MENTOR_IDS.length > 0) {
             const cand = await candidateRepository.findByTelegramId(telegramId);
             const name = cand?.fullName || ctx.from.first_name || "Candidate";
-            const alertMsg = `📥 <b>INBOX: No ${isDiscovery ? 'discovery' : 'training'} slots available!</b>\n\n` +
+            const alertMsg = `📥 <b>INBOX: No discovery slots available!</b>\n\n` +
                 `👤 <b>${name}</b>\n\n` +
-                `This candidate tried to book ${typeText} but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
+                `This candidate tried to book a discovery but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
 
             for (const mentorId of MENTOR_IDS) {
                 try {
@@ -499,14 +495,14 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
     keyboard.text("🙋‍♀️ Мені не підходить жодна дата", "training_no_slots_fit").row();
 
     await cleanupMessages(ctx);
-    const msg = await ctx.reply(`Обери зручний час для ${typeText}: 🗓️✨`, { reply_markup: keyboard });
+    const msg = await ctx.reply(`Обери зручний час для зустрічі-знайомства: 🗓️✨`, { reply_markup: keyboard });
     trackMessage(ctx, msg.message_id);
 });
 
 // In-memory lock to prevent double-click race conditions
 const bookingLocks = new Set<number>();
 
-// 8. Бронювання слоту НАВЧАННЯ / ЗНАЙОМСТВО
+// 8. Бронювання слоту ЗНАЙОМСТВО (кандидатка обирає час сама)
 bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
     const telegramId = ctx.from.id;
@@ -515,9 +511,9 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         return await ctx.answerCallbackQuery("⏳ Зачекай, бронювання вже в процесі...");
     }
 
-    // Idempotency: check if candidate already has a booked training/discovery
+    // Idempotency: check if candidate already has a booked discovery
     const existingCand = await candidateRepository.findByTelegramId(telegramId);
-    if (existingCand?.trainingSlotId || existingCand?.discoverySlotId) {
+    if (existingCand?.discoverySlotId) {
         return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис!");
     }
 
@@ -527,35 +523,19 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (!candidate) throw new Error("CANDIDATE_NOT_FOUND");
 
-        const isDiscovery = candidate.status === CandidateStatus.ACCEPTED || candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
-        const typeText = isDiscovery ? "знайомство" : "online-навчання";
+        await ctx.answerCallbackQuery(`Бронюємо знайомство... ⏳`);
+        logger.info({ userId: ctx.from.id, slotId }, `🎓 [JOURNEY] Booking discovery slot`);
 
-        await ctx.answerCallbackQuery(`Бронюємо ${typeText}... ⏳`);
-        logger.info({ userId: ctx.from.id, slotId, type: isDiscovery ? 'discovery' : 'training' }, `🎓 [JOURNEY] Booking training/discovery slot`);
-
-        const result = isDiscovery
-            ? await bookingService.bookDiscoverySlot(telegramId, slotId)
-            : await bookingService.bookTrainingSlot(telegramId, slotId);
+        const result = await bookingService.bookDiscoverySlot(telegramId, slotId);
 
         const startTime = (result as any).startTime;
-        const fullName = (result as any).candidate?.fullName || (result as any).candidateDiscovery?.fullName || ctx.from.first_name || "Кандидатко";
-        const firstName = extractFirstName(fullName);
+        const fullName = (result as any).candidateDiscovery?.fullName || ctx.from.first_name || "Кандидатко";
 
-        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `твоя наставниця ${MENTOR_NAME}`;
-
-        let confirmationText = isDiscovery
-            ? CANDIDATE_TEXTS["discovery-confirm"](MENTOR_NAME, startTime.toLocaleDateString('uk-UA'), startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }))
-            : `✅ Вітаємо, <b>${firstName}</b>! Твій час для <b>online-навчання</b> заброньовано.\n\n` +
-            `📅 Дата: <b>${startTime.toLocaleDateString('uk-UA')}</b>\n` +
-            `⏰ Час: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
-
-        if ((result as any).googleMeetLink) {
-            confirmationText += `\n📹 Google Meet: <a href="${(result as any).googleMeetLink}">Приєднатися до зустрічі</a>\n`;
-        }
-
-        if (!isDiscovery) {
-            confirmationText += `\n${mentorDisplay.charAt(0).toUpperCase() + mentorDisplay.slice(1)} чекатиме на тебе в Google Meet! Готуйся! ✨`;
-        }
+        const confirmationText = CANDIDATE_TEXTS["discovery-confirm"](
+            MENTOR_NAME,
+            startTime.toLocaleDateString('uk-UA'),
+            startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
+        );
 
         const kb = new InlineKeyboard()
             .text("🗓️ Перенести", `reschedule_training_${slotId}`).row()
@@ -569,7 +549,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         // Notify Mentors
         const { MENTOR_IDS } = await import("../config.js");
         if (MENTOR_IDS.length > 0) {
-            const mentorNotifyText = `🆕 <b>New ${isDiscovery ? 'discovery' : 'training'} appointment!</b>\n\n` +
+            const mentorNotifyText = `🆕 <b>New discovery appointment!</b>\n\n` +
                 `👤 Candidate: <b>${fullName}</b>\n` +
                 `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</b>\n\n` +
                 `📍 Appointment added to Google Calendar.`;
