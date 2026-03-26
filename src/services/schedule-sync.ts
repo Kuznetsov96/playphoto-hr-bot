@@ -393,8 +393,7 @@ export class ScheduleSyncService {
                             const cell = String(row[parseInt(colIdx)] || "").trim();
                             if (!this.isShiftCode(cell)) continue;
 
-                            const staffHomeLocationId = (staffProfile as any).locationId ?? undefined;
-                            const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined, staffHomeLocationId) || currentLocation;
+                            const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined) || currentLocation;
 
                             if (shiftLocation) {
                                 creationPromises.push(workShiftRepository.create({
@@ -603,7 +602,7 @@ export class ScheduleSyncService {
             if (cityMap[potentialCity]) currentCity = cityMap[potentialCity];
         }
 
-        const headerAliases: Record<string, { name: string, city?: string }> = {
+        const headerAliases: Record<string, { name: string, city?: string, exact?: boolean }> = {
             'drivecity': { name: 'drive city', city: 'Львів' },
             'dragonp': { name: 'dragon park', city: 'Львів' },
             'leoland': { name: 'leoland', city: 'Львів' },
@@ -616,12 +615,20 @@ export class ScheduleSyncService {
             'fk київ': { name: 'fly kids', city: 'Київ' },
             'fk львів': { name: 'fly kids', city: 'Львів' },
             'fk рівне': { name: 'fly kids', city: 'Рівне' },
+            // Volkland without number = Volkland 1; numbered variants match exactly
+            'volkland': { name: 'volkland 1', city: 'Запоріжжя', exact: true },
+            'volkland 2': { name: 'volkland 2', city: 'Запоріжжя', exact: true },
+            'volkland 3': { name: 'volkland 3', city: 'Запоріжжя', exact: true },
         };
 
         const target = headerAliases[hLower];
         if (target) {
             const found = allLocations.find(l => {
-                const nameMatch = l.name.toLowerCase().includes(target.name) || (l.legacyName || "").toLowerCase().includes(target.name);
+                const lName = l.name.toLowerCase();
+                const lLegacy = (l.legacyName || "").toLowerCase();
+                const nameMatch = target.exact
+                    ? (lName.startsWith(target.name) || lLegacy.startsWith(target.name))
+                    : (lName.includes(target.name) || lLegacy.includes(target.name));
                 const cityMatch = (target.city) ? l.city === target.city : (currentCity ? l.city === currentCity : true);
                 return nameMatch && cityMatch;
             });
@@ -654,18 +661,13 @@ export class ScheduleSyncService {
         return null;
     }
 
-    private resolveLocationFromCode(code: string, currentLocation: Location | null, allLocations: Location[], cityContext?: string, staffHomeLocationId?: string): Location | null {
+    private resolveLocationFromCode(code: string, currentLocation: Location | null, allLocations: Location[], cityContext?: string): Location | null {
         const codeUpper = code.toUpperCase();
         const locPattern = LOCATION_CODE_MAP[codeUpper];
         if (!locPattern) return null;
-        const candidates = allLocations.filter(l => l.name.toLowerCase().includes(locPattern));
+        const candidates = allLocations.filter(l => l.name.toLowerCase().startsWith(locPattern) || l.name.toLowerCase().includes(locPattern));
         if (candidates.length === 0) return null;
         if (candidates.length === 1) return candidates[0]!;
-        // Prefer staff's home location when it matches one of the candidates
-        if (staffHomeLocationId) {
-            const homeMatch = candidates.find(c => c.id === staffHomeLocationId);
-            if (homeMatch) return homeMatch;
-        }
         if (currentLocation && candidates.some(c => c.id === currentLocation.id)) return currentLocation;
         if (cityContext) {
             const sameCity = candidates.find(c => c.city === cityContext);
