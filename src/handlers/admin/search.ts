@@ -125,14 +125,17 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
             const user = await userRepository.findByTelegramId(BigInt(targetTgId));
             if (!user) throw new Error("User not found in DB");
 
-            // 1. Deliver to User — include a reply button so candidate can respond without funnel interception
-            const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-            await ctx.api.sendMessage(Number(targetTgId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${messageText}`, {
-                parse_mode: "HTML",
-                reply_markup: replyKb
-            });
+            // 1. Check if candidate to conditionally show reply button
+            const candidate = await candidateRepository.findByUserId(user.id);
 
-            // 2. Log to Timeline
+            // 2. Deliver to User — reply button only for candidates
+            const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
+            if (candidate) {
+                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+            }
+            await ctx.api.sendMessage(Number(targetTgId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${messageText}`, msgOptions);
+
+            // 3. Log to Timeline
             const { timelineRepository } = await import("../../repositories/timeline-repository.js");
             await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', messageText, {
                 adminId: ctx.from?.id,
@@ -140,8 +143,7 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
                 directReply: true
             });
 
-            // 3. Mark unread as handled if candidate
-            const candidate = await candidateRepository.findByUserId(user.id);
+            // 4. Mark unread as handled if candidate
             if (candidate) {
                 await candidateRepository.update(candidate.id, { hasUnreadMessage: false });
             }
@@ -288,11 +290,11 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
     }
 
     try {
-        const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-        await ctx.api.sendMessage(Number(user.telegramId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(messageTextStr)}`, {
-            parse_mode: "HTML",
-            reply_markup: replyKb
-        });
+        const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
+        if (candidate) {
+            msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+        }
+        await ctx.api.sendMessage(Number(user.telegramId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(messageTextStr)}`, msgOptions);
 
         const { timelineRepository } = await import("../../repositories/timeline-repository.js");
         await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', messageTextStr, {
