@@ -390,7 +390,8 @@ export class ScheduleSyncService {
                             const cell = String(row[parseInt(colIdx)] || "").trim();
                             if (!this.isShiftCode(cell)) continue;
 
-                            const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined) || currentLocation;
+                            const staffHomeLocationId = (staffProfile as any).locationId ?? undefined;
+                            const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined, staffHomeLocationId) || currentLocation;
 
                             if (shiftLocation) {
                                 creationPromises.push(workShiftRepository.create({
@@ -650,13 +651,18 @@ export class ScheduleSyncService {
         return null;
     }
 
-    private resolveLocationFromCode(code: string, currentLocation: Location | null, allLocations: Location[], cityContext?: string): Location | null {
+    private resolveLocationFromCode(code: string, currentLocation: Location | null, allLocations: Location[], cityContext?: string, staffHomeLocationId?: string): Location | null {
         const codeUpper = code.toUpperCase();
         const locPattern = LOCATION_CODE_MAP[codeUpper];
         if (!locPattern) return null;
         const candidates = allLocations.filter(l => l.name.toLowerCase().includes(locPattern));
         if (candidates.length === 0) return null;
         if (candidates.length === 1) return candidates[0]!;
+        // Prefer staff's home location when it matches one of the candidates
+        if (staffHomeLocationId) {
+            const homeMatch = candidates.find(c => c.id === staffHomeLocationId);
+            if (homeMatch) return homeMatch;
+        }
         if (currentLocation && candidates.some(c => c.id === currentLocation.id)) return currentLocation;
         if (cityContext) {
             const sameCity = candidates.find(c => c.city === cityContext);
