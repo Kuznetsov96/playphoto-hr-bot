@@ -277,11 +277,37 @@ onboardingHandlers.on("message:photo", async (ctx, next) => {
 
 import { FunnelStep } from "@prisma/client";
 
+function getCandidateAge(birthDate: Date): number {
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+    return age;
+}
+
+const MAX_CANDIDATE_AGE = 25;
+
 async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     const candidateId = existingCandidate?.id;
     logger.info({ candidateId }, "🏁 Starting finishOnboarding...");
 
     try {
+        // Soft age filter: politely decline 26+ candidates
+        if (existingCandidate.birthDate && getCandidateAge(existingCandidate.birthDate) > MAX_CANDIDATE_AGE) {
+            await candidateRepository.update(candidateId, {
+                status: CandidateStatus.REJECTED,
+                hrDecision: "AGE_LIMIT"
+            } as any);
+
+            const text = `Дякуємо, що заповнила анкету! 🌸\n\n` +
+                `На жаль, наразі всі позиції у нас зайняті. Ми зберегли твої дані і обов'язково зв'яжемося, якщо з'явиться можливість. Бажаємо успіхів! ✨`;
+
+            await cleanupMessages(ctx).catch(() => {});
+            await ScreenManager.renderScreen(ctx, text, undefined, { forceNew: true });
+            logger.info({ candidateId, age: getCandidateAge(existingCandidate.birthDate) }, "Candidate soft-rejected: age limit");
+            return;
+        }
+
         // All fields already saved incrementally — just update status
         const updatedCandidate = await candidateRepository.update(candidateId, {
             status: 'AWAITING_FIRST_SHIFT',
