@@ -59,7 +59,7 @@ DD.MM HH:MM-HH:MM
 Example: 05.02 10:00-14:00`,
   "hr-error-past-time": `⚠️ This time has already passed (or date is in the past).`,
   "hr-error-end-before-start": `⚠️ End time must be after start time.`,
-  "hr-success-created-slots": (p: { count: string | number, date: string | number }) => `✅ Created ${p.count} slots (20 min each) for ${p.date}! 📅`,
+  "hr-success-created-slots": (p: { count: string | number, date: string | number }) => `✅ Created ${p.count} slots (15 min each) for ${p.date}! 📅`,
   "hr-error-generic": (p: { error: string | number }) => `❌ Error: ${p.error}`,
   "hr-success-added-single-slot": (p: { dateTime: string | number }) => `✅ Added one slot: ${p.dateTime}`,
   "hr-error-create-slot": `❌ Error creating slot.`,
@@ -117,7 +117,7 @@ Example: <code>05.02 10:00</code>
 📅 <b>Window (multiple slots)</b>
 <code>DD.MM HH:MM-HH:MM</code>
 Example: <code>05.02 10:00-14:00</code>
-<i>(20 min slots will be created)</i>`,
+<i>(15 min slots will be created)</i>`,
   "mentor-btn-add-time": `➕ Add Time`,
   "mentor-ask-add-time": `✍️ <b>Enter date and time for training</b>
 Choose input format:

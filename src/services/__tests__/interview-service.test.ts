@@ -42,7 +42,7 @@ describe('InterviewService', () => {
 
         it('should create correct number of slots', async () => {
             const start = new Date('2026-02-10T10:00:00');
-            const end = new Date('2026-02-10T11:00:00'); // 60 mins -> 3 slots of 20 mins (V4 updated)
+            const end = new Date('2026-02-10T11:00:00'); // 60 mins -> 4 slots of 15 mins
 
             vi.mocked(interviewRepository.createSession).mockResolvedValue({ id: 'session1' } as any);
             vi.mocked(interviewRepository.createSlot).mockResolvedValue({ id: 'slot' } as any);
@@ -50,21 +50,21 @@ describe('InterviewService', () => {
             const result = await interviewService.createSessionWithSlots(start, end);
 
             expect(interviewRepository.createSession).toHaveBeenCalledWith({ startTime: start, endTime: end });
-            expect(interviewRepository.createSlot).toHaveBeenCalledTimes(3);
-            expect(result.createdCount).toBe(3);
+            expect(interviewRepository.createSlot).toHaveBeenCalledTimes(4);
+            expect(result.createdCount).toBe(4);
         });
 
         it('should handle non-exact divisions (break before end)', async () => {
             const start = new Date('2026-02-10T10:00:00');
-            const end = new Date('2026-02-10T10:35:00'); // 35 mins -> 1 slot of 20 mins
+            const end = new Date('2026-02-10T10:35:00'); // 35 mins -> 2 slots of 15 mins
 
             vi.mocked(interviewRepository.createSession).mockResolvedValue({ id: 'session1' } as any);
             vi.mocked(interviewRepository.createSlot).mockResolvedValue({ id: 'slot' } as any);
 
             const result = await interviewService.createSessionWithSlots(start, end);
 
-            expect(interviewRepository.createSlot).toHaveBeenCalledTimes(1);
-            expect(result.createdCount).toBe(1);
+            expect(interviewRepository.createSlot).toHaveBeenCalledTimes(2);
+            expect(result.createdCount).toBe(2);
         });
     });
 

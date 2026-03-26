@@ -52,7 +52,7 @@ export const createTimePickerKb = (prefix: string) => {
 
 export const createDurationPickerKb = (prefix: string) => {
     return new InlineKeyboard()
-        .text("📍 Just 1 Slot (20 min)", `${prefix}_dur_20`).row()
+        .text("📍 Just 1 Slot (15 min)", `${prefix}_dur_15`).row()
         .text("📅 Window: 2 hours", `${prefix}_dur_120`).row()
         .text("📅 Window: 4 hours", `${prefix}_dur_240`).row()
         .text("✍️ Custom...", `${prefix}_dur_custom`).row()

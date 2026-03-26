@@ -61,7 +61,7 @@ slotBuilderHandlers.callbackQuery(/^(hr|mentor)_sb_dur_custom$/, async (ctx) => 
     ctx.session.step = `${role}_sb_wait_custom_end`;
     
     if (role === 'mentor') {
-        await ctx.editMessageText("✍️ <b>Enter Start Time:</b>\n\nExample:\n• <code>17:50</code>\n\n<i>Bot will create a 20-min slot + 10-min break automatically. ✨</i>", {
+        await ctx.editMessageText("✍️ <b>Enter Start Time:</b>\n\nExample:\n• <code>17:50</code>\n\n<i>Bot will create a slot + break automatically. ✨</i>", {
             parse_mode: "HTML",
             reply_markup: new InlineKeyboard().text("⬅️ Back", `${role}_sb_back_dur`)
         });
@@ -157,7 +157,7 @@ async function executeSlotCreation(ctx: MyContext, role: 'hr' | 'mentor', durati
         if (role === 'hr') {
             const timeLabel = `${sb.startHour}:${(sb.startMinute || 0).toString().padStart(2, '0')}`;
             if (candId) {
-                const dbSlot = await interviewService.createSingleSlot(start, 20, candId);
+                const dbSlot = await interviewService.createSingleSlot(start, 15, candId);
                 const { candidateRepository } = await import("../repositories/candidate-repository.js");
                 const { CandidateStatus } = await import("@prisma/client");
                 await candidateRepository.update(candId, {
@@ -169,7 +169,7 @@ async function executeSlotCreation(ctx: MyContext, role: 'hr' | 'mentor', durati
                 if (ctx.callbackQuery) await ctx.editMessageText(resp, { parse_mode: "HTML", reply_markup: kb });
                 else await ctx.reply(resp, { parse_mode: "HTML", reply_markup: kb });
             } else {
-                if (duration === 20) await interviewService.createSingleSlot(start);
+                if (duration === 15) await interviewService.createSingleSlot(start);
                 else await interviewService.createSessionWithSlots(start, end);
                 const kb = new InlineKeyboard().text(STAFF_TEXTS["hr-btn-back-to-calendar"], "hr_main_calendar");
                 const resp = `✅ <b>Success!</b>\n\nSlots created for ${start.toLocaleDateString('uk-UA')} starting at ${timeLabel}.`;
