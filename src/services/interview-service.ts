@@ -6,9 +6,9 @@ export class InterviewService {
      * Creates a batch of slots for a session.
      * @param start Start date/time
      * @param end End date/time
-     * @param slotDuration Duration of each slot in minutes (default 20)
+     * @param slotDuration Duration of each slot in minutes (default 15)
      */
-    async createSessionWithSlots(start: Date, end: Date, slotDuration: number = 20) {
+    async createSessionWithSlots(start: Date, end: Date, slotDuration: number = 15) {
         if (end <= start) {
             throw new Error("End time must be after start time");
         }
@@ -80,7 +80,7 @@ export class InterviewService {
     /**
      * Creates a single slot without an explicit session.
      */
-    async createSingleSlot(start: Date, duration: number = 20, candidateId?: string) {
+    async createSingleSlot(start: Date, duration: number = 15, candidateId?: string) {
         const end = new Date(start.getTime() + duration * 60 * 1000);
 
         // 1. Check for ANY overlaps (allows back-to-back)
@@ -137,7 +137,7 @@ export class InterviewService {
     /**
      * Safely updates a session's interval
      */
-    async updateSessionInterval(sessionId: string, newStart: Date, newEnd: Date, slotDuration: number = 20) {
+    async updateSessionInterval(sessionId: string, newStart: Date, newEnd: Date, slotDuration: number = 15) {
         const session = await interviewRepository.findSessionById(sessionId);
         if (!session) throw new Error("SESSION_NOT_FOUND");
 
