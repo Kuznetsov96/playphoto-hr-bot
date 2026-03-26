@@ -355,7 +355,11 @@ export class LogisticsService {
                 text = `⚠️ <b>No Photographer on Shift</b>\n\nParcel ${ttn} has arrived at ${loc}, but nobody is scheduled today.\n\nPlease coordinate manually. 📦`;
                 break;
             case 'REJECTED':
-                text = `🚨 <b>Parcel Rejected</b>\n\nPhotographer at ${loc} cannot pick up parcel ${ttn} today! (Rejections: ${parcel.rejectionCount})\n\nUrgent action required. ⚡️`;
+                if (parcel.rejectionCount >= 2) {
+                    text = `🚨 <b>Parcel Rejected</b>\n\nPhotographer at ${loc} cannot pick up parcel ${ttn} today! (Rejections: ${parcel.rejectionCount})\n\nUrgent action required. ⚡️`;
+                } else {
+                    text = `ℹ️ Photographer at ${loc} declined parcel ${ttn}. Someone else on shift may pick it up.`;
+                }
                 break;
             case 'DELAYED':
                 text = `⏳ <b>Parcel Delayed</b>\n\nParcel ${ttn} at ${loc} has been waiting for too long!\n\nPlease check the status. 📦`;
