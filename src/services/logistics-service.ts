@@ -219,6 +219,14 @@ export class LogisticsService {
         if (addressRef) {
             const byRef = await prisma.location.findFirst({ where: { npAddressRef: addressRef } });
             if (byRef) return byRef;
+
+            // 1b. Learn from past parcels: same addressRef was already manually assigned
+            const pastParcel = await prisma.parcel.findFirst({
+                where: { npAddressRef: addressRef, locationId: { not: null } },
+                include: { location: true },
+                orderBy: { updatedAt: 'desc' }
+            });
+            if (pastParcel?.location) return pastParcel.location;
         }
 
         // 2. Warehouse number match via static NP_LOCATIONS_MAP
