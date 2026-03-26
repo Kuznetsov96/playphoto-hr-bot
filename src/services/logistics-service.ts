@@ -79,7 +79,7 @@ export class LogisticsService {
                 if (parcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
                         where: { id: parcel.id },
-                        data: { status: newStatus },
+                        data: { status: newStatus, staleAlertSentAt: null },
                         include: { location: true }
                     });
 
@@ -355,7 +355,11 @@ export class LogisticsService {
                 text = `⚠️ <b>No Photographer on Shift</b>\n\nParcel ${ttn} has arrived at ${loc}, but nobody is scheduled today.\n\nPlease coordinate manually. 📦`;
                 break;
             case 'REJECTED':
-                text = `🚨 <b>Parcel Rejected</b>\n\nPhotographer at ${loc} cannot pick up parcel ${ttn} today! (Rejections: ${parcel.rejectionCount})\n\nUrgent action required. ⚡️`;
+                if (parcel.rejectionCount >= 2) {
+                    text = `🚨 <b>Parcel Rejected</b>\n\nPhotographer at ${loc} cannot pick up parcel ${ttn} today! (Rejections: ${parcel.rejectionCount})\n\nUrgent action required. ⚡️`;
+                } else {
+                    text = `ℹ️ Photographer at ${loc} declined parcel ${ttn}. Someone else on shift may pick it up.`;
+                }
                 break;
             case 'DELAYED':
                 text = `⏳ <b>Parcel Delayed</b>\n\nParcel ${ttn} at ${loc} has been waiting for too long!\n\nPlease check the status. 📦`;
@@ -391,23 +395,7 @@ export class LogisticsService {
 
         // After 20:00 Kyiv time, notify next day's staff instead of today's
         const now = new Date();
-        const kyivParts = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'Europe/Kyiv',
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: 'numeric', hour12: false
-        }).formatToParts(now);
-
-        let y = 0, m = 0, d = 0, h = 0;
-        for (const p of kyivParts) {
-            if (p.type === 'year') y = parseInt(p.value);
-            if (p.type === 'month') m = parseInt(p.value);
-            if (p.type === 'day') d = parseInt(p.value);
-            if (p.type === 'hour') h = parseInt(p.value);
-        }
-
-        if (h >= 20) d++;
-        const shiftStart = new Date(Date.UTC(y, m - 1, d));
-        const shiftEnd = new Date(Date.UTC(y, m - 1, d + 1));
+        const { shiftStart, shiftEnd } = this.getKyivShiftDateRange(now);
 
         const shifts = await prisma.workShift.findMany({
             where: {
@@ -470,6 +458,31 @@ export class LogisticsService {
     }
 
     /**
+     * Returns today's (or tomorrow's after 20:00) shift date range in Kyiv time,
+     * as UTC-anchored Date boundaries suitable for WorkShift.date queries.
+     */
+    private getKyivShiftDateRange(now: Date): { shiftStart: Date; shiftEnd: Date } {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Europe/Kyiv',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: 'numeric', hour12: false
+        }).formatToParts(now);
+
+        let y = 0, mo = 0, d = 0, h = 0;
+        for (const p of parts) {
+            if (p.type === 'year')  y  = parseInt(p.value);
+            if (p.type === 'month') mo = parseInt(p.value);
+            if (p.type === 'day')   d  = parseInt(p.value);
+            if (p.type === 'hour')  h  = parseInt(p.value);
+        }
+
+        if (h >= 20) d++;
+        const shiftStart = new Date(Date.UTC(y, mo - 1, d));
+        const shiftEnd   = new Date(Date.UTC(y, mo - 1, d + 1));
+        return { shiftStart, shiftEnd };
+    }
+
+    /**
      * Parses closing time from Location.schedule text for a given day of week.
      * Schedule format: "Пн-Пт — 15:00-21:00\nСб-Нд — 12:00-21:00"
      * Returns hour and minute of closing, or null if unparseable.
@@ -479,8 +492,13 @@ export class LogisticsService {
         const DAY_RANGES: { days: number[]; pattern: RegExp }[] = [
             { days: [1, 2, 3, 4, 5], pattern: /пн.{0,5}пт/i },
             { days: [6, 0],          pattern: /сб.{0,5}нд/i },
-            { days: [6],             pattern: /^сб$/i },
-            { days: [0],             pattern: /^нд$/i },
+            { days: [6],             pattern: /сб/i },
+            { days: [0],             pattern: /нд/i },
+            { days: [1],             pattern: /пн/i },
+            { days: [2],             pattern: /вт/i },
+            { days: [3],             pattern: /ср/i },
+            { days: [4],             pattern: /чт/i },
+            { days: [5],             pattern: /пт/i },
         ];
 
         for (const line of schedule.split('\n')) {
@@ -488,7 +506,8 @@ export class LogisticsService {
                 if (!range.days.includes(dayOfWeek)) continue;
                 if (!range.pattern.test(line)) continue;
 
-                const timeMatch = line.match(/(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/);
+                // Support both hyphen and en/em-dash as time separator
+                const timeMatch = line.match(/(\d{1,2}):(\d{2})[\s]*[-–—][\s]*(\d{1,2}):(\d{2})/);
                 if (timeMatch) {
                     return { h: parseInt(timeMatch[3]!), m: parseInt(timeMatch[4]!) };
                 }
@@ -516,24 +535,25 @@ export class LogisticsService {
         const location = await prisma.location.findUnique({ where: { id: locationId } });
         if (!location?.schedule) return null;
 
-        // Use Kyiv time to determine day of week
-        const kyivFormatter = new Intl.DateTimeFormat('en-US', {
+        // Use Kyiv time to determine day of week — parse directly from formatToParts
+        // to avoid timezone shifts when re-parsing a date string
+        const kyivParts = new Intl.DateTimeFormat('en-US', {
             timeZone: 'Europe/Kyiv',
             weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit'
-        });
-        const kyivParts = kyivFormatter.formatToParts(date);
-        const kyivDateStr = kyivParts.find(p => p.type === 'month')!.value + '/' +
-            kyivParts.find(p => p.type === 'day')!.value + '/' +
-            kyivParts.find(p => p.type === 'year')!.value;
-        const kyivDow = new Date(kyivDateStr).getDay();
+        }).formatToParts(date);
+
+        const weekdayNames: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+        const weekdayStr = kyivParts.find(p => p.type === 'weekday')?.value ?? '';
+        const kyivDow = weekdayNames[weekdayStr] ?? 0;
+
+        const kyivDay   = kyivParts.find(p => p.type === 'day')?.value   ?? '01';
+        const kyivMonth = kyivParts.find(p => p.type === 'month')?.value ?? '01';
+        const kyivYear  = kyivParts.find(p => p.type === 'year')?.value  ?? '2000';
 
         const closeTime = this.parseScheduleCloseTime(location.schedule, kyivDow);
         if (!closeTime) return null;
 
-        // Build close time as UTC Date for today in Kyiv timezone
-        const kyivDay = kyivParts.find(p => p.type === 'day')!.value;
-        const kyivMonth = kyivParts.find(p => p.type === 'month')!.value;
-        const kyivYear = kyivParts.find(p => p.type === 'year')!.value;
+        // Build close time anchored to Kyiv timezone (+02:00 standard; DST handled by offset string)
         const closeKyiv = new Date(`${kyivYear}-${kyivMonth}-${kyivDay}T${String(closeTime.h).padStart(2,'0')}:${String(closeTime.m).padStart(2,'0')}:00+02:00`);
         return closeKyiv;
     }
@@ -617,13 +637,15 @@ export class LogisticsService {
 
             const oldTid = parcel.responsibleStaff?.user?.telegramId;
 
-            // Reset parcel
+            // Reset parcel — clear all reminder flags so next shift gets fresh notifications
             await prisma.parcel.update({
                 where: { id: parcel.id },
                 data: {
                     status: 'ARRIVED',
                     responsibleStaffId: null,
                     shiftEndReminderSentAt: null,
+                    photoReminderSentAt: null,
+                    staleAlertSentAt: null,
                 }
             });
 
@@ -649,25 +671,7 @@ export class LogisticsService {
      */
     async notifyNextShiftAboutLeftover(parcelId: string) {
         const now = new Date();
-
-        const kyivParts = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'Europe/Kyiv',
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: 'numeric', hour12: false
-        }).formatToParts(now);
-
-        let y = 0, mo = 0, d = 0, h = 0;
-        for (const p of kyivParts) {
-            if (p.type === 'year') y = parseInt(p.value);
-            if (p.type === 'month') mo = parseInt(p.value);
-            if (p.type === 'day') d = parseInt(p.value);
-            if (p.type === 'hour') h = parseInt(p.value);
-        }
-
-        // After 20:00 notify next day's shift
-        if (h >= 20) d++;
-        const shiftStart = new Date(Date.UTC(y, mo - 1, d));
-        const shiftEnd = new Date(Date.UTC(y, mo - 1, d + 1));
+        const { shiftStart, shiftEnd } = this.getKyivShiftDateRange(now);
 
         const parcel = await prisma.parcel.findUnique({
             where: { id: parcelId },

@@ -19,31 +19,40 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
     if (!user || !user.staffProfile) return;
 
-    const parcel = await prisma.parcel.findUnique({
-        where: { id: parcelId },
-        include: { responsibleStaff: true }
-    });
-
-    if (!parcel) return ctx.answerCallbackQuery("Parcel not found.");
-    
-    // Block only if staff is actively handling (PICKUP_IN_PROGRESS / VERIFYING).
-    // ARRIVED with a stale responsibleStaffId (previous shift) should be re-assignable.
-    if (
-        parcel.responsibleStaffId &&
-        parcel.responsibleStaffId !== user.staffProfile.id &&
-        (parcel.status === 'PICKUP_IN_PROGRESS' || parcel.status === 'VERIFYING')
-    ) {
-        return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'), { parse_mode: 'HTML' });
-    }
-
-    // Assign responsible staff
-    await prisma.parcel.update({
-        where: { id: parcelId },
-        data: { 
+    // Atomic assignment: only claim the parcel if it's not actively handled by someone else.
+    // This prevents race conditions when two staff press Accept simultaneously.
+    const claimed = await prisma.parcel.updateMany({
+        where: {
+            id: parcelId,
+            OR: [
+                { status: { notIn: ['PICKUP_IN_PROGRESS', 'VERIFYING'] } },
+                { responsibleStaffId: null },
+                { responsibleStaffId: user.staffProfile.id },
+            ]
+        },
+        data: {
             responsibleStaffId: user.staffProfile.id,
-            status: 'PICKUP_IN_PROGRESS'
+            status: 'PICKUP_IN_PROGRESS',
+            shiftEndReminderSentAt: null,
+            photoReminderSentAt: null,
         }
     });
+
+    if (claimed.count === 0) {
+        // Another staff member just claimed it — fetch name for friendly message
+        const taken = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { responsibleStaff: true }
+        });
+        await ctx.answerCallbackQuery();
+        return ctx.editMessageText(
+            LOGISTICS_TEXTS_STAFF.already_taken(taken?.responsibleStaff?.fullName || 'іншого фотографа'),
+            { parse_mode: 'HTML' }
+        );
+    }
+
+    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+    if (!parcel) return ctx.answerCallbackQuery("Parcel not found.");
 
     // Ask for phone confirmation and format to 12 digits minimum (e.g. 380...)
     let phoneToUse = (user.staffProfile.npPhone || user.staffProfile.phone || '').replace(/\D/g, '');
@@ -84,10 +93,9 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
         }
     });
 
-    if (newRejectionCount >= 2) {
-        const { logisticsService } = await import("../../../services/logistics-service.js");
-        await logisticsService.notifySupport(parcelId, 'REJECTED');
-    }
+    // Alert support on every rejection so they see escalation (1st, 2nd, 3rd...)
+    const { logisticsService } = await import("../../../services/logistics-service.js");
+    await logisticsService.notifySupport(parcelId, 'REJECTED');
 
     const text = `Окей, дякую! 📦\nЦя посилка залишається у списку локації, її зможе забрати інша фотографиня. ✨`;
     await ctx.editMessageText(text, { parse_mode: 'HTML' });
