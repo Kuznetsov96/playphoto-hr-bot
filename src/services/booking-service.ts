@@ -41,6 +41,7 @@ export class BookingService {
             // --- SMART RESCHEDULE LOGIC ---
             // If candidate already has a booked slot, cancel it first
             if (candidate.interviewSlotId) {
+                logger.info({ candidateId: candidate.id, candidateName: candidate.fullName, oldSlotId: candidate.interviewSlotId, newSlotId: slotId }, "🔄 Interview reschedule: unbooking old slot");
                 const oldSlot = await interviewRepository.findSlotById(candidate.interviewSlotId, tx);
                 if (oldSlot && oldSlot.googleEventId) {
                     await googleCalendar.deleteEvent(oldSlot.googleEventId).catch(e => logger.warn("Failed to delete old calendar event during reschedule"));
@@ -95,6 +96,8 @@ export class BookingService {
         const slot = await interviewRepository.findSlotWithCandidate(slotId);
         if (!slot) return;
 
+        logger.info({ slotId, candidateId: slot.candidate?.id, candidateName: slot.candidate?.fullName }, "🔓 cancelInterviewSlot");
+
         if (slot.googleEventId) {
             await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
         }
@@ -117,6 +120,8 @@ export class BookingService {
         const slot = await trainingRepository.findSlotWithCandidate(slotId);
         if (!slot) return;
 
+        logger.info({ slotId, candidateId: slot.candidate?.id, candidateName: slot.candidate?.fullName }, "🔓 cancelTrainingSlot");
+
         if (slot.googleEventId) {
             await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
         }
@@ -138,6 +143,8 @@ export class BookingService {
     async cancelDiscoverySlot(slotId: string) {
         const slot = await trainingRepository.findSlotWithCandidate(slotId);
         if (!slot) return;
+
+        logger.info({ slotId, candidateId: slot.candidate?.id, candidateName: slot.candidate?.fullName }, "🔓 cancelDiscoverySlot");
 
         if (slot.googleEventId) {
             await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
@@ -171,6 +178,7 @@ export class BookingService {
 
             // --- SMART RESCHEDULE LOGIC for Discovery ---
             if (candidate.discoverySlotId) {
+                logger.info({ candidateId: candidate.id, candidateName: candidate.fullName, oldSlotId: candidate.discoverySlotId, newSlotId: slotId }, "🔄 Discovery reschedule: unbooking old slot");
                 const oldSlot = await trainingRepository.findSlotById(candidate.discoverySlotId, tx);
                 if (oldSlot && oldSlot.googleEventId) {
                     await googleCalendar.deleteEvent(oldSlot.googleEventId).catch(e => logger.warn("Failed to delete old discovery calendar event during reschedule"));
@@ -237,6 +245,7 @@ export class BookingService {
 
             // --- SMART RESCHEDULE LOGIC for Training ---
             if (candidate.trainingSlotId) {
+                logger.info({ candidateId: candidate.id, candidateName: candidate.fullName, oldSlotId: candidate.trainingSlotId, newSlotId: slotId }, "🔄 Training reschedule: unbooking old slot");
                 const oldSlot = await trainingRepository.findSlotById(candidate.trainingSlotId, tx);
                 if (oldSlot && oldSlot.googleEventId) {
                     await googleCalendar.deleteEvent(oldSlot.googleEventId).catch(e => logger.warn("Failed to delete old training calendar event during reschedule"));
