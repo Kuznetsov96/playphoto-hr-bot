@@ -40,7 +40,7 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
         try {
             const { bookingService } = await import("../services/booking-service.js");
             const { accessService } = await import("../services/access-service.js");
-            const { KNOWLEDGE_BASE_LINK } = await import("../config.js");
+            const { PHOTOGRAPHER_GUIDE_LINK } = await import("../config.js");
             const { createKyivDate } = await import("../utils/bot-utils.js");
 
             const cand = await candidateRepository.findById(candId!);
@@ -57,11 +57,19 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
             const tid = Number(cand.user.telegramId);
             if (type === 'discovery') {
                 await bookingService.bookDiscoverySlot(tid, slot.id);
-                await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](date!, text), { parse_mode: "HTML" });
+                const discoveryKb = new InlineKeyboard()
+                    .text("🗓️ Перенести", `reschedule_training_${slot.id}`).row()
+                    .text("❌ Скасувати запис", `cancel_training_${slot.id}`).row()
+                    .text("👩‍🏫 Написати наставниці", "contact_hr");
+                await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](date!, text), { parse_mode: "HTML", reply_markup: discoveryKb });
             } else {
                 await bookingService.bookTrainingSlot(tid, slot.id);
                 const channelLink = await accessService.createInviteLink(cand.user.telegramId) || "https://t.me/+FuFRMGsvMktkNGFi";
-                await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["training-manual-invite"](date!, text, channelLink, KNOWLEDGE_BASE_LINK), { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+                const trainingKb = new InlineKeyboard()
+                    .text("🗓️ Перенести", `reschedule_training_${slot.id}`).row()
+                    .text("❌ Скасувати запис", `cancel_training_${slot.id}`).row()
+                    .text("👩‍🏫 Написати наставниці", "contact_hr");
+                await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["training-manual-invite"](date!, text, channelLink, PHOTOGRAPHER_GUIDE_LINK), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: trainingKb });
             }
 
             await ScreenManager.renderScreen(ctx, `✅ <b>Scheduled for ${date} ${text}!</b>\n\nCandidate has been notified.`, "mentor-action-success");

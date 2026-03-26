@@ -29,6 +29,7 @@ const envSchema = z.object({
     // Important Links
     NDA_LINK: z.string().optional(),
     KNOWLEDGE_BASE_LINK: z.string().optional(),
+    PHOTOGRAPHER_GUIDE_LINK: z.string().optional(),
 
     // Spreadsheets (Required for full functionality)
     SPREADSHEET_ID_TECH_CASH: z.string().min(1, "TECH_CASH spreadsheet ID is missing"),
@@ -109,6 +110,7 @@ export const NDA_LINK = env.NDA_LINK || "";
 if (!NDA_LINK) console.warn("⚠️  NDA_LINK is not set — NDA flow will send messages without a document link");
 export const KNOWLEDGE_BASE_LINK = env.KNOWLEDGE_BASE_LINK || "https://t.me/+hC9UDoSZb3hiZjFi";
 export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge base channel
+export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
