@@ -250,10 +250,14 @@ export class CandidateRepository {
         if (data.status !== undefined) {
             (data as any).statusChangedAt = new Date();
         }
-        return prisma.candidate.updateMany({
+        const result = await prisma.candidate.updateMany({
             where,
             data
         });
+        if (data.status !== undefined && result.count > 0) {
+            logger.info({ count: result.count, newStatus: data.status, where: JSON.stringify(where).slice(0, 200) }, "📋 Candidate updateMany");
+        }
+        return result;
     }
 
     async findForDecisionNotification(delay: Date) {
