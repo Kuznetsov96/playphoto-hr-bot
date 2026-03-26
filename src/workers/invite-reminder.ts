@@ -2,6 +2,7 @@ import { PrismaClient, CandidateStatus } from "@prisma/client";
 import { InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { candidateRepository } from "../repositories/candidate-repository.js";
 
 const prisma = new PrismaClient();
 
@@ -42,15 +43,11 @@ export async function processInviteReminders(bot: any) {
             if (invitedTime <= resetThreshold.getTime()) {
                 logger.info({ candId: cand.id }, "🔄 [WORKER] 48h passed. Resetting candidate to WAITLIST.");
 
-                await prisma.candidate.update({
-                    where: { id: cand.id },
-                    data: {
-                        status: CandidateStatus.WAITLIST,
-                        isWaitlisted: true,
-                        notificationSent: false, // Reset to allow future invites
-                        interviewInvitedAt: null, // Reset time
-                        statusChangedAt: new Date()
-                    }
+                await candidateRepository.update(cand.id, {
+                    status: CandidateStatus.WAITLIST,
+                    isWaitlisted: true,
+                    notificationSent: false, // Reset to allow future invites
+                    interviewInvitedAt: null, // Reset time
                 });
 
                 try {
