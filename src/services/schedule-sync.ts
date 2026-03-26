@@ -602,14 +602,14 @@ export class ScheduleSyncService {
             if (cityMap[potentialCity]) currentCity = cityMap[potentialCity];
         }
 
-        const headerAliases: Record<string, { name: string, city?: string, exact?: boolean }> = {
+        const headerAliases: Record<string, { name: string, city?: string, exact?: boolean, exclude?: string }> = {
             'drivecity': { name: 'drive city', city: 'Львів' },
             'dragonp': { name: 'dragon park', city: 'Львів' },
             'leoland': { name: 'leoland', city: 'Львів' },
             'leo': { name: 'leoland', city: 'Львів' },
-            'sp даринок': { name: 'даринок', city: 'Київ' },
-            'даринок': { name: 'даринок', city: 'Київ' },
-            'sp київ': { name: 'smile park', city: 'Київ' },
+            'sp даринок': { name: 'darynok', city: 'Київ' },
+            'даринок': { name: 'darynok', city: 'Київ' },
+            'sp київ': { name: 'smile park', city: 'Київ', exclude: 'darynok' },
             'sp львів': { name: 'smile park', city: 'Львів' },
             'sp харків': { name: 'smile park', city: 'Харків' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
@@ -630,7 +630,8 @@ export class ScheduleSyncService {
                     ? (lName.startsWith(target.name) || lLegacy.startsWith(target.name))
                     : (lName.includes(target.name) || lLegacy.includes(target.name));
                 const cityMatch = (target.city) ? l.city === target.city : (currentCity ? l.city === currentCity : true);
-                return nameMatch && cityMatch;
+                const notExcluded = !target.exclude || (!lName.includes(target.exclude) && !lLegacy.includes(target.exclude));
+                return nameMatch && cityMatch && notExcluded;
             });
             if (found) return found;
         }
