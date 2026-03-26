@@ -26,7 +26,13 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
     if (!parcel) return ctx.answerCallbackQuery("Parcel not found.");
     
-    if (parcel.responsibleStaffId && parcel.responsibleStaffId !== user.staffProfile.id) {
+    // Block only if staff is actively handling (PICKUP_IN_PROGRESS / VERIFYING).
+    // ARRIVED with a stale responsibleStaffId (previous shift) should be re-assignable.
+    if (
+        parcel.responsibleStaffId &&
+        parcel.responsibleStaffId !== user.staffProfile.id &&
+        (parcel.status === 'PICKUP_IN_PROGRESS' || parcel.status === 'VERIFYING')
+    ) {
         return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'), { parse_mode: 'HTML' });
     }
 
