@@ -864,14 +864,10 @@ export const hrService = {
         } catch (e) { logger.error({ err: e }, "Failed to notify partner about staging"); }
 
         // Update candidate status
-        await prisma.candidate.update({
-            where: { id: candId },
-            data: {
-                status: CandidateStatus.STAGING_ACTIVE,
-                currentStep: FunnelStep.FIRST_SHIFT,
-                notificationSent: true,
-                statusChangedAt: new Date()
-            }
+        await candidateRepository.update(candId, {
+            status: CandidateStatus.STAGING_ACTIVE,
+            currentStep: FunnelStep.FIRST_SHIFT,
+            notificationSent: true,
         });
 
         return { candidateNotified, partnerNotified, candName, partnerName };

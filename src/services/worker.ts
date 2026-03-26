@@ -998,10 +998,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     await bot.api.sendMessage(Number(cand.user.telegramId),
                         `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
 
-                    await prisma.candidate.update({
-                        where: { id: cand.id },
-                        data: { status: "REJECTED", statusChangedAt: new Date() }
-                    });
+                    await candidateRepository.update(cand.id, { status: "REJECTED" });
                     logger.info({ userId: cand.user.telegramId }, "🚫 Кандидата автоматично переведено в REJECTED (7 днів неактивності)");
                 } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
                     // Day 5: Warning (We run this once a day, so it will hit exactly once)
@@ -1030,10 +1027,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     await bot.api.sendMessage(Number(cand.user.telegramId),
                         `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді щодо завершення підготовки до першої зміни, ми змушені скасувати твою заявку. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`
                     ).catch(() => {});
-                    await prisma.candidate.update({
-                        where: { id: cand.id },
-                        data: { status: "REJECTED", statusChangedAt: new Date() }
-                    });
+                    await candidateRepository.update(cand.id, { status: "REJECTED" });
                     logger.info({ userId: cand.user.telegramId }, "🚫 AWAITING_FIRST_SHIFT → REJECTED (12 днів неактивності)");
                 } else if (refDate <= cutoff10Days && refDate > cutoff11Days) {
                     await bot.api.sendMessage(Number(cand.user.telegramId),
