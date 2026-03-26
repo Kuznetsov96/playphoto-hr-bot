@@ -582,6 +582,21 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
             reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_training_scheduling")
         });
 
+        // Notify Mentor about cancellation
+        if (candidate) {
+            const { MENTOR_IDS } = await import("../config.js");
+            const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
+            const typeText = isDiscovery ? "discovery" : "training";
+            const name = candidate.fullName || "Candidate";
+            const alertText = `❌ <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Cancelled</b>\n\n` +
+                `👤 <b>${name}</b> cancelled her ${typeText} appointment.\n` +
+                `She can rebook via the bot.`;
+            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            for (const mentorId of MENTOR_IDS) {
+                await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
+            }
+        }
+
     } catch (e) {
         logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні навчання");
         await ctx.answerCallbackQuery("Сталася помилка.");
@@ -592,6 +607,22 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
 bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
+
+        // Notify Mentor about reschedule
+        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        if (candidate) {
+            const { MENTOR_IDS } = await import("../config.js");
+            const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
+            const typeText = isDiscovery ? "discovery" : "training";
+            const name = candidate.fullName || "Candidate";
+            const alertText = `🗓 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Rescheduled</b>\n\n` +
+                `👤 <b>${name}</b> is rescheduling her ${typeText} appointment.\n` +
+                `She is choosing a new time now.`;
+            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            for (const mentorId of MENTOR_IDS) {
+                await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
+            }
+        }
 
         const slots = await trainingRepository.findActiveSlots();
 
