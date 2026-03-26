@@ -56,15 +56,11 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             if (isExactly17 && wasUnderage && isFemale) {
                 logger.info({ candidateId: c.id }, "🎈 Candidate turned 17! Activating...");
 
-                await prisma.candidate.update({
-                    where: { id: c.id },
-                    data: {
-                        status: "WAITLIST",
-                        hrDecision: null,
-                        isWaitlisted: true,
-                        currentStep: "INTERVIEW",
-                        statusChangedAt: new Date()
-                    }
+                await candidateRepository.update(c.id, {
+                    status: "WAITLIST",
+                    hrDecision: null,
+                    isWaitlisted: true,
+                    currentStep: "INTERVIEW",
                 });
 
                 await bot.api.sendMessage(tid, activationGreeting, { parse_mode: "HTML" });
