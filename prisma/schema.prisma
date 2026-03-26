@@ -360,7 +360,7 @@ model Parcel {
   rejectionCount  Int       @default(0)
   lastRejectionAt DateTime?
 
-  contentPhotoIds    String[] // Telegram file_ids
+  contentPhotoIds    String[] @default([]) // Telegram file_ids
   photoReminderSentAt DateTime? // When the "please upload photo" reminder was sent
 
   createdAt DateTime @default(now())
