@@ -4,7 +4,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { accessService } from "./access-service.js";
-import { ADMIN_IDS, KNOWLEDGE_BASE_LINK, NDA_LINK } from "../config.js";
+import { ADMIN_IDS, KNOWLEDGE_BASE_LINK, NDA_LINK, PHOTOGRAPHER_GUIDE_LINK } from "../config.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { createKyivDate } from "../utils/bot-utils.js";
@@ -169,15 +169,17 @@ export class MentorService {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
 
-        const firstName = extractFirstName(cand.fullName || "");
         let msgText = "";
-        
+
         if (cand.status === "WAITLIST") {
             msgText = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для нашої короткої зустрічі-знайомства. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
         } else if (cand.materialsSent && !cand.discoverySlotId) {
             msgText = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
         } else {
-            msgText = CANDIDATE_TEXTS["discovery-invite"](firstName, KNOWLEDGE_BASE_LINK);
+            const channelLink = cand.user
+                ? (await accessService.createInviteLink(cand.user.telegramId)) || accessService.staticJoinLink
+                : accessService.staticJoinLink;
+            msgText = CANDIDATE_TEXTS["discovery-invite"](KNOWLEDGE_BASE_LINK, channelLink, PHOTOGRAPHER_GUIDE_LINK);
         }
 
         await candidateRepository.update(candId, {
@@ -507,7 +509,7 @@ export class MentorService {
             message: `✅ Scheduled for ${dateStr} ${timeStr}`,
             notification: {
                 telegramId: Number((await candidateRepository.findById(candId))?.user.telegramId),
-                text: CANDIDATE_TEXTS["training-manual-invite"](dateStr, timeStr, channelLink, KNOWLEDGE_BASE_LINK)
+                text: CANDIDATE_TEXTS["training-manual-invite"](dateStr, timeStr, channelLink, PHOTOGRAPHER_GUIDE_LINK)
             }
         };
     }

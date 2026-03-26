@@ -52,13 +52,15 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
             if (!candidate || !candidate.user) return false;
 
-            // Mentor-stage candidates should never be routed to support tickets implicitly
-            const isMentorStageImplicit = [
+            // Pre-hire candidates should never be routed to support tickets implicitly
+            const isPreHireImplicit = [
                 'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
                 'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
-                'AWAITING_FIRST_SHIFT'
+                'AWAITING_FIRST_SHIFT',
+                'NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING',
+                'STAGING_ACTIVE', 'READY_FOR_HIRE'
             ].includes(candidate.status);
-            if (isMentorStageImplicit) return false;
+            if (isPreHireImplicit) return false;
 
             const { supportRepository } = await import("../repositories/support-repository.js");
             const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
@@ -100,6 +102,57 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             'INTERVIEW_SCHEDULED', 'INTERVIEW_COMPLETED',
             'DECISION_PENDING', 'ACCEPTED', 'REJECTED', 'BLOCKER'
         ].includes(candidate.status);
+
+        // Setup-stage candidates → always DM main admin directly, skip support tickets
+        if (isSetupStage) {
+            const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+            const adminMsgText =
+                `💬 <b>Message from Candidate (Admin/Setup)</b>\n` +
+                `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
+                `📍 City: ${candidate.city || "—"}\n` +
+                `📊 Status: <b>${candidate.status}</b>\n\n` +
+                `<b>Text:</b> ${msgText}`;
+
+            const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
+
+            let delivered = false;
+            for (const adminId of ADMIN_IDS) {
+                try {
+                    await ctx.api.sendMessage(Number(adminId), adminMsgText, {
+                        parse_mode: "HTML",
+                        reply_markup: adminKb
+                    });
+                    delivered = true;
+                } catch (e) {
+                    logger.warn({ err: e, adminId }, "Failed to deliver setup-stage message to admin");
+                }
+            }
+
+            if (!delivered) {
+                await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
+                ctx.session.step = "idle";
+                return true;
+            }
+
+            try {
+                const { messageRepository } = await import("../repositories/message-repository.js");
+                const { timelineRepository } = await import("../repositories/timeline-repository.js");
+                await messageRepository.create({
+                    candidate: { connect: { id: candidate.id } },
+                    sender: "USER",
+                    scope: "HR",
+                    content: msgText
+                });
+                await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, { category: "Admin (Setup)" });
+                await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
+            } catch (e) {
+                logger.error({ err: e }, "Failed to log setup-stage message");
+            }
+
+            ctx.session.step = "idle";
+            await ctx.reply("✅ Повідомлення надіслано адміністратору! Він відповість найближчим часом. ✨");
+            return true;
+        }
 
         // Candidates in mentor stage → always DM mentors directly, skip support tickets
         // Only HIRED staff use the support ticket/topic system

@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { TRAINING_QUIZ } from "../config/quiz.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { cleanupMessages } from "../utils/cleanup.js";
@@ -32,7 +33,7 @@ quizHandlers.callbackQuery("start_staging_selection", async (ctx) => {
     const text = `📸 <b>Обери зручний день для стажування</b>\n\n` +
         `Нагадаємо, воно триває 2 години (зазвичай 15:00–17:00). Обери дату, коли тобі буде зручно завітати на локацію: ✨`;
 
-    const kb = generateStagingDatePicker();
+    const kb = await generateStagingDatePicker(candidate.locationId);
     await ScreenManager.renderScreen(ctx, text, kb);
 });
 
@@ -180,7 +181,7 @@ async function finishQuiz(ctx: MyContext) {
 
         ctx.session.candidateData.step = 'SELECT_STAGING_DATES';
         const successText = CANDIDATE_TEXTS["staging-quiz-success"](totalScore, questionsCount);
-        const kb = generateStagingDatePicker();
+        const kb = await generateStagingDatePicker(candidate.locationId);
         await ScreenManager.renderScreen(ctx, successText, kb);
     } else {
         const failText = `✨ <b>Трішки не вистачило</b>\n\n` +
@@ -192,18 +193,46 @@ async function finishQuiz(ctx: MyContext) {
     }
 }
 
-function generateStagingDatePicker() {
+async function generateStagingDatePicker(locationId?: string | null) {
     const kb = new InlineKeyboard();
     const today = new Date();
     const weekdays = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
-    for (let i = 1; i <= 7; i++) {
+    // Build the 14-day window to look for shifts
+    const windowStart = new Date(today);
+    windowStart.setDate(today.getDate() + 1);
+    windowStart.setHours(0, 0, 0, 0);
+    const windowEnd = new Date(today);
+    windowEnd.setDate(today.getDate() + 15);
+    windowEnd.setHours(0, 0, 0, 0);
+
+    // Fetch shifts in window for the candidate's location (if known)
+    let shiftDates = new Set<string>();
+    if (locationId) {
+        try {
+            const shifts = await workShiftRepository.findByLocationAndDateRange(locationId, windowStart, windowEnd);
+            for (const s of shifts) {
+                const d = s.date;
+                const key = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+                shiftDates.add(key);
+            }
+        } catch (e) {
+            logger.error({ err: e }, "Failed to fetch shifts for staging date picker");
+        }
+    }
+
+    let addedDays = 0;
+    for (let i = 1; i <= 14 && addedDays < 7; i++) {
         const d = new Date(today);
         d.setDate(today.getDate() + i);
         const dayName = weekdays[d.getDay()];
         const dateStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
 
+        // If location is known, only show days with a photographer on shift
+        if (locationId && shiftDates.size > 0 && !shiftDates.has(dateStr)) continue;
+
         kb.text(`${dayName}, ${dateStr}`, `staging_date_${dateStr}`).row();
+        addedDays++;
     }
 
     kb.text("Інші дати", "staging_no_date").row();
@@ -219,29 +248,30 @@ quizHandlers.callbackQuery("staging_no_date", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["staging-no-date-available"]);
 
-    // Notify HR
+    // Notify main admin
     try {
-        const { HR_IDS } = await import("../config.js");
-        if (HR_IDS && HR_IDS.length > 0) {
+        const { ADMIN_IDS } = await import("../config.js");
+        if (ADMIN_IDS && ADMIN_IDS.length > 0) {
             const telegramId = ctx.from!.id;
             const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
             const name = candidate?.fullName || ctx.from?.first_name || "Candidate";
             const username = ctx.from?.username ? `@${ctx.from.username}` : "No username";
 
             const alertMsg = `📅 <b>INBOX: Staging date needed!</b>\n\n` +
-                `👤 Candidate: <b>${name}</b>\n\n` +
+                `👤 Candidate: <b>${name}</b> (${username})\n` +
+                `📍 ${candidate?.city || '—'}\n\n` +
                 `<i>She passed the test but didn't find a convenient staging date. Please contact her!</i>`;
 
-            for (const hrId of HR_IDS) {
+            for (const adminId of ADMIN_IDS) {
                 try {
-                    await ctx.api.sendMessage(hrId, alertMsg, { parse_mode: "HTML" });
+                    await ctx.api.sendMessage(adminId, alertMsg, { parse_mode: "HTML" });
                 } catch (e) {
-                    logger.error({ err: e, hrId }, "Failed to send staging_no_date alert to HR");
+                    logger.error({ err: e, adminId }, "Failed to send staging_no_date alert to admin");
                 }
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "Failed to process HR notification for staging_no_date");
+        logger.error({ err: e }, "Failed to process admin notification for staging_no_date");
     }
 
     delete (ctx.session as any).quizState;
