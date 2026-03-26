@@ -26,7 +26,13 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
     if (!parcel) return ctx.answerCallbackQuery("Parcel not found.");
     
-    if (parcel.responsibleStaffId && parcel.responsibleStaffId !== user.staffProfile.id) {
+    // Block only if staff is actively handling (PICKUP_IN_PROGRESS / VERIFYING).
+    // ARRIVED with a stale responsibleStaffId (previous shift) should be re-assignable.
+    if (
+        parcel.responsibleStaffId &&
+        parcel.responsibleStaffId !== user.staffProfile.id &&
+        (parcel.status === 'PICKUP_IN_PROGRESS' || parcel.status === 'VERIFYING')
+    ) {
         return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'), { parse_mode: 'HTML' });
     }
 
@@ -128,6 +134,22 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) =
 // 5. Trigger Photo Upload
 staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
+    const telegramId = ctx.from?.id;
+
+    if (telegramId) {
+        const user = await prisma.user.findUnique({
+            where: { telegramId: BigInt(telegramId) },
+            include: { staffProfile: true }
+        });
+        const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+
+        if (parcel?.responsibleStaffId && user?.staffProfile &&
+            parcel.responsibleStaffId !== user.staffProfile.id) {
+            await ctx.answerCallbackQuery();
+            return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.transferred, { parse_mode: 'HTML' });
+        }
+    }
+
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
     await ctx.reply("Будь ласка, надішли фото вмісту посилки 📸\nМожеш надіслати кілька фото — по одному. Коли закінчиш, натисни «Готово».");
     await ctx.answerCallbackQuery();
