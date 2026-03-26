@@ -563,34 +563,54 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
     }
 });
 
-// 10. Скасування навчання
+// 10. Скасування навчання — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
+    const slotId = ctx.match[1] as string;
+    await ctx.answerCallbackQuery();
+
+    const kb = new InlineKeyboard()
+        .text("🚫 Так, скасувати заявку", `confirm_cancel_training_${slotId}`).row()
+        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+
+    await ctx.editMessageText(
+        `⚠️ <b>Ти впевнена, що хочеш скасувати?</b>\n\n` +
+        `Твою заявку буде закрито, а анкету видалено з нашої системи. Якщо в майбутньому захочеш повернутися — потрібно буде подати заявку заново.\n\n` +
+        `Якщо просто хочеш змінити час — натисни «Перенести» замість скасування. 🌸`,
+        { parse_mode: "HTML", reply_markup: kb }
+    );
+});
+
+// 10.1. Скасування навчання — крок 2: підтверджено
+bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         await bookingService.cancelTrainingSlot(slotId);
-        // Reset status so candidate doesn't get stuck without a slot
-        if (candidate && (candidate.status === CandidateStatus.TRAINING_SCHEDULED || candidate.status === CandidateStatus.DISCOVERY_SCHEDULED)) {
+
+        if (candidate) {
             await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.ACCEPTED,
-                materialsSent: true
+                status: CandidateStatus.REJECTED,
+                candidateDecision: "Кандидатка скасувала заявку самостійно",
+                notificationSent: true
             });
         }
-        await ctx.answerCallbackQuery("Запис на навчання скасовано.");
-        await ctx.editMessageText("Твій запис на навчання скасовано. Якщо захочеш обрати інший час — тисни команду /start або кнопку нижче. 😊", {
-            reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_training_scheduling")
-        });
 
-        // Notify Mentor about cancellation
+        await ctx.answerCallbackQuery("Заявку скасовано.");
+        await ctx.editMessageText(
+            "Зрозуміли, дякуємо, що попередила! 🌸\n\n" +
+            "Бажаємо тобі успіхів у пошуках і всього найкращого! Якщо в майбутньому захочеш повернутися — ми будемо раді бачити тебе. ✨"
+        );
+
+        // Notify Mentor
         if (candidate) {
             const { MENTOR_IDS } = await import("../config.js");
             const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
             const typeText = isDiscovery ? "discovery" : "training";
             const name = candidate.fullName || "Candidate";
-            const alertText = `❌ <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Cancelled</b>\n\n` +
-                `👤 <b>${name}</b> cancelled her ${typeText} appointment.\n` +
-                `She can rebook via the bot.`;
+            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
+                `👤 <b>${name}</b> cancelled her ${typeText} and left the pipeline.\n` +
+                `Reason: candidate decided not to continue.`;
             const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
             for (const mentorId of MENTOR_IDS) {
                 await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
@@ -600,6 +620,16 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
     } catch (e) {
         logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні навчання");
         await ctx.answerCallbackQuery("Сталася помилка.");
+    }
+});
+
+// 10.2. Скасування — повернутись (dismiss)
+bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+    const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+    if (candidate) {
+        await showCandidateStatus(ctx, candidate);
     }
 });
 
