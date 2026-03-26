@@ -67,8 +67,8 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
 
     const kb = new InlineKeyboard();
 
-    if (parcel.contentPhotoId) {
-        kb.text("🖼 View Photo", `admin_parcel_view_${parcel.id}`).row();
+    if (parcel.contentPhotoIds.length > 0) {
+        kb.text(`🖼 View Photo${parcel.contentPhotoIds.length > 1 ? 's' : ''} (${parcel.contentPhotoIds.length})`, `admin_parcel_view_${parcel.id}`).row();
     }
 
     if (parcel.status !== 'COMPLETED' && parcel.status !== 'CANCELLED') {
@@ -124,7 +124,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(?:direct_)?(.+)$/, a
     const parcelId = ctx.match[1] as string;
     const isDirect = ctx.callbackQuery.data.includes('_direct_');
     
-    await prisma.parcel.delete({ where: { id: parcelId } }).catch(() => { });
+    await prisma.parcel.update({ where: { id: parcelId }, data: { status: 'CANCELLED' } }).catch(() => { });
     await ctx.answerCallbackQuery("Parcel deleted. 🗑");
 
     if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
@@ -196,7 +196,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
     const parcelId = ctx.match[1] as string;
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true, responsibleStaff: true } });
 
-    if (parcel?.contentPhotoId) {
+    if (parcel && parcel.contentPhotoIds.length > 0) {
         const kb = new InlineKeyboard()
             .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcel.id}`)
             .text("🗑 Delete", `admin_parcel_delete_direct_${parcel.id}`);
@@ -206,21 +206,34 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
             kb.row().text("⬅️ Back to list", "admin_logistics_nav");
         }
 
-        const options: any = {
-            caption: LOGISTICS_TEXTS_ADMIN.new_photo_caption({
-                ttn: parcel.ttn,
-                location: parcel.location?.name || 'Unknown',
-                sender: parcel.responsibleStaff?.fullName || 'Photographer'
-            }),
-            parse_mode: 'HTML',
-            reply_markup: kb
-        };
+        const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
+            ttn: parcel.ttn,
+            location: parcel.location?.name || 'Unknown',
+            sender: parcel.responsibleStaff?.fullName || 'Photographer'
+        });
 
+        const chatId = ctx.chat!.id;
+        const threadOptions: any = {};
         if (TEAM_CHATS.LOGISTICS) {
-            options.message_thread_id = TEAM_CHATS.LOGISTICS;
+            threadOptions.message_thread_id = TEAM_CHATS.LOGISTICS;
         }
 
-        await ctx.api.sendPhoto(ctx.chat!.id, parcel.contentPhotoId, options);
+        if (parcel.contentPhotoIds.length === 1) {
+            await ctx.api.sendPhoto(chatId, parcel.contentPhotoIds[0]!, {
+                caption, parse_mode: 'HTML', reply_markup: kb, ...threadOptions
+            });
+        } else {
+            // Send as media group (album), then a separate message with buttons
+            const media = parcel.contentPhotoIds.map((id, i) => ({
+                type: 'photo' as const,
+                media: id,
+                ...(i === 0 ? { caption, parse_mode: 'HTML' as const } : {})
+            }));
+            await ctx.api.sendMediaGroup(chatId, media, threadOptions);
+            await ctx.api.sendMessage(chatId, `⬆️ ${parcel.contentPhotoIds.length} photos for TTN <code>${parcel.ttn}</code>`, {
+                parse_mode: 'HTML', reply_markup: kb, ...threadOptions
+            });
+        }
         await ctx.answerCallbackQuery();
     } else {
         await ctx.answerCallbackQuery("No photo available.");

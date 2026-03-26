@@ -231,7 +231,7 @@ export async function showStaffLogistics(ctx: MyContext) {
             locationId: shift.locationId,
             OR: [
                 { status: { in: ['EXPECTED', 'ARRIVED'] } },
-                { status: 'DELIVERED', deliveryType: 'Address', contentPhotoId: null }
+                { status: 'DELIVERED', deliveryType: 'Address', contentPhotoIds: { isEmpty: true } }
             ]
         },
         orderBy: { createdAt: 'desc' }

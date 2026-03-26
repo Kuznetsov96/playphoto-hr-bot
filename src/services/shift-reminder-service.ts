@@ -55,7 +55,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                         locationId: shift.locationId,
                         OR: [
                             { status: { in: ['EXPECTED', 'ARRIVED'] } },
-                            { status: 'DELIVERED', deliveryType: 'Address', contentPhotoId: null }
+                            { status: 'DELIVERED', deliveryType: 'Address', contentPhotoIds: { isEmpty: true } }
                         ]
                     }
                 });
