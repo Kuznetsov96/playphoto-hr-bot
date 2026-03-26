@@ -17,6 +17,42 @@ import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
 
 /**
+ * Checks if a Telegram API error means the bot is blocked/user deleted.
+ * If so, rejects the candidate and notifies staff.
+ */
+function isBotBlocked(err: any): boolean {
+    const desc = err?.description || err?.message || "";
+    return desc.includes("bot was blocked") ||
+        desc.includes("user is deactivated") ||
+        desc.includes("chat not found") ||
+        err?.error_code === 403;
+}
+
+async function handleBlockedCandidate(
+    bot: Bot<MyContext>,
+    candidateId: string,
+    candidateName: string,
+    staffIds: number[],
+    staffRole: "HR" | "Mentor"
+) {
+    await candidateRepository.update(candidateId, {
+        status: CandidateStatus.REJECTED,
+        candidateDecision: "Бот заблоковано / акаунт видалено"
+    });
+
+    const alertText = `⚠️ <b>Bot Blocked</b>\n\n` +
+        `👤 <b>${candidateName}</b> has blocked the bot or deleted their account.\n` +
+        `Status changed to REJECTED automatically.`;
+    const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidateId}`);
+
+    for (const id of staffIds) {
+        await bot.api.sendMessage(id, alertText, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
+    }
+
+    logger.info({ candidateId }, `🚫 Candidate auto-rejected: bot blocked/account deleted. ${staffRole} notified.`);
+}
+
+/**
  * Фоновий вокер для автоматизації воронки.
  * Перевіряє нагадування та фінальні опитування кожні 5 хвилин.
  */
@@ -116,8 +152,12 @@ export async function startWorker(bot: Bot<MyContext>) {
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
-                } catch (e) {
-                    logger.error({ err: e, candidateId: slot.candidate?.id, slotId: slot.id }, "Failed to send 6h interview reminder");
+                } catch (e: any) {
+                    if (isBotBlocked(e) && slot.candidate) {
+                        await handleBlockedCandidate(bot, slot.candidate.id, slot.candidate.fullName || "Candidate", HR_IDS, "HR");
+                    } else {
+                        logger.error({ err: e, candidateId: slot.candidate?.id, slotId: slot.id }, "Failed to send 6h interview reminder");
+                    }
                 }
             }
 
@@ -144,7 +184,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded10m: true });
-                } catch (e) { }
+                } catch (e: any) {
+                    if (isBotBlocked(e) && slot.candidate) {
+                        await handleBlockedCandidate(bot, slot.candidate.id, slot.candidate.fullName || "Candidate", HR_IDS, "HR");
+                    }
+                }
             }
 
             // 4. HR Reminder (~2 minutes, window 1-4 min before start)
@@ -193,7 +237,13 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
-                } catch (e) { }
+                } catch (e: any) {
+                    const cand = (slot.candidate || slot.candidateDiscovery)!;
+                    if (isBotBlocked(e) && cand) {
+                        const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                        await handleBlockedCandidate(bot, cand.id, cand.fullName || "Candidate", MENTORS, "Mentor");
+                    }
+                }
             }
 
             // 5.1 NEW: Candidate Training Reminder (1 hour)
@@ -238,7 +288,13 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });
-                } catch (e) { }
+                } catch (e: any) {
+                    const cand = (slot.candidate || slot.candidateDiscovery)!;
+                    if (isBotBlocked(e) && cand) {
+                        const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+                        await handleBlockedCandidate(bot, cand.id, cand.fullName || "Candidate", MENTORS, "Mentor");
+                    }
+                }
             }
 
             // 6.5 Mentor Reminder (~5 minutes, window 2-7 min before start)
