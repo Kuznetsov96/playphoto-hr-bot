@@ -393,11 +393,13 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     }
 });
 
-// 6.5 Відмова кандидата від співбесіди (Не актуально)
+// 6.5 Відмова кандидата від співбесіди
 bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
-    logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate declined the invite (no longer relevant)`);
+    logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate declined the invite`);
+
+    const candidate = await candidateRepository.findByTelegramId(telegramId);
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
@@ -412,6 +414,19 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
 
     const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
     await ctx.editMessageText(STAFF_TEXTS["hr-info-invite-declined"] as string);
+
+    // Notify HR
+    if (candidate) {
+        const { HR_IDS } = await import("../config.js");
+        const name = candidate.fullName || "Candidate";
+        const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
+            `👤 <b>${name}</b> declined the interview invite.\n` +
+            `Reason: no longer relevant for her.`;
+        const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+        for (const hrId of HR_IDS) {
+            await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
+        }
+    }
 });
 
 // 7. Початок запису НА НАВЧАННЯ / ЗНАЙОМСТВО
@@ -632,6 +647,9 @@ bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        // Save original status BEFORE update for correct notification
+        const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
+
         await bookingService.cancelTrainingSlot(slotId);
 
         if (candidate) {
@@ -651,8 +669,7 @@ bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
         // Notify Mentor
         if (candidate) {
             const { MENTOR_IDS } = await import("../config.js");
-            const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
-            const typeText = isDiscovery ? "discovery" : "training";
+            const typeText = wasDiscovery ? "discovery" : "training";
             const name = candidate.fullName || "Candidate";
             const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
                 `👤 <b>${name}</b> cancelled her ${typeText} and left the pipeline.\n` +
@@ -703,8 +720,30 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         const slots = await trainingRepository.findActiveSlots();
 
         if (slots.length === 0) {
-            return ctx.editMessageText("Зараз вільних слотів для навчання немає. HR зв'яжеться з тобою! ✨", {
-                reply_markup: new InlineKeyboard().text("👩‍💼 Написати HR", "contact_hr")
+            // Return candidate to inbox so mentor can assign manually
+            if (candidate && (candidate.status === CandidateStatus.DISCOVERY_SCHEDULED || candidate.status === CandidateStatus.TRAINING_SCHEDULED)) {
+                await bookingService.cancelTrainingSlot(ctx.match![1] as string).catch(() => {});
+                await candidateRepository.update(candidate.id, {
+                    status: CandidateStatus.ACCEPTED,
+                    materialsSent: true
+                });
+            }
+
+            // Notify Mentor
+            if (candidate) {
+                const { MENTOR_IDS: mentorIds } = await import("../config.js");
+                const name = candidate.fullName || "Candidate";
+                const alertText = `⚠️ <b>No Slots Available</b>\n\n` +
+                    `👤 <b>${name}</b> tried to reschedule but found no available slots.\n` +
+                    `She is back in Inbox — please assign a time manually.`;
+                const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+                for (const mentorId of mentorIds) {
+                    await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
+                }
+            }
+
+            return ctx.editMessageText("Зараз вільних слотів немає. Наставниця скоро запропонує тобі зручний час! 🌸✨", {
+                reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_hr")
             });
         }
 
