@@ -345,7 +345,6 @@ export const hrService = {
             return true;
         } catch (e: any) {
             logger.warn({ err: e, candId, tid }, "inviteCandidate: failed to send invitation");
-            await candidateRepository.update(candId, { notificationSent: true }).catch(() => {});
             // Mark user as bot-blocked so they're excluded from future broadcasts
             if (e.error_code === 403) {
                 await prisma.user.update({
@@ -353,6 +352,9 @@ export const hrService = {
                     data: { botBlockedAt: new Date() }
                 }).catch(() => {});
             }
+            // Don't set notificationSent=true without interviewInvitedAt —
+            // otherwise the candidate gets stuck: invite-reminder can't see them,
+            // and future broadcasts skip them.
             return false;
         }
     },
