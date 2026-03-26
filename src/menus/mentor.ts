@@ -281,10 +281,6 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             }).row();
         range.text("🗓 Reschedule Discovery", async (ctx) => {
             await ctx.answerCallbackQuery();
-            if (cand.discoverySlotId) {
-                const { bookingService } = await import("../services/booking-service.js");
-                await bookingService.cancelDiscoverySlot(cand.discoverySlotId);
-            }
             await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Discovery</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
         }).row();
     }
@@ -301,10 +297,6 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             }).row();
         range.text("🗓 Reschedule Training", async (ctx) => {
             await ctx.answerCallbackQuery();
-            if (cand.trainingSlotId) {
-                const { bookingService } = await import("../services/booking-service.js");
-                await bookingService.cancelTrainingSlot(cand.trainingSlotId);
-            }
             await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Training</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
         }).row();
     }

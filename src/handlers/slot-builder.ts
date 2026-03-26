@@ -157,7 +157,13 @@ async function executeSlotCreation(ctx: MyContext, role: 'hr' | 'mentor', durati
         if (role === 'hr') {
             const timeLabel = `${sb.startHour}:${(sb.startMinute || 0).toString().padStart(2, '0')}`;
             if (candId) {
-                await interviewService.createSingleSlot(start, 20, candId); 
+                const dbSlot = await interviewService.createSingleSlot(start, 20, candId);
+                const { candidateRepository } = await import("../repositories/candidate-repository.js");
+                const { CandidateStatus } = await import("@prisma/client");
+                await candidateRepository.update(candId, {
+                    status: CandidateStatus.INTERVIEW_SCHEDULED,
+                    interviewSlot: { connect: { id: dbSlot.id } }
+                });
                 const kb = new InlineKeyboard().text(STAFF_TEXTS["hr-btn-back-to-calendar"], "hr_main_calendar");
                 const resp = `✅ <b>Interview Scheduled!</b>\n\nDate: ${start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })}`;
                 if (ctx.callbackQuery) await ctx.editMessageText(resp, { parse_mode: "HTML", reply_markup: kb });

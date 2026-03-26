@@ -176,7 +176,16 @@ bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
 
     try {
+        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         await bookingService.cancelInterviewSlot(slotId);
+        // Reset status so candidate doesn't get stuck in INTERVIEW_SCHEDULED without a slot
+        if (candidate && candidate.status === CandidateStatus.INTERVIEW_SCHEDULED) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.SCREENING,
+                interviewInvitedAt: new Date(),
+                notificationSent: true
+            });
+        }
         await ctx.answerCallbackQuery("Запис скасовано.");
         await ctx.editMessageText("Твій запис скасовано. Якщо захочеш обрати інший час — тисни команду /start або кнопку нижче. 😊", {
             reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
@@ -216,11 +225,8 @@ bookingHandlers.callbackQuery(/^cancel_application_by_candidate_(.+)$/, async (c
 
 // 4. Перенесення співбесіди
 bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
-
     try {
-        await bookingService.cancelInterviewSlot(slotId);
-        await ctx.answerCallbackQuery("Скасовано. Обирай новий час!");
+        await ctx.answerCallbackQuery("Обирай новий час!");
 
         const slots = await interviewRepository.findActiveSlots();
 
@@ -235,7 +241,7 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
         await ctx.editMessageText("Добре, давай оберемо інший зручний час: 🗓️✨", { reply_markup: keyboard });
 
     } catch (e) {
-        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при перенесенні співбесіди");
+        logger.error({ err: e, userId: ctx.from.id }, "Помилка при перенесенні співбесіди");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -562,7 +568,15 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
 
     try {
+        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         await bookingService.cancelTrainingSlot(slotId);
+        // Reset status so candidate doesn't get stuck without a slot
+        if (candidate && (candidate.status === CandidateStatus.TRAINING_SCHEDULED || candidate.status === CandidateStatus.DISCOVERY_SCHEDULED)) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.ACCEPTED,
+                materialsSent: true
+            });
+        }
         await ctx.answerCallbackQuery("Запис на навчання скасовано.");
         await ctx.editMessageText("Твій запис на навчання скасовано. Якщо захочеш обрати інший час — тисни команду /start або кнопку нижче. 😊", {
             reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_training_scheduling")
@@ -576,11 +590,8 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
 
 // 11. Перенесення навчання
 bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
-
     try {
-        await bookingService.cancelTrainingSlot(slotId);
-        await ctx.answerCallbackQuery("Скасовано. Обирай новий час!");
+        await ctx.answerCallbackQuery("Обирай новий час!");
 
         const slots = await trainingRepository.findActiveSlots();
 
@@ -601,7 +612,7 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         await ctx.editMessageText("Добре, давай оберемо інший зручний час для навчання: 🗓️✨", { reply_markup: keyboard });
 
     } catch (e) {
-        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при перенесенні навчання");
+        logger.error({ err: e, userId: ctx.from.id }, "Помилка при перенесенні навчання");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });

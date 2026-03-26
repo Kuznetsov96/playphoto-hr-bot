@@ -8,6 +8,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { hrService } from "../services/hr-service.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { formatCandidateProfile } from "../utils/profile-formatter.js";
+import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 
 export const hrHandlers = new Composer<MyContext>();
@@ -220,6 +221,10 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             try {
                 const dbSlot = await interviewService.createSingleSlot(start);
                 await interviewService.bookSlot(dbSlot.id, candId);
+                await candidateRepository.update(candId, {
+                    status: CandidateStatus.INTERVIEW_SCHEDULED,
+                    interviewSlot: { connect: { id: dbSlot.id } }
+                });
 
                 const cand = await candidateRepository.findById(candId);
                 if (cand) {
