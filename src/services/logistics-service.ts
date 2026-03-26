@@ -2,7 +2,6 @@ import prisma from '../db/core.js';
 import { novaPoshtaService } from './nova-poshta-service.js';
 import logger from '../core/logger.js';
 import { ParcelStatus } from '@prisma/client';
-import { workShiftRepository } from '../repositories/work-shift-repository.js';
 import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
@@ -42,6 +41,12 @@ export class LogisticsService {
 
             // 4. Check for stale parcels (ARRIVED > 2 days)
             await this.checkStaleParcels();
+
+            // 5. Remind staff who accepted but haven't picked up (2h before shift end)
+            await this.remindBeforeShiftEnd();
+
+            // 6. Hand off parcels stuck in PICKUP_IN_PROGRESS after shift end
+            await this.handoffExpiredShiftParcels();
         } catch (error) {
             logger.error({ err: error }, '📦 Error during logistics sync');
         }
@@ -465,6 +470,236 @@ export class LogisticsService {
     }
 
     /**
+     * Parses closing time from Location.schedule text for a given day of week.
+     * Schedule format: "Пн-Пт — 15:00-21:00\nСб-Нд — 12:00-21:00"
+     * Returns hour and minute of closing, or null if unparseable.
+     */
+    private parseScheduleCloseTime(schedule: string, dayOfWeek: number): { h: number; m: number } | null {
+        // dayOfWeek: 0=Sun,1=Mon,...,6=Sat
+        const DAY_RANGES: { days: number[]; pattern: RegExp }[] = [
+            { days: [1, 2, 3, 4, 5], pattern: /пн.{0,5}пт/i },
+            { days: [6, 0],          pattern: /сб.{0,5}нд/i },
+            { days: [6],             pattern: /^сб$/i },
+            { days: [0],             pattern: /^нд$/i },
+        ];
+
+        for (const line of schedule.split('\n')) {
+            for (const range of DAY_RANGES) {
+                if (!range.days.includes(dayOfWeek)) continue;
+                if (!range.pattern.test(line)) continue;
+
+                const timeMatch = line.match(/(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/);
+                if (timeMatch) {
+                    return { h: parseInt(timeMatch[3]!), m: parseInt(timeMatch[4]!) };
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns the shift end time for a location on a given date.
+     * Uses WorkShift.endTime if available, otherwise parses Location.schedule.
+     */
+    private async getShiftEndTime(locationId: string, date: Date): Promise<Date | null> {
+        const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+        // Try WorkShift.endTime first
+        const shift = await prisma.workShift.findFirst({
+            where: { locationId, date: { gte: dayStart, lt: dayEnd }, endTime: { not: null } },
+            orderBy: { endTime: 'desc' }
+        });
+        if (shift?.endTime) return shift.endTime;
+
+        // Fallback: parse Location.schedule
+        const location = await prisma.location.findUnique({ where: { id: locationId } });
+        if (!location?.schedule) return null;
+
+        // Use Kyiv time to determine day of week
+        const kyivFormatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Europe/Kyiv',
+            weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit'
+        });
+        const kyivParts = kyivFormatter.formatToParts(date);
+        const kyivDateStr = kyivParts.find(p => p.type === 'month')!.value + '/' +
+            kyivParts.find(p => p.type === 'day')!.value + '/' +
+            kyivParts.find(p => p.type === 'year')!.value;
+        const kyivDow = new Date(kyivDateStr).getDay();
+
+        const closeTime = this.parseScheduleCloseTime(location.schedule, kyivDow);
+        if (!closeTime) return null;
+
+        // Build close time as UTC Date for today in Kyiv timezone
+        const kyivDay = kyivParts.find(p => p.type === 'day')!.value;
+        const kyivMonth = kyivParts.find(p => p.type === 'month')!.value;
+        const kyivYear = kyivParts.find(p => p.type === 'year')!.value;
+        const closeKyiv = new Date(`${kyivYear}-${kyivMonth}-${kyivDay}T${String(closeTime.h).padStart(2,'0')}:${String(closeTime.m).padStart(2,'0')}:00+02:00`);
+        return closeKyiv;
+    }
+
+    /**
+     * Sends a reminder to staff who accepted a parcel but haven't picked it up yet,
+     * when 2 hours remain before their shift ends.
+     */
+    async remindBeforeShiftEnd() {
+        const now = new Date();
+
+        const parcels = await prisma.parcel.findMany({
+            where: {
+                status: 'PICKUP_IN_PROGRESS',
+                responsibleStaffId: { not: null },
+                locationId: { not: null },
+                shiftEndReminderSentAt: null,
+            },
+            include: { responsibleStaff: { include: { user: true } }, location: true }
+        });
+
+        for (const parcel of parcels) {
+            if (!parcel.locationId) continue;
+
+            const endTime = await this.getShiftEndTime(parcel.locationId, now);
+            if (!endTime) continue;
+
+            const msUntilEnd = endTime.getTime() - now.getTime();
+            // Remind if 1h45m–2h15m remain (30-min window to avoid re-triggering on each sync)
+            if (msUntilEnd < 2.25 * 60 * 60 * 1000 && msUntilEnd > 1.75 * 60 * 60 * 1000) {
+                const tid = parcel.responsibleStaff?.user?.telegramId;
+                if (!tid) continue;
+
+                const endTimeStr = endTime.toLocaleTimeString('uk-UA', {
+                    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit'
+                });
+
+                const kb = new InlineKeyboard()
+                    .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+
+                await bot.api.sendMessage(
+                    Number(tid),
+                    LOGISTICS_TEXTS_STAFF.pickup_reminder(parcel.ttn, endTimeStr),
+                    { parse_mode: 'HTML', reply_markup: kb }
+                ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send shift-end reminder'));
+
+                await prisma.parcel.update({
+                    where: { id: parcel.id },
+                    data: { shiftEndReminderSentAt: new Date() }
+                });
+
+                logger.info({ ttn: parcel.ttn }, '📦 Shift-end reminder sent');
+            }
+        }
+    }
+
+    /**
+     * After shift end: resets PICKUP_IN_PROGRESS parcels back to ARRIVED,
+     * notifies the old responsible staff, then notifies the next shift.
+     */
+    async handoffExpiredShiftParcels() {
+        const now = new Date();
+
+        const parcels = await prisma.parcel.findMany({
+            where: {
+                status: 'PICKUP_IN_PROGRESS',
+                responsibleStaffId: { not: null },
+                locationId: { not: null },
+            },
+            include: { responsibleStaff: { include: { user: true } }, location: true }
+        });
+
+        for (const parcel of parcels) {
+            if (!parcel.locationId) continue;
+
+            const endTime = await this.getShiftEndTime(parcel.locationId, now);
+            if (!endTime) continue;
+
+            // Only hand off after shift end
+            if (now.getTime() <= endTime.getTime()) continue;
+
+            const oldTid = parcel.responsibleStaff?.user?.telegramId;
+
+            // Reset parcel
+            await prisma.parcel.update({
+                where: { id: parcel.id },
+                data: {
+                    status: 'ARRIVED',
+                    responsibleStaffId: null,
+                    shiftEndReminderSentAt: null,
+                }
+            });
+
+            // Notify old staff
+            if (oldTid) {
+                await bot.api.sendMessage(
+                    Number(oldTid),
+                    LOGISTICS_TEXTS_STAFF.shift_ended_handoff(parcel.ttn),
+                    { parse_mode: 'HTML' }
+                ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send handoff message to old staff'));
+            }
+
+            logger.info({ ttn: parcel.ttn }, '📦 Parcel handed off after shift end');
+
+            // Notify next shift (if already started)
+            await this.notifyNextShiftAboutLeftover(parcel.id);
+        }
+    }
+
+    /**
+     * Notifies the staff of the next shift about a leftover parcel.
+     * Called after handoff and also at start of each sync cycle.
+     */
+    async notifyNextShiftAboutLeftover(parcelId: string) {
+        const now = new Date();
+
+        const kyivParts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Europe/Kyiv',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: 'numeric', hour12: false
+        }).formatToParts(now);
+
+        let y = 0, mo = 0, d = 0, h = 0;
+        for (const p of kyivParts) {
+            if (p.type === 'year') y = parseInt(p.value);
+            if (p.type === 'month') mo = parseInt(p.value);
+            if (p.type === 'day') d = parseInt(p.value);
+            if (p.type === 'hour') h = parseInt(p.value);
+        }
+
+        // After 20:00 notify next day's shift
+        if (h >= 20) d++;
+        const shiftStart = new Date(Date.UTC(y, mo - 1, d));
+        const shiftEnd = new Date(Date.UTC(y, mo - 1, d + 1));
+
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { location: true }
+        });
+        if (!parcel?.locationId) return;
+
+        const shifts = await prisma.workShift.findMany({
+            where: {
+                locationId: parcel.locationId,
+                date: { gte: shiftStart, lt: shiftEnd }
+            },
+            include: { staff: { include: { user: true } } }
+        });
+
+        for (const shift of shifts) {
+            const tid = shift.staff?.user?.telegramId;
+            if (!tid) continue;
+
+            const kb = new InlineKeyboard()
+                .text(LOGISTICS_TEXTS_STAFF.btn_accept, `parcel_accept_${parcel.id}`)
+                .text(LOGISTICS_TEXTS_STAFF.btn_reject, `parcel_reject_${parcel.id}`);
+
+            await bot.api.sendMessage(
+                Number(tid),
+                LOGISTICS_TEXTS_STAFF.leftover_parcel(parcel.ttn),
+                { parse_mode: 'HTML', reply_markup: kb }
+            ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to notify next shift about leftover parcel'));
+        }
+    }
+
+    /**
      * Reminds staff to upload content photo 2h after picking up a parcel
      */
     private async remindPhotoUpload() {
@@ -512,7 +747,8 @@ export class LogisticsService {
         const staleParcels = await prisma.parcel.findMany({
             where: {
                 status: 'ARRIVED',
-                updatedAt: { lt: twoDaysAgo }
+                updatedAt: { lt: twoDaysAgo },
+                staleAlertSentAt: null,
             },
             include: { location: true }
         });
@@ -520,6 +756,7 @@ export class LogisticsService {
         for (const parcel of staleParcels) {
             const daysSinceUpdate = Math.floor((Date.now() - parcel.updatedAt.getTime()) / (1000 * 60 * 60 * 24));
             await this.notifySupport(parcel.id, 'DELAYED');
+            await prisma.parcel.update({ where: { id: parcel.id }, data: { staleAlertSentAt: new Date() } });
             logger.warn({ ttn: parcel.ttn, days: daysSinceUpdate }, '📦 Stale parcel alert sent');
         }
     }
