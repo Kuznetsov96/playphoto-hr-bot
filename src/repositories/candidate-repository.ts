@@ -1,6 +1,7 @@
 import { Prisma, CandidateStatus, FunnelStep } from "@prisma/client";
 import type { Candidate, User, Location, StaffProfile, TrainingSlot, InterviewSlot, Message } from "@prisma/client";
 import prisma from "../db/core.js";
+import logger from "../core/logger.js";
 
 export type CandidateWithRelations = Candidate & {
     user: User;
@@ -169,6 +170,12 @@ export class CandidateRepository {
 
     async update(id: string, data: Prisma.CandidateUpdateInput, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
         const client = tx || prisma;
+
+        // Log status changes and slot (dis)connections
+        const oldCandidate = (data.status !== undefined || data.interviewSlot !== undefined || data.discoverySlot !== undefined || data.trainingSlot !== undefined)
+            ? await client.candidate.findUnique({ where: { id }, select: { fullName: true, status: true, interviewSlotId: true, discoverySlotId: true, trainingSlotId: true } })
+            : null;
+
         // Auto-track status change time
         if (data.status !== undefined) {
             (data as any).statusChangedAt = new Date();
@@ -178,6 +185,25 @@ export class CandidateRepository {
             data,
             include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
         }) as unknown as CandidateWithRelations;
+
+        if (oldCandidate) {
+            const changes: Record<string, { from: unknown; to: unknown }> = {};
+            if (data.status !== undefined && oldCandidate.status !== candidate.status) {
+                changes.status = { from: oldCandidate.status, to: candidate.status };
+            }
+            if (oldCandidate.interviewSlotId !== candidate.interviewSlotId) {
+                changes.interviewSlotId = { from: oldCandidate.interviewSlotId, to: candidate.interviewSlotId };
+            }
+            if (oldCandidate.discoverySlotId !== candidate.discoverySlotId) {
+                changes.discoverySlotId = { from: oldCandidate.discoverySlotId, to: candidate.discoverySlotId };
+            }
+            if (oldCandidate.trainingSlotId !== candidate.trainingSlotId) {
+                changes.trainingSlotId = { from: oldCandidate.trainingSlotId, to: candidate.trainingSlotId };
+            }
+            if (Object.keys(changes).length > 0) {
+                logger.info({ candidateId: id, name: candidate.fullName, changes }, "📋 Candidate updated");
+            }
+        }
 
         // If status changed, sync channel access in background
         if (data.status !== undefined && candidate.user?.telegramId) {
