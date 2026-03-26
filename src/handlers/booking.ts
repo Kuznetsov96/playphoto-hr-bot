@@ -171,25 +171,57 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     }
 });
 
-// 2. Скасування бронювання
+// 2. Скасування бронювання — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
+    const slotId = ctx.match[1] as string;
+    await ctx.answerCallbackQuery();
+
+    const kb = new InlineKeyboard()
+        .text("🚫 Так, скасувати заявку", `confirm_cancel_booking_${slotId}`).row()
+        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+
+    await ctx.editMessageText(
+        `⚠️ <b>Ти впевнена, що хочеш скасувати?</b>\n\n` +
+        `Твою заявку буде закрито, а анкету видалено з нашої системи. Якщо в майбутньому захочеш повернутися — потрібно буде подати заявку заново.\n\n` +
+        `Якщо просто хочеш змінити час — натисни «Перенести» замість скасування. 🌸`,
+        { parse_mode: "HTML", reply_markup: kb }
+    );
+});
+
+// 2.1. Скасування бронювання — крок 2: підтверджено
+bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         await bookingService.cancelInterviewSlot(slotId);
-        // Reset status so candidate doesn't get stuck in INTERVIEW_SCHEDULED without a slot
-        if (candidate && candidate.status === CandidateStatus.INTERVIEW_SCHEDULED) {
+
+        if (candidate) {
             await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.SCREENING,
-                interviewInvitedAt: new Date(),
+                status: CandidateStatus.REJECTED,
+                candidateDecision: "Кандидатка скасувала заявку самостійно",
                 notificationSent: true
             });
         }
-        await ctx.answerCallbackQuery("Запис скасовано.");
-        await ctx.editMessageText("Твій запис скасовано. Якщо захочеш обрати інший час — тисни команду /start або кнопку нижче. 😊", {
-            reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
-        });
+
+        await ctx.answerCallbackQuery("Заявку скасовано.");
+        await ctx.editMessageText(
+            "Зрозуміли, дякуємо, що попередила! 🌸\n\n" +
+            "Бажаємо тобі успіхів у пошуках і всього найкращого! Якщо в майбутньому захочеш повернутися — ми будемо раді бачити тебе. ✨"
+        );
+
+        // Notify HR
+        if (candidate) {
+            const { HR_IDS } = await import("../config.js");
+            const name = candidate.fullName || "Candidate";
+            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
+                `👤 <b>${name}</b> cancelled her interview and left the pipeline.\n` +
+                `Reason: candidate decided not to continue.`;
+            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            for (const hrId of HR_IDS) {
+                await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
+            }
+        }
 
     } catch (e) {
         logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні співбесіди");
@@ -227,6 +259,20 @@ bookingHandlers.callbackQuery(/^cancel_application_by_candidate_(.+)$/, async (c
 bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
+
+        // Notify HR about reschedule
+        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        if (candidate) {
+            const { HR_IDS } = await import("../config.js");
+            const name = candidate.fullName || "Candidate";
+            const alertText = `🗓 <b>Interview Rescheduled</b>\n\n` +
+                `👤 <b>${name}</b> is rescheduling her interview.\n` +
+                `She is choosing a new time now.`;
+            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            for (const hrId of HR_IDS) {
+                await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
+            }
+        }
 
         const slots = await interviewRepository.findActiveSlots();
 
