@@ -100,7 +100,10 @@ export class BookingService {
         }
 
         if (slot.candidate) {
-            await candidateRepository.update(slot.candidate.id, { googleMeetLink: null });
+            await candidateRepository.update(slot.candidate.id, {
+                googleMeetLink: null,
+                interviewSlot: { disconnect: true }
+            });
         }
 
         return interviewRepository.updateSlot(slotId, {
@@ -119,7 +122,10 @@ export class BookingService {
         }
 
         if (slot.candidate) {
-            await candidateRepository.update(slot.candidate.id, { trainingMeetLink: null });
+            await candidateRepository.update(slot.candidate.id, {
+                trainingMeetLink: null,
+                trainingSlot: { disconnect: true }
+            });
         }
 
         return trainingRepository.updateSlot(slotId, {
@@ -138,7 +144,10 @@ export class BookingService {
         }
 
         if (slot.candidate) {
-            await candidateRepository.update(slot.candidate.id, { trainingMeetLink: null });
+            await candidateRepository.update(slot.candidate.id, {
+                trainingMeetLink: null,
+                discoverySlot: { disconnect: true }
+            });
         }
 
         return trainingRepository.updateSlot(slotId, {
