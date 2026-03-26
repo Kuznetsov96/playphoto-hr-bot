@@ -1,3 +1,13 @@
+/**
+ * Personal parcels filter — these NP destinations belong to the owner,
+ * not to any location. The system must silently ignore them.
+ */
+export const NP_PERSONAL_FILTER = {
+    city: 'Харків',
+    warehouses: ['65', '104'],
+    addresses: ['ландау'],
+};
+
 export const NP_LOCATIONS_MAP = [
     { name: 'Leoland', city: 'Львів', npPoints: ['80', '33826'] },
     { name: 'Drive City', city: 'Львів', npPoints: ['26740'] },

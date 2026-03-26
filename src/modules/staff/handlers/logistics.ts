@@ -129,8 +129,60 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) =
 staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
-    await ctx.reply("Будь ласка, надішліть фото вмісту посилки: 📸");
+    await ctx.reply("Будь ласка, надішли фото вмісту посилки 📸\nМожеш надіслати кілька фото — по одному. Коли закінчиш, натисни «Готово».");
     await ctx.answerCallbackQuery();
+});
+
+// 6. Photo upload done — finalize and notify support
+staffLogisticsHandlers.callbackQuery(/^parcel_photo_done_(.+)$/, async (ctx) => {
+    const parcelId = ctx.match[1] as string;
+    ctx.session.step = 'idle';
+
+    const parcel = await prisma.parcel.update({
+        where: { id: parcelId },
+        data: { status: 'VERIFYING' },
+        include: { location: true, responsibleStaff: true }
+    });
+
+    if (parcel.contentPhotoIds.length === 0) {
+        await ctx.answerCallbackQuery("No photos uploaded yet.");
+        return;
+    }
+
+    await ctx.editMessageText(LOGISTICS_TEXTS_STAFF.photo_received, { parse_mode: 'HTML' });
+    await ctx.answerCallbackQuery();
+
+    // Send photos to support chat
+    const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
+        ttn: parcel.ttn,
+        location: parcel.location?.name || 'Unknown',
+        sender: parcel.responsibleStaff?.fullName || 'Photographer'
+    });
+
+    const kb = new InlineKeyboard()
+        .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
+        .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
+
+    const threadOptions: any = {};
+    if (TEAM_CHATS.LOGISTICS !== undefined) {
+        threadOptions.message_thread_id = TEAM_CHATS.LOGISTICS;
+    }
+
+    if (parcel.contentPhotoIds.length === 1) {
+        await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, parcel.contentPhotoIds[0]!, {
+            caption, parse_mode: 'HTML', reply_markup: kb, ...threadOptions
+        });
+    } else {
+        const media = parcel.contentPhotoIds.map((id: string, i: number) => ({
+            type: 'photo' as const,
+            media: id,
+            ...(i === 0 ? { caption, parse_mode: 'HTML' as const } : {})
+        }));
+        await ctx.api.sendMediaGroup(TEAM_CHATS.SUPPORT, media, threadOptions);
+        await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `⬆️ ${parcel.contentPhotoIds.length} photos for TTN <code>${parcel.ttn}</code>`, {
+            parse_mode: 'HTML', reply_markup: kb, ...threadOptions
+        });
+    }
 });
 
 // Handle text and photo inputs
@@ -186,40 +238,22 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 include: { staffProfile: true }
             }) : null;
 
-            const parcel = await prisma.parcel.update({
+            // Append photo to array (accumulate multiple photos)
+            await prisma.parcel.update({
                 where: { id: parcelId },
                 data: {
-                    contentPhotoId: photo.file_id,
-                    status: 'VERIFYING',
+                    contentPhotoIds: { push: photo.file_id },
                     ...(uploader?.staffProfile ? { responsibleStaffId: uploader.staffProfile.id } : {})
-                },
-                include: { location: true, responsibleStaff: true }
+                }
             });
 
-            ctx.session.step = 'idle';
-            await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
+            const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+            const count = parcel?.contentPhotoIds.length || 1;
 
             const kb = new InlineKeyboard()
-                .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
-                .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
+                .text('✅ Готово', `parcel_photo_done_${parcelId}`);
 
-            const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
-                ttn: parcel.ttn,
-                location: parcel.location?.name || 'Unknown',
-                sender: parcel.responsibleStaff?.fullName || 'Photographer'
-            });
-
-            const options: any = { 
-                caption,
-                parse_mode: 'HTML', 
-                reply_markup: kb
-            };
-            
-            if (TEAM_CHATS.LOGISTICS !== undefined) {
-                options.message_thread_id = TEAM_CHATS.LOGISTICS;
-            }
-
-            await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photo.file_id, options);
+            await ctx.reply(`Фото ${count} збережено! Надішли ще або натисни «Готово». 📸`, { reply_markup: kb });
         } else {
             await ctx.reply("Будь ласка, надішли саме фото. 📸");
         }

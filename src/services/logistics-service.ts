@@ -5,7 +5,7 @@ import { ParcelStatus } from '@prisma/client';
 import { workShiftRepository } from '../repositories/work-shift-repository.js';
 import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
-import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP } from '../constants/logistics-constants.js';
+import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { locationRepository } from '../repositories/location-repository.js';
 
 const bot = new Bot(BOT_TOKEN);
@@ -69,7 +69,8 @@ export class LogisticsService {
                 const parcel = activeParcels.find(p => p.ttn === statusDoc.Number);
                 if (!parcel) continue;
 
-                const newStatus = this.mapNPStatusToParcelStatus(statusDoc.StatusCode);
+                const npStatus = this.mapNPStatusToParcelStatus(statusDoc.StatusCode);
+                const newStatus = this.resolveStatusTransition(parcel.status, npStatus, parcel.deliveryType);
                 if (parcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
                         where: { id: parcel.id },
@@ -77,23 +78,72 @@ export class LogisticsService {
                         include: { location: true }
                     });
 
-                    logger.info({ ttn: updated.ttn, newStatus }, '📦 Parcel status updated via Tracking API');
+                    logger.info({ ttn: updated.ttn, oldStatus: parcel.status, npStatus, newStatus }, '📦 Parcel status updated via Tracking API');
                     await this.notifyStaffOnShift(updated.id, newStatus);
                 }
             }
         }
     }
 
+    /**
+     * Guards status transitions: prevents NP from auto-completing parcels
+     * that haven't gone through staff pickup & photo verification flow.
+     *
+     * Rules:
+     * - PICKUP_IN_PROGRESS / VERIFYING: staff is handling it — freeze, ignore NP updates
+     * - EXPECTED/IN_TRANSIT → NP says DELIVERED/COMPLETED: cap at ARRIVED (staff must Accept first)
+     * - ARRIVED → NP says COMPLETED: stay ARRIVED (staff must Accept first)
+     */
+    private resolveStatusTransition(currentStatus: ParcelStatus, npStatus: ParcelStatus, deliveryType: string | null): ParcelStatus {
+        // Staff is actively handling — do not override with NP status
+        if (currentStatus === 'PICKUP_IN_PROGRESS' || currentStatus === 'VERIFYING') {
+            return currentStatus;
+        }
+
+        // Address delivery: NP gives DELIVERED when courier drops off.
+        // This is legitimate — let it through so staff gets notified to upload photo.
+        if (npStatus === 'DELIVERED' && deliveryType === 'Address') {
+            return 'DELIVERED';
+        }
+
+        // NP says DELIVERED or COMPLETED but staff hasn't accepted yet — cap at ARRIVED
+        // so the parcel stays visible and staff can go through the accept flow
+        if (npStatus === 'DELIVERED' || npStatus === 'COMPLETED') {
+            if (currentStatus === 'EXPECTED' || currentStatus === 'IN_TRANSIT' || currentStatus === 'ARRIVED') {
+                return 'ARRIVED';
+            }
+        }
+
+        return npStatus;
+    }
+
+    /**
+     * Extracts warehouse/postomat number from NP document fields.
+     * Tries explicit fields first, then parses from address string
+     * (e.g. 'Поштомат "Нова Пошта" №38007' or 'Відділення №65').
+     */
+    private extractWarehouseNumber(doc: any): string {
+        const explicit = doc.WarehouseRecipientNumber || doc.RecipientWarehouseIndex || '';
+        if (explicit) return explicit;
+
+        // Parse from address description: "№38007", "№ 65", "No38007"
+        const addr = doc.RecipientAddressDescription || '';
+        const match = addr.match(/№\s*(\d+)/);
+        return match ? match[1] : '';
+    }
+
     private async processIncomingDocument(doc: any) {
         // getIncomingDocumentsByPhone returns TrackingStatusCode
         // getDocumentList returns StatusCode — handle both
-        
+
         const npCity = doc.CityRecipientDescription || '';
-        const npWarehouse = doc.WarehouseRecipientNumber || doc.RecipientWarehouseIndex || '';
-        
-        // Ignore personal support parcels (Харків, відділення 65 та 104)
-        if (npCity.includes('Харків') && (npWarehouse === '65' || npWarehouse === '104')) {
-            return;
+        const npWarehouse = this.extractWarehouseNumber(doc);
+        const npAddress = (doc.RecipientAddressDescription || '').toLowerCase();
+
+        // Ignore personal parcels (owner's private deliveries)
+        if (npCity.includes(NP_PERSONAL_FILTER.city)) {
+            if (NP_PERSONAL_FILTER.warehouses.includes(npWarehouse)) return;
+            if (NP_PERSONAL_FILTER.addresses.some(a => npAddress.includes(a))) return;
         }
 
         const ttn = doc.Number;
@@ -104,7 +154,7 @@ export class LogisticsService {
             const addressRef = doc.RecipientAddress || doc.RecipientAddressRef || null;
             const city = doc.CityRecipientDescription || null;
             const addressDesc = doc.RecipientAddressDescription || null;
-            const warehouseNumber = doc.WarehouseRecipientNumber || doc.RecipientWarehouseIndex || null;
+            const warehouseNumber = npWarehouse || null;
 
             // Try to find matching location (by addressRef, warehouse number, address, or city)
             const location = await this.findLocationByMapping(addressRef, city, warehouseNumber, addressDesc);
@@ -141,7 +191,11 @@ export class LogisticsService {
                 await this.notifyUnmatchedParcel(parcel.id, city, addressDesc);
             }
         } else {
-            const newStatus = this.mapNPStatusToParcelStatus(statusCode);
+            // Skip cancelled/completed parcels — don't resurrect deleted ones
+            if (parcel.status === 'CANCELLED' || parcel.status === 'COMPLETED') return;
+
+            const npStatus = this.mapNPStatusToParcelStatus(statusCode);
+            const newStatus = this.resolveStatusTransition(parcel.status, npStatus, parcel.deliveryType);
             if (parcel.status !== newStatus) {
                 const updated = await prisma.parcel.update({
                     where: { id: parcel.id },
@@ -411,7 +465,7 @@ export class LogisticsService {
         const parcels = await prisma.parcel.findMany({
             where: {
                 status: { in: ['PICKUP_IN_PROGRESS', 'DELIVERED'] },
-                contentPhotoId: null,
+                contentPhotoIds: { isEmpty: true },
                 photoReminderSentAt: null,
                 responsibleStaffId: { not: null },
                 updatedAt: { lt: twoHoursAgo }
