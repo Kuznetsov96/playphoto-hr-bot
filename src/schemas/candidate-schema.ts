@@ -4,7 +4,7 @@ export const CandidateSchema = z.object({
     fullName: z.string()
         .min(5, "ПІБ має бути не менше 5 символів")
         .max(100, "ПІБ занадто довге")
-        .refine(val => val.trim().split(/\s+/).length >= 2, "Введіть Ім'я та Прізвище (через пробіл)")
+        .refine(val => val.trim().split(/\s+/).length >= 3, "Введіть повне ПІБ: Прізвище, Ім'я та По батькові (через пробіл)")
         .refine(val => !val.startsWith("/"), "Це схоже на команду, введіть ім'я")
         .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
     
