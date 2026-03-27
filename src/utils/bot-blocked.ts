@@ -1,4 +1,3 @@
-import { InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { CandidateStatus } from "@prisma/client";
 import { candidateRepository } from "../repositories/candidate-repository.js";
@@ -23,13 +22,13 @@ export async function handleBlockedCandidate(
         candidateDecision: "Бот заблоковано / акаунт видалено"
     });
 
+    // Free up any booked slots so they become available for others
+    await candidateRepository.deleteRelatedData(candidateId);
+
     const hrId = HR_IDS[0];
     if (hrId) {
-        const text = `⚠️ <b>Bot Blocked</b>\n\n` +
-            `👤 <b>${candidateName}</b> заблокувала бот.\n` +
-            `Статус → <b>REJECTED</b> автоматично.`;
-        const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidateId}`);
-        await api.sendMessage(hrId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
+        const text = `⚠️ <b>Bot Blocked</b>\n👤 <b>${candidateName}</b> — статус REJECTED автоматично.`;
+        await api.sendMessage(hrId, text, { parse_mode: "HTML" }).catch(() => {});
     }
 
     logger.info({ candidateId }, "🚫 Candidate auto-rejected: bot blocked/account deleted.");
