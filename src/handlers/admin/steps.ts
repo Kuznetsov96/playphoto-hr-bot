@@ -129,8 +129,67 @@ async function handleSetCustomStagingTime(ctx: MyContext, step: string, text: st
 async function handleSyncOtherSheet(ctx: MyContext, text: string) {
     const sheetName = text.trim();
     try {
+        const prisma = (await import("../../db/core.js")).default;
+        const { staffRepository } = await import("../../repositories/staff-repository.js");
+        const { InlineKeyboard } = await import("grammy");
+
+        // Snapshot BEFORE
+        const shiftsBefore = await prisma.workShift.findMany({
+            where: { date: { gte: new Date() } },
+            select: { staffId: true, date: true, locationId: true }
+        });
+        const beforeMap = new Map<string, Set<string>>();
+        for (const s of shiftsBefore) {
+            const key = `${s.date.toISOString()}|${s.locationId}`;
+            if (!beforeMap.has(s.staffId)) beforeMap.set(s.staffId, new Set());
+            beforeMap.get(s.staffId)!.add(key);
+        }
+
         const schedRes = await scheduleSyncService.syncSchedule(sheetName);
-        await ScreenManager.renderScreen(ctx, `✅ Sync for "${sheetName}" complete!\n\nProcessed shifts: <b>${schedRes.count || 0}</b>`, "admin-system");
+
+        // Snapshot AFTER
+        const shiftsAfter = await prisma.workShift.findMany({
+            where: { date: { gte: new Date() } },
+            select: { staffId: true, date: true, locationId: true }
+        });
+        const afterMap = new Map<string, Set<string>>();
+        for (const s of shiftsAfter) {
+            const key = `${s.date.toISOString()}|${s.locationId}`;
+            if (!afterMap.has(s.staffId)) afterMap.set(s.staffId, new Set());
+            afterMap.get(s.staffId)!.add(key);
+        }
+
+        // Diff
+        const changedStaffIds = new Set<string>();
+        const allStaffIds = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+        for (const sid of allStaffIds) {
+            const before = beforeMap.get(sid);
+            const after = afterMap.get(sid);
+            if (!before && !after) continue;
+            if (!before || !after || before.size !== after.size) { changedStaffIds.add(sid); continue; }
+            for (const k of before) { if (!after.has(k)) { changedStaffIds.add(sid); break; } }
+        }
+
+        // Notify
+        let staffNotified = 0;
+        if (changedStaffIds.size > 0) {
+            const staffToNotify = await staffRepository.findMany({
+                where: { id: { in: Array.from(changedStaffIds) }, isActive: true, isWelcomeSent: true },
+                include: { user: true }
+            });
+            for (const s of staffToNotify) {
+                if (!s.user) continue;
+                const updateMsg = `📅 <b>Графік оновлено!</b>\n\nПереглянь свої зміни — можливо, є зміни у датах чи локації. ✨`;
+                const updateKb = new InlineKeyboard().text("🗓 Мій графік", "staff_hub_nav");
+                await ctx.api.sendMessage(Number(s.user.telegramId), updateMsg, { parse_mode: "HTML", reply_markup: updateKb }).catch(() => { });
+                staffNotified++;
+            }
+        }
+
+        let report = `✅ Sync for "${sheetName}" complete!\n\nProcessed shifts: <b>${schedRes.count || 0}</b>`;
+        if (staffNotified > 0) report += `\n📅 <b>${staffNotified}</b> staff notified about schedule changes`;
+
+        await ScreenManager.renderScreen(ctx, report, "admin-system");
     } catch (e: any) {
         logger.error({ err: e, sheetName }, "❌ [SYNC] Custom sync failed:");
         await ScreenManager.renderScreen(ctx, `❌ Error: ${e.message}`, "admin-system");
