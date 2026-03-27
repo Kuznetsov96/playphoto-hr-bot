@@ -144,17 +144,41 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const telegramId = ctx.from?.id;
 
-    if (telegramId) {
-        const user = await prisma.user.findUnique({
-            where: { telegramId: BigInt(telegramId) },
-            include: { staffProfile: true }
-        });
-        const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+    // If already waiting for photos for this parcel — just ack, don't send duplicate message
+    if (ctx.session.step === `awaiting_parcel_photo_${parcelId}`) {
+        await ctx.answerCallbackQuery();
+        return;
+    }
 
-        if (parcel?.responsibleStaffId && user?.staffProfile &&
-            parcel.responsibleStaffId !== user.staffProfile.id) {
+    let user = telegramId ? await prisma.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        include: { staffProfile: true }
+    }) : null;
+
+    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+
+    if (parcel?.responsibleStaffId && user?.staffProfile &&
+        parcel.responsibleStaffId !== user.staffProfile.id) {
+        await ctx.answerCallbackQuery();
+        return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.transferred, { parse_mode: 'HTML' });
+    }
+
+    // Guard: ensure createTrustee was called before moving to photo step.
+    // If staff reached here without confirming phone (e.g. via worker reminder),
+    // auto-trigger it now. If no valid phone — redirect to phone entry.
+    if (parcel && user?.staffProfile) {
+        let phoneToUse = (user.staffProfile.npPhone || user.staffProfile.phone || '').replace(/\D/g, '');
+        if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) phoneToUse = '38' + phoneToUse;
+
+        if (phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
+            const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
+            await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse, user.staffProfile.fullName);
+        } else {
+            // No valid phone — redirect to phone entry before allowing photo
+            ctx.session.step = `awaiting_np_phone_${parcelId}`;
+            await ctx.reply("⚠️ Для оформлення доручення потрібен твій номер телефону (формат 380...).\nВведи його, і після збереження зможеш надіслати фото:", { parse_mode: 'HTML' });
             await ctx.answerCallbackQuery();
-            return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.transferred, { parse_mode: 'HTML' });
+            return;
         }
     }
 
@@ -168,19 +192,28 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_done_(.+)$/, async (ctx) => 
     const parcelId = ctx.match[1] as string;
     ctx.session.step = 'idle';
 
+    const existing = await prisma.parcel.findUnique({ where: { id: parcelId } });
+    if (!existing) { await ctx.answerCallbackQuery(); return; }
+
+    if (existing.contentPhotoIds.length === 0) {
+        await ctx.answerCallbackQuery("No photos uploaded yet.");
+        return;
+    }
+
+    // Guard against duplicate "Done" taps — if already VERIFYING, just ack silently
+    if (existing.status === 'VERIFYING') {
+        await ctx.answerCallbackQuery();
+        return;
+    }
+
     const parcel = await prisma.parcel.update({
         where: { id: parcelId },
         data: { status: 'VERIFYING' },
         include: { location: true, responsibleStaff: true }
     });
 
-    if (parcel.contentPhotoIds.length === 0) {
-        await ctx.answerCallbackQuery("No photos uploaded yet.");
-        return;
-    }
-
-    await ctx.editMessageText(LOGISTICS_TEXTS_STAFF.photo_received, { parse_mode: 'HTML' });
     await ctx.answerCallbackQuery();
+    await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received, { parse_mode: 'HTML' });
 
     // Send photos to support chat
     const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
