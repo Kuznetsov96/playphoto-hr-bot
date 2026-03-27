@@ -15,42 +15,8 @@ import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
+import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 
-/**
- * Checks if a Telegram API error means the bot is blocked/user deleted.
- * If so, rejects the candidate and notifies staff.
- */
-function isBotBlocked(err: any): boolean {
-    const desc = err?.description || err?.message || "";
-    return desc.includes("bot was blocked") ||
-        desc.includes("user is deactivated") ||
-        desc.includes("chat not found") ||
-        err?.error_code === 403;
-}
-
-async function handleBlockedCandidate(
-    bot: Bot<MyContext>,
-    candidateId: string,
-    candidateName: string,
-    staffIds: number[],
-    staffRole: "HR" | "Mentor"
-) {
-    await candidateRepository.update(candidateId, {
-        status: CandidateStatus.REJECTED,
-        candidateDecision: "Бот заблоковано / акаунт видалено"
-    });
-
-    const alertText = `⚠️ <b>Bot Blocked</b>\n\n` +
-        `👤 <b>${candidateName}</b> has blocked the bot or deleted their account.\n` +
-        `Status changed to REJECTED automatically.`;
-    const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidateId}`);
-
-    for (const id of staffIds) {
-        await bot.api.sendMessage(id, alertText, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
-    }
-
-    logger.info({ candidateId }, `🚫 Candidate auto-rejected: bot blocked/account deleted. ${staffRole} notified.`);
-}
 
 /**
  * Фоновий вокер для автоматизації воронки.
@@ -154,7 +120,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                     await interviewRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
                 } catch (e: any) {
                     if (isBotBlocked(e) && slot.candidate) {
-                        await handleBlockedCandidate(bot, slot.candidate.id, slot.candidate.fullName || "Candidate", HR_IDS, "HR");
+                        await handleBlockedCandidate(bot.api, slot.candidate.id, slot.candidate.fullName || "Candidate");
                     } else {
                         logger.error({ err: e, candidateId: slot.candidate?.id, slotId: slot.id }, "Failed to send 6h interview reminder");
                     }
@@ -186,7 +152,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                     await interviewRepository.updateSlot(slot.id, { reminded10m: true });
                 } catch (e: any) {
                     if (isBotBlocked(e) && slot.candidate) {
-                        await handleBlockedCandidate(bot, slot.candidate.id, slot.candidate.fullName || "Candidate", HR_IDS, "HR");
+                        await handleBlockedCandidate(bot.api, slot.candidate.id, slot.candidate.fullName || "Candidate");
                     }
                 }
             }
@@ -240,8 +206,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e: any) {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
                     if (isBotBlocked(e) && cand) {
-                        const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                        await handleBlockedCandidate(bot, cand.id, cand.fullName || "Candidate", MENTORS, "Mentor");
+                        await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     }
                 }
             }
@@ -291,8 +256,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e: any) {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
                     if (isBotBlocked(e) && cand) {
-                        const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                        await handleBlockedCandidate(bot, cand.id, cand.fullName || "Candidate", MENTORS, "Mentor");
+                        await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     }
                 }
             }
@@ -491,7 +455,9 @@ async function processTestReminders(bot: Bot<MyContext>) {
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
                 logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про тест (24 години)");
-            } catch (e) { }
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+            }
         }
     } catch (e) {
         logger.error({ err: e }, "❌ Помилка в processTestReminders");
@@ -547,8 +513,9 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
                     where: { id: cand.userId },
                     data: { updatedAt: new Date() }
                 });
-            } catch (e) {
-                logger.warn({ err: e, userId: (cand as any).user?.telegramId }, "⚠️ Не вдалося надіслати нагадування про навчання");
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                else logger.warn({ err: e, userId: (cand as any).user?.telegramId }, "⚠️ Не вдалося надіслати нагадування про навчання");
             }
         }
     } catch (e) {
@@ -818,8 +785,9 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
             try {
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], { parse_mode: "HTML" });
                 logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про анкету");
-            } catch (e) {
-                logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування кандидату");
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                else logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування кандидату");
             }
         }
 
@@ -868,8 +836,9 @@ async function processNDAReminders(bot: Bot<MyContext>) {
                 // Update user to reset throttle
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
                 logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про NDA (циклічне)");
-            } catch (e) {
-                logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування про NDA");
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                else logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування про NDA");
             }
         }
     } catch (e) {
@@ -967,8 +936,9 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
                 logger.info({ userId: cand.user.telegramId, missing: missing.length }, "📢 Smart onboarding reminder sent");
-            } catch (e) {
-                logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                else logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
             }
         }
     } catch (e) {
@@ -1025,19 +995,6 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
             include: { user: true }
         });
 
-        // 5. AWAITING_FIRST_SHIFT (Onboarding done, but didn't fill preferences — longer grace period)
-        const cutoff10Days = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
-        const cutoff11Days = new Date(now.getTime() - 11 * 24 * 60 * 60 * 1000);
-        const cutoff12Days = new Date(now.getTime() - 12 * 24 * 60 * 60 * 1000);
-
-        const idleAwaitingFirstShift = await prisma.candidate.findMany({
-            where: {
-                status: "AWAITING_FIRST_SHIFT",
-                statusChangedAt: { lte: cutoff10Days }
-            },
-            include: { user: true }
-        });
-
         const allIdle = [...idleAccepted, ...idleNDA, ...idleTest, ...idleStagingSetup];
 
         for (const cand of allIdle) {
@@ -1051,9 +1008,12 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     let rejectReason = "на стажування";
                     if (cand.status === "KNOWLEDGE_TEST" || cand.status === "STAGING_SETUP") rejectReason = "після тестування";
 
-                    await bot.api.sendMessage(Number(cand.user.telegramId),
-                        `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
-
+                    try {
+                        await bot.api.sendMessage(Number(cand.user.telegramId),
+                            `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
+                    } catch (e: any) {
+                        if (!isBotBlocked(e)) logger.warn({ err: e }, "⚠️ Failed to send 7-day rejection message");
+                    }
                     await candidateRepository.update(cand.id, { status: "REJECTED" });
                     logger.info({ userId: cand.user.telegramId }, "🚫 Кандидата автоматично переведено в REJECTED (7 днів неактивності)");
                 } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
@@ -1066,33 +1026,17 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                         case "STAGING_SETUP": contextStr = "на вибір дати для першого стажування на локації"; break;
                     }
 
-                    await bot.api.sendMessage(Number(cand.user.telegramId),
-                        `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
-                    logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 5-денне попередження про неактивність");
+                    try {
+                        await bot.api.sendMessage(Number(cand.user.telegramId),
+                            `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
+                        logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 5-денне попередження про неактивність");
+                    } catch (e: any) {
+                        if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                    }
                 }
             } catch (e) {}
         }
 
-        // AWAITING_FIRST_SHIFT: longer grace period (warn day 10, reject day 12)
-        for (const cand of idleAwaitingFirstShift) {
-            try {
-                const refDate = cand.statusChangedAt;
-                if (!refDate) continue;
-
-                if (refDate <= cutoff12Days) {
-                    await bot.api.sendMessage(Number(cand.user.telegramId),
-                        `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді щодо завершення підготовки до першої зміни, ми змушені скасувати твою заявку. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`
-                    ).catch(() => {});
-                    await candidateRepository.update(cand.id, { status: "REJECTED" });
-                    logger.info({ userId: cand.user.telegramId }, "🚫 AWAITING_FIRST_SHIFT → REJECTED (12 днів неактивності)");
-                } else if (refDate <= cutoff10Days && refDate > cutoff11Days) {
-                    await bot.api.sendMessage(Number(cand.user.telegramId),
-                        `Привіт! ✨ Ми все ще чекаємо на завершення підготовки до першої зміни. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді протягом 2 днів, ми автоматично скасуємо твою заявку. 🌸`
-                    ).catch(() => {});
-                    logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 10-денне попередження (AWAITING_FIRST_SHIFT)");
-                }
-            } catch (e) {}
-        }
     } catch (e) {
         logger.error({ err: e }, "❌ Помилка в processAutoRejectInactiveCandidates");
     }
