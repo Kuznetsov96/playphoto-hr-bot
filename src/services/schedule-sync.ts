@@ -85,6 +85,48 @@ export class ScheduleSyncService {
     }
 
     /**
+     * Marks a staff member as "bot blocked" in the TEAM spreadsheet:
+     * - Column F (index 5): "Закінчення роботи"
+     * - Column S (index 18): "Заблокувала бот"
+     * Finds the row by telegramId in column R (index 17).
+     */
+    async markStaffBotBlocked(telegramId: number): Promise<boolean> {
+        this.ensureSheets();
+        try {
+            const res = await this.sheets.spreadsheets.values.get({
+                spreadsheetId: SPREADSHEET_ID_TEAM,
+                range: "'В роботі'!A1:S2000",
+            });
+            const rows: any[][] = res.data.values || [];
+
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                const rowTgId = this.parseTelegramId(String(row?.[17] || ""));
+                if (rowTgId === BigInt(telegramId)) {
+                    const sheetRow = i + 1; // 1-indexed, header is row 1
+                    await this.sheets.spreadsheets.values.batchUpdate({
+                        spreadsheetId: SPREADSHEET_ID_TEAM,
+                        requestBody: {
+                            valueInputOption: 'RAW',
+                            data: [
+                                { range: `'В роботі'!F${sheetRow}`, values: [["Закінчення роботи"]] },
+                                { range: `'В роботі'!S${sheetRow}`, values: [["Заблокувала бот"]] },
+                            ]
+                        }
+                    });
+                    logger.info({ telegramId, sheetRow }, "📋 [BLOCKED] Staff marked in TEAM sheet");
+                    return true;
+                }
+            }
+            logger.warn({ telegramId }, "⚠️ [BLOCKED] Staff not found in TEAM sheet");
+            return false;
+        } catch (e: any) {
+            logger.error({ err: e.message, telegramId }, "❌ [BLOCKED] Failed to update TEAM sheet");
+            return false;
+        }
+    }
+
+    /**
      * Syncs blocked users from Blocklist sheet
      */
     async syncBlocklist() {
