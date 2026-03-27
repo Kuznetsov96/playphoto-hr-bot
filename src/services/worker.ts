@@ -995,19 +995,6 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
             include: { user: true }
         });
 
-        // 5. AWAITING_FIRST_SHIFT (Onboarding done, but didn't fill preferences — longer grace period)
-        const cutoff10Days = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
-        const cutoff11Days = new Date(now.getTime() - 11 * 24 * 60 * 60 * 1000);
-        const cutoff12Days = new Date(now.getTime() - 12 * 24 * 60 * 60 * 1000);
-
-        const idleAwaitingFirstShift = await prisma.candidate.findMany({
-            where: {
-                status: "AWAITING_FIRST_SHIFT",
-                statusChangedAt: { lte: cutoff10Days }
-            },
-            include: { user: true }
-        });
-
         const allIdle = [...idleAccepted, ...idleNDA, ...idleTest, ...idleStagingSetup];
 
         for (const cand of allIdle) {
@@ -1050,32 +1037,6 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
             } catch (e) {}
         }
 
-        // AWAITING_FIRST_SHIFT: longer grace period (warn day 10, reject day 12)
-        for (const cand of idleAwaitingFirstShift) {
-            try {
-                const refDate = cand.statusChangedAt;
-                if (!refDate) continue;
-
-                if (refDate <= cutoff12Days) {
-                    try {
-                        await bot.api.sendMessage(Number(cand.user.telegramId),
-                            `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді щодо завершення підготовки до першої зміни, ми змушені скасувати твою заявку. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
-                    } catch (e: any) {
-                        if (!isBotBlocked(e)) logger.warn({ err: e }, "⚠️ Failed to send 12-day rejection message");
-                    }
-                    await candidateRepository.update(cand.id, { status: "REJECTED" });
-                    logger.info({ userId: cand.user.telegramId }, "🚫 AWAITING_FIRST_SHIFT → REJECTED (12 днів неактивності)");
-                } else if (refDate <= cutoff10Days && refDate > cutoff11Days) {
-                    try {
-                        await bot.api.sendMessage(Number(cand.user.telegramId),
-                            `Привіт! ✨ Ми все ще чекаємо на завершення підготовки до першої зміни. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді протягом 2 днів, ми автоматично скасуємо твою заявку. 🌸`);
-                        logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 10-денне попередження (AWAITING_FIRST_SHIFT)");
-                    } catch (e: any) {
-                        if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                    }
-                }
-            } catch (e) {}
-        }
     } catch (e) {
         logger.error({ err: e }, "❌ Помилка в processAutoRejectInactiveCandidates");
     }
