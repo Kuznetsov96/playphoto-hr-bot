@@ -123,9 +123,10 @@ async function runPinger(bot: Bot<MyContext>) {
             } catch (e: any) {
                 if (e.error_code === 403 || (e.error_code === 400 && e.description?.includes("chat not found"))) {
                     await trackedMessageRepository.stopTracking(msg.id);
-                    // If this is a private chat with a staff member — treat as intentional bot block
+                    // Only treat as intentional block if we already pinged at least once before
+                    // (msg.lastPingMsgId exists = at least one prior ping was delivered)
                     const chatId = Number(msg.chatId);
-                    if (chatId > 0) {
+                    if (chatId > 0 && msg.lastPingMsgId) {
                         await handleBlockedStaff(bot, chatId);
                     } else {
                         logger.warn(`🚫 Bot blocked or chat not found for ${msg.chatId}. Tracking stopped.`);
