@@ -9,20 +9,13 @@ import { PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
 import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 
+// Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
     CandidateStatus.SCREENING,
     CandidateStatus.WAITLIST,
     CandidateStatus.INTERVIEW_SCHEDULED,
     CandidateStatus.INTERVIEW_COMPLETED,
     CandidateStatus.DECISION_PENDING,
-    CandidateStatus.DISCOVERY_SCHEDULED,
-    CandidateStatus.DISCOVERY_COMPLETED,
-    CandidateStatus.TRAINING_SCHEDULED,
-    CandidateStatus.NDA,
-    CandidateStatus.KNOWLEDGE_TEST,
-    CandidateStatus.STAGING_SETUP,
-    CandidateStatus.STAGING_ACTIVE,
-    CandidateStatus.READY_FOR_HIRE,
 ];
 
 async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
