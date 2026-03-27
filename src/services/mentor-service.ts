@@ -7,6 +7,7 @@ import { accessService } from "./access-service.js";
 import { ADMIN_IDS, KNOWLEDGE_BASE_LINK, NDA_LINK, PHOTOGRAPHER_GUIDE_LINK } from "../config.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
 import { cleanupUserSessionMessages } from "../utils/cleanup.js";
@@ -209,7 +210,7 @@ export class MentorService {
                 
                 if (cand.user) {
                     await api.sendMessage(Number(cand.user.telegramId), text, { reply_markup: kb });
-                    
+
                     await candidateRepository.update(cand.id, {
                         status: "ACCEPTED",
                         isWaitlisted: false,
@@ -218,8 +219,9 @@ export class MentorService {
                     });
                     successCount++;
                 }
-            } catch (e) {
-                logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify waitlist candidate");
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+                else logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify waitlist candidate");
             }
         }
         return successCount;
@@ -267,19 +269,25 @@ export class MentorService {
 
             const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
             if (cand.user) {
-                await api.sendMessage(Number(cand.user.telegramId),
-                    CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails),
-                    { parse_mode: "HTML", reply_markup: kb }
-                ).catch((err: any) => {
-                    logger.error({ err, candidateId: cand.id, telegramId: cand.user.telegramId }, "Failed to send NDA message to candidate");
-                    const mainAdmin = ADMIN_IDS[0];
-                    if (mainAdmin) {
-                        api.sendMessage(mainAdmin,
-                            `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
-                            { parse_mode: "HTML" }
-                        ).catch(() => {});
+                try {
+                    await api.sendMessage(Number(cand.user.telegramId),
+                        CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails),
+                        { parse_mode: "HTML", reply_markup: kb }
+                    );
+                } catch (err: any) {
+                    if (isBotBlocked(err)) {
+                        await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+                    } else {
+                        logger.error({ err, candidateId: cand.id, telegramId: cand.user.telegramId }, "Failed to send NDA message to candidate");
+                        const mainAdmin = ADMIN_IDS[0];
+                        if (mainAdmin) {
+                            api.sendMessage(mainAdmin,
+                                `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
+                                { parse_mode: "HTML" }
+                            ).catch(() => {});
+                        }
                     }
-                });
+                }
             }
 
         } else {
