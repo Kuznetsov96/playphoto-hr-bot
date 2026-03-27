@@ -2,42 +2,82 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
+import { candidateRepository } from "../repositories/candidate-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
-import { PING_CONFIG, ADMIN_IDS } from "../config.js";
+import { CandidateStatus } from "@prisma/client";
+import { PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
 import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 
-async function handleBlockedStaff(bot: Bot<MyContext>, telegramId: number) {
+const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
+    CandidateStatus.SCREENING,
+    CandidateStatus.WAITLIST,
+    CandidateStatus.INTERVIEW_SCHEDULED,
+    CandidateStatus.INTERVIEW_COMPLETED,
+    CandidateStatus.DECISION_PENDING,
+    CandidateStatus.DISCOVERY_SCHEDULED,
+    CandidateStatus.DISCOVERY_COMPLETED,
+    CandidateStatus.TRAINING_SCHEDULED,
+    CandidateStatus.NDA,
+    CandidateStatus.KNOWLEDGE_TEST,
+    CandidateStatus.STAGING_SETUP,
+    CandidateStatus.STAGING_ACTIVE,
+    CandidateStatus.READY_FOR_HIRE,
+];
+
+async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
     try {
-        const userWithProfile = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
-        const staff = userWithProfile?.staffProfile;
-        if (!staff?.isActive) {
-            logger.warn({ telegramId }, "🚫 Bot blocked by non-staff or already inactive user. Skipping.");
+        const userWithProfile = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
+        if (!userWithProfile) return;
+
+        const staff = userWithProfile.staffProfile;
+        const candidate = userWithProfile.candidate;
+
+        // --- Staff ---
+        if (staff?.isActive) {
+            const staffName = staff.surnameNameDot || staff.fullName;
+            logger.warn({ telegramId, staffName }, "🚫 [BLOCKED] Staff blocked the bot. Auto-deactivating...");
+
+            await staffRepository.update(staff.id, { isActive: false });
+            await scheduleSyncService.markStaffBotBlocked(telegramId);
+
+            const adminId = ADMIN_IDS[0];
+            if (adminId) {
+                const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
+                    `👤 <b>${staffName}</b> заблокувала бот.\n\n` +
+                    `Виконано автоматично:\n` +
+                    `• Статус → <b>Закінчення роботи</b>\n` +
+                    `• Доступ до каналу — знято\n` +
+                    `• Таблиця персоналу — оновлено`;
+                await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => {});
+            }
             return;
         }
 
-        const staffName = staff.surnameNameDot || staff.fullName;
-        logger.warn({ telegramId, staffName }, "🚫 [BLOCKED] Staff blocked the bot. Starting auto-deactivation...");
+        // --- Candidate ---
+        if (candidate && ACTIVE_CANDIDATE_STATUSES.includes(candidate.status as CandidateStatus)) {
+            const name = candidate.fullName || "Candidate";
+            logger.warn({ telegramId, name }, "🚫 [BLOCKED] Candidate blocked the bot. Auto-rejecting...");
 
-        // 1. Deactivate in DB (triggers syncUserAccess → revokes channel access)
-        await staffRepository.update(staff.id, { isActive: false });
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.REJECTED,
+                candidateDecision: "Бот заблоковано / акаунт видалено"
+            });
 
-        // 2. Update TEAM spreadsheet
-        await scheduleSyncService.markStaffBotBlocked(telegramId);
-
-        // 3. Notify main admin
-        const adminId = ADMIN_IDS[0];
-        if (adminId) {
-            const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
-                `👤 <b>${staffName}</b> заблокувала бот.\n\n` +
-                `Виконано автоматично:\n` +
-                `• Статус → <b>Закінчення роботи</b>\n` +
-                `• Доступ до каналу — знято\n` +
-                `• Таблиця персоналу — оновлено`;
-            await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => {});
+            const hrId = HR_IDS[0];
+            if (hrId) {
+                const text = `⚠️ <b>Bot Blocked</b>\n\n` +
+                    `👤 <b>${name}</b> заблокувала бот.\n` +
+                    `Статус → <b>REJECTED</b> автоматично.`;
+                const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+                await bot.api.sendMessage(hrId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
+            }
+            return;
         }
+
+        logger.warn({ telegramId }, "🚫 Bot blocked — user is not active staff or active candidate. Skipping.");
     } catch (e) {
-        logger.error({ err: e, telegramId }, "❌ [BLOCKED] handleBlockedStaff failed");
+        logger.error({ err: e, telegramId }, "❌ [BLOCKED] handleBlockedUser failed");
     }
 }
 
@@ -127,7 +167,7 @@ async function runPinger(bot: Bot<MyContext>) {
                     // (msg.lastPingMsgId exists = at least one prior ping was delivered)
                     const chatId = Number(msg.chatId);
                     if (chatId > 0 && msg.lastPingMsgId) {
-                        await handleBlockedStaff(bot, chatId);
+                        await handleBlockedUser(bot, chatId);
                     } else {
                         logger.warn(`🚫 Bot blocked or chat not found for ${msg.chatId}. Tracking stopped.`);
                     }
