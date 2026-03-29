@@ -791,7 +791,7 @@ export class LogisticsService {
 
         const staleParcels = await prisma.parcel.findMany({
             where: {
-                status: { in: ['ARRIVED', 'DELIVERED'] },
+                status: 'ARRIVED',
                 updatedAt: { lt: twoDaysAgo },
                 staleAlertSentAt: null,
             },
