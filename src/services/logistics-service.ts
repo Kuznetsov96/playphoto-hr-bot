@@ -635,6 +635,9 @@ export class LogisticsService {
             // Only hand off after shift end
             if (now.getTime() <= endTime.getTime()) continue;
 
+            // If staff accepted AFTER shift end — they belong to the next shift, don't evict
+            if (parcel.acceptedAt && parcel.acceptedAt.getTime() > endTime.getTime()) continue;
+
             const oldTid = parcel.responsibleStaff?.user?.telegramId;
 
             // Reset parcel — clear all reminder flags so next shift gets fresh notifications
@@ -643,6 +646,7 @@ export class LogisticsService {
                 data: {
                     status: 'ARRIVED',
                     responsibleStaffId: null,
+                    acceptedAt: null,
                     shiftEndReminderSentAt: null,
                     photoReminderSentAt: null,
                     staleAlertSentAt: null,
