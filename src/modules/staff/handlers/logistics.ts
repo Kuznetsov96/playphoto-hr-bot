@@ -118,14 +118,19 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
     if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) phoneToUse = '38' + phoneToUse;
 
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+    let trusteeOk = false;
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
         const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-        await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse, user?.staffProfile?.fullName);
+        trusteeOk = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse, user?.staffProfile?.fullName);
     }
 
     const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
 
-    await ctx.editMessageText("Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨", {
+    const msg = trusteeOk
+        ? "Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨"
+        : "⚠️ Не вдалось створити доручення через API НП. Напиши в підтримку PlayPhoto — ми оформимо вручну.\n\nНатисни кнопку нижче, коли забереш посилку та зробиш фото:";
+
+    await ctx.editMessageText(msg, {
         parse_mode: 'HTML',
         reply_markup: kb
     });
@@ -173,7 +178,10 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
 
         if (phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
             const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-            await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse, user.staffProfile.fullName);
+            const ok = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse, user.staffProfile.fullName);
+            if (!ok) {
+                await ctx.reply("⚠️ Не вдалось створити доручення через API НП. Напиши в підтримку PlayPhoto — ми оформимо вручну.");
+            }
         } else {
             // No valid phone — redirect to phone entry before allowing photo
             ctx.session.step = `awaiting_np_phone_${parcelId}`;
@@ -279,12 +287,16 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             
             // Auto-trigger the API request if we just saved the phone.
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
+            let trusteeOk = false;
             if (parcel) {
                 const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-                await novaPoshtaService.createTrustee(parcel.ttn, phone, user?.staffProfile?.fullName);
+                trusteeOk = await novaPoshtaService.createTrustee(parcel.ttn, phone, user?.staffProfile?.fullName);
             }
 
-            await ctx.reply("Номер збережено і API-запит відправлено! Натисни кнопку нижче, як забереш посилку та зробиш фото. ✨", { reply_markup: kb });
+            const msg = trusteeOk
+                ? "Номер збережено і API-запит відправлено! Натисни кнопку нижче, як забереш посилку та зробиш фото. ✨"
+                : "Номер збережено. ⚠️ Не вдалось створити доручення через API НП. Напиши в підтримку PlayPhoto — ми оформимо вручну.\n\nНатисни кнопку нижче, як забереш посилку та зробиш фото:";
+            await ctx.reply(msg, { reply_markup: kb });
         } else {
             await ctx.reply("⚠️ Некоректний формат.\nБудь ласка, введіть номер телефону в форматі 380... (наприклад: 380991234567).");
         }
