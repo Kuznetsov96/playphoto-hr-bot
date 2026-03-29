@@ -100,9 +100,15 @@ export class LogisticsService {
      * - ARRIVED → NP says COMPLETED: stay ARRIVED (staff must Accept first)
      */
     private resolveStatusTransition(currentStatus: ParcelStatus, npStatus: ParcelStatus, deliveryType: string | null): ParcelStatus {
-        // Staff is actively handling — do not override with NP status
-        if (currentStatus === 'PICKUP_IN_PROGRESS' || currentStatus === 'VERIFYING') {
+        // VERIFYING: photos uploaded, awaiting admin — freeze completely
+        if (currentStatus === 'VERIFYING') {
             return currentStatus;
+        }
+
+        // PICKUP_IN_PROGRESS: staff accepted. Allow NP DELIVERED through —
+        // it means parcel was physically picked up from NP.
+        if (currentStatus === 'PICKUP_IN_PROGRESS') {
+            return npStatus === 'DELIVERED' ? 'DELIVERED' : currentStatus;
         }
 
         // Address delivery: NP gives DELIVERED when courier drops off.
@@ -553,9 +559,22 @@ export class LogisticsService {
         const closeTime = this.parseScheduleCloseTime(location.schedule, kyivDow);
         if (!closeTime) return null;
 
-        // Build close time anchored to Kyiv timezone (+02:00 standard; DST handled by offset string)
-        const closeKyiv = new Date(`${kyivYear}-${kyivMonth}-${kyivDay}T${String(closeTime.h).padStart(2,'0')}:${String(closeTime.m).padStart(2,'0')}:00+02:00`);
-        return closeKyiv;
+        // Build close time anchored to Kyiv timezone (resolve actual UTC offset for DST)
+        // Create a rough UTC estimate, then use Intl to find the real Kyiv offset for that moment
+        const roughUtc = new Date(Date.UTC(parseInt(kyivYear), parseInt(kyivMonth) - 1, parseInt(kyivDay), closeTime.h, closeTime.m));
+        const offsetMin = this.getKyivUtcOffsetMinutes(roughUtc);
+        const closeUtc = new Date(roughUtc.getTime() - offsetMin * 60 * 1000);
+        return closeUtc;
+    }
+
+    /**
+     * Returns the UTC offset in minutes for Europe/Kyiv at a given moment.
+     * Handles DST transitions automatically via Intl.
+     */
+    private getKyivUtcOffsetMinutes(date: Date): number {
+        const utcStr = date.toLocaleString('en-US', { timeZone: 'UTC' });
+        const kyivStr = date.toLocaleString('en-US', { timeZone: 'Europe/Kyiv' });
+        return (new Date(kyivStr).getTime() - new Date(utcStr).getTime()) / 60000;
     }
 
     /**
@@ -594,16 +613,18 @@ export class LogisticsService {
                 const kb = new InlineKeyboard()
                     .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
 
-                await bot.api.sendMessage(
+                const sent = await bot.api.sendMessage(
                     Number(tid),
                     LOGISTICS_TEXTS_STAFF.pickup_reminder(parcel.ttn, endTimeStr),
                     { parse_mode: 'HTML', reply_markup: kb }
-                ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send shift-end reminder'));
+                ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn }, 'Failed to send shift-end reminder'); return false; });
 
-                await prisma.parcel.update({
-                    where: { id: parcel.id },
-                    data: { shiftEndReminderSentAt: new Date() }
-                });
+                if (sent) {
+                    await prisma.parcel.update({
+                        where: { id: parcel.id },
+                        data: { shiftEndReminderSentAt: new Date() }
+                    });
+                }
 
                 logger.info({ ttn: parcel.ttn }, '📦 Shift-end reminder sent');
             }
@@ -619,7 +640,7 @@ export class LogisticsService {
 
         const parcels = await prisma.parcel.findMany({
             where: {
-                status: 'PICKUP_IN_PROGRESS',
+                status: { in: ['PICKUP_IN_PROGRESS', 'DELIVERED'] },
                 responsibleStaffId: { not: null },
                 locationId: { not: null },
             },
@@ -638,9 +659,24 @@ export class LogisticsService {
             // If staff accepted AFTER shift end — they belong to the next shift, don't evict
             if (parcel.acceptedAt && parcel.acceptedAt.getTime() > endTime.getTime()) continue;
 
+            // DELIVERED = physically picked up from NP. Don't reset to ARRIVED —
+            // just remind the staff to upload photos. The parcel is already on location.
+            if (parcel.status === 'DELIVERED') {
+                const tid = parcel.responsibleStaff?.user?.telegramId;
+                if (tid && parcel.contentPhotoIds.length === 0) {
+                    const kb = new InlineKeyboard()
+                        .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+                    await bot.api.sendMessage(Number(tid),
+                        `⏰ Зміна закінчилась, але фото посилки <code>${parcel.ttn}</code> ще не завантажено.\nБудь ласка, надішли фото вмісту. 📸`,
+                        { parse_mode: 'HTML', reply_markup: kb }
+                    ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send post-shift photo reminder'));
+                }
+                continue;
+            }
+
             const oldTid = parcel.responsibleStaff?.user?.telegramId;
 
-            // Reset parcel — clear all reminder flags so next shift gets fresh notifications
+            // PICKUP_IN_PROGRESS but not picked up — reset for next shift
             await prisma.parcel.update({
                 where: { id: parcel.id },
                 data: {
@@ -719,7 +755,7 @@ export class LogisticsService {
                 contentPhotoIds: { isEmpty: true },
                 photoReminderSentAt: null,
                 responsibleStaffId: { not: null },
-                updatedAt: { lt: twoHoursAgo }
+                acceptedAt: { not: null, lt: twoHoursAgo }
             },
             include: { responsibleStaff: { include: { user: true } }, location: true }
         });
@@ -731,22 +767,23 @@ export class LogisticsService {
             const kb = new InlineKeyboard()
                 .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
 
-            await bot.api.sendMessage(Number(tid),
+            const sent = await bot.api.sendMessage(Number(tid),
                 `⏰ <b>Нагадування:</b> будь ласка, завантаж фото вмісту посилки <code>${parcel.ttn}</code> (${parcel.location?.name || ''}).\n\nНатисни кнопку нижче: 📸`,
                 { parse_mode: 'HTML', reply_markup: kb }
-            ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send photo reminder'));
+            ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn }, 'Failed to send photo reminder'); return false; });
 
-            await prisma.parcel.update({
-                where: { id: parcel.id },
-                data: { photoReminderSentAt: new Date() }
-            });
-
-            logger.info({ ttn: parcel.ttn }, '📦 Photo upload reminder sent');
+            if (sent) {
+                await prisma.parcel.update({
+                    where: { id: parcel.id },
+                    data: { photoReminderSentAt: new Date() }
+                });
+                logger.info({ ttn: parcel.ttn }, '📦 Photo upload reminder sent');
+            }
         }
     }
 
     /**
-     * Alerts support about parcels stuck in ARRIVED for more than 2 days
+     * Alerts support about parcels stuck in ARRIVED or DELIVERED (picked up but no photo) for more than 2 days
      */
     private async checkStaleParcels() {
         const twoDaysAgo = new Date();
@@ -754,7 +791,7 @@ export class LogisticsService {
 
         const staleParcels = await prisma.parcel.findMany({
             where: {
-                status: 'ARRIVED',
+                status: { in: ['ARRIVED', 'DELIVERED'] },
                 updatedAt: { lt: twoDaysAgo },
                 staleAlertSentAt: null,
             },
