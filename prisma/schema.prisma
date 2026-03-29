@@ -357,6 +357,8 @@ model Parcel {
   responsibleStaffId String?
   responsibleStaff   StaffProfile? @relation("ResponsibleStaff", fields: [responsibleStaffId], references: [id])
 
+  acceptedAt      DateTime? // When responsibleStaffId was last assigned (for handoff guard)
+
   rejectionCount  Int       @default(0)
   lastRejectionAt DateTime?
 

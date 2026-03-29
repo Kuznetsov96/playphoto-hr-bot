@@ -33,6 +33,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
         data: {
             responsibleStaffId: user.staffProfile.id,
             status: 'PICKUP_IN_PROGRESS',
+            acceptedAt: new Date(),
             shiftEndReminderSentAt: null,
             photoReminderSentAt: null,
         }
@@ -200,8 +201,8 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_done_(.+)$/, async (ctx) => 
         return;
     }
 
-    // Guard against duplicate "Done" taps — if already VERIFYING, just ack silently
-    if (existing.status === 'VERIFYING') {
+    // Guard against duplicate "Done" taps or already-closed parcels
+    if (existing.status === 'VERIFYING' || existing.status === 'COMPLETED' || existing.status === 'CANCELLED') {
         await ctx.answerCallbackQuery();
         return;
     }
