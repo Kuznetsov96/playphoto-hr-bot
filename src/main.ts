@@ -1,4 +1,8 @@
 import * as dotenv from "dotenv";
+(BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+};
+
 dotenv.config();
 
 import logger from "./core/logger.js";
