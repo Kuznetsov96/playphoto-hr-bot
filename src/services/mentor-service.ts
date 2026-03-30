@@ -443,7 +443,7 @@ export class MentorService {
             }
         });
 
-        return { success: true, createdCount: slots.length, date: start.toLocaleDateString('uk-UA') };
+        return { success: true, createdCount: slots.length, date: start.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }) };
     }
 
     async bookTrainingSlotFromText(candId: string, text: string) {
@@ -508,7 +508,7 @@ export class MentorService {
             trainingSlot: { connect: { id: slot.id } }
         });
 
-        const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+        const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
         const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
         const channelLink = await accessService.createInviteLink((await candidateRepository.findById(candId))?.user.telegramId!) || "https://t.me/+FuFRMGsvMktkNGFi";
         
