@@ -120,7 +120,7 @@ export class BookingService {
         const slot = await trainingRepository.findSlotWithCandidate(slotId);
         if (!slot) return;
 
-        logger.info({ slotId, candidateId: slot.candidate?.id, candidateName: slot.candidate?.fullName }, "🔓 cancelTrainingSlot");
+        logger.info({ slotId, candidateId: slot.candidate?.id, candidateDiscoveryId: slot.candidateDiscovery?.id }, "🔓 cancelTrainingSlot");
 
         if (slot.googleEventId) {
             await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
@@ -133,25 +133,8 @@ export class BookingService {
             });
         }
 
-        return trainingRepository.updateSlot(slotId, {
-            isBooked: false,
-            candidate: { disconnect: true },
-            googleEventId: null
-        });
-    }
-
-    async cancelDiscoverySlot(slotId: string) {
-        const slot = await trainingRepository.findSlotWithCandidate(slotId);
-        if (!slot) return;
-
-        logger.info({ slotId, candidateId: slot.candidate?.id, candidateName: slot.candidate?.fullName }, "🔓 cancelDiscoverySlot");
-
-        if (slot.googleEventId) {
-            await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
-        }
-
-        if (slot.candidate) {
-            await candidateRepository.update(slot.candidate.id, {
+        if (slot.candidateDiscovery) {
+            await candidateRepository.update(slot.candidateDiscovery.id, {
                 trainingMeetLink: null,
                 discoverySlot: { disconnect: true }
             });
@@ -159,10 +142,18 @@ export class BookingService {
 
         return trainingRepository.updateSlot(slotId, {
             isBooked: false,
+            candidate: { disconnect: true },
             candidateDiscovery: { disconnect: true },
             googleEventId: null
         });
     }
+
+    async cancelDiscoverySlot(slotId: string) {
+        // Alias to cancelTrainingSlot since it now handles both candidate and candidateDiscovery
+        return this.cancelTrainingSlot(slotId);
+    }
+
+
 
     async bookDiscoverySlot(telegramId: number, slotId: string) {
         return prisma.$transaction(async (tx) => {

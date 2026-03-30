@@ -18,6 +18,7 @@ import { startAdminStaffSearch } from "./search.js";
 import { InputFile } from "grammy";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import { candidateRepository } from "../../repositories/candidate-repository.js";
 
 /**
  * Birthday Selection Menu
@@ -128,6 +129,41 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                     const key = `${s.date.toISOString()}|${s.locationId}`;
                     if (!afterMap.has(s.staffId)) afterMap.set(s.staffId, new Set());
                     afterMap.get(s.staffId)!.add(key);
+                }
+
+                // --- Sync firstShiftDate for onboarding candidates from actual schedule ---
+                const { CandidateStatus } = await import("@prisma/client");
+                const onboardingCandidates = await prisma.candidate.findMany({
+                    where: { status: CandidateStatus.HIRED, isMentorLocked: true },
+                    include: { user: true, location: true }
+                });
+                for (const cand of onboardingCandidates) {
+                    try {
+                        const staff = await prisma.staffProfile.findUnique({ where: { userId: cand.userId } });
+                        if (!staff) continue;
+                        const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+                        const firstShift = await prisma.workShift.findFirst({
+                            where: { staffId: staff.id, date: { gte: startOfToday } },
+                            orderBy: { date: 'asc' },
+                            include: { location: true }
+                        });
+                        if (!firstShift) continue;
+                        let shiftTime: string | undefined;
+                        const locSchedule = firstShift.location.schedule;
+                        if (locSchedule) {
+                            const isWeekend = [0, 6].includes(firstShift.date.getDay());
+                            const match = isWeekend
+                                ? locSchedule.match(/Сб-Нд\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i)
+                                : locSchedule.match(/Пн-Пт\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i);
+                            if (match) shiftTime = match[1];
+                        }
+                        await candidateRepository.update(cand.id, {
+                            firstShiftDate: firstShift.date,
+                            ...(shiftTime ? { firstShiftTime: shiftTime } : {})
+                        });
+                    } catch (e) {
+                        logger.warn({ err: e, candId: cand.id }, "Failed to sync firstShiftDate for onboarding candidate");
+                    }
                 }
 
                 // --- Diff: find staff whose schedule actually changed ---

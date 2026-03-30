@@ -28,6 +28,9 @@ const LOCATION_CODE_MAP: Record<string, string> = {
     'DC': 'drive city',
     'FT': 'fantasy town',
     'VK': 'volkland',
+    'VK1': 'volkland 1',
+    'VK2': 'volkland 2',
+    'VK3': 'volkland 3',
     'K': 'karamel',
     'KD': 'leoland',
     'DH': 'dytyache horyshche',
@@ -78,6 +81,48 @@ export class ScheduleSyncService {
         } catch (e) {
             logger.error({ err: e, idStr, cleaned }, "❌ Failed to parse Telegram ID:");
             return null;
+        }
+    }
+
+    /**
+     * Marks a staff member as "bot blocked" in the TEAM spreadsheet:
+     * - Column F (index 5): "Закінчення роботи"
+     * - Column S (index 18): "Заблокувала бот"
+     * Finds the row by telegramId in column R (index 17).
+     */
+    async markStaffBotBlocked(telegramId: number): Promise<boolean> {
+        this.ensureSheets();
+        try {
+            const res = await this.sheets.spreadsheets.values.get({
+                spreadsheetId: SPREADSHEET_ID_TEAM,
+                range: "'В роботі'!A1:S2000",
+            });
+            const rows: any[][] = res.data.values || [];
+
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                const rowTgId = this.parseTelegramId(String(row?.[17] || ""));
+                if (rowTgId === BigInt(telegramId)) {
+                    const sheetRow = i + 1; // 1-indexed, header is row 1
+                    await this.sheets.spreadsheets.values.batchUpdate({
+                        spreadsheetId: SPREADSHEET_ID_TEAM,
+                        requestBody: {
+                            valueInputOption: 'RAW',
+                            data: [
+                                { range: `'В роботі'!F${sheetRow}`, values: [["Закінчення роботи"]] },
+                                { range: `'В роботі'!S${sheetRow}`, values: [["Заблокувала бот"]] },
+                            ]
+                        }
+                    });
+                    logger.info({ telegramId, sheetRow }, "📋 [BLOCKED] Staff marked in TEAM sheet");
+                    return true;
+                }
+            }
+            logger.warn({ telegramId }, "⚠️ [BLOCKED] Staff not found in TEAM sheet");
+            return false;
+        } catch (e: any) {
+            logger.error({ err: e.message, telegramId }, "❌ [BLOCKED] Failed to update TEAM sheet");
+            return false;
         }
     }
 
@@ -599,27 +644,36 @@ export class ScheduleSyncService {
             if (cityMap[potentialCity]) currentCity = cityMap[potentialCity];
         }
 
-        const headerAliases: Record<string, { name: string, city?: string }> = {
+        const headerAliases: Record<string, { name: string, city?: string, exact?: boolean, exclude?: string }> = {
             'drivecity': { name: 'drive city', city: 'Львів' },
             'dragonp': { name: 'dragon park', city: 'Львів' },
             'leoland': { name: 'leoland', city: 'Львів' },
             'leo': { name: 'leoland', city: 'Львів' },
-            'sp даринок': { name: 'даринок', city: 'Київ' },
-            'даринок': { name: 'даринок', city: 'Київ' },
-            'sp київ': { name: 'smile park', city: 'Київ' },
+            'sp даринок': { name: 'darynok', city: 'Київ' },
+            'даринок': { name: 'darynok', city: 'Київ' },
+            'sp київ': { name: 'smile park', city: 'Київ', exclude: 'darynok' },
             'sp львів': { name: 'smile park', city: 'Львів' },
             'sp харків': { name: 'smile park', city: 'Харків' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
             'fk львів': { name: 'fly kids', city: 'Львів' },
             'fk рівне': { name: 'fly kids', city: 'Рівне' },
+            // Volkland without number = Volkland 1; numbered variants match exactly
+            'volkland': { name: 'volkland 1', city: 'Запоріжжя', exact: true },
+            'volkland 2': { name: 'volkland 2', city: 'Запоріжжя', exact: true },
+            'volkland 3': { name: 'volkland 3', city: 'Запоріжжя', exact: true },
         };
 
         const target = headerAliases[hLower];
         if (target) {
             const found = allLocations.find(l => {
-                const nameMatch = l.name.toLowerCase().includes(target.name) || (l.legacyName || "").toLowerCase().includes(target.name);
+                const lName = l.name.toLowerCase();
+                const lLegacy = (l.legacyName || "").toLowerCase();
+                const nameMatch = target.exact
+                    ? (lName.startsWith(target.name) || lLegacy.startsWith(target.name))
+                    : (lName.includes(target.name) || lLegacy.includes(target.name));
                 const cityMatch = (target.city) ? l.city === target.city : (currentCity ? l.city === currentCity : true);
-                return nameMatch && cityMatch;
+                const notExcluded = !target.exclude || (!lName.includes(target.exclude) && !lLegacy.includes(target.exclude));
+                return nameMatch && cityMatch && notExcluded;
             });
             if (found) return found;
         }
@@ -654,7 +708,7 @@ export class ScheduleSyncService {
         const codeUpper = code.toUpperCase();
         const locPattern = LOCATION_CODE_MAP[codeUpper];
         if (!locPattern) return null;
-        const candidates = allLocations.filter(l => l.name.toLowerCase().includes(locPattern));
+        const candidates = allLocations.filter(l => l.name.toLowerCase().startsWith(locPattern) || l.name.toLowerCase().includes(locPattern));
         if (candidates.length === 0) return null;
         if (candidates.length === 1) return candidates[0]!;
         if (currentLocation && candidates.some(c => c.id === currentLocation.id)) return currentLocation;

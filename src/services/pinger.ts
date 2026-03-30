@@ -1,8 +1,78 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
-import { PING_CONFIG } from "../config.js";
+import { staffRepository } from "../repositories/staff-repository.js";
+import { candidateRepository } from "../repositories/candidate-repository.js";
+import { userRepository } from "../repositories/user-repository.js";
+import { CandidateStatus } from "@prisma/client";
+import { PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
+import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
+
+// Only HR-stage statuses — pinger broadcast targets early funnel
+const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
+    CandidateStatus.SCREENING,
+    CandidateStatus.WAITLIST,
+    CandidateStatus.INTERVIEW_SCHEDULED,
+    CandidateStatus.INTERVIEW_COMPLETED,
+    CandidateStatus.DECISION_PENDING,
+];
+
+async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
+    try {
+        const userWithProfile = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
+        if (!userWithProfile) return;
+
+        const staff = userWithProfile.staffProfile;
+        const candidate = userWithProfile.candidate;
+
+        // --- Staff ---
+        if (staff?.isActive) {
+            const staffName = staff.surnameNameDot || staff.fullName;
+            logger.warn({ telegramId, staffName }, "🚫 [BLOCKED] Staff blocked the bot. Auto-deactivating...");
+
+            await staffRepository.update(staff.id, { isActive: false });
+            await scheduleSyncService.markStaffBotBlocked(telegramId);
+
+            const adminId = ADMIN_IDS[0];
+            if (adminId) {
+                const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
+                    `👤 <b>${staffName}</b> заблокувала бот.\n\n` +
+                    `Виконано автоматично:\n` +
+                    `• Статус → <b>Закінчення роботи</b>\n` +
+                    `• Доступ до каналу — знято\n` +
+                    `• Таблиця персоналу — оновлено`;
+                await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => {});
+            }
+            return;
+        }
+
+        // --- Candidate ---
+        if (candidate && ACTIVE_CANDIDATE_STATUSES.includes(candidate.status as CandidateStatus)) {
+            const name = candidate.fullName || "Candidate";
+            logger.warn({ telegramId, name }, "🚫 [BLOCKED] Candidate blocked the bot. Auto-rejecting...");
+
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.REJECTED,
+                candidateDecision: "Бот заблоковано / акаунт видалено"
+            });
+
+            const hrId = HR_IDS[0];
+            if (hrId) {
+                const text = `⚠️ <b>Bot Blocked</b>\n\n` +
+                    `👤 <b>${name}</b> заблокувала бот.\n` +
+                    `Статус → <b>REJECTED</b> автоматично.`;
+                const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+                await bot.api.sendMessage(hrId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
+            }
+            return;
+        }
+
+        logger.warn({ telegramId }, "🚫 Bot blocked — user is not active staff or active candidate. Skipping.");
+    } catch (e) {
+        logger.error({ err: e, telegramId }, "❌ [BLOCKED] handleBlockedUser failed");
+    }
+}
 
 export function startPingerLoop(bot: Bot<MyContext>) {
     logger.info("🔔 Pinger loop started...");
@@ -85,8 +155,15 @@ async function runPinger(bot: Bot<MyContext>) {
                 logger.info(`🔔 Ping sent to ${msg.chatId} for ${msg.pendingReplies.length} users.`);
             } catch (e: any) {
                 if (e.error_code === 403 || (e.error_code === 400 && e.description?.includes("chat not found"))) {
-                    logger.warn(`🚫 Bot blocked or chat not found for ${msg.chatId}. Stopping pinger for this message.`);
                     await trackedMessageRepository.stopTracking(msg.id);
+                    // Only treat as intentional block if we already pinged at least once before
+                    // (msg.lastPingMsgId exists = at least one prior ping was delivered)
+                    const chatId = Number(msg.chatId);
+                    if (chatId > 0 && msg.lastPingMsgId) {
+                        await handleBlockedUser(bot, chatId);
+                    } else {
+                        logger.warn(`🚫 Bot blocked or chat not found for ${msg.chatId}. Tracking stopped.`);
+                    }
                 } else if (e.error_code === 400 && e.description?.includes("message to be replied not found")) {
                     logger.warn(`⚠️ Original message not found in ${msg.chatId}. Stopping pinger.`);
                     await trackedMessageRepository.stopTracking(msg.id);

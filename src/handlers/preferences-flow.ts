@@ -40,7 +40,7 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
     // Log opt-out to Google Sheets so admin sees who refused
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
-        const fullName = user?.staffProfile?.fullName || user?.candidate?.fullName || "Невідомий";
+        const fullName = (user?.staffProfile as any)?.surnameNameDot || user?.staffProfile?.fullName || user?.candidate?.fullName || "Невідомий";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
 
         await preferencesService.savePreference({
@@ -253,7 +253,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     const waitMsg = await ctx.reply("⏳ Зберігаю...");
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId!));
-        const staffNameForTable = user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
+        const staffNameForTable = (user?.staffProfile as any)?.surnameNameDot || user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
         const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає побажань";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
 

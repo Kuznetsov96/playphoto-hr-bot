@@ -357,11 +357,15 @@ model Parcel {
   responsibleStaffId String?
   responsibleStaff   StaffProfile? @relation("ResponsibleStaff", fields: [responsibleStaffId], references: [id])
 
+  acceptedAt      DateTime? // When responsibleStaffId was last assigned (for handoff guard)
+
   rejectionCount  Int       @default(0)
   lastRejectionAt DateTime?
 
-  contentPhotoIds    String[] @default([]) // Telegram file_ids
-  photoReminderSentAt DateTime? // When the "please upload photo" reminder was sent
+  contentPhotoIds      String[] @default([]) // Telegram file_ids
+  photoReminderSentAt    DateTime? // When the "please upload photo" reminder was sent
+  shiftEndReminderSentAt DateTime? // When the shift-end pickup reminder was sent
+  staleAlertSentAt       DateTime? // When the "parcel delayed" support alert was sent
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
