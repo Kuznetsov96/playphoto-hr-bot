@@ -185,7 +185,9 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 const parcel = await prisma.parcel.update({
                     where: { id: parcelId },
                     data: { 
-                        contentPhotoId: photo.file_id,
+                        contentPhotoIds: {
+                            push: photo.file_id
+                        },
                         status: 'VERIFYING'
                     },
                     include: { location: true, responsibleStaff: true }
