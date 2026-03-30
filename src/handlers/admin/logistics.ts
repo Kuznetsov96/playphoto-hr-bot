@@ -216,7 +216,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
         const chatId = ctx.chat!.id;
         const threadOptions: any = {};
         if (TEAM_CHATS.LOGISTICS && ctx.chat?.type !== 'private') {
-            options.message_thread_id = TEAM_CHATS.LOGISTICS;
+            threadOptions.message_thread_id = TEAM_CHATS.LOGISTICS;
         }
 
         if (parcel.contentPhotoIds.length === 1) {
