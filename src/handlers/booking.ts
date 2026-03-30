@@ -149,7 +149,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         if (HR_IDS.length > 0) {
             const hrNotifyText = `🆕 <b>New interview appointment!</b>\n\n` +
                 `👤 Candidate: <b>${fullName}</b>\n` +
-                `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</b>\n\n` +
+                `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n\n` +
                 `📍 Appointment added to Google Calendar.`;
 
             const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${(result as any).candidate?.id}`);
@@ -532,14 +532,14 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         if (isTrainingPhase) {
             confirmationText = CANDIDATE_TEXTS["candidate-training-scheduled"](
                 "навчання",
-                startTime.toLocaleDateString('uk-UA'),
+                startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }),
                 startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }),
                 result.googleMeetLink
             );
         } else {
             confirmationText = CANDIDATE_TEXTS["discovery-confirm"](
                 MENTOR_NAME,
-                startTime.toLocaleDateString('uk-UA'),
+                startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }),
                 startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
             );
         }
@@ -559,7 +559,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
             const typeText = isTrainingPhase ? "training" : "discovery";
             const mentorNotifyText = `🆕 <b>New ${typeText} appointment!</b>\n\n` +
                 `👤 Candidate: <b>${fullName}</b>\n` +
-                `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</b>\n\n` +
+                `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n\n` +
                 `📍 Appointment added to Google Calendar.`;
 
             const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${existingCand.id}`);

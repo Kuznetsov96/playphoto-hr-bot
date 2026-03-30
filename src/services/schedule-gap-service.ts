@@ -67,7 +67,7 @@ export class ScheduleGapService {
         let report = ADMIN_TEXTS["admin-schedule-gaps-title"] + "\n\n";
 
         for (const dayGap of gaps) {
-            const dateStr = dayGap.date.toLocaleDateString("en-US", { weekday: 'short', day: '2-digit', month: '2-digit' });
+            const dateStr = dayGap.date.toLocaleDateString("en-US", { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
             report += `📅 <b>${dateStr}:</b>\n`;
             
             for (const locGap of dayGap.locationGaps) {

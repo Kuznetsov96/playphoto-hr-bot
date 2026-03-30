@@ -292,7 +292,7 @@ export async function startDailyReportLoop(bot: Bot<MyContext>) {
         const now = new Date();
         const kievTime = now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" });
         const localDate = new Date(kievTime);
-        const todayStr = localDate.toLocaleDateString("uk-UA");
+        const todayStr = localDate.toLocaleDateString("uk-UA", { timeZone: 'Europe/Kyiv' });
 
         // 08:00 Audit Report (for Yesterday)
         if (localDate.getHours() === 8 && localDate.getMinutes() === 0) {
