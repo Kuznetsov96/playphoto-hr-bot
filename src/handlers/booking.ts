@@ -145,6 +145,11 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         const confirmationMsg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
         trackMessage(ctx, confirmationMsg.message_id);
 
+        // --- TIMELINE TRACKING ---
+        import("../services/timeline-service.js").then(({ timelineService }) => {
+            timelineService.trackEvent(existingCand?.userId || '', `Забронювала співбесіду: ${startTime.toLocaleString('uk-UA')}`, { slotId, startTime }).catch(() => {});
+        }).catch(() => {});
+
         const { HR_IDS } = await import("../config.js");
         if (HR_IDS.length > 0) {
             const hrNotifyText = `🆕 <b>New interview appointment!</b>\n\n` +
@@ -552,6 +557,12 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         await cleanupMessages(ctx);
         const msg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
         trackMessage(ctx, msg.message_id);
+
+        // --- TIMELINE TRACKING ---
+        const typeText = isTrainingPhase ? "навчання" : "знайомство";
+        import("../services/timeline-service.js").then(({ timelineService }) => {
+            timelineService.trackEvent(existingCand.userId, `Забронювала ${typeText}: ${startTime.toLocaleString('uk-UA')}`, { slotId, type: typeText, startTime }).catch(() => {});
+        }).catch(() => {});
 
         // Notify Mentors
         const { MENTOR_IDS } = await import("../config.js");

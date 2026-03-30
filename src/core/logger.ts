@@ -1,5 +1,7 @@
 import pino from "pino";
 import type { LoggerOptions } from "pino";
+import fs from "fs";
+import path from "path";
 
 /**
  * PlayPhoto Security Logger Configuration.
@@ -16,11 +18,8 @@ const pinoOptions: LoggerOptions = {
             "*.bankCard",
             "*.registrationAddress",
             "*.phone",
-            "*.fullName",
+            //"*.fullName", // Temporarily disabled for debugging journey
             "*.email",
-            "*.firstName",
-            "*.lastName",
-            "*.username",
             "payload.iban",
             "payload.passportNumber",
             "payload.ipn",
@@ -28,24 +27,37 @@ const pinoOptions: LoggerOptions = {
             "ctx.message.text",
             "ctx.message.caption",
             "ctx.update.message.text",
-            "ctx.update.message.caption",
-            "ctx.message.from.first_name",
-            "ctx.message.from.last_name",
-            "ctx.message.from.username",
-            "ctx.from.first_name",
-            "ctx.from.last_name",
-            "ctx.from.username",
-            "user.firstName",
-            "user.lastName",
-            "user.username",
-            "candidate.fullName",
-            "staffProfile.fullName"
+            "ctx.update.message.caption"
         ],
         censor: "[PROTECTED]",
     }
 };
 
-if (process.env.NODE_ENV !== "production") {
+const streams: any[] = [{ stream: process.stdout }];
+
+// Persistence: write to /app/logs in production/docker
+if (process.env.NODE_ENV === "production" || fs.existsSync("/app/logs")) {
+    const logPath = "/app/logs/product.log";
+    try {
+        // Ensure directory exists (though volume should handle it)
+        const dir = path.dirname(logPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        streams.push({ 
+            stream: pino.destination({ 
+                dest: logPath, 
+                minLength: 0, 
+                sync: false,
+                mkdir: true 
+            }) 
+        });
+        console.log(`📡 Logger: Writing to ${logPath}`);
+    } catch (e) {
+        console.error("❌ Failed to initialize file logger:", e);
+    }
+}
+
+if (process.env.NODE_ENV !== "production" && !fs.existsSync("/app/logs")) {
     pinoOptions.transport = {
         target: 'pino-pretty',
         options: {
@@ -54,6 +66,6 @@ if (process.env.NODE_ENV !== "production") {
     };
 }
 
-const logger = pino(pinoOptions);
+const logger = pino(pinoOptions, pino.multistream(streams));
 
 export default logger;

@@ -190,6 +190,11 @@ export class CandidateRepository {
             const changes: Record<string, { from: unknown; to: unknown }> = {};
             if (data.status !== undefined && oldCandidate.status !== candidate.status) {
                 changes.status = { from: oldCandidate.status, to: candidate.status };
+                
+                // --- AUTOMATIC TIMELINE TRACKING ---
+                import("../services/timeline-service.js").then(({ timelineService }) => {
+                    timelineService.trackStatusChange(candidate, candidate.status, 'SYSTEM').catch(() => {});
+                }).catch(() => {});
             }
             if (oldCandidate.interviewSlotId !== candidate.interviewSlotId) {
                 changes.interviewSlotId = { from: oldCandidate.interviewSlotId, to: candidate.interviewSlotId };
