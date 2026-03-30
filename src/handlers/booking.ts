@@ -486,7 +486,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
 // In-memory lock to prevent double-click race conditions
 const bookingLocks = new Set<number>();
 
-// 8. Бронювання слоту ЗНАЙОМСТВО (кандидатка обирає час сама)
+// 8. Бронювання слоту ЗНАЙОМСТВО або НАВЧАННЯ (кандидатка обирає час сама)
 bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
     const telegramId = ctx.from.id;
@@ -495,31 +495,54 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         return await ctx.answerCallbackQuery("⏳ Зачекай, бронювання вже в процесі...");
     }
 
-    // Idempotency: check if candidate already has a booked discovery
     const existingCand = await candidateRepository.findByTelegramId(telegramId);
-    if (existingCand?.discoverySlotId) {
-        return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис!");
+    if (!existingCand) {
+        return await ctx.answerCallbackQuery("Кандидата не знайдено!");
+    }
+
+    const isTrainingPhase = existingCand.status === CandidateStatus.DISCOVERY_COMPLETED || 
+                            existingCand.status === CandidateStatus.TRAINING_SCHEDULED;
+
+    // Idempotency check appropriate for phase
+    if (isTrainingPhase) {
+        if (existingCand.trainingSlotId) {
+            return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис на навчання!");
+        }
+    } else {
+        if (existingCand.discoverySlotId) {
+            return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис на знайомство!");
+        }
     }
 
     bookingLocks.add(telegramId);
 
     try {
-        const candidate = await candidateRepository.findByTelegramId(telegramId);
-        if (!candidate) throw new Error("CANDIDATE_NOT_FOUND");
+        await ctx.answerCallbackQuery(isTrainingPhase ? "Бронюємо навчання... ⏳" : "Бронюємо знайомство... ⏳");
+        logger.info({ userId: ctx.from.id, slotId }, `🎓 [JOURNEY] Booking ${isTrainingPhase ? "training" : "discovery"} slot`);
 
-        await ctx.answerCallbackQuery(`Бронюємо знайомство... ⏳`);
-        logger.info({ userId: ctx.from.id, slotId }, `🎓 [JOURNEY] Booking discovery slot`);
-
-        const result = await bookingService.bookDiscoverySlot(telegramId, slotId);
+        const result = isTrainingPhase 
+            ? await bookingService.bookTrainingSlot(telegramId, slotId)
+            : await bookingService.bookDiscoverySlot(telegramId, slotId);
 
         const startTime = (result as any).startTime;
-        const fullName = (result as any).candidateDiscovery?.fullName || ctx.from.first_name || "Кандидатко";
+        const candData = isTrainingPhase ? (result as any).candidate : (result as any).candidateDiscovery;
+        const fullName = candData?.fullName || ctx.from.first_name || "Кандидатко";
 
-        const confirmationText = CANDIDATE_TEXTS["discovery-confirm"](
-            MENTOR_NAME,
-            startTime.toLocaleDateString('uk-UA'),
-            startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
-        );
+        let confirmationText = "";
+        if (isTrainingPhase) {
+            confirmationText = CANDIDATE_TEXTS["candidate-training-scheduled"](
+                "навчання",
+                startTime.toLocaleDateString('uk-UA'),
+                startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }),
+                result.googleMeetLink
+            );
+        } else {
+            confirmationText = CANDIDATE_TEXTS["discovery-confirm"](
+                MENTOR_NAME,
+                startTime.toLocaleDateString('uk-UA'),
+                startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
+            );
+        }
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", `reschedule_training_${slotId}`).row()
@@ -533,12 +556,13 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         // Notify Mentors
         const { MENTOR_IDS } = await import("../config.js");
         if (MENTOR_IDS.length > 0) {
-            const mentorNotifyText = `🆕 <b>New discovery appointment!</b>\n\n` +
+            const typeText = isTrainingPhase ? "training" : "discovery";
+            const mentorNotifyText = `🆕 <b>New ${typeText} appointment!</b>\n\n` +
                 `👤 Candidate: <b>${fullName}</b>\n` +
                 `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</b>\n\n` +
                 `📍 Appointment added to Google Calendar.`;
 
-            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${existingCand.id}`);
             await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorNotifyText, { parse_mode: "HTML", reply_markup: mentorKb });
         }
 
@@ -667,12 +691,13 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         await ctx.answerCallbackQuery("Обирай новий час!");
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
 
         // Release current slot first so it appears in the new list
         await bookingService.cancelTrainingSlot(slotId);
         if (candidate) {
             await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.ACCEPTED,
+                status: wasDiscovery ? CandidateStatus.ACCEPTED : CandidateStatus.DISCOVERY_COMPLETED,
                 candidateDecision: null,
                 notificationSent: false
             });
