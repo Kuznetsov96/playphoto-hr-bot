@@ -262,8 +262,8 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
 
         const keyboard = new InlineKeyboard();
         slots.slice(0, 20).forEach((s: any, index: number) => {
-            const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-            const dateStr = s.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+            const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
+            const dateStr = s.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
             keyboard.text(`${dateStr} ${timeStr}`, `book_slot_${s.id}`);
             if ((index + 1) % 2 === 0) keyboard.row();
         });
@@ -323,7 +323,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     // Групуємо слоти за датами
     const groupedSlots: Record<string, typeof slots> = {};
     slots.forEach(slot => {
-        const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+        const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
         if (!groupedSlots[dateStr]) groupedSlots[dateStr] = [];
         groupedSlots[dateStr].push(slot);
     });
@@ -459,7 +459,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
     const groupedSlots: Record<string, typeof slots> = {};
 
     slots.forEach((slot: any) => {
-        const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+        const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
         if (!groupedSlots[dateStr]) groupedSlots[dateStr] = [];
         groupedSlots[dateStr].push(slot);
     });
@@ -716,8 +716,8 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
 
         const keyboard = new InlineKeyboard();
         slots.slice(0, 20).forEach((s: any, index: number) => {
-            const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-            const dateStr = s.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+            const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
+            const dateStr = s.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
             keyboard.text(`${dateStr} ${timeStr}`, `book_training_slot_${s.id}`);
             if ((index + 1) % 2 === 0) keyboard.row();
         });
