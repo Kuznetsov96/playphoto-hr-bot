@@ -101,16 +101,18 @@ adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx,
 
         try {
             const { InlineKeyboard } = await import("grammy");
-            const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-
-            await ctx.api.sendMessage(targetId, `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${replyText}`, { 
-                parse_mode: "HTML",
-                reply_markup: replyKb
-            });
-            await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent to the candidate.", "admin-main");
-            
             const { userRepository } = await import("../../repositories/user-repository.js");
+            const { candidateRepository } = await import("../../repositories/candidate-repository.js");
             const user = await userRepository.findByTelegramId(BigInt(targetId));
+            const isCandidate = user ? !!(await candidateRepository.findByUserId(user.id)) : false;
+
+            const msgOptions: { parse_mode: "HTML"; reply_markup?: InstanceType<typeof InlineKeyboard> } = { parse_mode: "HTML" };
+            if (isCandidate) {
+                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+            }
+
+            await ctx.api.sendMessage(targetId, `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${replyText}`, msgOptions);
+            await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent.", "admin-main");
             if (user) {
                 const { timelineRepository } = await import("../../repositories/timeline-repository.js");
                 await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', `[Direct Reply] ${replyText}`, { adminId: ctx.from?.id });

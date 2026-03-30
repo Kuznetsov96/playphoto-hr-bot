@@ -9,6 +9,7 @@ import { MENTOR_IDS } from "../config.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
 
 export async function notifyMentors(api: any, candidate: any) {
@@ -177,14 +178,24 @@ export const hrService = {
         const { NDA_LINK } = await import("../config.js");
         const firstName = extractFirstName(cand.fullName || "");
         const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
-        await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), { parse_mode: "HTML", reply_markup: kb });
+        try {
+            await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), { parse_mode: "HTML", reply_markup: kb });
+        } catch (e: any) {
+            if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+            else throw e;
+        }
     },
 
     async pingTest(api: any, candId: string) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return;
         const kb = new InlineKeyboard().text("📝 Почати тест", `start_training_test_${cand.id}`);
-        await api.sendMessage(Number(cand.user.telegramId), `<b>Продовжимо твій шлях? ✨</b>\n\nТи вже ознайомилась з NDA. Залишився останній крок перед виходом на локацію — короткий тест. Давай перевіримо твої знання! 📸`, { parse_mode: "HTML", reply_markup: kb });
+        try {
+            await api.sendMessage(Number(cand.user.telegramId), `<b>Продовжимо твій шлях? ✨</b>\n\nТи вже ознайомилась з NDA. Залишився останній крок перед виходом на локацію — короткий тест. Давай перевіримо твої знання! 📸`, { parse_mode: "HTML", reply_markup: kb });
+        } catch (e: any) {
+            if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+            else throw e;
+        }
     },
 
     async getHubText(stats?: any) {
@@ -266,8 +277,9 @@ export const hrService = {
             await notifyMentors(api, cand);
 
             return true;
-        } catch (e) {
-            logger.error({ err: e, candId }, "Failed to send offer message");
+        } catch (e: any) {
+            if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+            else logger.error({ err: e, candId }, "Failed to send offer message");
             return false;
         }
     },
@@ -894,8 +906,9 @@ export const hrService = {
                     notificationSent: true
                 });
                 successCount++;
-            } catch (e) {
-                logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify HR waitlist candidate");
+            } catch (e: any) {
+                if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+                else logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify HR waitlist candidate");
             }
         }
         return successCount;

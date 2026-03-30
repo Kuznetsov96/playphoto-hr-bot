@@ -159,6 +159,8 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_set_loc_(.+)_(.+)$/, async (
     const parcelId = ctx.match[1] as string;
     const locId = ctx.match[2] as string;
 
+    await ctx.answerCallbackQuery("Location updated! 📍");
+
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
 
     await prisma.parcel.update({
@@ -181,7 +183,6 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_set_loc_(.+)_(.+)$/, async (
     const { logisticsService } = await import("../../services/logistics-service.js");
     await logisticsService.notifyStaffOnShift(parcelId, parcel?.status || 'EXPECTED');
 
-    await ctx.answerCallbackQuery("Location updated! 📍");
     await showParcelDetails(ctx, parcelId);
 });
 
