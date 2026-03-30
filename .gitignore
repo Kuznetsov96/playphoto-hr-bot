@@ -5,6 +5,9 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# ─── Claude Code local settings (may contain secrets) ───
+.claude/settings.local.json
 \#\ Core\ Settings.ini
 google-service-account.json
 monobank_cache.json
@@ -25,6 +28,7 @@ monobank_cache.json
 /check_*.js
 /find_*.js
 /verify_*.js
+/np-*.js
 prisma/seed.js
 prisma/seed.d.ts
 scripts/assign-roles.js
