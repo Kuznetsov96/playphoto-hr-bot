@@ -18,6 +18,8 @@ export class CryptoUtility {
             this.key = Buffer.from(envKey.padEnd(KEY_LEN, '0').slice(0, KEY_LEN));
             this.isReady = true;
             logger.debug("🔐 CryptoUtility initialized. Application-level encryption enabled.");
+        } else if (process.env.NODE_ENV === 'production') {
+            throw new Error("ENCRYPTION_KEY must be set in production. Refusing to start without encryption.");
         } else {
             logger.warn("⚠️ ENCRYPTION_KEY is missing. Encryption disabled (returning plain text).");
         }

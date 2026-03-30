@@ -87,7 +87,7 @@ export class ReconciliationService {
             const expenses: any[] = [];
 
             const from = Math.floor(targetDate.getTime() / 1000);
-            const endOfTargetDay = from + 86400;
+            const endOfTargetDay = Math.floor(new Date(Number(y), Number(m) - 1, Number(d) + 1).getTime() / 1000);
             const to = from + 259200;
 
             const fopKeysToAudit = Object.keys(monoClients)
