@@ -205,7 +205,9 @@ bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.REJECTED,
                 candidateDecision: "Кандидатка відмовилась від участі",
-                notificationSent: true
+                notificationSent: true,
+                interviewSlot: { disconnect: true },
+                googleMeetLink: null
             });
         }
 
@@ -247,7 +249,9 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.WAITLIST,
                 candidateDecision: null,
-                notificationSent: false
+                notificationSent: false,
+                interviewSlot: { disconnect: true },
+                googleMeetLink: null
             });
         }
 
@@ -655,7 +659,10 @@ bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.REJECTED,
                 candidateDecision: "Кандидатка скасувала заявку самостійно",
-                notificationSent: true
+                notificationSent: true,
+                discoverySlot: { disconnect: true },
+                trainingSlot: { disconnect: true },
+                trainingMeetLink: null
             });
         }
 
@@ -704,15 +711,20 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
 
-        // Release current slot first so it appears in the new list
-        await bookingService.cancelTrainingSlot(slotId);
+        // Force disconnect any current slots on the candidate record to prevent "ghost" bookings
         if (candidate) {
             await candidateRepository.update(candidate.id, {
                 status: wasDiscovery ? CandidateStatus.ACCEPTED : CandidateStatus.DISCOVERY_COMPLETED,
                 candidateDecision: null,
-                notificationSent: false
+                notificationSent: false,
+                discoverySlot: { disconnect: true },
+                trainingSlot: { disconnect: true },
+                trainingMeetLink: null
             });
         }
+
+        // Release the specifically requested slot as well (context-safe)
+        await bookingService.cancelTrainingSlot(slotId);
 
         // Notify Mentor about reschedule
         if (candidate) {
