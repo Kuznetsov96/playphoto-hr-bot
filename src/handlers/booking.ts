@@ -137,8 +137,8 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         }
 
         const kb = new InlineKeyboard()
-            .text("🗓️ Перенести", `reschedule_booking_${result.slot.id}`).row()
-            .text("❌ Скасувати", `cancel_booking_${result.slot.id}`).row()
+            .text("🗓️ Змінити час", `reschedule_booking_${result.slot.id}`).row()
+            .text("❌ Скасувати участь", `cancel_booking_${result.slot.id}`).row()
             .text("👩‍💼 Написати HR", "contact_hr");
 
         await cleanupMessages(ctx);
@@ -171,24 +171,24 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     }
 });
 
-// 2. Скасування бронювання — крок 1: підтвердження
+// 2. Відмова від участі — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, скасувати заявку", `confirm_cancel_booking_${slotId}`).row()
+        .text("🚫 Так, відмовляюсь", `confirm_cancel_booking_${slotId}`).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
         `⚠️ <b>Ти впевнена, що хочеш скасувати?</b>\n\n` +
         `Твою заявку буде закрито, а анкету видалено з нашої системи. Якщо в майбутньому захочеш повернутися — потрібно буде подати заявку заново.\n\n` +
-        `Якщо просто хочеш змінити час — натисни «Перенести» замість скасування. 🌸`,
+        `Якщо просто хочеш змінити час — поверніться і натисни «Змінити час». 🌸`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
 
-// 2.1. Скасування бронювання — крок 2: підтверджено
+// 2.1. Відмова від участі — крок 2: підтверджено → REJECTED
 bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
 
@@ -199,7 +199,7 @@ bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
         if (candidate) {
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.REJECTED,
-                candidateDecision: "Кандидатка скасувала заявку самостійно",
+                candidateDecision: "Кандидатка відмовилась від участі",
                 notificationSent: true
             });
         }
@@ -215,8 +215,7 @@ bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
             const { HR_IDS } = await import("../config.js");
             const name = candidate.fullName || "Candidate";
             const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
-                `👤 <b>${name}</b> cancelled her interview and left the pipeline.\n` +
-                `Reason: candidate decided not to continue.`;
+                `👤 <b>${name}</b> cancelled her application and left the pipeline.`;
             const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
             for (const hrId of HR_IDS) {
                 await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
@@ -224,50 +223,35 @@ bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
         }
 
     } catch (e) {
-        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні співбесіди");
+        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при відмові від участі");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
 
-// 3. Скасування заявки самим кандидатом
-bookingHandlers.callbackQuery(/^cancel_application_by_candidate_(.+)$/, async (ctx) => {
-    const candidateId = ctx.match[1] as string;
-    const telegramId = ctx.from.id;
-
-    try {
-        const candidate = await candidateRepository.findById(candidateId);
-
-        if (!candidate || Number(candidate.user.telegramId) !== telegramId) {
-            return await ctx.answerCallbackQuery("Це не твоя заявка.");
-        }
-
-        await candidateRepository.update(candidateId, {
-            status: CandidateStatus.REJECTED,
-            notificationSent: true,
-            candidateDecision: "NO"
-        });
-
-        await ctx.answerCallbackQuery("Заявку скасовано");
-        await ctx.editMessageText("Зрозуміли, дякуємо, що попередила! 🌸\n\nБажаємо тобі успіхів у пошуках і всього найкращого! ✨");
-    } catch (e) {
-        logger.error({ err: e, candidateId, userId: telegramId }, "Помилка при самостійному скасуванні заявки");
-        await ctx.answerCallbackQuery("Помилка при скасуванні.");
-    }
-});
-
-// 4. Перенесення співбесіди
+// 4. Зміна часу співбесіди — одразу звільняє поточний слот і показує нові
 bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
+    const slotId = ctx.match[1] as string;
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
 
-        // Notify HR about reschedule
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+
+        // Release current slot first so it appears in the new list
+        await bookingService.cancelInterviewSlot(slotId);
+        if (candidate) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.WAITLIST,
+                candidateDecision: null,
+                notificationSent: false
+            });
+        }
+
+        // Notify HR
         if (candidate) {
             const { HR_IDS } = await import("../config.js");
             const name = candidate.fullName || "Candidate";
             const alertText = `🗓 <b>Interview Rescheduled</b>\n\n` +
-                `👤 <b>${name}</b> is rescheduling her interview.\n` +
-                `She is choosing a new time now.`;
+                `👤 <b>${name}</b> is choosing a new interview time.`;
             const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
             for (const hrId of HR_IDS) {
                 await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
@@ -538,8 +522,8 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         );
 
         const kb = new InlineKeyboard()
-            .text("🗓️ Перенести", `reschedule_training_${slotId}`).row()
-            .text("❌ Скасувати запис", `cancel_training_${slotId}`).row()
+            .text("🗓️ Змінити час", `reschedule_training_${slotId}`).row()
+            .text("❌ Скасувати участь", `cancel_training_${slotId}`).row()
             .text("👩‍🏫 Написати наставниці", "contact_hr");
 
         await cleanupMessages(ctx);
@@ -610,13 +594,13 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, скасувати заявку", `confirm_cancel_training_${slotId}`).row()
+        .text("🚫 Так, відмовляюсь", `confirm_cancel_training_${slotId}`).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
         `⚠️ <b>Ти впевнена, що хочеш скасувати?</b>\n\n` +
         `Твою заявку буде закрито, а анкету видалено з нашої системи. Якщо в майбутньому захочеш повернутися — потрібно буде подати заявку заново.\n\n` +
-        `Якщо просто хочеш змінити час — натисни «Перенести» замість скасування. 🌸`,
+        `Якщо просто хочеш змінити час — поверніться і натисни «Змінити час». 🌸`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
@@ -676,13 +660,25 @@ bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
     }
 });
 
-// 11. Перенесення навчання
+// 11. Зміна часу навчання — одразу звільняє поточний слот і показує нові
 bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
+    const slotId = ctx.match![1] as string;
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
 
-        // Notify Mentor about reschedule
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+
+        // Release current slot first so it appears in the new list
+        await bookingService.cancelTrainingSlot(slotId);
+        if (candidate) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.ACCEPTED,
+                candidateDecision: null,
+                notificationSent: false
+            });
+        }
+
+        // Notify Mentor about reschedule
         if (candidate) {
             const { MENTOR_IDS } = await import("../config.js");
             const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
@@ -700,15 +696,6 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         const slots = await trainingRepository.findActiveSlots();
 
         if (slots.length === 0) {
-            // Return candidate to inbox so mentor can assign manually
-            if (candidate && (candidate.status === CandidateStatus.DISCOVERY_SCHEDULED || candidate.status === CandidateStatus.TRAINING_SCHEDULED)) {
-                await bookingService.cancelTrainingSlot(ctx.match![1] as string).catch(() => {});
-                await candidateRepository.update(candidate.id, {
-                    status: CandidateStatus.ACCEPTED,
-                    materialsSent: true
-                });
-            }
-
             // Notify Mentor
             if (candidate) {
                 const { MENTOR_IDS: mentorIds } = await import("../config.js");
