@@ -31,7 +31,7 @@ export async function startWorker(bot: Bot<MyContext>) {
         try {
             const now = new Date();
             const nowTime = now.getTime();
-            logger.info(`[${now.toLocaleTimeString()}] ⚙️ Вокер перевіряє завдання...`);
+            logger.info(`[${now.toLocaleTimeString('uk-UA', { timeZone: 'Europe/Kyiv' })}] ⚙️ Вокер перевіряє завдання...`);
 
             // 0. Process HR Invites (24h ping / 48h reset)
             await processInviteReminders(bot);
@@ -548,7 +548,7 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                 let text = `🌅 <b>Доброго ранку!</b> ✨\n\n`;
 
                 if (shift) {
-                    const dateStr = new Date(shift.date).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+                    const dateStr = new Date(shift.date).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
                     text += `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸\n\n`;
                 }
 

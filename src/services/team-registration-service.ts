@@ -123,7 +123,7 @@ class TeamRegistrationService {
             if (data.birthDate) {
                 const bd = new Date(data.birthDate);
                 if (!isNaN(bd.getTime())) {
-                    birthDateStr = bd.toLocaleDateString('uk-UA');
+                    birthDateStr = bd.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' });
                 }
             }
             
