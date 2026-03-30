@@ -76,6 +76,19 @@ services:
     volumes:
       - redis_data:/data
 
+  studio:
+    build: .
+    image: ghcr.io/kuznetsov96/playphoto-hr-bot:latest
+    command: npx prisma studio --port 5555 --browser none
+    restart: always
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
