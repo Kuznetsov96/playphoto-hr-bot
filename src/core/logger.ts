@@ -5,47 +5,59 @@ import path from "path";
 
 /**
  * PlayPhoto Security Logger Configuration.
- * Automatically redacts sensitive fields to prevent PII (Personally Identifiable Information) 
+ * Automatically redacts sensitive fields to prevent PII (Personally Identifiable Information)
  * leaks into log files, even in debug mode.
  */
+export const REDACT_CONFIG = {
+    paths: [
+        "*.iban",
+        "*.passportNumber",
+        "*.ipn",
+        "*.bankCard",
+        "*.registrationAddress",
+        "*.phone",
+        "*.fullName",
+        "*.email",
+        "*.firstName",
+        "*.lastName",
+        "*.username",
+        "payload.iban",
+        "payload.passportNumber",
+        "payload.ipn",
+        "payload.bankCard",
+        "ctx.message.text",
+        "ctx.message.caption",
+        "ctx.update.message.text",
+        "ctx.update.message.caption",
+        "ctx.message.from.first_name",
+        "ctx.message.from.last_name",
+        "ctx.message.from.username",
+        "ctx.from.first_name",
+        "ctx.from.last_name",
+        "ctx.from.username",
+        "user.firstName",
+        "user.lastName",
+        "user.username",
+        "candidate.fullName",
+        "staffProfile.fullName"
+    ],
+    censor: "[PROTECTED]",
+};
+
 const pinoOptions: LoggerOptions = {
     level: process.env.LOG_LEVEL || "info",
-    redact: {
-        paths: [
-            "*.iban",
-            "*.passportNumber",
-            "*.ipn",
-            "*.bankCard",
-            "*.registrationAddress",
-            "*.phone",
-            //"*.fullName", // Temporarily disabled for debugging journey
-            "*.email",
-            "payload.iban",
-            "payload.passportNumber",
-            "payload.ipn",
-            "payload.bankCard",
-            "ctx.message.text",
-            "ctx.message.caption",
-            "ctx.update.message.text",
-            "ctx.update.message.caption"
-        ],
-        censor: "[PROTECTED]",
-    }
+    redact: REDACT_CONFIG
 };
 
 const isProd = process.env.NODE_ENV === "production";
-const logDir = "/app/logs";
-
 let logger: pino.Logger;
 
-// Check if we are in an environment that should write to a file (Prod or Docker)
-const hasLogVolume = fs.existsSync(logDir);
-
-if (isProd || hasLogVolume) {
-    // Production style: multi-stream to stdout and file
+if (isProd) {
+    // In production, we write to both stdout and a persistent file
+    const logDir = "/app/logs";
     const logPath = path.join(logDir, "product.log");
-    
-    if (!hasLogVolume) {
+
+    if (!fs.existsSync(logDir)) {
         try {
             fs.mkdirSync(logDir, { recursive: true });
         } catch (e) {
@@ -59,16 +71,15 @@ if (isProd || hasLogVolume) {
             stream: pino.destination({
                 dest: logPath,
                 minLength: 0,
-                sync: true, // Use sync: true for production stability or if required for critical logs
-                append: true,
-                mkdir: true
+                sync: true, // Ensure logs are written immediately to avoid loss
+                append: true
             })
         },
     ];
 
     logger = pino(pinoOptions, pino.multistream(streams));
 } else {
-    // Development style: pino-pretty
+    // In development, use pino-pretty for better readability
     pinoOptions.transport = {
         target: 'pino-pretty',
         options: {

@@ -6,6 +6,7 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 import { Menu } from "@grammyjs/menu";
 import { menuRegistry } from "../../utils/menu-registry.js";
 import { TEAM_CHATS } from "../../config.js";
+import { audit } from "../../core/audit-logger.js";
 
 export const adminLogisticsHandlers = new Composer<MyContext>();
 
@@ -104,6 +105,8 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(?:direct_)?(.+)$/, 
         data: { status: 'COMPLETED' }
     });
 
+    audit({ event: "parcel_confirm", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+
     await ctx.answerCallbackQuery("Parcel confirmed! ✅");
 
     if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
@@ -125,6 +128,9 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(?:direct_)?(.+)$/, a
     const isDirect = ctx.callbackQuery.data.includes('_direct_');
     
     await prisma.parcel.update({ where: { id: parcelId }, data: { status: 'CANCELLED' } }).catch(() => { });
+
+    audit({ event: "parcel_delete", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+
     await ctx.answerCallbackQuery("Parcel deleted. 🗑");
 
     if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
@@ -167,6 +173,8 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_set_loc_(.+)_(.+)$/, async (
         where: { id: parcelId },
         data: { locationId: locId }
     });
+
+    audit({ event: "parcel_set_location", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { locationId: locId } });
 
     // Auto-learn: save NP address ref to location for future auto-mapping
     if (parcel?.npAddressRef) {
@@ -274,9 +282,13 @@ adminLogisticsHandlers.on("message:text", async (ctx, next) => {
         });
 
         ctx.session.step = "idle";
+
+        audit({ event: "parcel_add_ttn", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", updateId: ctx.update.update_id, context: { ttn } });
+
         await ctx.reply(`✅ TTN <code>${ttn}</code> added! Tracking will begin on next sync.`, { parse_mode: 'HTML' });
         await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.menu_title, "admin-logistics");
-    } catch (error) {
+    } catch (error: any) {
+        audit({ event: "parcel_add_ttn", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", updateId: ctx.update.update_id, error: error.message, context: { ttn } });
         await ctx.reply(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 });

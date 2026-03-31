@@ -7,6 +7,7 @@ import { normalizeCity, msgToHtml } from "./utils.js";
 import { getBroadcastKb, getBroadcastPreview, formatTargetLabel } from "./broadcast-helpers.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import logger from "../../core/logger.js";
+import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
 export const adminBroadcastHandlers = new Composer<MyContext>();
@@ -450,7 +451,8 @@ adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
         );
 
         ctx.session.broadcastTestConfirmed = true;
-        
+        audit({ event: "broadcast_test", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, context: { targetType: draft.targetType } });
+
         // Update review screen to show test sent
         const stats = draft.targetStats;
         const preview = getBroadcastPreview(draft.textHtml, draft.targetType, stats, true, true, draft.buttonType || 'default');
@@ -485,6 +487,8 @@ adminBroadcastHandlers.callbackQuery("b_send", async (ctx: MyContext) => {
             pingOptions
         );
 
+        audit({ event: "broadcast_send", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, context: { targetType: draft.targetType, count } });
+
         const successText = `✅ Broadcast sent to ${count} targets!`;
         const kb = new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities");
 
@@ -497,6 +501,7 @@ adminBroadcastHandlers.callbackQuery("b_send", async (ctx: MyContext) => {
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
     } catch (e: any) {
+        audit({ event: "broadcast_send", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, error: e.message });
         logger.error({ err: e }, "Broadcast send failed");
         await ctx.reply(`❌ Error: ${e.message}`);
     }

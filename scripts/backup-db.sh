@@ -9,7 +9,7 @@ set -euo pipefail
 # Auto-detect directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BACKUP_DIR="$PROJECT_DIR/backups"
+BACKUP_DIR="$PROJECT_DIR/logs/backups"
 LOG_FILE="$PROJECT_DIR/logs/backup.log"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
 

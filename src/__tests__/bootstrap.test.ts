@@ -9,6 +9,10 @@ vi.mock("../core/logger.js", () => ({
         debug: vi.fn(),
         trace: vi.fn(),
         warn: vi.fn(),
+    },
+    REDACT_CONFIG: {
+        paths: [],
+        censor: "[PROTECTED]",
     }
 }));
 
