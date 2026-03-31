@@ -16,6 +16,15 @@ function getAge(birthDate: Date): number {
     return age;
 }
 
+function toIsoOrUndefined(value: unknown): string | undefined {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === "string" || typeof value === "number") {
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+    }
+    return undefined;
+}
+
 export class BookingService {
     async bookInterviewSlot(telegramId: number, slotId: string, username: string | undefined) {
         return prisma.$transaction(async (tx) => {
@@ -324,8 +333,8 @@ export class BookingService {
                     operation: "bookDiscoverySlot",
                     safeContext: {
                         slotId: updatedSlot.id,
-                        startTime: updatedSlot.startTime.toISOString(),
-                        endTime: updatedSlot.endTime.toISOString(),
+                        startTime: toIsoOrUndefined(updatedSlot.startTime),
+                        endTime: toIsoOrUndefined(updatedSlot.endTime),
                         rescheduled: Boolean(candidate.discoverySlotId),
                         calendarEventCreated: Boolean(googleEvent.eventId),
                     },
@@ -348,8 +357,8 @@ export class BookingService {
                     operation: "bookDiscoverySlot",
                     safeContext: {
                         slotId: updatedSlot.id,
-                        startTime: updatedSlot.startTime.toISOString(),
-                        endTime: updatedSlot.endTime.toISOString(),
+                        startTime: toIsoOrUndefined(updatedSlot.startTime),
+                        endTime: toIsoOrUndefined(updatedSlot.endTime),
                         rescheduled: Boolean(candidate.discoverySlotId),
                     },
                     error: e,
@@ -445,8 +454,8 @@ export class BookingService {
                     operation: "bookTrainingSlot",
                     safeContext: {
                         slotId: updatedSlot.id,
-                        startTime: updatedSlot.startTime.toISOString(),
-                        endTime: updatedSlot.endTime.toISOString(),
+                        startTime: toIsoOrUndefined(updatedSlot.startTime),
+                        endTime: toIsoOrUndefined(updatedSlot.endTime),
                         rescheduled: Boolean(candidate.trainingSlotId),
                         calendarEventCreated: Boolean(googleEvent.eventId),
                     },
@@ -469,8 +478,8 @@ export class BookingService {
                     operation: "bookTrainingSlot",
                     safeContext: {
                         slotId: updatedSlot.id,
-                        startTime: updatedSlot.startTime.toISOString(),
-                        endTime: updatedSlot.endTime.toISOString(),
+                        startTime: toIsoOrUndefined(updatedSlot.startTime),
+                        endTime: toIsoOrUndefined(updatedSlot.endTime),
                         rescheduled: Boolean(candidate.trainingSlotId),
                     },
                     error: e,
