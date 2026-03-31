@@ -7,61 +7,93 @@ import logger from "../../../core/logger.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
+async function editOrReplyText(
+    ctx: MyContext,
+    text: string,
+    replyMarkup?: InlineKeyboard,
+) {
+    const options = replyMarkup
+        ? { parse_mode: 'HTML' as const, reply_markup: replyMarkup }
+        : { parse_mode: 'HTML' as const };
+
+    if (ctx.callbackQuery?.message && !('photo' in ctx.callbackQuery.message)) {
+        try {
+            await ctx.editMessageText(text, options);
+            return;
+        } catch (err) {
+            logger.warn({ err, data: ctx.callbackQuery.data, userId: ctx.from?.id }, "⚠️ [LOGISTICS] Failed to edit message, falling back to reply");
+        }
+    }
+
+    await ctx.reply(text, options);
+}
+
 // 1. Accept Parcel
 staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
-    const telegramId = ctx.from?.id;
-    if (!telegramId) return;
-
-    const user = await prisma.user.findUnique({
-        where: { telegramId: BigInt(telegramId) },
-        include: { staffProfile: true }
-    });
-
-    if (!user || !user.staffProfile) return;
-
-    const parcel = await prisma.parcel.findUnique({
-        where: { id: parcelId },
-        include: { responsibleStaff: true }
-    });
-
-    if (!parcel) return ctx.answerCallbackQuery("Parcel not found.");
-    
-    if (parcel.responsibleStaffId && parcel.responsibleStaffId !== user.staffProfile.id) {
-        return ctx.editMessageText(LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'), { parse_mode: 'HTML' });
-    }
-
-    // Assign responsible staff
-    await prisma.parcel.update({
-        where: { id: parcelId },
-        data: { 
-            responsibleStaffId: user.staffProfile.id,
-            status: 'PICKUP_IN_PROGRESS'
+    try {
+        const parcelId = ctx.match[1] as string;
+        const telegramId = ctx.from?.id;
+        if (!telegramId) {
+            await ctx.answerCallbackQuery("Не вдалося визначити користувача.");
+            return;
         }
-    });
 
-    // Ask for phone confirmation and format to 12 digits minimum (e.g. 380...)
-    let phoneToUse = (user.staffProfile.npPhone || user.staffProfile.phone || '').replace(/\D/g, '');
-    if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) {
-        phoneToUse = '38' + phoneToUse;
+        const user = await prisma.user.findUnique({
+            where: { telegramId: BigInt(telegramId) },
+            include: { staffProfile: true }
+        });
+
+        if (!user || !user.staffProfile) {
+            await ctx.answerCallbackQuery("Профіль фотографа не знайдено.");
+            return;
+        }
+
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { responsibleStaff: true }
+        });
+
+        if (!parcel) {
+            await ctx.answerCallbackQuery("Parcel not found.");
+            return;
+        }
+
+        if (parcel.responsibleStaffId && parcel.responsibleStaffId !== user.staffProfile.id) {
+            await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'));
+            await ctx.answerCallbackQuery("Цю посилку вже взяли.");
+            return;
+        }
+
+        await prisma.parcel.update({
+            where: { id: parcelId },
+            data: {
+                responsibleStaffId: user.staffProfile.id,
+                status: 'PICKUP_IN_PROGRESS'
+            }
+        });
+
+        let phoneToUse = (user.staffProfile.npPhone || user.staffProfile.phone || '').replace(/\D/g, '');
+        if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) {
+            phoneToUse = '38' + phoneToUse;
+        }
+        const isValid = phoneToUse.length === 12 && phoneToUse.startsWith('380');
+
+        const kb = new InlineKeyboard();
+        if (isValid) {
+            kb.text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row();
+        }
+        kb.text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+
+        const askText = isValid
+            ? LOGISTICS_TEXTS_STAFF.ask_phone(`+${phoneToUse}`)
+            : `⚠️ <b>Номер телефону відсутній або некоректний.</b>\nДля створення повноцінного доручення Нової Пошти потрібен правильний номер (380...).\n\nБудь ласка, оберіть «Змінити номер» і введіть його.`;
+
+        await editOrReplyText(ctx, askText, kb);
+        await ctx.answerCallbackQuery("Прийнято.");
+    } catch (err) {
+        logger.error({ err, parcelId: ctx.match?.[1], userId: ctx.from?.id }, "❌ [LOGISTICS] parcel_accept handler failed");
+        await ctx.answerCallbackQuery({ text: "Не вдалося обробити кнопку. Спробуй ще раз.", show_alert: true }).catch(() => { });
     }
-    const isValid = phoneToUse.length === 12 && phoneToUse.startsWith('380');
-
-    const kb = new InlineKeyboard();
-    if (isValid) {
-        kb.text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row();
-    }
-    kb.text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
-
-    const askText = isValid 
-        ? LOGISTICS_TEXTS_STAFF.ask_phone(`+${phoneToUse}`)
-        : `⚠️ <b>Номер телефону відсутній або некоректний.</b>\nДля створення повноцінного доручення Нової Пошти потрібен правильний номер (380...).\n\nБудь ласка, оберіть «Змінити номер» і введіть його.`;
-
-    await ctx.editMessageText(askText, {
-        parse_mode: 'HTML',
-        reply_markup: kb
-    });
-    await ctx.answerCallbackQuery();
 });
 
 // 2. Reject Parcel
@@ -85,7 +117,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
     }
 
     const text = `Окей, дякую! 📦\nЦя посилка залишається у списку локації, її зможе забрати інша фотографиня. ✨`;
-    await ctx.editMessageText(text, { parse_mode: 'HTML' });
+    await editOrReplyText(ctx, text);
     await ctx.answerCallbackQuery();
 });
 
@@ -111,10 +143,11 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
 
     const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
     
-    await ctx.editMessageText("Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨", {
-        parse_mode: 'HTML',
-        reply_markup: kb
-    });
+    await editOrReplyText(
+        ctx,
+        "Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨",
+        kb
+    );
     await ctx.answerCallbackQuery();
 });
 
@@ -122,7 +155,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
 staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     ctx.session.step = `awaiting_np_phone_${parcelId}`;
-    await ctx.editMessageText("Будь ласка, введи номер телефону для оформлення доручення (у форматі 380...):", { parse_mode: 'HTML' });
+    await editOrReplyText(ctx, "Будь ласка, введи номер телефону для оформлення доручення (у форматі 380...):");
     await ctx.answerCallbackQuery();
 });
 
@@ -182,16 +215,24 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
         
         if (photo) {
             try {
-                const parcel = await prisma.parcel.update({
+                await prisma.parcel.update({
                     where: { id: parcelId },
                     data: { 
                         contentPhotoIds: {
                             push: photo.file_id
                         },
                         status: 'VERIFYING'
-                    },
+                    }
+                });
+
+                const parcel = await prisma.parcel.findUnique({
+                    where: { id: parcelId },
                     include: { location: true, responsibleStaff: true }
                 });
+
+                if (!parcel) {
+                    throw new Error(`Parcel ${parcelId} not found after photo upload`);
+                }
 
                 ctx.session.step = 'idle';
                 await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
