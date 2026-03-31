@@ -98,7 +98,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
         // All early-funnel statuses → HR DMs
         const isHRStage = [
-            'SCREENING', 'WAITLIST', 'MANUAL_REVIEW',
+            'SCREENING', 'WAITLIST', 'WAITLIST_HR', 'WAITLIST_MENTOR', 'MANUAL_REVIEW',
             'INTERVIEW_SCHEDULED', 'INTERVIEW_COMPLETED',
             'DECISION_PENDING', 'ACCEPTED', 'REJECTED', 'BLOCKER'
         ].includes(candidate.status);

@@ -89,7 +89,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             return;
         }
         // Block HR-waitlist candidates (no HR approval yet)
-        if (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep !== FunnelStep.TRAINING) {
+        if (candidate.status === CandidateStatus.WAITLIST_HR ||
+            (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep !== FunnelStep.TRAINING)) {
             await ctx.answerCallbackQuery("⏳ Твоя заявка ще на розгляді у HR.");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
@@ -249,7 +250,7 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
         await bookingService.cancelInterviewSlot(slotId);
         if (candidate) {
             await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.WAITLIST,
+                status: CandidateStatus.WAITLIST_HR,
                 candidateDecision: null,
                 notificationSent: false
             });
@@ -293,12 +294,12 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     const telegramId = ctx.from.id;
 
     if (slots.length === 0) {
-        logger.info({ userId: telegramId }, "⏳ [JOURNEY] Candidate start_scheduling: No slots available. Moving to WAITLIST.");
+        logger.info({ userId: telegramId }, "⏳ [JOURNEY] Candidate start_scheduling: No slots available. Moving to WAITLIST_HR.");
 
-        // Auto-move to WAITLIST so HR can see them
+        // Auto-move to WAITLIST_HR so HR can see them
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
-            { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
+            { status: CandidateStatus.WAITLIST_HR, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
         );
 
         const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
@@ -364,7 +365,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
+        { status: CandidateStatus.WAITLIST_HR, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
     );
 
     await ctx.editMessageText(`Домовились! Як тільки з'являться нові вікна — ти дізнаєшся про це першою. ✨`);
@@ -437,7 +438,8 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         CandidateStatus.DISCOVERY_COMPLETED,
         CandidateStatus.TRAINING_SCHEDULED
     ];
-    const isWaitlistMentor = candidate.status === CandidateStatus.WAITLIST && candidate.currentStep === FunnelStep.TRAINING;
+    const isWaitlistMentor = candidate.status === CandidateStatus.WAITLIST_MENTOR ||
+        (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep === FunnelStep.TRAINING);
 
     if (!allowedStatuses.includes(candidate.status) && !isWaitlistMentor) {
         logger.warn({ userId: telegramId, status: candidate.status, currentStep: candidate.currentStep },
@@ -455,7 +457,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         // Auto-move to WAITLIST so Mentor can see them
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
-            { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: FunnelStep.TRAINING }
+            { status: CandidateStatus.WAITLIST_MENTOR, isWaitlisted: true, currentStep: FunnelStep.TRAINING }
         );
 
         const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на коротку зустріч-знайомство. ✨`;
@@ -615,7 +617,7 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
         {
-            status: CandidateStatus.WAITLIST,
+            status: CandidateStatus.WAITLIST_MENTOR,
             isWaitlisted: true,
             currentStep: FunnelStep.TRAINING // Explicitly set step for mentor waitlist
         }

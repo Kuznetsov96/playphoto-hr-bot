@@ -150,7 +150,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
-    if (isHr && ["SCREENING", "WAITLIST"].includes(cand.status)) {
+    if (isHr && ["SCREENING", "WAITLIST", "WAITLIST_HR"].includes(cand.status)) {
         range.text("🗓️ Re-invite to Interview", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
             await hrService.markAsScreening(candId);
@@ -163,7 +163,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
-    if (isMentor && ["TRAINING_COMPLETED", "WAITLIST"].includes(cand.status) && cand.quizScore !== null) {
+    if (isMentor && ["TRAINING_COMPLETED", "WAITLIST", "WAITLIST_MENTOR"].includes(cand.status) && cand.quizScore !== null) {
         range.text("🎓 Re-invite to Training", async (ctx) => {
             await ctx.answerCallbackQuery("Sending training slots...");
             await ctx.api.sendMessage(Number(cand.user.telegramId),
