@@ -15,6 +15,7 @@ import { TicketStatus } from "@prisma/client";
 import { updateTicketVisuals, sendSupportStatus, finalizeTopicUIClosure } from "../../../handlers/support-utils.js";
 import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
+import { audit } from "../../../core/audit-logger.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -53,6 +54,7 @@ staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
     }
 
     ctx.session.step = "create_ticket";
+    audit({ event: "ticket_create", result: "started", actorType: "staff", telegramId, entityType: "ticket", updateId: ctx.update.update_id });
     await ctx.answerCallbackQuery();
     const text = STAFF_TEXTS["support-ask-issue"];
 
@@ -91,6 +93,8 @@ staffSupportHandlers.callbackQuery(/^ticket_assign_(\d+)$/, async (ctx) => {
     try {
         const { supportService } = await import("../../../services/support-service.js"); // Lazy import or use DI container
         const ticket = await supportService.assignTicket(ticketId, adminId);
+
+        audit({ event: "ticket_assign", result: "success", actorType: "admin", telegramId: adminId, entityType: "ticket", entityId: ticketId, updateId: ctx.update.update_id });
 
         // Visual Updates (Topic Title, Card)
         await updateTicketVisuals(ctx, ticketId);
@@ -132,6 +136,8 @@ staffSupportHandlers.callbackQuery(/^ticket_urgent_(\d+)$/, async (ctx) => {
     try {
         const { supportService } = await import("../../../services/support-service.js");
         const { newUrgent } = await supportService.toggleUrgent(ticketId);
+
+        audit({ event: "ticket_urgent_toggle", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "ticket", entityId: ticketId, updateId: ctx.update.update_id, context: { isUrgent: newUrgent } });
 
         // Visual Updates
         await updateTicketVisuals(ctx, ticketId);
@@ -371,6 +377,8 @@ async function closeTicket(ctx: MyContext, ticketId: number, initiator: "USER" |
 
     // Close in DB via Service
     await supportService.closeTicket(ticketId);
+
+    audit({ event: "ticket_close", result: "success", actorType: initiator === "ADMIN" ? "admin" : "staff", telegramId: ctx.from?.id, entityType: "ticket", entityId: ticketId, updateId: ctx.update.update_id, context: { closedBy: initiator } });
 
     // Rename and Close Topic in Support Group
     if (ticket.topicId) {
