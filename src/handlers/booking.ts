@@ -78,10 +78,19 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             CandidateStatus.KNOWLEDGE_TEST,
             CandidateStatus.STAGING_SETUP,
             CandidateStatus.STAGING_ACTIVE,
-            CandidateStatus.READY_FOR_HIRE
+            CandidateStatus.READY_FOR_HIRE,
+            CandidateStatus.SCREENING,
+            CandidateStatus.REJECTED
         ];
         if (forbiddenStatuses.includes(candidate.status)) {
             await ctx.answerCallbackQuery("⚠️ Твоє навчання вже завершене! Оновлюю меню... ✨");
+            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+            await showCandidateStatus(ctx, candidate);
+            return;
+        }
+        // Block HR-waitlist candidates (no HR approval yet)
+        if (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep !== FunnelStep.TRAINING) {
+            await ctx.answerCallbackQuery("⏳ Твоя заявка ще на розгляді у HR.");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
@@ -418,6 +427,25 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
     await ctx.answerCallbackQuery();
 
     const telegramId = ctx.from.id;
+
+    // Validate candidate is eligible for training scheduling
+    const candidate = await candidateRepository.findByTelegramId(telegramId);
+    if (!candidate) return;
+
+    const allowedStatuses: CandidateStatus[] = [
+        CandidateStatus.ACCEPTED,
+        CandidateStatus.DISCOVERY_COMPLETED,
+        CandidateStatus.TRAINING_SCHEDULED
+    ];
+    const isWaitlistMentor = candidate.status === CandidateStatus.WAITLIST && candidate.currentStep === FunnelStep.TRAINING;
+
+    if (!allowedStatuses.includes(candidate.status) && !isWaitlistMentor) {
+        logger.warn({ userId: telegramId, status: candidate.status, currentStep: candidate.currentStep },
+            "⚠️ start_training_scheduling blocked: invalid candidate status");
+        const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+        await showCandidateStatus(ctx, candidate);
+        return;
+    }
 
     const slots = await trainingRepository.findActiveSlots();
 

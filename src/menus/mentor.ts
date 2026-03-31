@@ -4,6 +4,7 @@ import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../types/context.js";
 import { mentorService } from "../services/mentor-service.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { FunnelStep } from "@prisma/client";
 import { InlineKeyboard, Composer } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
@@ -300,7 +301,7 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Training</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
         }).row();
     }
-    else if (cand.status === "ACCEPTED" || cand.status === "WAITLIST") {
+    else if (cand.status === "ACCEPTED" || (cand.status === "WAITLIST" && cand.currentStep === FunnelStep.TRAINING)) {
         if (!cand.materialsSent) {
             const label = cand.status === "WAITLIST" ? "📚 Invite to Discovery" : "📚 Send Materials";
             range.text(label, async (ctx) => {
