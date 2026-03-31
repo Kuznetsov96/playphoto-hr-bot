@@ -7,23 +7,26 @@ import logger from "../core/logger.js";
 export const supportHandlers = new Composer<MyContext>();
 
 // --- CALLBACKS ---
-
-// START SUPPORT FLOW
-supportHandlers.callbackQuery("contact_hr", async (ctx) => {
+async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR") {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
-    // 1. Check if candidate exists
     const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
     if (!candidate) {
-        return ctx.answerCallbackQuery("Error: Candidate profile not found.");
+        await ctx.answerCallbackQuery("Error: Candidate profile not found.");
+        return;
     }
 
     if (candidate.gender === "male") {
-        return ctx.answerCallbackQuery("Ця опція недоступна для цього профілю.");
+        await ctx.answerCallbackQuery("Ця опція недоступна для цього профілю.");
+        return;
     }
 
     ctx.session.step = "support_chat";
+    ctx.session.supportData = {
+        ...(ctx.session.supportData || {}),
+        preferredTarget
+    };
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard().text("❌ Скасувати", "end_support_chat");
@@ -32,11 +35,21 @@ supportHandlers.callbackQuery("contact_hr", async (ctx) => {
         `Ми одразу передамо його відповідальній особі, і ви отримаєте відповідь прямо тут. ✨`,
         { parse_mode: "HTML", reply_markup: kb }
     );
+}
+
+// START SUPPORT FLOW
+supportHandlers.callbackQuery("contact_hr", async (ctx) => {
+    await startSupportFlow(ctx, "HR");
+});
+
+supportHandlers.callbackQuery("contact_mentor", async (ctx) => {
+    await startSupportFlow(ctx, "MENTOR");
 });
 
 // END SUPPORT FLOW
 supportHandlers.callbackQuery("end_support_chat", async (ctx) => {
     ctx.session.step = "idle";
+    if (ctx.session.supportData) delete ctx.session.supportData.preferredTarget;
     await ctx.editMessageText("Діалог завершено. Якщо захочете написати знову — натисніть кнопку 'Написати нам'. 🌸");
     await ctx.answerCallbackQuery();
 });
@@ -88,12 +101,15 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const { MENTOR_IDS, HR_IDS, ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
         const { supportService } = await import("../services/support-service.js");
         const { supportRepository } = await import("../repositories/support-repository.js");
+        const preferredTarget = ctx.session.supportData?.preferredTarget;
+        const isExplicitSupportFlow = step === "support_chat";
 
         const isMentorStage = [
             'DISCOVERY_SCHEDULED', 'DISCOVERY_COMPLETED',
             'TRAINING_SCHEDULED', 'TRAINING_COMPLETED',
             'AWAITING_FIRST_SHIFT'
         ].includes(candidate.status);
+        const isMentorOwnedFlow = step === "support_chat" && preferredTarget === "MENTOR";
 
         const isSetupStage = [
             'NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING',
@@ -154,13 +170,14 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             }
 
             ctx.session.step = "idle";
+            if (ctx.session.supportData) delete ctx.session.supportData.preferredTarget;
             await ctx.reply("✅ Повідомлення надіслано адміністратору! Він відповість найближчим часом. ✨");
             return true;
         }
 
-        // Candidates in mentor stage → always DM mentors directly, skip support tickets
-        // Only HIRED staff use the support ticket/topic system
-        if (isMentorStage) {
+        // Mentor-owned flow (training/discovery + mentor onboarding) → DM mentors directly
+        // and keep this dialog out of generic support tickets/topics.
+        if (isMentorOwnedFlow) {
             const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
             let categoryLabel = "Mentor";
             let targetAdminIds = MENTOR_IDS.length > 0 ? MENTOR_IDS : ADMIN_IDS;
@@ -215,6 +232,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             }
 
             ctx.session.step = "idle";
+            if (ctx.session.supportData) delete ctx.session.supportData.preferredTarget;
             await ctx.reply("✅ Повідомлення надіслано наставниці! Вона відповість найближчим часом. ✨");
             return true;
         }
@@ -245,6 +263,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 await ctx.reply("Сталася помилка при відправці повідомлення. Спробуйте пізніше.");
             }
             ctx.session.step = "idle";
+            if (ctx.session.supportData) delete ctx.session.supportData.preferredTarget;
             await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
             return true;
         }
@@ -258,7 +277,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         if (isSetupStage) {
             categoryLabel = "Admin (Setup)";
             targetAdminIds = ADMIN_IDS;
-        } else if (isMentorStage) {
+        } else if (!isExplicitSupportFlow && isMentorStage) {
             categoryLabel = "Mentor";
             targetAdminIds = MENTOR_IDS;
         } else if (isHRStage) {
@@ -304,7 +323,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             await messageRepository.create({
                 candidate: { connect: { id: candidate.id } },
                 sender: "USER",
-                scope: isMentorStage ? "MENTOR" : "HR",
+                scope: categoryLabel === "Mentor" ? "MENTOR" : "HR",
                 content: msgText
             });
 
@@ -313,6 +332,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         } catch (e) { }
 
         ctx.session.step = "idle";
+        if (ctx.session.supportData) delete ctx.session.supportData.preferredTarget;
         await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
 
         return true;
