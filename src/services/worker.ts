@@ -16,6 +16,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 
 /**
@@ -31,7 +32,11 @@ export async function startWorker(bot: Bot<MyContext>) {
         try {
             const now = new Date();
             const nowTime = now.getTime();
-            logger.info(`[${now.toLocaleTimeString('uk-UA', { timeZone: 'Europe/Kyiv' })}] ⚙️ Вокер перевіряє завдання...`);
+            logger.debug({
+                event: "worker.tick",
+                iteration,
+                kyivTime: now.toLocaleTimeString('uk-UA', { timeZone: 'Europe/Kyiv' })
+            }, "⚙️ Worker tick");
 
             // 0. Process HR Invites (24h ping / 48h reset)
             await processInviteReminders(bot);
@@ -65,8 +70,39 @@ export async function startWorker(bot: Bot<MyContext>) {
 
                             // Notify Mentor about the new candidate who just received their offer
                             await notifyMentors(bot.api, cand);
+                            logBusinessEvent({
+                                event: "candidate.offer.notification_sent",
+                                candidateId: cand.id,
+                                telegramId: cand.user.telegramId,
+                                actorType: "system",
+                                actorRole: "system",
+                                stage: "ACCEPTED",
+                                result: "success",
+                                module: "worker",
+                                operation: "processDecisionNotifications",
+                                safeContext: {
+                                    decision,
+                                },
+                            });
                         } catch (sendErr: any) {
                             logger.error({ err: sendErr, candidateId: cand.id }, "❌ Failed to send offer notification");
+                            logBusinessEvent({
+                                event: "candidate.offer.notification_sent",
+                                level: "error",
+                                candidateId: cand.id,
+                                telegramId: cand.user.telegramId,
+                                actorType: "system",
+                                actorRole: "system",
+                                stage: "OFFER_DECISION",
+                                result: "failed",
+                                reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                                module: "worker",
+                                operation: "processDecisionNotifications",
+                                safeContext: {
+                                    decision,
+                                },
+                                error: sendErr,
+                            });
                             // Notify HR about delivery failure
                             if (HR_IDS.length > 0) {
                                 await bot.api.sendMessage(
@@ -86,8 +122,39 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 status: CandidateStatus.REJECTED,
                                 notificationSent: true
                             });
+                            logBusinessEvent({
+                                event: "candidate.rejection.notification_sent",
+                                candidateId: cand.id,
+                                telegramId: cand.user.telegramId,
+                                actorType: "system",
+                                actorRole: "system",
+                                stage: "REJECTED",
+                                result: "success",
+                                module: "worker",
+                                operation: "processDecisionNotifications",
+                                safeContext: {
+                                    decision,
+                                },
+                            });
                         } catch (sendErr) {
                             logger.error({ err: sendErr, candidateId: cand.id }, "❌ Failed to send rejection notification");
+                            logBusinessEvent({
+                                event: "candidate.rejection.notification_sent",
+                                level: "error",
+                                candidateId: cand.id,
+                                telegramId: cand.user.telegramId,
+                                actorType: "system",
+                                actorRole: "system",
+                                stage: "REJECTED",
+                                result: "failed",
+                                reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                                module: "worker",
+                                operation: "processDecisionNotifications",
+                                safeContext: {
+                                    decision,
+                                },
+                                error: sendErr,
+                            });
                         }
                     }
                 } catch (e) {
@@ -118,11 +185,45 @@ export async function startWorker(bot: Bot<MyContext>) {
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
+                    logBusinessEvent({
+                        event: "candidate.interview.reminder_sent",
+                        candidateId: slot.candidate.id,
+                        telegramId: slot.candidate.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "INTERVIEW",
+                        result: "success",
+                        module: "worker",
+                        operation: "processInterviewReminders",
+                        safeContext: {
+                            slotId: slot.id,
+                            reminderType: "6h",
+                            scheduledAt: slot.startTime.toISOString(),
+                        },
+                    });
                 } catch (e: any) {
                     if (isBotBlocked(e) && slot.candidate) {
                         await handleBlockedCandidate(bot.api, slot.candidate.id, slot.candidate.fullName || "Candidate");
                     } else {
                         logger.error({ err: e, candidateId: slot.candidate?.id, slotId: slot.id }, "Failed to send 6h interview reminder");
+                        logBusinessEvent({
+                            event: "candidate.interview.reminder_sent",
+                            level: "error",
+                            candidateId: slot.candidate?.id,
+                            telegramId: slot.candidate?.user.telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: "INTERVIEW",
+                            result: "failed",
+                            reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                            module: "worker",
+                            operation: "processInterviewReminders",
+                            safeContext: {
+                                slotId: slot.id,
+                                reminderType: "6h",
+                            },
+                            error: e,
+                        });
                     }
                 }
             }
@@ -150,9 +251,44 @@ export async function startWorker(bot: Bot<MyContext>) {
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded10m: true });
+                    logBusinessEvent({
+                        event: "candidate.interview.reminder_sent",
+                        candidateId: slot.candidate.id,
+                        telegramId: slot.candidate.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "INTERVIEW",
+                        result: "success",
+                        module: "worker",
+                        operation: "processInterviewReminders",
+                        safeContext: {
+                            slotId: slot.id,
+                            reminderType: "10m",
+                            scheduledAt: slot.startTime.toISOString(),
+                        },
+                    });
                 } catch (e: any) {
                     if (isBotBlocked(e) && slot.candidate) {
                         await handleBlockedCandidate(bot.api, slot.candidate.id, slot.candidate.fullName || "Candidate");
+                    } else {
+                        logBusinessEvent({
+                            event: "candidate.interview.reminder_sent",
+                            level: "error",
+                            candidateId: slot.candidate?.id,
+                            telegramId: slot.candidate?.user.telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: "INTERVIEW",
+                            result: "failed",
+                            reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                            module: "worker",
+                            operation: "processInterviewReminders",
+                            safeContext: {
+                                slotId: slot.id,
+                                reminderType: "10m",
+                            },
+                            error: e,
+                        });
                     }
                 }
             }
@@ -203,10 +339,46 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
+                    logBusinessEvent({
+                        event: isDiscovery ? "candidate.discovery.reminder_sent" : "candidate.training.reminder_sent",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: isDiscovery ? "DISCOVERY" : "TRAINING",
+                        result: "success",
+                        module: "worker",
+                        operation: "processTrainingReminders",
+                        safeContext: {
+                            slotId: slot.id,
+                            reminderType: "6h",
+                            scheduledAt: slot.startTime.toISOString(),
+                        },
+                    });
                 } catch (e: any) {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
+                    const isDiscovery = !!slot.candidateDiscovery;
                     if (isBotBlocked(e) && cand) {
                         await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                    } else {
+                        logBusinessEvent({
+                            event: isDiscovery ? "candidate.discovery.reminder_sent" : "candidate.training.reminder_sent",
+                            level: "error",
+                            candidateId: cand.id,
+                            telegramId: cand.user.telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: isDiscovery ? "DISCOVERY" : "TRAINING",
+                            result: "failed",
+                            reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                            module: "worker",
+                            operation: "processTrainingReminders",
+                            safeContext: {
+                                slotId: slot.id,
+                                reminderType: "6h",
+                            },
+                            error: e,
+                        });
                     }
                 }
             }
@@ -253,10 +425,46 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });
+                    logBusinessEvent({
+                        event: isDiscovery ? "candidate.discovery.reminder_sent" : "candidate.training.reminder_sent",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: isDiscovery ? "DISCOVERY" : "TRAINING",
+                        result: "success",
+                        module: "worker",
+                        operation: "processTrainingReminders",
+                        safeContext: {
+                            slotId: slot.id,
+                            reminderType: "10m",
+                            scheduledAt: slot.startTime.toISOString(),
+                        },
+                    });
                 } catch (e: any) {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
+                    const isDiscovery = !!slot.candidateDiscovery;
                     if (isBotBlocked(e) && cand) {
                         await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                    } else {
+                        logBusinessEvent({
+                            event: isDiscovery ? "candidate.discovery.reminder_sent" : "candidate.training.reminder_sent",
+                            level: "error",
+                            candidateId: cand.id,
+                            telegramId: cand.user.telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: isDiscovery ? "DISCOVERY" : "TRAINING",
+                            result: "failed",
+                            reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                            module: "worker",
+                            operation: "processTrainingReminders",
+                            safeContext: {
+                                slotId: slot.id,
+                                reminderType: "10m",
+                            },
+                            error: e,
+                        });
                     }
                 }
             }
@@ -307,6 +515,20 @@ export async function startWorker(bot: Bot<MyContext>) {
                     await candidateRepository.update(slot.candidate.id, {
                         status: CandidateStatus.INTERVIEW_COMPLETED,
                         interviewCompletedAt: slot.endTime
+                    });
+                    logBusinessEvent({
+                        event: "candidate.interview.auto_completed",
+                        candidateId: slot.candidate.id,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "INTERVIEW_COMPLETED",
+                        result: "success",
+                        module: "worker",
+                        operation: "processAutoCompleteInterview",
+                        safeContext: {
+                            slotId: slot.id,
+                            completedAt: slot.endTime.toISOString(),
+                        },
                     });
 
                     // Notify HR to make a decision (Proactive Assistance)
@@ -671,6 +893,18 @@ async function processAutoCloseTasks() {
         });
         if (result.count > 0) {
             logger.info(`🕐 Auto-closed ${result.count} stale tasks (>48h after workDate)`);
+            logBusinessEvent({
+                event: "task.auto_closed",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "worker",
+                operation: "processAutoCloseTasks",
+                safeContext: {
+                    count: result.count,
+                    inactivityHours: 48,
+                },
+            });
         }
     } catch (e) {
         logger.error({ err: e }, "❌ Error in processAutoCloseTasks");
@@ -702,6 +936,19 @@ async function processAutoCloseTopics(bot: Bot<MyContext>) {
                     data: { isClosed: true },
                 });
                 logger.info(`🔒 Auto-closed topic ${topic.topicId} in chat ${topic.chatId} due to 48h inactivity`);
+                logBusinessEvent({
+                    event: "support.topic.auto_closed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "worker",
+                    operation: "processAutoCloseTopics",
+                    safeContext: {
+                        topicId: topic.topicId,
+                        chatId: topic.chatId,
+                        inactivityHours: 48,
+                    },
+                });
             } catch (e) {
                 logger.warn({ err: e, topicId: topic.topicId }, "⚠️ Failed to auto-close topic");
                 // Mark as closed anyway to avoid retrying indefinitely
@@ -746,6 +993,19 @@ async function processAutoCloseTickets(bot: Bot<MyContext>) {
                 });
 
                 logger.info(`🔒 Auto-closed support ticket #${ticket.id} due to 48h inactivity`);
+                logBusinessEvent({
+                    event: "support.ticket.auto_closed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "worker",
+                    operation: "processAutoCloseTickets",
+                    safeContext: {
+                        ticketId: ticket.id,
+                        topicId: ticket.topicId,
+                        inactivityHours: 48,
+                    },
+                });
             } catch (e) {
                 logger.warn({ err: e, ticketId: ticket.id }, "⚠️ Failed to auto-close support ticket");
                 // Fallback: still mark as closed in DB to avoid retry loop if TG fails
@@ -785,9 +1045,36 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
             try {
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], { parse_mode: "HTML" });
                 logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про анкету");
+                logBusinessEvent({
+                    event: "candidate.screening.reminder_sent",
+                    candidateId: cand.id,
+                    telegramId: cand.user.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: "SCREENING",
+                    result: "success",
+                    module: "worker",
+                    operation: "processAbandonedApplications",
+                });
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                else logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування кандидату");
+                else {
+                    logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування кандидату");
+                    logBusinessEvent({
+                        event: "candidate.screening.reminder_sent",
+                        level: "warn",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "SCREENING",
+                        result: "failed",
+                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                        module: "worker",
+                        operation: "processAbandonedApplications",
+                        error: e,
+                    });
+                }
             }
         }
 
@@ -836,9 +1123,36 @@ async function processNDAReminders(bot: Bot<MyContext>) {
                 // Update user to reset throttle
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
                 logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про NDA (циклічне)");
+                logBusinessEvent({
+                    event: "candidate.nda.reminder_sent",
+                    candidateId: cand.id,
+                    telegramId: cand.user.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: "NDA",
+                    result: "success",
+                    module: "worker",
+                    operation: "processNDAReminders",
+                });
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                else logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування про NDA");
+                else {
+                    logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування про NDA");
+                    logBusinessEvent({
+                        event: "candidate.nda.reminder_sent",
+                        level: "warn",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "NDA",
+                        result: "failed",
+                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                        module: "worker",
+                        operation: "processNDAReminders",
+                        error: e,
+                    });
+                }
             }
         }
     } catch (e) {
@@ -889,8 +1203,33 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
                 logger.info({ candId: cand.id }, "📢 Post-staging reminder sent to admin");
+                logBusinessEvent({
+                    event: "candidate.staging.admin_reminder_sent",
+                    candidateId: cand.id,
+                    telegramId: cand.user.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: "STAGING_ACTIVE",
+                    result: "success",
+                    module: "worker",
+                    operation: "processPostStagingReminder",
+                });
             } catch (e) {
                 logger.warn({ err: e, candId: cand.id }, "⚠️ Failed to send post-staging reminder");
+                logBusinessEvent({
+                    event: "candidate.staging.admin_reminder_sent",
+                    level: "warn",
+                    candidateId: cand.id,
+                    telegramId: cand.user.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: "STAGING_ACTIVE",
+                    result: "failed",
+                    reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                    module: "worker",
+                    operation: "processPostStagingReminder",
+                    error: e,
+                });
             }
         }
     } catch (e) {
@@ -920,9 +1259,9 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
         for (const cand of candidates) {
             const userUpdate = new Date(cand.user.updatedAt);
             if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
+            const missing = getMissingFieldLabels(cand);
 
             try {
-                const missing = getMissingFieldLabels(cand);
                 const kb = new InlineKeyboard().text("📝 Продовжити", "start_onboarding_data");
 
                 let text: string;
@@ -936,9 +1275,42 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
                 logger.info({ userId: cand.user.telegramId, missing: missing.length }, "📢 Smart onboarding reminder sent");
+                logBusinessEvent({
+                    event: "candidate.onboarding.reminder_sent",
+                    candidateId: cand.id,
+                    telegramId: cand.user.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: "READY_FOR_HIRE",
+                    result: "success",
+                    module: "worker",
+                    operation: "processOnboardingReminders",
+                    safeContext: {
+                        missingFieldsCount: missing.length,
+                    },
+                });
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                else logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
+                else {
+                    logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
+                    logBusinessEvent({
+                        event: "candidate.onboarding.reminder_sent",
+                        level: "warn",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "READY_FOR_HIRE",
+                        result: "failed",
+                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                        module: "worker",
+                        operation: "processOnboardingReminders",
+                        safeContext: {
+                            missingFieldsCount: missing.length,
+                        },
+                        error: e,
+                    });
+                }
             }
         }
     } catch (e) {
@@ -1016,6 +1388,18 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     }
                     await candidateRepository.update(cand.id, { status: "REJECTED" });
                     logger.info({ userId: cand.user.telegramId }, "🚫 Кандидата автоматично переведено в REJECTED (7 днів неактивності)");
+                    logBusinessEvent({
+                        event: "candidate.auto_rejected_inactive",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: cand.status,
+                        result: "success",
+                        reasonCode: "INACTIVE_7_DAYS",
+                        module: "worker",
+                        operation: "processAutoRejectInactiveCandidates",
+                    });
                 } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
                     // Day 5: Warning (We run this once a day, so it will hit exactly once)
                     let contextStr = "на твій наступний крок";
@@ -1030,6 +1414,18 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
                             `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
                         logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 5-денне попередження про неактивність");
+                        logBusinessEvent({
+                            event: "candidate.inactivity.warning_sent",
+                            candidateId: cand.id,
+                            telegramId: cand.user.telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: cand.status,
+                            result: "success",
+                            reasonCode: "INACTIVE_5_DAYS",
+                            module: "worker",
+                            operation: "processAutoRejectInactiveCandidates",
+                        });
                     } catch (e: any) {
                         if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     }

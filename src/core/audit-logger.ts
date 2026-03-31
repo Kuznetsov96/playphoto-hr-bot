@@ -19,8 +19,8 @@ if (!fs.existsSync(logDir)) {
 
 export const auditDestination = pino.destination({
     dest: auditLogPath,
-    minLength: 0,
-    sync: true,
+    minLength: 4096,
+    sync: false,
     append: true
 });
 
@@ -52,6 +52,10 @@ export interface AuditParams {
     error?: string | undefined;
 }
 
+export interface SecurityAuditParams extends AuditParams {
+    severity?: "info" | "warn" | "critical";
+}
+
 /**
  * Emit a structured audit event to audit.log.
  * Fire-and-forget — safe to call anywhere.
@@ -60,6 +64,17 @@ export function audit(params: AuditParams): void {
     const { telegramId, ...rest } = params;
     auditLogger.info({
         audit: true,
+        ...rest,
+        telegramId: telegramId != null ? String(telegramId) : undefined,
+    });
+}
+
+export function securityAudit(params: SecurityAuditParams): void {
+    const { telegramId, severity = "warn", ...rest } = params;
+    auditLogger.warn({
+        audit: true,
+        security: true,
+        severity,
         ...rest,
         telegramId: telegramId != null ? String(telegramId) : undefined,
     });

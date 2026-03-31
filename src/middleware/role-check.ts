@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import type { NextFunction } from "grammy";
 import { userRepository } from "../repositories/user-repository.js";
 import { getAdminRoleByTelegramId, hasPermission, hasAnyRole } from "../config/roles.js";
+import { securityAudit } from "../core/audit-logger.js";
 
 /**
  * Middleware to check if user has required admin role
@@ -11,6 +12,7 @@ export function requireRole(...roles: AdminRole[]) {
     return async (ctx: MyContext, next: NextFunction) => {
         const telegramId = ctx.from?.id;
         if (!telegramId) {
+            securityAudit({ event: "security.access.denied", result: "failed", actorType: "system", entityType: "admin_feature", error: "telegram_id_missing" });
             await ctx.reply("❌ Не вдалося визначити користувача.");
             return;
         }
@@ -39,6 +41,14 @@ export function requireRole(...roles: AdminRole[]) {
 
         // Check if user has adminRole set
         if (!user || !user.adminRole) {
+            securityAudit({
+                event: "security.access.denied",
+                result: "failed",
+                actorType: "staff",
+                telegramId,
+                entityType: "admin_feature",
+                context: { requiredRoles: roles }
+            });
             if (ctx.chat?.type === "private") {
                 await ctx.reply("❌ У вас немає доступу до цієї функції.");
             }
@@ -47,6 +57,15 @@ export function requireRole(...roles: AdminRole[]) {
 
         // Check if user has required role
         if (!hasAnyRole(user.adminRole, ...roles)) {
+            securityAudit({
+                event: "security.access.denied",
+                result: "failed",
+                actorType: "staff",
+                telegramId,
+                role: user.adminRole,
+                entityType: "admin_feature",
+                context: { requiredRoles: roles }
+            });
             if (ctx.callbackQuery) {
                 await ctx.answerCallbackQuery({ text: "❌ No access to this function.", show_alert: true });
             } else if (ctx.chat?.type === "private") {
@@ -66,6 +85,7 @@ export function requirePermission(permission: Parameters<typeof hasPermission>[1
     return async (ctx: MyContext, next: NextFunction) => {
         const telegramId = ctx.from?.id;
         if (!telegramId) {
+            securityAudit({ event: "security.permission.denied", result: "failed", actorType: "system", entityType: "permission", error: "telegram_id_missing" });
             await ctx.reply("❌ Не вдалося визначити користувача.");
             return;
         }
@@ -84,12 +104,29 @@ export function requirePermission(permission: Parameters<typeof hasPermission>[1
             }
 
             if (ctx.chat?.type === "private") {
+                securityAudit({
+                    event: "security.permission.denied",
+                    result: "failed",
+                    actorType: "staff",
+                    telegramId,
+                    entityType: "permission",
+                    context: { permission }
+                });
                 await ctx.reply("❌ У вас немає доступу до цієї функції.");
             }
             return;
         }
 
         if (!hasPermission(user.adminRole, permission)) {
+            securityAudit({
+                event: "security.permission.denied",
+                result: "failed",
+                actorType: "staff",
+                telegramId,
+                role: user.adminRole,
+                entityType: "permission",
+                context: { permission }
+            });
             if (ctx.chat?.type === "private") {
                 await ctx.reply("❌ У вас немає доступу до цієї функції.");
             }

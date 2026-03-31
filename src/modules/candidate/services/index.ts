@@ -4,6 +4,7 @@ import { locationRepository } from "../../../repositories/location-repository.js
 import { ADMIN_IDS, BACKUP_PASSPHRASE, SPREADSHEET_ID_TEAM } from "../../../config.js";
 import { getBankNameByIban } from "../../../utils/iban-utils.js";
 import logger from "../../../core/logger.js";
+import { logBusinessEvent } from "../../../core/log-events.js";
 import path from "path";
 import fs from "fs/promises";
 import os from "os";
@@ -15,6 +16,17 @@ export class CandidateService {
         const candidateId = candidate?.id;
         const fullName = candidate?.fullName || "Unknown";
         logger.info({ candidateId, fullName }, "🚀 processOnboardingFinish: Starting background tasks...");
+        logBusinessEvent({
+            event: "candidate.onboarding.background_processing_started",
+            candidateId,
+            telegramId: candidate?.user?.telegramId,
+            actorType: "system",
+            actorRole: "system",
+            stage: "AWAITING_FIRST_SHIFT",
+            result: "started",
+            module: "candidate-service",
+            operation: "processOnboardingFinish",
+        });
 
         // 1. GOOGLE SHEET REGISTRATION
         try {
@@ -44,6 +56,22 @@ export class CandidateService {
                 const locName = loc?.name || candidate.city || "—";
                 await api.sendMessage(ADMIN_IDS[0], `✅ <b>${fullName}</b> auto-added to TEAM sheet!\n📍 ${locName}`, { parse_mode: "HTML" }).catch(() => { });
             }
+
+            logBusinessEvent({
+                event: "candidate.team_registration.completed",
+                candidateId,
+                telegramId: candidate.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "AWAITING_FIRST_SHIFT",
+                result: "success",
+                module: "candidate-service",
+                operation: "processOnboardingFinish",
+                safeContext: {
+                    locationId: candidate.locationId,
+                    locationName: loc?.name,
+                },
+            });
         } catch (regErr: any) {
             const errorMsg = regErr.message || "Unknown error";
             logger.error({
@@ -57,6 +85,24 @@ export class CandidateService {
             if (ADMIN_IDS[0]) {
                 await api.sendMessage(ADMIN_IDS[0], `❌ Failed to add <b>${fullName}</b> to TEAM sheet: <code>${errorMsg}</code>`, { parse_mode: "HTML" }).catch(() => { });
             }
+
+            logBusinessEvent({
+                event: "candidate.team_registration.completed",
+                level: "error",
+                candidateId,
+                telegramId: candidate?.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "AWAITING_FIRST_SHIFT",
+                result: "failed",
+                reasonCode: "TEAM_SHEET_REGISTRATION_FAILED",
+                module: "candidate-service",
+                operation: "processOnboardingFinish",
+                safeContext: {
+                    spreadsheetId: SPREADSHEET_ID_TEAM,
+                },
+                error: regErr,
+            });
         }
 
         // 2. MEDIA HANDLING (Secondary Priority, Background)
@@ -111,8 +157,41 @@ Location: ${candidate.location?.name || '—'}
                 await api.sendDocument(ADMIN_IDS[0], new InputFile(zipPath), { caption, parse_mode: "HTML" });
             }
             await fs.unlink(zipPath).catch(() => { });
+            logBusinessEvent({
+                event: "candidate.documents_archive.delivered",
+                candidateId,
+                telegramId: candidate?.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "AWAITING_FIRST_SHIFT",
+                result: "success",
+                module: "candidate-service",
+                operation: "processOnboardingFinish",
+                safeContext: {
+                    documentCount: fileIds.length,
+                    includesProfile: true,
+                    deliveryTarget: ADMIN_IDS[0] || null,
+                },
+            });
         } catch (mediaErr) {
             logger.error({ err: mediaErr }, "Failed to process documents media");
+            logBusinessEvent({
+                event: "candidate.documents_archive.delivered",
+                level: "error",
+                candidateId,
+                telegramId: candidate?.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "AWAITING_FIRST_SHIFT",
+                result: "failed",
+                reasonCode: "DOCUMENT_ARCHIVE_PROCESSING_FAILED",
+                module: "candidate-service",
+                operation: "processOnboardingFinish",
+                safeContext: {
+                    documentCount: fileIds.length,
+                },
+                error: mediaErr,
+            });
         } finally {
             await fs.rm(tempDir, { recursive: true, force: true }).catch(() => { });
         }

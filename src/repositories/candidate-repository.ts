@@ -248,7 +248,7 @@ export class CandidateRepository {
                 
                 // --- AUTOMATIC TIMELINE TRACKING ---
                 import("../services/timeline-service.js").then(({ timelineService }) => {
-                    timelineService.trackStatusChange(candidate, candidate.status, 'SYSTEM').catch(() => {});
+                    timelineService.trackStatusChange(candidate, oldCandidate.status, candidate.status, 'SYSTEM').catch(() => {});
                 }).catch(() => {});
             }
             if (oldCandidate.interviewSlotId !== candidate.interviewSlotId) {
@@ -261,7 +261,7 @@ export class CandidateRepository {
                 changes.trainingSlotId = { from: oldCandidate.trainingSlotId, to: candidate.trainingSlotId };
             }
             if (Object.keys(changes).length > 0) {
-                logger.info({ candidateId: id, name: candidate.fullName, changes }, "📋 Candidate updated");
+                logger.info({ event: "candidate.updated", candidateId: id, name: candidate.fullName, changes }, "📋 Candidate updated");
             }
         }
 

@@ -70,6 +70,14 @@ export async function persistCandidate(ctx: MyContext, data: any) {
 
 export async function startScreening(ctx: MyContext) {
     const candidateData = ctx.session.candidateData;
+    logger.info({
+        event: "candidate.screening.started",
+        correlation_id: ctx.correlationId,
+        update_id: ctx.update.update_id,
+        telegram_id: ctx.from?.id != null ? String(ctx.from.id) : undefined,
+        stage: "SCREENING",
+        result: "started"
+    }, "Candidate screening started/resumed");
 
     if (!candidateData.fullName) {
         ctx.session.step = "screening_name";
@@ -147,6 +155,17 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
         isWaitlisted,
         hrDecision
     });
+
+    logger.info({
+        event: "candidate.screening.completed",
+        correlation_id: ctx.correlationId,
+        update_id: ctx.update.update_id,
+        telegram_id: ctx.from?.id != null ? String(ctx.from.id) : undefined,
+        stage: "SCREENING",
+        result: isUnderage ? "rejected" : "waitlisted",
+        reason_code: isUnderage ? "UNDERAGE" : "NO_VACANCIES",
+        safe_context: { city, status }
+    }, "Candidate screening completed with no vacancies");
 
     if (isUnderage) {
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
@@ -462,6 +481,27 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
         isWaitlisted,
         hrDecision
     });
+
+    logger.info({
+        event: "candidate.screening.completed",
+        correlation_id: ctx.correlationId,
+        update_id: ctx.update.update_id,
+        telegram_id: ctx.from?.id != null ? String(ctx.from.id) : undefined,
+        stage: "SCREENING",
+        result: "success",
+        reason_code:
+            status === CandidateStatus.REJECTED ? "UNDERAGE" :
+            status === CandidateStatus.MANUAL_REVIEW ? "MANUAL_REVIEW" :
+            status === CandidateStatus.WAITLIST_HR ? "NO_CAPACITY" :
+            "READY_FOR_INTERVIEW",
+        safe_context: {
+            city,
+            locationId: finalLocationId,
+            status,
+            isWaitlisted,
+            currentStep: "INITIAL_TEST"
+        }
+    }, "Candidate screening finalized");
 
     // Notify HR if needed
     if (status === CandidateStatus.MANUAL_REVIEW || status === CandidateStatus.WAITLIST_HR) {

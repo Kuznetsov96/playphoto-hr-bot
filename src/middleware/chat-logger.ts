@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { chatLogRepository } from "../repositories/chat-log-repository.js";
 import prisma from "../db/core.js";
 import type { MiddlewareFn } from "grammy";
+import { sanitizeCallbackData, sanitizeChatLogEntry, sanitizeTextForLogs } from "../core/log-sanitizer.js";
 
 /**
  * Middleware: logs every incoming message/callback from users to ChatLog.
@@ -24,10 +25,10 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
 
         if (ctx.callbackQuery?.data) {
             contentType = "callback";
-            text = ctx.callbackQuery.data;
+            text = sanitizeCallbackData(ctx.callbackQuery.data);
         } else if (ctx.message) {
             const msg = ctx.message;
-            text = msg.text || msg.caption || null;
+            text = sanitizeTextForLogs(msg.text || msg.caption || null);
 
             if (msg.photo && msg.photo.length > 0) {
                 contentType = "photo";
@@ -49,10 +50,10 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
                 mediaFileId = msg.video_note.file_id;
             } else if (msg.contact) {
                 contentType = "contact";
-                text = JSON.stringify({ phone: msg.contact.phone_number, name: msg.contact.first_name });
+                text = "[CONTACT_REDACTED]";
             } else if (msg.location) {
                 contentType = "location";
-                text = JSON.stringify({ lat: msg.location.latitude, lon: msg.location.longitude });
+                text = "[LOCATION_REDACTED]";
             }
         } else {
             // Not a message or callback — skip logging
@@ -82,7 +83,7 @@ export const chatLogTransformer: Transformer = async (prev, method, payload, sig
         if (method === "sendMessage" || method === "editMessageText") {
             const p = payload as any;
             const chatId = p?.chat_id;
-            const text = p?.text ?? p?.caption ?? null;
+            const text = sanitizeTextForLogs(p?.text ?? p?.caption ?? null);
 
             // Only log if chat_id looks like a user (positive number = private chat)
             if (chatId && Number(chatId) > 0) {
@@ -103,7 +104,7 @@ export const chatLogTransformer: Transformer = async (prev, method, payload, sig
         if (method === "sendMessage" || method === "editMessageText") {
             const p = payload as any;
             const chatId = p?.chat_id;
-            const text = p?.text ?? p?.caption ?? null;
+            const text = sanitizeTextForLogs(p?.text ?? p?.caption ?? null);
 
             if (chatId && Number(chatId) > 0) {
                 const telegramId = BigInt(chatId);
@@ -113,7 +114,7 @@ export const chatLogTransformer: Transformer = async (prev, method, payload, sig
                     where: { telegramId },
                     select: { id: true }
                 }).then(user => {
-                    chatLogRepository.logOutgoing(telegramId, text, user?.id, errorMessage);
+                    chatLogRepository.logOutgoing(telegramId, sanitizeChatLogEntry("text", text), user?.id, sanitizeTextForLogs(errorMessage));
                 }).catch(() => {});
             }
         }

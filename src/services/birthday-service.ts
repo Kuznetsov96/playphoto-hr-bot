@@ -15,6 +15,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { ADMIN_IDS, CO_FOUNDER_IDS } from "../config.js";
 import logger from "../core/logger.js";
+import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 
 function getBirthdayRecipients(): number[] {
     const ids = [...ADMIN_IDS, ...CO_FOUNDER_IDS];
@@ -23,6 +24,15 @@ function getBirthdayRecipients(): number[] {
 
 export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, month: number) {
     logger.info(`🎂 Greeting candidates with birthday on ${day}/${month}...`);
+    logBusinessEvent({
+        event: "candidate.birthday_greetings.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "started",
+        module: "birthday-service",
+        operation: "greetCandidateBirthdays",
+        safeContext: { day, month },
+    });
     const candidates = await candidateRepository.findBirthdaysToday(day, month);
     const { default: prisma } = await import("../db/core.js");
 
@@ -62,6 +72,18 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                     isWaitlisted: true,
                     currentStep: "INTERVIEW",
                 });
+                logAuditEvent({
+                    event: "candidate.underage_reactivated_on_birthday",
+                    telegramId: c.user.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    candidateId: c.id,
+                    result: "success",
+                    stage: "WAITLIST_HR",
+                    module: "birthday-service",
+                    operation: "greetCandidateBirthdays",
+                    safeContext: { age: 17 },
+                });
 
                 await bot.api.sendMessage(tid, activationGreeting, { parse_mode: "HTML" });
             } else {
@@ -69,8 +91,34 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             }
 
             successCount++;
+            logBusinessEvent({
+                event: "candidate.birthday_greeting_sent",
+                candidateId: c.id,
+                telegramId: c.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "birthday-service",
+                operation: "greetCandidateBirthdays",
+                safeContext: {
+                    activatedFromUnderage: isExactly17 && wasUnderage && isFemale,
+                },
+            });
         } catch (e) {
             logger.error({ err: e, candidateId: c.id }, "Failed to send birthday greeting to candidate");
+            logBusinessEvent({
+                event: "candidate.birthday_greeting_sent",
+                level: "warn",
+                candidateId: c.id,
+                telegramId: c.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "BIRTHDAY_MESSAGE_SEND_FAILED",
+                module: "birthday-service",
+                operation: "greetCandidateBirthdays",
+                error: e,
+            });
         }
     }
 
@@ -95,6 +143,14 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
 
 export async function checkBirthdays(bot: Bot<MyContext>) {
     logger.info("🎂 Checking birthdays...");
+    logBusinessEvent({
+        event: "birthday.check.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "started",
+        module: "birthday-service",
+        operation: "checkBirthdays",
+    });
     const now = new Date();
 
     const getKyivDayMonth = (date: Date) => {
@@ -162,8 +218,34 @@ export async function checkBirthdays(bot: Bot<MyContext>) {
             }
         } catch (e) {
             logger.error({ err: e, adminId }, "Failed to send birthday alert");
+            logBusinessEvent({
+                event: "staff.birthday_alert_sent",
+                level: "warn",
+                telegramId: adminId,
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "ADMIN_BIRTHDAY_ALERT_FAILED",
+                module: "birthday-service",
+                operation: "checkBirthdays",
+                error: e,
+            });
         }
     }
+
+    logBusinessEvent({
+        event: "birthday.check.completed",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "birthday-service",
+        operation: "checkBirthdays",
+        safeContext: {
+            todayCount: todayBday.length,
+            tomorrowCount: in1DayBday.length,
+            in3DaysCount: in3DaysBday.length,
+        },
+    });
 }
 
 const MONTH_NAMES = [
@@ -273,6 +355,14 @@ export async function getBirthdaysByLocation(): Promise<string> {
 import { redis } from "../core/redis.js";
 
 export function startBirthdayLoop(bot: Bot<MyContext>) {
+    logBusinessEvent({
+        event: "birthday.loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "birthday-service",
+        operation: "startBirthdayLoop",
+    });
     // 1. Run immediate check if not done today
     const runCheck = async () => {
         const todayKey = `bday_checked:${new Date().toLocaleDateString('en-GB', { timeZone: 'Europe/Kyiv' }).replace(/\//g, '-')}`;
@@ -281,6 +371,15 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
         const alreadyDone = await redis.get(todayKey);
         if (alreadyDone) {
             logger.info("🎂 Birthday check already performed today, skipping.");
+            logBusinessEvent({
+                event: "birthday.check.skipped",
+                actorType: "system",
+                actorRole: "system",
+                result: "skipped",
+                reasonCode: "ALREADY_CHECKED_TODAY",
+                module: "birthday-service",
+                operation: "startBirthdayLoop",
+            });
             return;
         }
 
