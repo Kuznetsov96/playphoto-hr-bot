@@ -85,6 +85,7 @@ export interface SessionData {
         step?: string;
         replyingToUserId?: string;
         ticketFilter?: string;
+        preferredTarget?: "HR" | "MENTOR";
     };
 
     // Legacy / Other module fields

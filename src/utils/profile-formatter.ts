@@ -12,6 +12,8 @@ export interface ProfileFormatOptions {
     interviewSlot?: any;
     includeHistory?: boolean;
     viewerRole?: "HR" | "MENTOR";
+    historyScope?: "HR" | "MENTOR";
+    historySince?: Date | string | null;
 }
 
 const CITY_TO_EN: Record<string, string> = {
@@ -226,8 +228,14 @@ export async function formatCandidateProfile(
     if (options.includeHistory) {
         const { messageRepository } = await import("../repositories/message-repository.js");
         const { cryptoUtility } = await import("../core/crypto.js");
-        const scope = options.viewerRole || "HR";
-        const history = await messageRepository.findByCandidateIdAndScope(candidate.id, scope);
+        const scope = options.historyScope || options.viewerRole || "HR";
+        let history = await messageRepository.findByCandidateIdAndScope(candidate.id, scope);
+        if (options.historySince) {
+            const since = new Date(options.historySince);
+            if (!Number.isNaN(since.getTime())) {
+                history = history.filter(msg => msg.createdAt >= since);
+            }
+        }
         const last7 = history.slice(0, 7).reverse();
 
         if (last7.length > 0) {
