@@ -1004,7 +1004,6 @@ hrStagingConfirmMenu.dynamic(async (ctx, range) => {
 
 // --- REGISTRATION ---
 hrHubMenu.register(hrInboxMenu);
-hrHubMenu.register(hrInboxNewMenu);
 hrHubMenu.register(hrDashboardDatesMenu);
 hrHubMenu.register(hrDayViewMenu);
 hrHubMenu.register(hrToolsMenu);
@@ -1018,6 +1017,7 @@ hrWaitlistMenu.register(hrWaitlistCityMenu);
 hrWaitlistCityMenu.register(hrWaitlistLocMenu);
 hrWaitlistLocMenu.register(hrWaitlistProfilesMenu);
 hrToolsMenu.register(hrBroadcastCitiesMenu);
+hrInboxMenu.register(hrInboxNewMenu);
 hrBroadcastCitiesMenu.register(hrBroadcastConfirmMenu);
 hrInboxMenu.register(hrInboxTattooMenu);
 hrInboxMenu.register(hrInboxMessagesMenu);
