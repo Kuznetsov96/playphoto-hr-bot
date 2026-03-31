@@ -122,33 +122,11 @@ export async function showStaffSchedule(ctx: MyContext) {
     }
 
     let text = "📅 <b>Твій графік на найближчий час:</b>\n\n";
-    const shiftsToQuery = shifts.map((s) => ({ locationId: s.locationId, date: s.date }));
-    const allColleagues = await workShiftRepository.findColleaguesForShifts(user.staffProfile.id, shiftsToQuery);
 
     for (const s of shifts) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
         text += `▫️ <code>${dateStr}</code> — ${s.location.name}`;
-
-        const sStart = new Date(s.date);
-        sStart.setHours(0, 0, 0, 0);
-        const sEnd = new Date(s.date);
-        sEnd.setHours(23, 59, 59, 999);
-        const colleagues = allColleagues.filter(
-            (c) => c.locationId === s.locationId && c.date >= sStart && c.date <= sEnd
-        );
-
-        if (colleagues.length > 0) {
-            const links = colleagues.map((c) => {
-                const name = staffService.formatStaffName(c.staff.fullName);
-                const username = c.staff.user?.username;
-                const tgId = c.staff.user?.telegramId;
-                if (username) return `<a href="https://t.me/${username}">${name}</a>`;
-                if (tgId) return `<a href="tg://user?id=${tgId}">${name}</a>`;
-                return name;
-            });
-            text += ` (${links.join(", ")})`;
-        }
         text += `\n`;
     }
 
