@@ -104,10 +104,11 @@ adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx,
             const { userRepository } = await import("../../repositories/user-repository.js");
             const { candidateRepository } = await import("../../repositories/candidate-repository.js");
             const user = await userRepository.findByTelegramId(BigInt(targetId));
-            const isCandidate = user ? !!(await candidateRepository.findByUserId(user.id)) : false;
+            const candidate = user ? await candidateRepository.findByUserId(user.id) : null;
+            const isCandidate = !!candidate;
 
             const msgOptions: { parse_mode: "HTML"; reply_markup?: InstanceType<typeof InlineKeyboard> } = { parse_mode: "HTML" };
-            if (isCandidate) {
+            if (candidate && candidate.gender !== "male") {
                 msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
             }
 
