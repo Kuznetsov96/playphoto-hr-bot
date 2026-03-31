@@ -12,6 +12,7 @@ import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
+import { audit } from "../core/audit-logger.js";
 
 function isUnknownCandidateStatusError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
@@ -274,6 +275,22 @@ export const hrService = {
             adminId: adminId || 'unknown'
         });
 
+        audit({
+            event: "candidate_decision_set",
+            result: "success",
+            actorType: "admin",
+            actorId: adminId,
+            telegramId: cand.user.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: {
+                fromStatus: initialCand.status,
+                decision,
+                previousDecision: initialCand.hrDecision,
+                currentStep: cand.currentStep
+            }
+        });
+
         return true;
     },
 
@@ -291,6 +308,16 @@ export const hrService = {
             await candidateRepository.update(candId, {
                 status: CandidateStatus.ACCEPTED,
                 notificationSent: true
+            });
+
+            audit({
+                event: "candidate_offer_sent",
+                result: "success",
+                actorType: "system",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: { fromStatus: cand.status, toStatus: CandidateStatus.ACCEPTED }
             });
 
             // Notify Mentors ONLY AFTER offer is actually sent
@@ -327,6 +354,16 @@ export const hrService = {
         await candidateRepository.update(candId, {
             status: CandidateStatus.REJECTED,
             hrDecision: reason === "NOSHOW" ? "NOSHOW" : "REJECTED"
+        });
+
+        audit({
+            event: "candidate_rejected",
+            result: "success",
+            actorType: "admin",
+            telegramId: cand.user.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: { reason, fromStatus: cand.status, toStatus: CandidateStatus.REJECTED }
         });
 
         const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
@@ -374,9 +411,29 @@ export const hrService = {
                 interviewInvitedAt: new Date()
             });
 
+            audit({
+                event: "candidate_interview_invited",
+                result: "success",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: { locationId: cand.locationId, city: cand.city }
+            });
+
             return true;
         } catch (e: any) {
             logger.warn({ err: e, candId, tid }, "inviteCandidate: failed to send invitation");
+            audit({
+                event: "candidate_interview_invited",
+                result: "failed",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                error: e.message,
+                context: { locationId: cand.locationId, city: cand.city }
+            });
             // Mark user as bot-blocked so they're excluded from future broadcasts
             if (e.error_code === 403) {
                 await prisma.user.update({

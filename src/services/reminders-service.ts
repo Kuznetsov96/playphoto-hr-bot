@@ -4,10 +4,19 @@ import { NDA_LINK } from "../config.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 export const remindersService = {
     async processNDAReminders(botApi: any) {
         logger.info("🕒 Checking for candidates awaiting NDA confirmation (12h+)...");
+        logBusinessEvent({
+            event: "candidate.nda_legacy_reminder_scan.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "reminders-service",
+            operation: "processNDAReminders",
+        });
         
         try {
             // Find candidates who got NDA more than 12 hours ago and haven't confirmed or been reminded yet
@@ -15,6 +24,15 @@ export const remindersService = {
             
             if (candidates.length === 0) {
                 logger.info("✅ No candidates need NDA reminders at this time.");
+                logBusinessEvent({
+                    event: "candidate.nda_legacy_reminder_scan.completed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "reminders-service",
+                    operation: "processNDAReminders",
+                    safeContext: { candidateCount: 0 },
+                });
                 return;
             }
 
@@ -33,17 +51,70 @@ export const remindersService = {
                     // Mark as reminded to avoid double automatic ping
                     await candidateRepository.update(cand.id, { ndaReminderSentAt: new Date() } as any);
                     logger.info(`✅ Auto-ping sent to ${cand.fullName} (TG: ${cand.user.telegramId})`);
+                    logBusinessEvent({
+                        event: "candidate.nda_legacy_reminder_sent",
+                        candidateId: cand.id,
+                        telegramId: cand.user.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "NDA",
+                        result: "success",
+                        module: "reminders-service",
+                        operation: "processNDAReminders",
+                    });
                 } catch (e) {
                     logger.error({ err: e, candId: cand.id }, "❌ Failed to send automated NDA reminder");
+                    logBusinessEvent({
+                        event: "candidate.nda_legacy_reminder_sent",
+                        level: "warn",
+                        candidateId: cand.id,
+                        telegramId: cand.user?.telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        stage: "NDA",
+                        result: "failed",
+                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                        module: "reminders-service",
+                        operation: "processNDAReminders",
+                        error: e,
+                    });
                 }
             }
+            logBusinessEvent({
+                event: "candidate.nda_legacy_reminder_scan.completed",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "reminders-service",
+                operation: "processNDAReminders",
+                safeContext: { candidateCount: candidates.length },
+            });
         } catch (e) {
             logger.error({ err: e }, "❌ Error processing NDA reminders");
+            logBusinessEvent({
+                event: "candidate.nda_legacy_reminder_scan.completed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                module: "reminders-service",
+                operation: "processNDAReminders",
+                error: e,
+            });
         }
     },
 
     startRemindersLoop(botApi: any) {
         logger.info("🕒 Starting automated NDA reminders loop (every 15m)...");
+        logBusinessEvent({
+            event: "candidate.nda_legacy_reminder_loop.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "reminders-service",
+            operation: "startRemindersLoop",
+            safeContext: { intervalMinutes: 15 },
+        });
         // Check every 15 minutes
         setInterval(() => this.processNDAReminders(botApi), 15 * 60 * 1000);
         // Also run immediately on start

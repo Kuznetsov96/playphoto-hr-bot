@@ -11,6 +11,7 @@ import { accessService } from "./access-service.js";
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
 import type { Api } from "grammy";
 import logger from "../core/logger.js";
+import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 
 interface TeamMember {
     fullName: string;
@@ -115,13 +116,47 @@ export class ScheduleSyncService {
                         }
                     });
                     logger.info({ telegramId, sheetRow }, "📋 [BLOCKED] Staff marked in TEAM sheet");
+                    logSecurityEvent({
+                        event: "security.staff.block_marked_in_sheet",
+                        telegramId,
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "success",
+                        module: "schedule-sync",
+                        operation: "markStaffBotBlocked",
+                        safeContext: {
+                            sheetRow,
+                        },
+                    });
                     return true;
                 }
             }
             logger.warn({ telegramId }, "⚠️ [BLOCKED] Staff not found in TEAM sheet");
+            logSecurityEvent({
+                event: "security.staff.block_mark_in_sheet_failed",
+                telegramId,
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "STAFF_NOT_FOUND_IN_TEAM_SHEET",
+                module: "schedule-sync",
+                operation: "markStaffBotBlocked",
+            });
             return false;
         } catch (e: any) {
             logger.error({ err: e.message, telegramId }, "❌ [BLOCKED] Failed to update TEAM sheet");
+            logSecurityEvent({
+                event: "security.staff.block_mark_in_sheet_failed",
+                level: "error",
+                telegramId,
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "TEAM_SHEET_UPDATE_FAILED",
+                module: "schedule-sync",
+                operation: "markStaffBotBlocked",
+                error: e,
+            });
             return false;
         }
     }
@@ -149,6 +184,17 @@ export class ScheduleSyncService {
             }
 
             logger.info(`🔄 Syncing ${blockedIds.size} blocked IDs...`);
+            logSecurityEvent({
+                event: "security.blocklist.sync_started",
+                actorType: "system",
+                actorRole: "system",
+                result: "pending",
+                module: "schedule-sync",
+                operation: "syncBlocklist",
+                safeContext: {
+                    blockedCount: blockedIds.size,
+                },
+            });
 
             // 1. Mark new users as blocked or update existing ones
             for (const tgId of blockedIds) {
@@ -174,12 +220,44 @@ export class ScheduleSyncService {
                 if (!blockedIds.has(user.telegramId)) {
                     logger.info({ telegramId: user.telegramId }, "🔓 Unblocking user (removed from sheet)");
                     await (userRepository as any).update(user.id, { isBlocked: false });
+                    logSecurityEvent({
+                        event: "security.blocklist.user_unblocked",
+                        telegramId: user.telegramId,
+                        userId: user.id,
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "success",
+                        module: "schedule-sync",
+                        operation: "syncBlocklist",
+                    });
                 }
             }
 
+            logSecurityEvent({
+                event: "security.blocklist.sync_completed",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "schedule-sync",
+                operation: "syncBlocklist",
+                safeContext: {
+                    blockedCount: blockedIds.size,
+                },
+            });
             return { success: true, count: blockedIds.size };
         } catch (e: any) {
             logger.error({ err: e }, "❌ Failed to sync blocklist (maybe sheet 'Blocklist' is missing)");
+            logSecurityEvent({
+                event: "security.blocklist.sync_failed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "BLOCKLIST_SYNC_FAILED",
+                module: "schedule-sync",
+                operation: "syncBlocklist",
+                error: e,
+            });
             return { success: false, error: e.message };
         }
     }
@@ -298,8 +376,37 @@ export class ScheduleSyncService {
                                 // Optional: immediately unban so they can be re-invited/join later if needed, but they are kicked now
                                 await api.unbanChatMember(TEAM_CHATS.CHANNEL, Number(telegramId));
                                 logger.info({ fullName }, "✅ [SYNC] Successfully removed from channel");
+                                logSecurityEvent({
+                                    event: "security.staff.channel_access_removed",
+                                    telegramId,
+                                    userId: user.id,
+                                    actorType: "system",
+                                    actorRole: "system",
+                                    result: "success",
+                                    module: "schedule-sync",
+                                    operation: "syncTeam",
+                                    safeContext: {
+                                        fullName,
+                                        reason: "STAFF_DEACTIVATED",
+                                    },
+                                });
                             } catch (e: any) {
                                 logger.warn({ err: e, fullName }, "⚠️ [SYNC] Failed to remove staff from channel (maybe already left or bot lacks perms)");
+                                logSecurityEvent({
+                                    event: "security.staff.channel_access_remove_failed",
+                                    telegramId,
+                                    userId: user.id,
+                                    actorType: "system",
+                                    actorRole: "system",
+                                    result: "failed",
+                                    reasonCode: "CHANNEL_REMOVE_FAILED",
+                                    module: "schedule-sync",
+                                    operation: "syncTeam",
+                                    safeContext: {
+                                        fullName,
+                                    },
+                                    error: e,
+                                });
                             }
                         } else {
                             logger.warn({ fullName }, "⚠️ [SYNC] Skipping channel removal: no API instance provided");
@@ -343,6 +450,22 @@ export class ScheduleSyncService {
                         await userRepository.update(user.id, { role: "STAFF" });
                     } else {
                         logger.warn({ fullName, status: cand?.status }, "⚠️ [SYNC] Skipping role→STAFF: candidate still in recruitment funnel");
+                        logBusinessEvent({
+                            event: "staff.role_promotion.skipped",
+                            level: "warn",
+                            userId: user.id,
+                            telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: cand?.status || undefined,
+                            result: "skipped",
+                            reasonCode: "CANDIDATE_STILL_IN_FUNNEL",
+                            module: "schedule-sync",
+                            operation: "syncTeam",
+                            safeContext: {
+                                fullName,
+                            },
+                        });
                     }
                 }
             } catch (err) {
@@ -351,6 +474,23 @@ export class ScheduleSyncService {
         }
 
         const activeAfter = await staffRepository.countActive();
+
+        logBusinessEvent({
+            event: "staff.team.sync_completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "schedule-sync",
+            operation: "syncTeam",
+            safeContext: {
+                staffAdded,
+                staffUpdated,
+                activeBefore,
+                activeAfter,
+                skipped,
+                blocklistSyncSuccess: blocklistRes.success,
+            },
+        });
 
         return {
             success: true,
@@ -467,6 +607,20 @@ export class ScheduleSyncService {
         }
 
         logger.info({ syncCount }, "🧱 Prepared shifts for schedule sync");
+        logBusinessEvent({
+            event: "schedule.sync.prepared",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "schedule-sync",
+            operation: "syncSchedule",
+            safeContext: {
+                sheetName,
+                shiftCount: syncCount,
+                from: minDate.toISOString(),
+                to: maxDate.toISOString(),
+            },
+        });
 
         // Run inserts in real batches instead of creating all Prisma promises up front.
         const batchSize = 20;
@@ -481,6 +635,19 @@ export class ScheduleSyncService {
         }
 
         logger.info({ shiftsBefore, shiftsAfter: syncCount }, "✅ Schedule sync completed");
+        logBusinessEvent({
+            event: "schedule.sync.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "schedule-sync",
+            operation: "syncSchedule",
+            safeContext: {
+                sheetName,
+                shiftsBefore,
+                shiftsAfter: syncCount,
+            },
+        });
 
         return {
             success: true,

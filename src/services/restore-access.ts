@@ -2,6 +2,7 @@ import { bot } from "../core/bot.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { accessService } from "./access-service.js";
 import logger from "../core/logger.js";
+import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 
 export const restoreAccessService = {
     /**
@@ -10,6 +11,14 @@ export const restoreAccessService = {
      */
     async restoreAllStaffAccess(adminApi: any) {
         logger.info("🛠 Starting mass access restoration...");
+        logAuditEvent({
+            event: "admin.staff_access_restore.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "restore-access",
+            operation: "restoreAllStaffAccess",
+        });
         
         const allUsers = await userRepository.findAllWithProfiles();
         let processed = 0;
@@ -45,10 +54,33 @@ export const restoreAccessService = {
                         
                         await bot.api.sendMessage(Number(user.telegramId), message, { parse_mode: "HTML" });
                         invited++;
+                        logBusinessEvent({
+                            event: "staff.access_restore_invite_sent",
+                            telegramId: user.telegramId,
+                            userId: user.id,
+                            actorType: "system",
+                            actorRole: "system",
+                            result: "success",
+                            module: "restore-access",
+                            operation: "restoreAllStaffAccess",
+                        });
                     }
                 } catch (e: any) {
                     logger.error({ err: e, userId: user.telegramId }, "Failed to restore access for user");
                     failed++;
+                    logBusinessEvent({
+                        event: "staff.access_restore_invite_sent",
+                        level: "warn",
+                        telegramId: user.telegramId,
+                        userId: user.id,
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "failed",
+                        reasonCode: "ACCESS_RESTORE_INVITE_FAILED",
+                        module: "restore-access",
+                        operation: "restoreAllStaffAccess",
+                        error: e,
+                    });
                 }
             }));
 
@@ -64,6 +96,20 @@ export const restoreAccessService = {
             `• Authorized & Notified: ${invited}
 ` +
             `• Failed: ${failed}`;
+        logAuditEvent({
+            event: "admin.staff_access_restore.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "restore-access",
+            operation: "restoreAllStaffAccess",
+            safeContext: {
+                totalUsers: allUsers.length,
+                processed,
+                invited,
+                failed,
+            },
+        });
         
         return summary;
     }

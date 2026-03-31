@@ -46,11 +46,17 @@ export const REDACT_CONFIG = {
 
 const pinoOptions: LoggerOptions = {
     level: process.env.LOG_LEVEL || "info",
-    redact: REDACT_CONFIG
+    redact: REDACT_CONFIG,
+    base: {
+        service: "playphoto-hr-bot",
+        env: process.env.NODE_ENV || "development",
+    }
 };
 
 const isProd = process.env.NODE_ENV === "production";
 let logger: pino.Logger;
+export type ReopenableDestination = pino.DestinationStream & { reopen: () => void };
+export let productDestination: ReopenableDestination | undefined;
 
 if (isProd) {
     // In production, we write to both stdout and a persistent file
@@ -67,13 +73,13 @@ if (isProd) {
 
     const streams = [
         { stream: process.stdout },
-        { 
-            stream: pino.destination({
+        {
+            stream: (productDestination = pino.destination({
                 dest: logPath,
-                minLength: 0,
-                sync: true, // Ensure logs are written immediately to avoid loss
+                minLength: 4096,
+                sync: false,
                 append: true
-            })
+            }) as ReopenableDestination)
         },
     ];
 

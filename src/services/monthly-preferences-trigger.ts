@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { broadcastService } from "./broadcast.js";
 import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 /**
  * Service to handle monthly schedule preference collection.
@@ -25,6 +26,18 @@ export class MonthlyPreferencesTrigger {
         const alreadyTriggered = await redis.get(triggerKey);
         if (alreadyTriggered) {
             logger.debug(`[MonthlyPref] Already triggered for ${monthName}, skipping.`);
+            logBusinessEvent({
+                event: "staff.preferences_monthly_trigger.skipped",
+                actorType: "system",
+                actorRole: "system",
+                result: "skipped",
+                reasonCode: "ALREADY_TRIGGERED",
+                module: "monthly-preferences-trigger",
+                operation: "trigger",
+                safeContext: {
+                    monthName,
+                },
+            });
             return;
         }
 
@@ -52,8 +65,34 @@ export class MonthlyPreferencesTrigger {
             );
 
             logger.info({ totalSent }, "✅ Monthly preferences broadcast sent and queued for pings.");
+            logBusinessEvent({
+                event: "staff.preferences_monthly_trigger.completed",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "monthly-preferences-trigger",
+                operation: "trigger",
+                safeContext: {
+                    monthName,
+                    totalSent,
+                },
+            });
         } catch (e: any) {
             logger.error({ err: e.message }, "❌ Failed to trigger monthly preferences");
+            logBusinessEvent({
+                event: "staff.preferences_monthly_trigger.completed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "MONTHLY_PREFERENCES_TRIGGER_FAILED",
+                module: "monthly-preferences-trigger",
+                operation: "trigger",
+                safeContext: {
+                    monthName,
+                },
+                error: e,
+            });
             // Optional: reset triggerKey if it failed completely? 
             // Better to leave it and let admin trigger manually if needed.
         }
@@ -76,6 +115,14 @@ export class MonthlyPreferencesTrigger {
 
 export function startMonthlyPreferencesLoop(bot: Bot<MyContext>) {
     logger.info("📅 Starting monthly preferences loop...");
+    logBusinessEvent({
+        event: "staff.preferences_monthly_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "monthly-preferences-trigger",
+        operation: "startMonthlyPreferencesLoop",
+    });
     // Check every minute
     setInterval(() => MonthlyPreferencesTrigger.checkAndTrigger(bot), 60 * 1000);
 }

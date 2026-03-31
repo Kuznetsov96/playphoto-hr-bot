@@ -19,6 +19,7 @@ import { createKyivDate } from "../../utils/bot-utils.js";
 import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import { logAuditEvent, logBusinessEvent } from "../../core/log-events.js";
 
 
 export const adminRecruitmentHandlers = new Composer<MyContext>();
@@ -119,6 +120,19 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
             await ctx.answerCallbackQuery();
             const { mentorService } = await import("../../services/mentor-service.js");
             const res = await mentorService.completeDiscovery(ctx.api, cand.id, 'passed');
+            logBusinessEvent({
+                event: "admin.candidate.discovery.marked_passed",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId: ctx.from?.id,
+                candidateId: cand.id,
+                actorType: "admin",
+                stage: "DISCOVERY",
+                result: "success",
+                module: "admin-recruitment",
+                operation: "completeDiscovery",
+                safeContext: { fromStatus: cand.status }
+            });
             audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "discovery_passed", from: cand.status } });
             if (res) {
                 await ScreenManager.renderScreen(ctx, `✨ <b>Discovery Passed!</b>\n\nNow please select the <b>Online Internship Date</b> for ${res.candidate.fullName}:`, "mentor-manual-date", { pushToStack: true });
@@ -127,6 +141,19 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
             await ctx.answerCallbackQuery();
             const { mentorService } = await import("../../services/mentor-service.js");
             await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
+            logBusinessEvent({
+                event: "admin.candidate.discovery.marked_failed",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId: ctx.from?.id,
+                candidateId: cand.id,
+                actorType: "admin",
+                stage: "DISCOVERY",
+                result: "success",
+                module: "admin-recruitment",
+                operation: "completeDiscovery",
+                safeContext: { fromStatus: cand.status }
+            });
             audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "discovery_failed", from: cand.status } });
             await ctx.menu.update();
         }).row();
@@ -144,12 +171,38 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
             await ctx.answerCallbackQuery();
             const { mentorService } = await import("../../services/mentor-service.js");
             await mentorService.completeTraining(ctx.api, cand.id, 'passed');
+            logBusinessEvent({
+                event: "admin.candidate.training.marked_passed",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId: ctx.from?.id,
+                candidateId: cand.id,
+                actorType: "admin",
+                stage: "TRAINING",
+                result: "success",
+                module: "admin-recruitment",
+                operation: "completeTraining",
+                safeContext: { fromStatus: cand.status }
+            });
             audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "training_passed", from: cand.status } });
             await ctx.menu.update();
         }).text(ADMIN_TEXTS["admin-btn-fail"], async (ctx) => {
             await ctx.answerCallbackQuery();
             const { mentorService } = await import("../../services/mentor-service.js");
             await mentorService.completeTraining(ctx.api, cand.id, 'failed');
+            logBusinessEvent({
+                event: "admin.candidate.training.marked_failed",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId: ctx.from?.id,
+                candidateId: cand.id,
+                actorType: "admin",
+                stage: "TRAINING",
+                result: "success",
+                module: "admin-recruitment",
+                operation: "completeTraining",
+                safeContext: { fromStatus: cand.status }
+            });
             audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "training_failed", from: cand.status } });
             await ctx.menu.update();
         }).row();
@@ -159,6 +212,18 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         range.text("🗓️ Re-invite to Interview", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
             await hrService.markAsScreening(candId);
+            logAuditEvent({
+                event: "admin.candidate.reinvited_to_interview",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId: ctx.from?.id,
+                candidateId: candId,
+                actorType: "admin",
+                stage: "INTERVIEW",
+                result: "success",
+                module: "admin-recruitment",
+                safeContext: { fromStatus: cand.status }
+            });
             audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: candId, updateId: ctx.update.update_id, context: { action: "reinvite_interview", from: cand.status } });
             await ctx.answerCallbackQuery("Status reset. Sending invite...");
             await ctx.api.sendMessage(Number(cand.user.telegramId),
@@ -187,13 +252,48 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
             const { hrService } = await import("../../services/hr-service.js");
             const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
             if (result && 'error' in result) {
+                logAuditEvent({
+                    event: "admin.candidate.staging_notified",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId: ctx.from?.id,
+                    candidateId: cand.id,
+                    actorType: "admin",
+                    stage: "STAGING",
+                    result: "failed",
+                    module: "admin-recruitment",
+                    error: result.error
+                });
                 audit({ event: "candidate_staging_notify", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, error: result.error });
                 await ctx.answerCallbackQuery(`❌ ${result.error}`);
             } else if (result) {
+                logAuditEvent({
+                    event: "admin.candidate.staging_notified",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId: ctx.from?.id,
+                    candidateId: cand.id,
+                    actorType: "admin",
+                    stage: "STAGING",
+                    result: "success",
+                    module: "admin-recruitment"
+                });
                 audit({ event: "candidate_staging_notify", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id });
                 await ctx.answerCallbackQuery("Success! Candidate and partner notified. ✅");
                 await ctx.menu.update();
             } else {
+                logAuditEvent({
+                    event: "admin.candidate.staging_notified",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId: ctx.from?.id,
+                    candidateId: cand.id,
+                    actorType: "admin",
+                    stage: "STAGING",
+                    result: "failed",
+                    module: "admin-recruitment",
+                    error: "null result"
+                });
                 audit({ event: "candidate_staging_notify", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, error: "null result" });
                 await ctx.answerCallbackQuery("Error sending notifications ❌");
             }

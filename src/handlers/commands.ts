@@ -17,6 +17,7 @@ import { updateUserCommands } from "../utils/command-manager.js";
 import { startScreening } from "../modules/candidate/handlers/index.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
+import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 
 import { accessService } from "../services/access-service.js";
 
@@ -135,12 +136,34 @@ commandHandlers.command("start", async (ctx) => {
                 ctx.session.candidateData.clickSource = sourceName;
             }
             logger.info({ userId, sourceName }, "📍 Candidate source tracked via deep-link");
+            logBusinessEvent({
+                event: "candidate.source.tracked",
+                telegramId: userId,
+                actorType: "candidate",
+                actorRole: "candidate",
+                result: "success",
+                module: "commands",
+                operation: "start",
+                updateId: ctx.update.update_id,
+                safeContext: { sourceName },
+            });
         }
 
         // 1. Admin/Support Logic (Prioritize adminRole over base role)
         try {
             const userAdminRole = await getUserAdminRole(BigInt(userId));
             if (userAdminRole) {
+                logBusinessEvent({
+                    event: "user.start_routed",
+                    telegramId: userId,
+                    actorType: "admin",
+                    actorRole: userAdminRole,
+                    result: "success",
+                    module: "commands",
+                    operation: "start",
+                    updateId: ctx.update.update_id,
+                    safeContext: { targetHub: userAdminRole },
+                });
                 await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
                 
                 if (userAdminRole === 'SUPER_ADMIN' || userAdminRole === 'CO_FOUNDER' || userAdminRole === 'SUPPORT') {
@@ -172,6 +195,18 @@ commandHandlers.command("start", async (ctx) => {
         
         if (user?.staffProfile) {
             if (user.staffProfile.isActive) {
+                logBusinessEvent({
+                    event: "user.start_routed",
+                    telegramId: userId,
+                    actorType: "staff",
+                    actorRole: "staff",
+                    result: "success",
+                    module: "commands",
+                    operation: "start",
+                    updateId: ctx.update.update_id,
+                    userId: user.id,
+                    safeContext: { targetHub: "STAFF" },
+                });
                 await updateUserCommands(ctx, "STAFF");
                 const { showStaffHub } = await import("../modules/staff/handlers/menu.js");
                 await showStaffHub(ctx, true);
@@ -188,10 +223,35 @@ commandHandlers.command("start", async (ctx) => {
         const candidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
 
         if (candidate) {
+            logBusinessEvent({
+                event: "user.start_routed",
+                telegramId: userId,
+                actorType: "candidate",
+                actorRole: "candidate",
+                result: "success",
+                module: "commands",
+                operation: "start",
+                updateId: ctx.update.update_id,
+                userId: user?.id,
+                candidateId: candidate.id,
+                stage: candidate.status,
+                safeContext: { targetHub: "CANDIDATE_STATUS" },
+            });
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
         } else {
+            logBusinessEvent({
+                event: "user.start_routed",
+                telegramId: userId,
+                actorType: "candidate",
+                actorRole: "candidate",
+                result: "success",
+                module: "commands",
+                operation: "start",
+                updateId: ctx.update.update_id,
+                safeContext: { targetHub: "SCREENING" },
+            });
             shouldEnterScreening = true;
         }
     } catch (e: any) {
@@ -206,7 +266,6 @@ commandHandlers.command("start", async (ctx) => {
     }
 
     if (shouldEnterScreening) {
-        logger.info(`[Start Debug] Entering stateless screening for ${userId}`);
         await startScreening(ctx);
     }
 });
@@ -232,9 +291,30 @@ commandHandlers.command("restore_access", requireRole('SUPER_ADMIN', 'CO_FOUNDER
     try {
         const { restoreAccessService } = await import("../services/restore-access.js");
         const summary = await restoreAccessService.restoreAllStaffAccess(ctx.api);
+        logAuditEvent({
+            event: "admin.restore_access.executed",
+            telegramId: ctx.from?.id,
+            actorType: "admin",
+            actorRole: "admin",
+            result: "success",
+            module: "commands",
+            operation: "restore_access",
+            updateId: ctx.update.update_id,
+        });
         await ctx.reply(summary, { parse_mode: "HTML" });
     } catch (e: any) {
         logger.error({ err: e }, "Error in /restore_access command");
+        logAuditEvent({
+            event: "admin.restore_access.executed",
+            telegramId: ctx.from?.id,
+            actorType: "admin",
+            actorRole: "admin",
+            result: "failed",
+            module: "commands",
+            operation: "restore_access",
+            updateId: ctx.update.update_id,
+            error: e,
+        });
         await ctx.reply(`❌ Помилка: ${e.message}`);
     }
 });
@@ -242,7 +322,6 @@ commandHandlers.command("restore_access", requireRole('SUPER_ADMIN', 'CO_FOUNDER
 commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'), async (ctx) => {
     if (ctx.chat?.type !== "private") return;
     try { await ctx.deleteMessage(); } catch (e) { }
-    logger.info(`[Debug] /admin command executing for ${ctx.from?.id}`);
     try {
         const userAdminRole = await getUserAdminRole(BigInt(ctx.from!.id));
         await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
@@ -250,9 +329,31 @@ commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPO
         const text = await staffService.getAdminHeader(userAdminRole || undefined);
 
         await ctx.reply(text, { reply_markup: adminMenu, parse_mode: "HTML" });
-        logger.info(`[Debug] Admin panel loaded for ${ctx.from?.id}`);
+        logBusinessEvent({
+            event: "admin.panel.opened",
+            telegramId: ctx.from?.id,
+            actorType: "admin",
+            actorRole: userAdminRole || "admin",
+            result: "success",
+            module: "commands",
+            operation: "admin",
+            updateId: ctx.update.update_id,
+        });
     } catch (e: any) {
         logger.error({ err: e }, "Failure in /admin command");
+        logBusinessEvent({
+            event: "admin.panel.opened",
+            level: "error",
+            telegramId: ctx.from?.id,
+            actorType: "admin",
+            actorRole: "admin",
+            result: "failed",
+            reasonCode: "ADMIN_PANEL_OPEN_FAILED",
+            module: "commands",
+            operation: "admin",
+            updateId: ctx.update.update_id,
+            error: e,
+        });
         await ctx.reply(`💥 Помилка: ${e.message}`);
     }
 });
@@ -361,6 +462,19 @@ commandHandlers.command("reset_me", async (ctx) => {
         if (user.candidate) {
             await candidateRepository.deleteRelatedData(user.candidate.id);
             logger.info({ targetId }, "Candidate data deleted via /reset_me");
+            logAuditEvent({
+                event: "admin.user_reset.candidate_data_deleted",
+                telegramId: callerId,
+                actorType: "admin",
+                actorRole: "admin",
+                result: "success",
+                module: "commands",
+                operation: "reset_me",
+                updateId: ctx.update.update_id,
+                candidateId: user.candidate.id,
+                userId: user.id,
+                safeContext: { targetTelegramId: targetId.toString() },
+            });
         }
 
         // 2. Special Case: Clear Staff Profile if it's the tester or if specifically requested for reset
@@ -369,6 +483,21 @@ commandHandlers.command("reset_me", async (ctx) => {
             const { staffRepository } = await import("../repositories/staff-repository.js");
             await staffRepository.deleteRelatedData(user.staffProfile.id);
             logger.info({ targetId }, "Staff profile and related data deleted via /reset_me");
+            logAuditEvent({
+                event: "admin.user_reset.staff_profile_deleted",
+                telegramId: callerId,
+                actorType: "admin",
+                actorRole: "admin",
+                result: "success",
+                module: "commands",
+                operation: "reset_me",
+                updateId: ctx.update.update_id,
+                userId: user.id,
+                safeContext: {
+                    staffProfileId: user.staffProfile.id,
+                    targetTelegramId: targetId.toString(),
+                },
+            });
         }
 
         ctx.session.step = "idle";
@@ -377,6 +506,18 @@ commandHandlers.command("reset_me", async (ctx) => {
         await ctx.reply(`🧹 <b>Дані для ID ${targetId} повністю очищено!</b>\n\nТепер можна натиснути /start для початку з чистого листа. ✨`, { parse_mode: "HTML" });
     } catch (e: any) {
         logger.error({ err: e, targetId }, "Error in /reset_me");
+        logAuditEvent({
+            event: "admin.user_reset.executed",
+            telegramId: callerId,
+            actorType: "admin",
+            actorRole: "admin",
+            result: "failed",
+            module: "commands",
+            operation: "reset_me",
+            updateId: ctx.update.update_id,
+            safeContext: { targetTelegramId: targetId.toString() },
+            error: e,
+        });
         await ctx.reply(`❌ Помилка при скиданні: ${e.message}`);
     }
 });

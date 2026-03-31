@@ -1,17 +1,20 @@
 import fs from "fs";
 import path from "path";
 import logger from "../core/logger.js";
+import { productDestination } from "../core/logger.js";
 import { redis } from "../core/redis.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 /**
  * Service to handle automatic log cleanup.
- * Prevents the product.log file from growing indefinitely since logrotate is not available.
+ * Rotates product.log monthly to preserve incident history without unbounded growth.
  */
 export class LogCleanupService {
+    private static LOG_DIR = "/app/logs";
     private static LOG_PATH = "/app/logs/product.log";
 
     /**
-     * Truncates the log file to 0 bytes.
+     * Rotates the current log into a month-stamped archive and reopens the destination.
      * Scheduled for the 1st of every month at 04:00 AM Kyiv time.
      */
     static async cleanup() {
@@ -26,25 +29,83 @@ export class LogCleanupService {
         }
 
         logger.info("🧹 Starting scheduled log cleanup (Monthly)...");
+        logBusinessEvent({
+            event: "logs.product.rotation.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "log-cleanup-service",
+            operation: "cleanup",
+        });
 
         try {
             if (fs.existsSync(this.LOG_PATH)) {
-                // Get file size before cleanup for logging
                 const stats = fs.statSync(this.LOG_PATH);
                 const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+                const archiveName = `product-${kyivNow.getFullYear()}-${String(kyivNow.getMonth() + 1).padStart(2, "0")}.log`;
+                const archivePath = path.join(this.LOG_DIR, archiveName);
 
-                // Truncate file to 0 bytes (this keeps the file descriptor valid for Pino)
-                fs.truncateSync(this.LOG_PATH, 0);
-                
-                logger.info(`✅ Log file cleaned. Freed ${sizeMB} MB.`);
+                fs.renameSync(this.LOG_PATH, archivePath);
+                productDestination?.reopen();
+                this.purgeOldArchives();
+
+                logger.info({ archiveName, sizeMB }, "✅ Product log rotated");
+                logBusinessEvent({
+                    event: "logs.product.rotation.completed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "log-cleanup-service",
+                    operation: "cleanup",
+                    safeContext: { archiveName, sizeMB },
+                });
             } else {
                 logger.warn(`📂 Log file not found at ${this.LOG_PATH}, skipping cleanup.`);
+                logBusinessEvent({
+                    event: "logs.product.rotation.completed",
+                    level: "warn",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "skipped",
+                    reasonCode: "PRODUCT_LOG_FILE_MISSING",
+                    module: "log-cleanup-service",
+                    operation: "cleanup",
+                });
             }
 
             // 2. Mark as triggered for this month
             await redis.set(triggerKey, "true", "EX", 32 * 24 * 60 * 60); 
         } catch (e: any) {
             logger.error({ err: e.message }, "❌ Failed to cleanup logs");
+            logBusinessEvent({
+                event: "logs.product.rotation.completed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                module: "log-cleanup-service",
+                operation: "cleanup",
+                error: e,
+            });
+        }
+    }
+
+    private static purgeOldArchives() {
+        try {
+            const files = fs.readdirSync(this.LOG_DIR);
+            const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+
+            for (const file of files) {
+                if (!file.startsWith("product-") || !file.endsWith(".log")) continue;
+                const filePath = path.join(this.LOG_DIR, file);
+                const stat = fs.statSync(filePath);
+                if (stat.mtimeMs < cutoff) {
+                    fs.unlinkSync(filePath);
+                    logger.info({ file }, "🗑 Deleted old product log archive");
+                }
+            }
+        } catch (e: any) {
+            logger.error({ err: e.message }, "❌ Failed to purge old product log archives");
         }
     }
 
@@ -64,6 +125,14 @@ export class LogCleanupService {
 
 export function startLogCleanupLoop() {
     logger.info("🧹 Starting log cleanup loop (Monthly on the 1st)...");
+    logBusinessEvent({
+        event: "logs.product.rotation_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "log-cleanup-service",
+        operation: "startLogCleanupLoop",
+    });
     // Check every minute
     setInterval(() => LogCleanupService.checkAndTrigger(), 60 * 1000);
 }
