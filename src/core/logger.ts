@@ -1,5 +1,7 @@
 import pino from "pino";
 import type { LoggerOptions } from "pino";
+import fs from "fs";
+import path from "path";
 
 /**
  * PlayPhoto Security Logger Configuration.
@@ -45,15 +47,44 @@ const pinoOptions: LoggerOptions = {
     }
 };
 
-if (process.env.NODE_ENV !== "production") {
+const isProd = process.env.NODE_ENV === "production";
+let logger: pino.Logger;
+
+if (isProd) {
+    // In production, we write to both stdout and a persistent file
+    const logDir = "/app/logs";
+    const logPath = path.join(logDir, "product.log");
+
+    if (!fs.existsSync(logDir)) {
+        try {
+            fs.mkdirSync(logDir, { recursive: true });
+        } catch (e) {
+            console.error("❌ Failed to create log directory:", e);
+        }
+    }
+
+    const streams = [
+        { stream: process.stdout },
+        { 
+            stream: pino.destination({
+                dest: logPath,
+                minLength: 0,
+                sync: true, // Ensure logs are written immediately to avoid loss
+                append: true
+            })
+        },
+    ];
+
+    logger = pino(pinoOptions, pino.multistream(streams));
+} else {
+    // In development, use pino-pretty for better readability
     pinoOptions.transport = {
         target: 'pino-pretty',
         options: {
             colorize: true
         }
     };
+    logger = pino(pinoOptions);
 }
-
-const logger = pino(pinoOptions);
 
 export default logger;
