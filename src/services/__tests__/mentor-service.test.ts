@@ -152,6 +152,26 @@ describe('MentorService', () => {
     });
 
     describe('notifyWaitlist', () => {
+        it('should notify candidate with materialsSent=true even without hrDecision', async () => {
+            vi.mocked(candidateRepository.findByStatus).mockResolvedValue([
+                {
+                    id: 'cand-legacy',
+                    status: CandidateStatus.WAITLIST,
+                    currentStep: FunnelStep.TRAINING,
+                    isWaitlisted: true,
+                    hrDecision: null,
+                    materialsSent: true,
+                    user: { telegramId: 333n }
+                } as any
+            ]);
+
+            const mockApi = { sendMessage: vi.fn().mockResolvedValue({}) };
+            const count = await mentorService.notifyWaitlist(mockApi);
+
+            expect(count).toBe(1);
+            expect(mockApi.sendMessage).toHaveBeenCalledWith(333, expect.any(String), expect.any(Object));
+        });
+
         it('should skip candidates with currentStep != TRAINING', async () => {
             vi.mocked(candidateRepository.findByStatus).mockResolvedValue([
                 {
