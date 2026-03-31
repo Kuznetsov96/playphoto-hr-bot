@@ -148,8 +148,10 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", `reschedule_booking_${result.slot.id}`).row()
-            .text("❌ Скасувати участь", `cancel_booking_${result.slot.id}`).row()
-            .text("👩‍💼 Написати HR", "contact_hr");
+            .text("❌ Скасувати участь", `cancel_booking_${result.slot.id}`);
+        if ((result as any).candidate?.gender !== "male") {
+            kb.row().text("👩‍💼 Написати HR", "contact_hr");
+        }
 
         await cleanupMessages(ctx);
         const confirmationMsg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
@@ -312,9 +314,11 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
         );
 
         const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
-        const kb = new InlineKeyboard()
-            .text("🔔 Повідомити мене", "no_slots_fit")
-            .text("👩‍💼 Написати HR", "contact_hr");
+        const kb = new InlineKeyboard().text("🔔 Повідомити мене", "no_slots_fit");
+        const candidate = await candidateRepository.findByTelegramId(telegramId);
+        if (candidate?.gender !== "male") {
+            kb.text("👩‍💼 Написати HR", "contact_hr");
+        }
 
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
@@ -322,7 +326,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
         // Notify HRs that someone is stuck
         const { HR_IDS } = await import("../config.js");
         if (HR_IDS && HR_IDS.length > 0) {
-            const cand = await candidateRepository.findByTelegramId(telegramId);
+            const cand = candidate || await candidateRepository.findByTelegramId(telegramId);
             const name = cand?.fullName || ctx.from.first_name || "Candidate";
             const alertMsg = `📥 <b>INBOX: No interview slots available!</b>\n\n` +
                 `👤 <b>${name}</b>\n\n` +

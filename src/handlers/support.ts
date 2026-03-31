@@ -19,6 +19,10 @@ supportHandlers.callbackQuery("contact_hr", async (ctx) => {
         return ctx.answerCallbackQuery("Error: Candidate profile not found.");
     }
 
+    if (candidate.gender === "male") {
+        return ctx.answerCallbackQuery("Ця опція недоступна для цього профілю.");
+    }
+
     ctx.session.step = "support_chat";
     await ctx.answerCallbackQuery();
 
