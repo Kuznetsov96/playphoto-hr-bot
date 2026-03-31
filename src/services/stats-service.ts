@@ -45,7 +45,7 @@ export const statsService = {
         const total = stats['TOTAL'] ?? 0;
 
         const screening = stats['SCREENING'] ?? 0;
-        const waitlist = stats['WAITLIST'] ?? 0;
+        const waitlist = (stats['WAITLIST'] ?? 0) + (stats['WAITLIST_HR'] ?? 0) + (stats['WAITLIST_MENTOR'] ?? 0);
         const manualReview = stats['MANUAL_REVIEW'] ?? 0;
         const interviewScheduled = stats['INTERVIEW_SCHEDULED'] ?? 0;
         const interviewCompleted = stats['INTERVIEW_COMPLETED'] ?? 0;

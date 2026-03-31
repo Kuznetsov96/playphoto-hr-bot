@@ -67,7 +67,9 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             break;
         }
 
-        case CandidateStatus.WAITLIST: {
+        case CandidateStatus.WAITLIST:
+        case CandidateStatus.WAITLIST_HR:
+        case CandidateStatus.WAITLIST_MENTOR: {
             const { FunnelStep } = await import("@prisma/client");
             const isWaitingForSlots = candidate.currentStep === FunnelStep.INTERVIEW || candidate.currentStep === FunnelStep.TRAINING;
             const typeText = candidate.currentStep === FunnelStep.TRAINING ? "знайомства та навчання" : "співбесіди";

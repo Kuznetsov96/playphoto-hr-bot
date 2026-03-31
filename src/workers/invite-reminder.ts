@@ -41,10 +41,10 @@ export async function processInviteReminders(bot: any) {
 
             // Check if older than 48 hours -> Reset
             if (invitedTime <= resetThreshold.getTime()) {
-                logger.info({ candId: cand.id }, "🔄 [WORKER] 48h passed. Resetting candidate to WAITLIST.");
+                logger.info({ candId: cand.id }, "🔄 [WORKER] 48h passed. Resetting candidate to WAITLIST_HR.");
 
                 await candidateRepository.update(cand.id, {
-                    status: CandidateStatus.WAITLIST,
+                    status: CandidateStatus.WAITLIST_HR,
                     isWaitlisted: true,
                     notificationSent: false, // Reset to allow future invites
                     interviewInvitedAt: null, // Reset time

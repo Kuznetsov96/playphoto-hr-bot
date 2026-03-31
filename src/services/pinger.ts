@@ -13,6 +13,8 @@ import logger from "../core/logger.js";
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
     CandidateStatus.SCREENING,
     CandidateStatus.WAITLIST,
+    CandidateStatus.WAITLIST_HR,
+    CandidateStatus.WAITLIST_MENTOR,
     CandidateStatus.INTERVIEW_SCHEDULED,
     CandidateStatus.INTERVIEW_COMPLETED,
     CandidateStatus.DECISION_PENDING,

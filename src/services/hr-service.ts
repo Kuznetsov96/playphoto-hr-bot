@@ -78,7 +78,7 @@ export const hrService = {
             candidateRepository.countUnreadByScope("HR"),
             prisma.candidate.count({
                 where: {
-                    status: CandidateStatus.WAITLIST,
+                    status: { in: [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST] },
                     isWaitlisted: true,
                     currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] }
                 }
@@ -381,7 +381,7 @@ export const hrService = {
                 user: { botBlockedAt: null },
                 OR: [
                     { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
-                    { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
+                    { status: { in: [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST] }, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
                 ],
                 ...(locationId ? { locationId } : {})
             },
@@ -392,7 +392,7 @@ export const hrService = {
         });
 
         const filtered = candidates.filter(c => {
-            if (c.status === CandidateStatus.WAITLIST) return true;
+            if (c.status === CandidateStatus.WAITLIST_HR || c.status === CandidateStatus.WAITLIST) return true;
             return includeNotified || !c.notificationSent;
         });
 
@@ -407,11 +407,13 @@ export const hrService = {
     },
 
     async getWaitlistBroadcastCandidates(locId: string) {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, { locationId: locId });
+        return candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], { locationId: locId });
     },
 
     async getWaitlistCandidatesByLocation(locId: string) {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, { locationId: locId });
+        return candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], { locationId: locId });
     },
 
     async getNewCandidates(take = 10) {
@@ -431,7 +433,8 @@ export const hrService = {
     },
 
     async getWaitlistCandidates() {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, {
+        return candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], {
             isWaitlisted: true,
             currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] }
         });
@@ -480,7 +483,8 @@ export const hrService = {
 
     // Тип 1: Очікують місця (повна команда при первинному відборі)
     async getWaitlistLocationFull() {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, {
+        return candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], {
             isWaitlisted: true,
             currentStep: FunnelStep.INITIAL_TEST
         });
@@ -488,7 +492,8 @@ export const hrService = {
 
     // Тип 2: Отримали запрошення, але не знайшли зручного слоту
     async getWaitlistNoSlot() {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, {
+        return candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], {
             isWaitlisted: true,
             currentStep: FunnelStep.INTERVIEW
         });
@@ -513,12 +518,12 @@ export const hrService = {
                     user: { botBlockedAt: null },
                     OR: [
                         { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
-                        { status: CandidateStatus.WAITLIST, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
+                        { status: { in: [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST] }, isWaitlisted: true, currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] } }
                     ]
                 }
             });
             // ONLY count those who haven't been notified yet (or waitlist)
-            const freshCount = candidates.filter(c => c.status === CandidateStatus.WAITLIST || !c.notificationSent).length;
+            const freshCount = candidates.filter(c => c.status === CandidateStatus.WAITLIST_HR || c.status === CandidateStatus.WAITLIST || !c.notificationSent).length;
 
             // Show location ONLY if it has an active need (vacancies)
             if (loc.neededCount > 0) {
@@ -544,8 +549,11 @@ export const hrService = {
     },
 
     async hasCandidatesWaitlisted(locId: string) {
-        const count = await candidateRepository.countByLocationAndStatus(locId, CandidateStatus.WAITLIST);
-        return count > 0;
+        const [countOld, countNew] = await Promise.all([
+            candidateRepository.countByLocationAndStatus(locId, CandidateStatus.WAITLIST),
+            candidateRepository.countByLocationAndStatus(locId, CandidateStatus.WAITLIST_HR)
+        ]);
+        return (countOld + countNew) > 0;
     },
 
     async getOccupiedDates() {
@@ -744,9 +752,9 @@ export const hrService = {
             await bookingService.cancelInterviewSlot(cand.interviewSlotId);
         }
 
-        // 2. Set status back to WAITLIST so they can book again
+        // 2. Set status back to WAITLIST_HR so they can book again
         await candidateRepository.update(candId, {
-            status: CandidateStatus.WAITLIST,
+            status: CandidateStatus.WAITLIST_HR,
             hrDecision: null,
             notificationSent: false,
             currentStep: FunnelStep.INTERVIEW
@@ -886,7 +894,8 @@ export const hrService = {
     },
 
     async notifyWaitlist(api: any, city?: string) {
-        const candidates = await candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, {
+        const candidates = await candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], {
             isWaitlisted: true,
             currentStep: FunnelStep.INTERVIEW,
             ...(city ? { city } : {})

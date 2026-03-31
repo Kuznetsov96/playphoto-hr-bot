@@ -57,7 +57,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                 logger.info({ candidateId: c.id }, "🎈 Candidate turned 17! Activating...");
 
                 await candidateRepository.update(c.id, {
-                    status: "WAITLIST",
+                    status: "WAITLIST_HR",
                     hrDecision: null,
                     isWaitlisted: true,
                     currentStep: "INTERVIEW",

@@ -327,7 +327,7 @@ export class CandidateRepository {
             where.city = city;
         }
         const statuses = [
-            'SCREENING', 'WAITLIST', 'MANUAL_REVIEW', 'INTERVIEW_SCHEDULED',
+            'SCREENING', 'WAITLIST', 'WAITLIST_HR', 'WAITLIST_MENTOR', 'MANUAL_REVIEW', 'INTERVIEW_SCHEDULED',
             'INTERVIEW_COMPLETED', 'DECISION_PENDING', 'ACCEPTED',
             'TRAINING_SCHEDULED', 'TRAINING_COMPLETED', 'OFFLINE_STAGING',
             'AWAITING_FIRST_SHIFT', 'HIRED', 'REJECTED'
