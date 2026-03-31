@@ -8,9 +8,28 @@ import { staffService } from "../services/index.js";
 import { taskService } from "../../../services/task-service.js";
 import { truncateText } from "../../../utils/task-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
+import { escapeHtml } from "../../../handlers/admin/utils.js";
 import logger from "../../../core/logger.js";
 
 export const staffHandlers = new Composer<MyContext>();
+
+function formatShiftColleague(fullName: string, username?: string | null, telegramId?: bigint | null): string {
+    const parts = fullName.trim().split(/\s+/);
+    const surname = parts[0] || "Колега";
+    const firstInitial = parts[1]?.charAt(0) || "";
+    const shortName = firstInitial ? `${surname} ${firstInitial}.` : surname;
+    const escapedLabel = escapeHtml(shortName);
+
+    if (username && username.length < 32 && !username.includes('/') && !username.includes('\\')) {
+        return `<a href="https://t.me/${username}">${escapedLabel}</a>`;
+    }
+
+    if (telegramId) {
+        return `<a href="tg://user?id=${telegramId.toString()}">${escapedLabel}</a>`;
+    }
+
+    return escapedLabel;
+}
 
 /**
  * Entry point for active photographers (Main Hub)
@@ -122,11 +141,26 @@ export async function showStaffSchedule(ctx: MyContext) {
     }
 
     let text = "📅 <b>Твій графік на найближчий час:</b>\n\n";
+    const shiftsToQuery = shifts.map((s) => ({ locationId: s.locationId, date: s.date }));
+    const allColleagues = await workShiftRepository.findColleaguesForShifts(user.staffProfile.id, shiftsToQuery);
 
     for (const s of shifts) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
         text += `▫️ <code>${dateStr}</code> — ${s.location.name}`;
+
+        const colleagues = allColleagues.filter(
+            (c) => c.locationId === s.locationId && c.date.getTime() === s.date.getTime()
+        );
+
+        if (colleagues.length > 0) {
+            const names = colleagues.map((c) => formatShiftColleague(
+                c.staff.fullName,
+                c.staff.user?.username,
+                c.staff.user?.telegramId ?? null
+            ));
+            text += ` (${names.join(", ")})`;
+        }
         text += `\n`;
     }
 
