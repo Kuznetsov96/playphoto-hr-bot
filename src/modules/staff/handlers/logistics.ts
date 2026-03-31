@@ -4,6 +4,7 @@ import prisma from "../../../db/core.js";
 import { LOGISTICS_TEXTS_STAFF, LOGISTICS_TEXTS_ADMIN } from "../../../constants/logistics-constants.js";
 import { TEAM_CHATS } from "../../../config.js";
 import logger from "../../../core/logger.js";
+import { audit } from "../../../core/audit-logger.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
@@ -37,6 +38,8 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             await ctx.answerCallbackQuery("Не вдалося визначити користувача.");
             return;
         }
+
+        audit({ event: "parcel_accept", result: "started", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
         const user = await prisma.user.findUnique({
             where: { telegramId: BigInt(telegramId) },
@@ -90,7 +93,10 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
         await editOrReplyText(ctx, askText, kb);
         await ctx.answerCallbackQuery("Прийнято.");
-    } catch (err) {
+
+        audit({ event: "parcel_accept", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, actorId: user.staffProfile.id });
+    } catch (err: any) {
+        audit({ event: "parcel_accept", result: "failed", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: ctx.match?.[1], updateId: ctx.update.update_id, error: err.message });
         logger.error({ err, parcelId: ctx.match?.[1], userId: ctx.from?.id }, "❌ [LOGISTICS] parcel_accept handler failed");
         await ctx.answerCallbackQuery({ text: "Не вдалося обробити кнопку. Спробуй ще раз.", show_alert: true }).catch(() => { });
     }
@@ -105,7 +111,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
     const newRejectionCount = parcel.rejectionCount + 1;
     await prisma.parcel.update({
         where: { id: parcelId },
-        data: { 
+        data: {
             rejectionCount: newRejectionCount,
             lastRejectionAt: new Date()
         }
@@ -115,6 +121,8 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
         const { logisticsService } = await import("../../../services/logistics-service.js");
         await logisticsService.notifySupport(parcelId, 'REJECTED');
     }
+
+    audit({ event: "parcel_reject", result: "success", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { rejectionCount: newRejectionCount } });
 
     const text = `Окей, дякую! 📦\nЦя посилка залишається у списку локації, її зможе забрати інша фотографиня. ✨`;
     await editOrReplyText(ctx, text);
@@ -141,8 +149,10 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
         await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
     }
 
+    audit({ event: "parcel_phone_confirm", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+
     const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
-    
+
     await editOrReplyText(
         ctx,
         "Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨",
@@ -155,6 +165,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
 staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     ctx.session.step = `awaiting_np_phone_${parcelId}`;
+    audit({ event: "parcel_phone_change", result: "started", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
     await editOrReplyText(ctx, "Будь ласка, введи номер телефону для оформлення доручення (у форматі 380...):");
     await ctx.answerCallbackQuery();
 });
@@ -212,8 +223,9 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
     if (step.startsWith('awaiting_parcel_photo_')) {
         const parcelId = step.replace('awaiting_parcel_photo_', '');
         const photo = ctx.message?.photo?.[ctx.message.photo.length - 1];
-        
+
         if (photo) {
+            audit({ event: "parcel_photo_upload", result: "started", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
             try {
                 await prisma.parcel.update({
                     where: { id: parcelId },
@@ -236,6 +248,8 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
 
                 ctx.session.step = 'idle';
                 await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
+
+                audit({ event: "parcel_photo_upload", result: "success", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
                 const kb = new InlineKeyboard()
                     .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
@@ -271,7 +285,8 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                         throw e;
                     }
                 }
-            } catch (err) {
+            } catch (err: any) {
+                audit({ event: "parcel_photo_upload", result: "failed", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, error: err.message });
                 logger.error({ err, parcelId, userId: ctx.from?.id }, "❌ [LOGISTICS] Photo upload handler failed");
                 throw err;
             }

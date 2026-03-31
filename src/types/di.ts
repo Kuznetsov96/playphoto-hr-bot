@@ -20,11 +20,13 @@ import type { candidateService } from '../modules/candidate/services/index.js';
 import type { broadcastService } from '../services/broadcast.js';
 import type { hrService } from '../services/hr-service.js';
 import type { mentorService } from '../services/mentor-service.js';
+import type { audit } from '../core/audit-logger.js';
 
 export interface Cradle {
     db: typeof prisma;
     logger: typeof logger;
     redis: typeof redis;
+    audit: typeof audit;
 
     // Repositories
     staffRepository: typeof staffRepository;
