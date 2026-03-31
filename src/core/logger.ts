@@ -33,39 +33,49 @@ const pinoOptions: LoggerOptions = {
     }
 };
 
-const streams: any[] = [{ stream: process.stdout }];
+const isProd = process.env.NODE_ENV === "production";
+const logDir = "/app/logs";
 
-// Persistence: write to /app/logs in production/docker
-if (process.env.NODE_ENV === "production" || fs.existsSync("/app/logs")) {
-    const logPath = "/app/logs/product.log";
-    try {
-        // Ensure directory exists (though volume should handle it)
-        const dir = path.dirname(logPath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+let logger: pino.Logger;
 
-        streams.push({ 
-            stream: pino.destination({ 
-                dest: logPath, 
-                minLength: 0, 
-                sync: false,
-                mkdir: true 
-            }) 
-        });
-        console.log(`📡 Logger: Writing to ${logPath}`);
-    } catch (e) {
-        console.error("❌ Failed to initialize file logger:", e);
+// Check if we are in an environment that should write to a file (Prod or Docker)
+const hasLogVolume = fs.existsSync(logDir);
+
+if (isProd || hasLogVolume) {
+    // Production style: multi-stream to stdout and file
+    const logPath = path.join(logDir, "product.log");
+    
+    if (!hasLogVolume) {
+        try {
+            fs.mkdirSync(logDir, { recursive: true });
+        } catch (e) {
+            console.error("❌ Failed to create log directory:", e);
+        }
     }
-}
 
-if (process.env.NODE_ENV !== "production" && !fs.existsSync("/app/logs")) {
+    const streams = [
+        { stream: process.stdout },
+        { 
+            stream: pino.destination({
+                dest: logPath,
+                minLength: 0,
+                sync: true, // Use sync: true for production stability or if required for critical logs
+                append: true,
+                mkdir: true
+            })
+        },
+    ];
+
+    logger = pino(pinoOptions, pino.multistream(streams));
+} else {
+    // Development style: pino-pretty
     pinoOptions.transport = {
         target: 'pino-pretty',
         options: {
             colorize: true
         }
     };
+    logger = pino(pinoOptions);
 }
-
-const logger = pino(pinoOptions, pino.multistream(streams));
 
 export default logger;

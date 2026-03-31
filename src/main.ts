@@ -17,6 +17,7 @@ import { startDailyReportLoop } from "./services/finance-report.js";
 import { startPingerLoop } from "./services/pinger.js";
 import { startMonthlyPreferencesLoop } from "./services/monthly-preferences-trigger.js";
 import { startLogisticsLoop } from "./services/logistics-worker.js";
+import { startLogCleanupLoop } from "./services/log-cleanup-service.js";
 import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
 import { configureContainer } from "./core/container.js";
@@ -92,6 +93,7 @@ async function bootstrap() {
         startPingerLoop(bot);
         startMonthlyPreferencesLoop(bot);
         startLogisticsLoop(bot as any);
+        startLogCleanupLoop();
         remindersService.startRemindersLoop(bot.api);
         
         webhookService.listen(bot.api);
