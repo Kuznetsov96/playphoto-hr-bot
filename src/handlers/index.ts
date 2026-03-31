@@ -50,7 +50,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         data.startsWith("tas_") || data.startsWith("task_") || data.startsWith("b_") || data.startsWith("ticket_") ||
         data.startsWith("broadcast_") || data.startsWith("pref_") || data.startsWith("onb_") ||
         data.startsWith("gender_") || data.startsWith("city_") || data.startsWith("loc_") || data.startsWith("src_") ||
-        data.startsWith("close_topic_") || data.startsWith("close_ticket_") || data.startsWith("contact_hr") ||
+        data.startsWith("close_topic_") || data.startsWith("close_ticket_") || data.startsWith("contact_hr") || data.startsWith("contact_mentor") ||
         data.startsWith("end_support_chat") || data.startsWith("view_staff_") ||
         data.startsWith("view_candidate_") || data.startsWith("approve_") || data.startsWith("reject_") ||
         data.startsWith("parcel_") ||

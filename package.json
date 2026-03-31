@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --ignore db/ --exec tsx src/main.ts",
+    "prisma:generate": "prisma generate",
+    "postinstall": "npm run prisma:generate",
+    "prebuild": "npm run prisma:generate",
+    "predev": "npm run prisma:generate",
+    "dev": "nodemon --watch src --watch prisma/schema.prisma --ignore db/ --exec \"tsx src/main.ts\"",
     "build": "tsc",
     "start": "npx prisma migrate deploy && node dist/main.js",
     "test": "vitest run",

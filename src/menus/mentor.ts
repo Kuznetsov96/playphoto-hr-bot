@@ -24,10 +24,17 @@ const formatDate = (date: Date) => {
 const getMentorCandidateProfileText = async (ctx: MyContext, candId: string) => {
     const details = await mentorService.getCandidateDetails(candId);
     if (!details || !details.cand) return "Candidate details not found. Please refresh /mentor.";
+    const cand = details.cand as any;
+    const isMentorOnboarding = cand.status === "HIRED" && cand.isMentorLocked;
+    const historySince = isMentorOnboarding
+        ? (cand.firstShiftDate || cand.statusChangedAt || null)
+        : null;
 
-    return await formatCandidateProfile(ctx as any, details.cand as any, {
+    return await formatCandidateProfile(ctx as any, cand, {
         includeHistory: true,
-        viewerRole: "MENTOR"
+        viewerRole: "MENTOR",
+        historyScope: "MENTOR",
+        historySince
     });
 };
 

@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { NOVA_POSHTA_API_KEY } from '../config.js';
+import { NOVA_POSHTA_API_KEY, NP_RECIPIENT_PHONE } from '../config.js';
 import logger from '../core/logger.js';
 
 export interface NPTrackingResult {
@@ -127,14 +127,36 @@ export class NovaPoshtaService {
             methodProperties.RecipientContactName = recipientName;
         }
 
-        const result = await this.callApi('AdditionalServiceGeneral', 'save', methodProperties);
-
-        if (!result) {
-            logger.warn({ ttn, recipientPhone, recipientName }, '📦 NP changeEW API failed. Check API key privileges or try through the NP mobile app.');
-            return false;
+        const primaryResult = await this.callApi('AdditionalServiceGeneral', 'save', methodProperties);
+        if (primaryResult) {
+            return true;
         }
 
-        return true;
+        const customerPhone = NP_RECIPIENT_PHONE?.replace(/\D/g, '') || '';
+        if (customerPhone) {
+            const fallbackResult = await this.callApi('AdditionalService', 'save', {
+                OrderType: 'orderTrustee',
+                IntDocNumber: ttn,
+                CustomerPhone: customerPhone,
+                TrusteePhone: recipientPhone
+            });
+
+            if (fallbackResult) {
+                logger.info({ ttn, recipientPhone }, '📦 NP trustee created via orderTrustee fallback');
+                return true;
+            }
+        }
+
+        logger.warn(
+            {
+                ttn,
+                recipientPhone,
+                recipientName,
+                fallbackTried: Boolean(customerPhone)
+            },
+            '📦 NP trustee creation failed. Check API privileges or try through the NP mobile app.'
+        );
+        return false;
     }
 }
 

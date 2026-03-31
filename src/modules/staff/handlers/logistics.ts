@@ -71,7 +71,8 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             where: { id: parcelId },
             data: {
                 responsibleStaffId: user.staffProfile.id,
-                status: 'PICKUP_IN_PROGRESS'
+                status: 'PICKUP_IN_PROGRESS',
+                acceptedAt: new Date()
             }
         });
 
@@ -146,7 +147,27 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
         const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-        await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
+        const trusteeCreated = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
+        if (!trusteeCreated) {
+            audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+
+            const retryKb = new InlineKeyboard()
+                .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
+                .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+
+            await editOrReplyText(
+                ctx,
+                "Не вдалося оформити доручення в Новій Пошті. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
+                retryKb
+            );
+            await ctx.answerCallbackQuery("Доручення не створено.");
+            return;
+        }
+
+        await prisma.parcel.update({
+            where: { id: parcelId },
+            data: { recipientPhone: phoneToUse }
+        });
     }
 
     audit({ event: "parcel_phone_confirm", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
@@ -210,7 +231,24 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
             if (parcel) {
                 const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-                await novaPoshtaService.createTrustee(parcel.ttn, phone);
+                const trusteeCreated = await novaPoshtaService.createTrustee(parcel.ttn, phone);
+                if (!trusteeCreated) {
+                    const retryKb = new InlineKeyboard()
+                        .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
+                        .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+
+                    await ctx.reply(
+                        "Номер збережено, але доручення в Новій Пошті не створилося. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
+                        { reply_markup: retryKb }
+                    );
+                    audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+                    return;
+                }
+
+                await prisma.parcel.update({
+                    where: { id: parcelId },
+                    data: { recipientPhone: phone }
+                });
             }
 
             await ctx.reply("Номер збережено і API-запит відправлено! Натисни кнопку нижче, як забереш посилку та зробиш фото. ✨", { reply_markup: kb });
