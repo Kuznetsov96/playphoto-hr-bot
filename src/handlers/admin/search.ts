@@ -130,7 +130,7 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
 
             // 2. Deliver to User — reply button only for candidates
             const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
-            if (candidate) {
+            if (candidate && candidate.gender !== "male") {
                 msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
             }
             await ctx.api.sendMessage(Number(targetTgId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${messageText}`, msgOptions);
@@ -291,7 +291,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
 
     try {
         const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
-        if (candidate) {
+        if (candidate && candidate.gender !== "male") {
             msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
         }
         await ctx.api.sendMessage(Number(user.telegramId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(messageTextStr)}`, msgOptions);

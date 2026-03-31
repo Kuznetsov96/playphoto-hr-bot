@@ -30,6 +30,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
     const status = candidate.status;
     let text = "";
     const kb = new InlineKeyboard();
+    const canContactStaff = candidate.gender !== "male";
 
     const fullName = candidate.fullName || ctx.from?.first_name || "Кандидатко";
     const firstName = extractFirstName(fullName);
@@ -58,7 +59,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
             if (isFinished) {
                 text = CANDIDATE_TEXTS["candidate-success-screening"];
-                kb.text("👩‍💼 Написати HR", "contact_hr");
+                if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
             } else {
                 text = CANDIDATE_TEXTS["candidate-screening-unfinished"](firstName);
                 kb.text("📝 Продовжити анкету", "resume_screening").row();
@@ -79,19 +80,19 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 : CANDIDATE_TEXTS["candidate-success-waitlist"];
 
             if (isWaitingForSlots) kb.text("🗓️ Перевірити вільний час", candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
-            kb.text("👩‍💼 Написати HR", "contact_hr");
+            if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
             break;
         }
 
         case CandidateStatus.MANUAL_REVIEW:
             text = CANDIDATE_TEXTS["candidate-success-manual-review"];
-            kb.text("👩‍💼 Написати HR", "contact_hr");
+            if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
             break;
 
         case CandidateStatus.INTERVIEW_COMPLETED:
         case CandidateStatus.DECISION_PENDING:
             text = `🌸 <b>${firstName}</b>, приємно було познайомитися! 😊\n\nТвоя анкета на розгляді у HR. Очікуй на відповідь найближчим часом. ✨` + jobDetails;
-            kb.text("👩‍💼 Написати HR", "contact_hr");
+            if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
             break;
 
         case CandidateStatus.INTERVIEW_SCHEDULED: {
@@ -102,8 +103,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
             } else text = `🌸 <b>${firstName}</b>, ти записана на співбесіду!`;
             kb.text("🗓️ Перенести", `reschedule_booking_${candidate.interviewSlotId || 'none'}`).row()
-                .text("❌ Скасувати", `cancel_booking_${candidate.interviewSlotId || 'none'}`).row()
-                .text("👩‍💼 Написати HR", "contact_hr");
+                .text("❌ Скасувати", `cancel_booking_${candidate.interviewSlotId || 'none'}`);
+            if (canContactStaff) kb.row().text("👩‍💼 Написати HR", "contact_hr");
             break;
         }
 

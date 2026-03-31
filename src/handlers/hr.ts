@@ -100,13 +100,13 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             const name = cand?.fullName?.split(' ')[0] || "Candidate";
 
             const { InlineKeyboard } = await import("grammy");
-            const replyKb = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+            const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
+            if (cand?.gender !== "male") {
+                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+            }
 
             // Candidate message stays in Ukrainian
-            await ctx.api.sendMessage(Number(targetId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${text}`, { 
-                parse_mode: "HTML",
-                reply_markup: replyKb
-            });
+            await ctx.api.sendMessage(Number(targetId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${text}`, msgOptions);
 
             // Log to history and reset unread ONLY after success
             if (cand) {
