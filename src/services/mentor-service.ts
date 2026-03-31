@@ -212,9 +212,10 @@ export class MentorService {
     async notifyWaitlist(api: any) {
         const all = await candidateRepository.findByStatus("WAITLIST", true);
 
-        // Only notify mentor-waitlist candidates (passed HR, stuck on slot booking)
+        // Only notify mentor-waitlist candidates (passed HR or already in mentor flow)
         const filtered = all.filter(c =>
-            c.currentStep === FunnelStep.TRAINING && c.hrDecision === "ACCEPTED"
+            c.currentStep === FunnelStep.TRAINING &&
+            (c.hrDecision === "ACCEPTED" || c.materialsSent)
         );
 
         let successCount = 0;
