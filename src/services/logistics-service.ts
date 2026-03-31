@@ -683,6 +683,7 @@ export class LogisticsService {
                     status: 'ARRIVED',
                     responsibleStaffId: null,
                     acceptedAt: null,
+                    recipientPhone: null,
                     shiftEndReminderSentAt: null,
                     photoReminderSentAt: null,
                     staleAlertSentAt: null,

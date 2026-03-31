@@ -98,11 +98,24 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             const { candidateRepository } = await import("../repositories/candidate-repository.js");
             const cand = await candidateRepository.findByTelegramId(Number(targetId));
             const name = cand?.fullName?.split(' ')[0] || "Candidate";
+            const { MENTOR_IDS } = await import("../config.js");
+            const isMentor = MENTOR_IDS.includes(ctx.from!.id);
+            const isMentorOwnedStage = !!cand && [
+                "ACCEPTED",
+                "WAITLIST_MENTOR",
+                "DISCOVERY_SCHEDULED",
+                "DISCOVERY_COMPLETED",
+                "TRAINING_SCHEDULED",
+                "TRAINING_COMPLETED",
+                "AWAITING_FIRST_SHIFT",
+                "HIRED"
+            ].includes(cand.status);
+            const useMentorScope = isMentor && isMentorOwnedStage;
 
             const { InlineKeyboard } = await import("grammy");
             const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
             if (cand?.gender !== "male") {
-                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", useMentorScope ? "contact_mentor" : "contact_hr");
             }
 
             // Candidate message stays in Ukrainian
@@ -111,13 +124,11 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             // Log to history and reset unread ONLY after success
             if (cand) {
                 const { messageRepository } = await import("../repositories/message-repository.js");
-                const { MENTOR_IDS } = await import("../config.js");
-                const isMentor = MENTOR_IDS.includes(ctx.from!.id);
-                const scope = isMentor ? "MENTOR" : "HR";
+                const scope = useMentorScope ? "MENTOR" : "HR";
 
                 await messageRepository.create({
                     candidate: { connect: { id: cand.id } },
-                    sender: isMentor ? "MENTOR" : "HR",
+                    sender: useMentorScope ? "MENTOR" : "HR",
                     scope,
                     content: text
                 });

@@ -60,7 +60,7 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
                 const discoveryKb = new InlineKeyboard()
                     .text("🗓️ Перенести", `reschedule_training_${slot.id}`).row()
                     .text("❌ Скасувати запис", `cancel_training_${slot.id}`).row()
-                    .text("👩‍🏫 Написати наставниці", "contact_hr");
+                    .text("👩‍🏫 Написати наставниці", "contact_mentor");
                 await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](date!, text), { parse_mode: "HTML", reply_markup: discoveryKb });
             } else {
                 await bookingService.bookTrainingSlot(tid, slot.id);
@@ -68,7 +68,7 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
                 const trainingKb = new InlineKeyboard()
                     .text("🗓️ Перенести", `reschedule_training_${slot.id}`).row()
                     .text("❌ Скасувати запис", `cancel_training_${slot.id}`).row()
-                    .text("👩‍🏫 Написати наставниці", "contact_hr");
+                    .text("👩‍🏫 Написати наставниці", "contact_mentor");
                 await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["training-manual-invite"](date!, text, channelLink, PHOTOGRAPHER_GUIDE_LINK), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: trainingKb });
             }
 

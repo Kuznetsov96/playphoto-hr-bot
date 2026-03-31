@@ -117,7 +117,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
                 text += "\n\n⏳ Наставниця скоро надішле тобі матеріали для підготовки.";
             }
-            kb.text("👩‍🏫 Написати наставниці", "contact_hr");
+            kb.text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
         }
 
@@ -134,14 +134,14 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
             kb.text("🗓️ Перенести", `reschedule_training_${(status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || 'none'}`).row()
                 .text("❌ Скасувати", `cancel_training_${(status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || 'none'}`).row()
-                .text("👩‍🏫 Написати наставниці", "contact_hr");
+                .text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
         }
 
         case CandidateStatus.DISCOVERY_COMPLETED:
             text = CANDIDATE_TEXTS["candidate-discovery-completed"](firstName) + jobDetails;
             text += "\n\n⏳ Наступний крок готує наставниця. Ми скоро надішлемо тобі доступні варіанти навчання.";
-            kb.text("👩‍🏫 Написати наставниці", "contact_hr");
+            kb.text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
 
         case CandidateStatus.TRAINING_COMPLETED:
@@ -154,13 +154,13 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["candidate-training-completed-quiz"](firstName) + jobDetails;
                 kb.text("🚀 Перейти до тесту", "start_quiz").row();
             }
-            kb.text("👩‍🏫 Написати наставниці", "contact_hr");
+            kb.text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
 
         case CandidateStatus.KNOWLEDGE_TEST:
             text = CANDIDATE_TEXTS["candidate-training-completed-quiz"](firstName) + jobDetails;
             kb.text("🚀 Перейти до тесту", "start_quiz").row();
-            kb.text("👩‍🏫 Написати наставниці", "contact_hr");
+            kb.text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
 
         case CandidateStatus.READY_FOR_HIRE: {

@@ -476,7 +476,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на коротку зустріч-знайомство. ✨`;
         const kb = new InlineKeyboard()
             .text("🔔 Повідомити мене", "training_no_slots_fit")
-            .text("👩‍🏫 Написати наставниці", "contact_hr");
+            .text("👩‍🏫 Написати наставниці", "contact_mentor");
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
 
@@ -590,7 +590,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", `reschedule_training_${slotId}`).row()
             .text("❌ Скасувати участь", `cancel_training_${slotId}`).row()
-            .text("👩‍🏫 Написати наставниці", "contact_hr");
+            .text("👩‍🏫 Написати наставниці", "contact_mentor");
 
         await cleanupMessages(ctx);
         const msg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
@@ -792,7 +792,7 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
             }
 
             return ctx.editMessageText("Зараз вільних слотів немає. Наставниця скоро запропонує тобі зручний час! 🌸✨", {
-                reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_hr")
+                reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_mentor")
             });
         }
 
