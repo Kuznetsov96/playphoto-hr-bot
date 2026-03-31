@@ -123,4 +123,5 @@ export interface SessionData {
 
 export type MyContext = Context & SessionFlavor<SessionData> & ConversationFlavor<Context & SessionFlavor<SessionData>> & MenuFlavor & {
     di: any;
+    correlationId?: string;
 };

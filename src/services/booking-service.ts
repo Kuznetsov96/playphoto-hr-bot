@@ -4,6 +4,7 @@ import { trainingRepository } from "../repositories/training-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { googleCalendar } from "./google-calendar.js";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 function getAge(birthDate: Date): number {
     const today = new Date();
@@ -42,6 +43,21 @@ export class BookingService {
             // If candidate already has a booked slot, cancel it first
             if (candidate.interviewSlotId) {
                 logger.info({ candidateId: candidate.id, candidateName: candidate.fullName, oldSlotId: candidate.interviewSlotId, newSlotId: slotId }, "🔄 Interview reschedule: unbooking old slot");
+                logBusinessEvent({
+                    event: "candidate.interview.reschedule.started",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "INTERVIEW",
+                    result: "pending",
+                    module: "booking-service",
+                    operation: "bookInterviewSlot",
+                    safeContext: {
+                        oldSlotId: candidate.interviewSlotId,
+                        newSlotId: slotId,
+                    },
+                });
                 const oldSlot = await interviewRepository.findSlotById(candidate.interviewSlotId, tx);
                 if (oldSlot && oldSlot.googleEventId) {
                     await googleCalendar.deleteEvent(oldSlot.googleEventId).catch(e => logger.warn("Failed to delete old calendar event during reschedule"));
@@ -88,6 +104,25 @@ export class BookingService {
                 await interviewRepository.updateSlot(updatedSlot.id, { googleEventId: googleEvent.eventId }, tx);
             }
 
+            logBusinessEvent({
+                event: "candidate.interview.booked",
+                candidateId: candidate.id,
+                telegramId: telegramId,
+                actorType: "candidate",
+                actorRole: "candidate",
+                stage: "INTERVIEW",
+                result: "success",
+                module: "booking-service",
+                operation: "bookInterviewSlot",
+                safeContext: {
+                    slotId: updatedSlot.id,
+                    startTime: updatedSlot.startTime.toISOString(),
+                    endTime: updatedSlot.endTime.toISOString(),
+                    rescheduled: Boolean(candidate.interviewSlotId),
+                    calendarEventCreated: Boolean(googleEvent.eventId),
+                },
+            });
+
             return { slot: updatedSlot, googleEvent };
         });
     }
@@ -106,6 +141,22 @@ export class BookingService {
             await candidateRepository.update(slot.candidate.id, {
                 googleMeetLink: null,
                 interviewSlot: { disconnect: true }
+            });
+
+            logBusinessEvent({
+                event: "candidate.interview.cancelled",
+                candidateId: slot.candidate.id,
+                telegramId: slot.candidate.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "INTERVIEW",
+                result: "success",
+                module: "booking-service",
+                operation: "cancelInterviewSlot",
+                safeContext: {
+                    slotId,
+                    hadCalendarEvent: Boolean(slot.googleEventId),
+                },
             });
         }
 
@@ -131,12 +182,44 @@ export class BookingService {
                 trainingMeetLink: null,
                 trainingSlot: { disconnect: true }
             });
+
+            logBusinessEvent({
+                event: "candidate.training.cancelled",
+                candidateId: slot.candidate.id,
+                telegramId: slot.candidate.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "TRAINING",
+                result: "success",
+                module: "booking-service",
+                operation: "cancelTrainingSlot",
+                safeContext: {
+                    slotId,
+                    hadCalendarEvent: Boolean(slot.googleEventId),
+                },
+            });
         }
 
         if (slot.candidateDiscovery) {
             await candidateRepository.update(slot.candidateDiscovery.id, {
                 trainingMeetLink: null,
                 discoverySlot: { disconnect: true }
+            });
+
+            logBusinessEvent({
+                event: "candidate.discovery.cancelled",
+                candidateId: slot.candidateDiscovery.id,
+                telegramId: slot.candidateDiscovery.user?.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "DISCOVERY",
+                result: "success",
+                module: "booking-service",
+                operation: "cancelTrainingSlot",
+                safeContext: {
+                    slotId,
+                    hadCalendarEvent: Boolean(slot.googleEventId),
+                },
             });
         }
 
@@ -170,6 +253,21 @@ export class BookingService {
             // --- SMART RESCHEDULE LOGIC for Discovery ---
             if (candidate.discoverySlotId) {
                 logger.info({ candidateId: candidate.id, candidateName: candidate.fullName, oldSlotId: candidate.discoverySlotId, newSlotId: slotId }, "🔄 Discovery reschedule: unbooking old slot");
+                logBusinessEvent({
+                    event: "candidate.discovery.reschedule.started",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "DISCOVERY",
+                    result: "pending",
+                    module: "booking-service",
+                    operation: "bookDiscoverySlot",
+                    safeContext: {
+                        oldSlotId: candidate.discoverySlotId,
+                        newSlotId: slotId,
+                    },
+                });
                 const oldSlot = await trainingRepository.findSlotById(candidate.discoverySlotId, tx);
                 if (oldSlot && oldSlot.googleEventId) {
                     await googleCalendar.deleteEvent(oldSlot.googleEventId).catch(e => logger.warn("Failed to delete old discovery calendar event during reschedule"));
@@ -214,9 +312,48 @@ export class BookingService {
                     await trainingRepository.updateSlot(updatedSlot.id, { googleEventId: googleEvent.eventId }, tx);
                 }
 
+                logBusinessEvent({
+                    event: "candidate.discovery.booked",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "DISCOVERY",
+                    result: "success",
+                    module: "booking-service",
+                    operation: "bookDiscoverySlot",
+                    safeContext: {
+                        slotId: updatedSlot.id,
+                        startTime: updatedSlot.startTime.toISOString(),
+                        endTime: updatedSlot.endTime.toISOString(),
+                        rescheduled: Boolean(candidate.discoverySlotId),
+                        calendarEventCreated: Boolean(googleEvent.eventId),
+                    },
+                });
+
                 return { ...updatedSlot, googleMeetLink: googleEvent.meetLink };
             } catch (e) {
                 logger.error({ err: e, candidateId: candidate.id, slotId }, "Failed to create Google Calendar event for discovery");
+                logBusinessEvent({
+                    event: "candidate.discovery.booked",
+                    level: "warn",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "DISCOVERY",
+                    result: "partial_success",
+                    reasonCode: "CALENDAR_EVENT_CREATE_FAILED",
+                    module: "booking-service",
+                    operation: "bookDiscoverySlot",
+                    safeContext: {
+                        slotId: updatedSlot.id,
+                        startTime: updatedSlot.startTime.toISOString(),
+                        endTime: updatedSlot.endTime.toISOString(),
+                        rescheduled: Boolean(candidate.discoverySlotId),
+                    },
+                    error: e,
+                });
                 return updatedSlot;
             }
         });
@@ -237,6 +374,21 @@ export class BookingService {
             // --- SMART RESCHEDULE LOGIC for Training ---
             if (candidate.trainingSlotId) {
                 logger.info({ candidateId: candidate.id, candidateName: candidate.fullName, oldSlotId: candidate.trainingSlotId, newSlotId: slotId }, "🔄 Training reschedule: unbooking old slot");
+                logBusinessEvent({
+                    event: "candidate.training.reschedule.started",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "TRAINING",
+                    result: "pending",
+                    module: "booking-service",
+                    operation: "bookTrainingSlot",
+                    safeContext: {
+                        oldSlotId: candidate.trainingSlotId,
+                        newSlotId: slotId,
+                    },
+                });
                 const oldSlot = await trainingRepository.findSlotById(candidate.trainingSlotId, tx);
                 if (oldSlot && oldSlot.googleEventId) {
                     await googleCalendar.deleteEvent(oldSlot.googleEventId).catch(e => logger.warn("Failed to delete old training calendar event during reschedule"));
@@ -281,9 +433,48 @@ export class BookingService {
                     await trainingRepository.updateSlot(updatedSlot.id, { googleEventId: googleEvent.eventId }, tx);
                 }
 
+                logBusinessEvent({
+                    event: "candidate.training.booked",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "TRAINING",
+                    result: "success",
+                    module: "booking-service",
+                    operation: "bookTrainingSlot",
+                    safeContext: {
+                        slotId: updatedSlot.id,
+                        startTime: updatedSlot.startTime.toISOString(),
+                        endTime: updatedSlot.endTime.toISOString(),
+                        rescheduled: Boolean(candidate.trainingSlotId),
+                        calendarEventCreated: Boolean(googleEvent.eventId),
+                    },
+                });
+
                 return { ...updatedSlot, googleMeetLink: googleEvent.meetLink };
             } catch (e) {
                 logger.error({ err: e, candidateId: candidate.id, slotId }, "Failed to create Google Calendar event for training");
+                logBusinessEvent({
+                    event: "candidate.training.booked",
+                    level: "warn",
+                    candidateId: candidate.id,
+                    telegramId: telegramId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    stage: "TRAINING",
+                    result: "partial_success",
+                    reasonCode: "CALENDAR_EVENT_CREATE_FAILED",
+                    module: "booking-service",
+                    operation: "bookTrainingSlot",
+                    safeContext: {
+                        slotId: updatedSlot.id,
+                        startTime: updatedSlot.startTime.toISOString(),
+                        endTime: updatedSlot.endTime.toISOString(),
+                        rescheduled: Boolean(candidate.trainingSlotId),
+                    },
+                    error: e,
+                });
                 return updatedSlot;
             }
         });

@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 export const supportHandlers = new Composer<MyContext>();
 
@@ -28,6 +29,18 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
         preferredTarget
     };
     await ctx.answerCallbackQuery();
+    logBusinessEvent({
+        event: "candidate.support.started",
+        correlationId: ctx.correlationId,
+        updateId: ctx.update.update_id,
+        telegramId,
+        candidateId: candidate.id,
+        actorType: "candidate",
+        stage: preferredTarget,
+        result: "started",
+        module: "support",
+        safeContext: { preferredTarget, status: candidate.status }
+    });
 
     const kb = new InlineKeyboard().text("❌ Скасувати", "end_support_chat");
     await ctx.reply(
@@ -126,6 +139,18 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         // Setup-stage candidates → always DM main admin directly, skip support tickets
         if (isSetupStage) {
             const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+            logBusinessEvent({
+                event: "candidate.support.message_sent",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId,
+                candidateId: candidate.id,
+                actorType: "candidate",
+                stage: "SETUP",
+                result: "success",
+                module: "support",
+                safeContext: { routing: "admin_dm", status: candidate.status }
+            });
             const adminMsgText =
                 `💬 <b>Message from Candidate (Admin/Setup)</b>\n` +
                 `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
@@ -179,6 +204,18 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         // and keep this dialog out of generic support tickets/topics.
         if (isMentorOwnedFlow) {
             const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+            logBusinessEvent({
+                event: "candidate.support.message_sent",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId,
+                candidateId: candidate.id,
+                actorType: "candidate",
+                stage: "MENTOR",
+                result: "success",
+                module: "support",
+                safeContext: { routing: "mentor_dm", status: candidate.status }
+            });
             let categoryLabel = "Mentor";
             let targetAdminIds = MENTOR_IDS.length > 0 ? MENTOR_IDS : ADMIN_IDS;
 
@@ -246,6 +283,18 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             const topicId = activeTicket?.topicId || activeOutgoingTopic?.topicId;
             try {
                 if (ctx.message && topicId) {
+                    logBusinessEvent({
+                        event: "candidate.support.message_sent",
+                        correlationId: ctx.correlationId,
+                        updateId: ctx.update.update_id,
+                        telegramId,
+                        candidateId: candidate.id,
+                        actorType: "candidate",
+                        stage: isHRStage ? "HR" : "SUPPORT",
+                        result: "success",
+                        module: "support",
+                        safeContext: { routing: activeTicket ? "support_ticket_topic" : "outgoing_topic", ticketId: activeTicket?.id, topicId }
+                    });
                     await ctx.api.copyMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id, {
                         message_thread_id: topicId
                     });

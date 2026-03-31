@@ -4,6 +4,7 @@ import { redis } from "../core/redis.js";
 import { type Api } from "grammy";
 import logger from "../core/logger.js";
 import fetch from "node-fetch";
+import { logBusinessEvent } from "../core/log-events.js";
 
 const WORK_UA_API_BASE = "https://api.work.ua";
 const LAST_ID_KEY = "work_ua:last_response_id";
@@ -18,6 +19,17 @@ export class WorkUAService {
      */
     startPolling(api: Api) {
         logger.info("🕒 Work.ua polling service started (every 15m)");
+        logBusinessEvent({
+            event: "integration.workua.polling_loop.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "work-ua-service",
+            operation: "startPolling",
+            safeContext: {
+                intervalMinutes: 15,
+            },
+        });
         
         // Перевіряємо кожні 15 хвилин
         setInterval(async () => {
@@ -25,6 +37,16 @@ export class WorkUAService {
                 await this.checkNewResponses(api);
             } catch (e) {
                 logger.error({ err: e }, "❌ Error in Work.ua polling loop");
+                logBusinessEvent({
+                    event: "integration.workua.polling_iteration.failed",
+                    level: "error",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    module: "work-ua-service",
+                    operation: "startPolling",
+                    error: e,
+                });
             }
         }, 15 * 60 * 1000);
 
@@ -48,6 +70,19 @@ export class WorkUAService {
             if (!res.ok) {
                 const text = await res.text();
                 logger.error({ status: res.status, body: text.slice(0, 100) }, "❌ Work.ua API vacancies error");
+                logBusinessEvent({
+                    event: "integration.workua.vacancies_refreshed",
+                    level: "error",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    reasonCode: "WORKUA_VACANCIES_API_ERROR",
+                    module: "work-ua-service",
+                    operation: "refreshVacancies",
+                    safeContext: {
+                        status: res.status,
+                    },
+                });
                 return;
             }
 
@@ -63,9 +98,31 @@ export class WorkUAService {
                 }
                 this.lastVacanciesFetch = Date.now();
                 logger.info({ count: this.vacanciesMap.size }, "✅ Work.ua vacancies map updated");
+                logBusinessEvent({
+                    event: "integration.workua.vacancies_refreshed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "work-ua-service",
+                    operation: "refreshVacancies",
+                    safeContext: {
+                        vacanciesCount: this.vacanciesMap.size,
+                    },
+                });
             }
         } catch (e) {
             logger.error({ err: e }, "Failed to fetch Work.ua vacancies");
+            logBusinessEvent({
+                event: "integration.workua.vacancies_refreshed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "WORKUA_VACANCIES_FETCH_FAILED",
+                module: "work-ua-service",
+                operation: "refreshVacancies",
+                error: e,
+            });
         }
     }
 
@@ -97,6 +154,19 @@ export class WorkUAService {
                 if (!initRes.ok) {
                     const text = await initRes.text();
                     logger.error({ status: initRes.status, body: text.slice(0, 100) }, "❌ Work.ua API init error");
+                    logBusinessEvent({
+                        event: "integration.workua.initialized",
+                        level: "error",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "failed",
+                        reasonCode: "WORKUA_INIT_API_ERROR",
+                        module: "work-ua-service",
+                        operation: "checkNewResponses",
+                        safeContext: {
+                            status: initRes.status,
+                        },
+                    });
                     return;
                 }
 
@@ -105,9 +175,31 @@ export class WorkUAService {
                     const latestId = initData.items[0].id;
                     await redis.set(LAST_ID_KEY, String(latestId));
                     logger.info({ latestId }, "✅ Work.ua service initialized with the latest ID");
+                    logBusinessEvent({
+                        event: "integration.workua.initialized",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "success",
+                        module: "work-ua-service",
+                        operation: "checkNewResponses",
+                        safeContext: {
+                            latestId,
+                        },
+                    });
                 }
             } catch (e) {
                 logger.error({ err: e }, "Failed to initialize Work.ua service");
+                logBusinessEvent({
+                    event: "integration.workua.initialized",
+                    level: "error",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    reasonCode: "WORKUA_INIT_FAILED",
+                    module: "work-ua-service",
+                    operation: "checkNewResponses",
+                    error: e,
+                });
             }
             return;
         }
@@ -127,12 +219,26 @@ export class WorkUAService {
             if (!response.ok) {
                 const text = await response.text();
                 logger.error({ status: response.status, body: text.slice(0, 100) }, "❌ Work.ua API error response");
+                logBusinessEvent({
+                    event: "integration.workua.responses_checked",
+                    level: "error",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    reasonCode: "WORKUA_RESPONSES_API_ERROR",
+                    module: "work-ua-service",
+                    operation: "checkNewResponses",
+                    safeContext: {
+                        status: response.status,
+                    },
+                });
                 return;
             }
 
             const data = await response.json() as any;
             if (data.status === 'ok' && data.items && data.items.length > 0) {
                 let maxId = parseInt(lastId);
+                let processedCount = 0;
 
                 for (const item of data.items) {
                     const responseId = parseInt(item.id);
@@ -169,12 +275,50 @@ export class WorkUAService {
                         text: textContent,
                         metadata: { city, originalDate: displayDate }
                     });
+                    processedCount++;
                 }
 
                 await redis.set(LAST_ID_KEY, String(maxId));
+                logBusinessEvent({
+                    event: "integration.workua.responses_checked",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "work-ua-service",
+                    operation: "checkNewResponses",
+                    safeContext: {
+                        previousLastId: lastId,
+                        newLastId: String(maxId),
+                        processedCount,
+                    },
+                });
+            } else {
+                logBusinessEvent({
+                    event: "integration.workua.responses_checked",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "work-ua-service",
+                    operation: "checkNewResponses",
+                    safeContext: {
+                        previousLastId: lastId,
+                        processedCount: 0,
+                    },
+                });
             }
         } catch (e) {
             logger.error({ err: e }, "Error calling Work.ua API");
+            logBusinessEvent({
+                event: "integration.workua.responses_checked",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "WORKUA_CALL_FAILED",
+                module: "work-ua-service",
+                operation: "checkNewResponses",
+                error: e,
+            });
         }
     }
 

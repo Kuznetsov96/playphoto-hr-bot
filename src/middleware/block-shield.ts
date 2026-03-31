@@ -2,6 +2,7 @@ import type { MyContext } from "../types/context.js";
 import type { NextFunction } from "grammy";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
+import { securityAudit } from "../core/audit-logger.js";
 
 /**
  * Global middleware to block unauthorized users (Silent Block)
@@ -23,6 +24,14 @@ export async function blockShield(ctx: MyContext, next: NextFunction) {
                 await ctx.reply(neutralMessage, { parse_mode: "HTML" });
             }
             
+            securityAudit({
+                event: "security.blocked_user_attempt",
+                result: "failed",
+                actorType: "staff",
+                telegramId,
+                entityType: "bot",
+                context: { username: ctx.from?.username, updateId: ctx.update.update_id }
+            });
             logger.info({ telegramId, username: ctx.from?.username }, "🛡️ [SHIELD] Blocked user attempt");
             return; // STOP processing
         }
