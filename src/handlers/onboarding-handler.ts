@@ -4,6 +4,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { cleanupMessages } from "../utils/cleanup.js";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 import { CandidateSchema, parseBirthDate } from "../schemas/candidate-schema.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 import { Menu } from "@grammyjs/menu";
@@ -155,10 +156,12 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
         if (step === STEPS.FULL_NAME) {
             const val = CandidateSchema.shape.fullName.safeParse(text);
             if (!val.success) {
+                logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: val.error.issues[0]?.message }, "Onboarding validation failed");
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>\n\nСпробуй ще раз (Прізвище Ім'я По Батькові):`);
                 return;
             }
             await candidateRepository.update(candidate.id, { fullName: val.data } as any);
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "fullName" }, "Onboarding field saved");
 
             const bd = candidate.birthDate;
             if (bd) {
@@ -172,15 +175,18 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
         else if (step === STEPS.BIRTH_DATE) {
             const date = parseBirthDate(text);
             if (!date) {
+                logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: "INVALID_DATE_FORMAT" }, "Onboarding validation failed");
                 await ScreenManager.renderScreen(ctx, "⚠️ <b>Формат має бути ДД.ММ.РРРР.</b>\n\nБудь ласка, спробуй ще раз (наприклад, 15.05.1998):");
                 return;
             }
             const val = CandidateSchema.shape.birthDate.safeParse(date);
             if (!val.success) {
+                logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: val.error.issues[0]?.message }, "Onboarding validation failed");
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>\n\nБудь ласка, спробуй ще раз:`);
                 return;
             }
             await candidateRepository.update(candidate.id, { birthDate: date } as any);
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "birthDate" }, "Onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.PHONE;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.PHONE), undefined, { pushToStack: true });
@@ -189,10 +195,12 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
             const sanitized = text.replace(/\s+/g, '').replace(/-/g, '').replace(/\(/g, '').replace(/\)/g, '');
             const val = CandidateSchema.shape.phone.safeParse(sanitized);
             if (!val.success) {
+                logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: val.error.issues[0]?.message }, "Onboarding validation failed");
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>\n\nПриклад: +380931234567`);
                 return;
             }
             await candidateRepository.update(candidate.id, { phone: val.data } as any);
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "phone" }, "Onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.EMAIL;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.EMAIL), undefined, { pushToStack: true });
@@ -200,10 +208,12 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
         else if (step === STEPS.EMAIL) {
             const val = CandidateSchema.shape.email.safeParse(text.toLowerCase());
             if (!val.success) {
+                logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: val.error.issues[0]?.message }, "Onboarding validation failed");
                 await ScreenManager.renderScreen(ctx, `⚠️ <b>${val.error.issues[0]?.message}</b>`);
                 return;
             }
             await candidateRepository.update(candidate.id, { email: val.data } as any);
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "email" }, "Onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.PASSPORT_FRONT;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.PASSPORT_FRONT), undefined, { pushToStack: true });
@@ -215,16 +225,19 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
         else if (step === STEPS.IBAN) {
             const ibanVal = text.toUpperCase().replace(/\s+/g, '');
             if (!ibanVal.startsWith("UA") || ibanVal.length < 15) {
+                logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: "INVALID_IBAN_FORMAT" }, "Onboarding validation failed");
                 await ScreenManager.renderScreen(ctx, "⚠️ <b>Це не схоже на IBAN.</b>\n\nВін має починатися на UA і містити 29 символів. Спробуй ще раз:");
                 return;
             }
             await candidateRepository.update(candidate.id, { iban: ibanVal } as any);
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "iban" }, "Onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.INSTAGRAM;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.INSTAGRAM), undefined, { pushToStack: true });
         }
         else if (step === STEPS.INSTAGRAM) {
             await candidateRepository.update(candidate.id, { instagram: text } as any);
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "instagram" }, "Onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.FINAL;
             // Re-fetch candidate with all saved data
@@ -257,6 +270,7 @@ onboardingHandlers.on("message:photo", async (ctx, next) => {
     // Save photo to DB immediately
     const updatedPhotoIds = ctx.session.candidateData.passportPhotoIds.join(',');
     await candidateRepository.update(candidate.id, { passportPhotoIds: updatedPhotoIds } as any);
+    logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "passportPhotoIds", photoCount: ctx.session.candidateData.passportPhotoIds.length }, "Onboarding photo saved");
 
     try {
         if (step === STEPS.PASSPORT_FRONT) {
@@ -290,6 +304,17 @@ const MAX_CANDIDATE_AGE = 25;
 async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     const candidateId = existingCandidate?.id;
     logger.info({ candidateId }, "🏁 Starting finishOnboarding...");
+    logBusinessEvent({
+        event: "candidate.onboarding.completed",
+        candidateId,
+        telegramId: existingCandidate?.user?.telegramId ?? ctx.from?.id,
+        actorType: "candidate",
+        actorRole: "candidate",
+        stage: "ONBOARDING",
+        result: "started",
+        module: "onboarding-handler",
+        operation: "finishOnboarding",
+    });
 
     try {
         // Soft age filter: politely decline 26+ candidates
@@ -305,6 +330,22 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
             await cleanupMessages(ctx).catch(() => {});
             await ScreenManager.renderScreen(ctx, text, undefined, { forceNew: true });
             logger.info({ candidateId, age: getCandidateAge(existingCandidate.birthDate) }, "Candidate soft-rejected: age limit");
+            logBusinessEvent({
+                event: "candidate.onboarding.completed",
+                level: "warn",
+                candidateId,
+                telegramId: existingCandidate?.user?.telegramId ?? ctx.from?.id,
+                actorType: "system",
+                actorRole: "system",
+                stage: "ONBOARDING",
+                result: "rejected",
+                reasonCode: "AGE_LIMIT",
+                module: "onboarding-handler",
+                operation: "finishOnboarding",
+                safeContext: {
+                    age: getCandidateAge(existingCandidate.birthDate),
+                },
+            });
             return;
         }
 
@@ -313,6 +354,20 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
             status: 'AWAITING_FIRST_SHIFT',
             currentStep: FunnelStep.FIRST_SHIFT
         } as any);
+        logBusinessEvent({
+            event: "candidate.onboarding.completed",
+            candidateId,
+            telegramId: updatedCandidate?.user?.telegramId ?? existingCandidate?.user?.telegramId ?? ctx.from?.id,
+            actorType: "candidate",
+            actorRole: "candidate",
+            stage: "AWAITING_FIRST_SHIFT",
+            result: "success",
+            module: "onboarding-handler",
+            operation: "finishOnboarding",
+            safeContext: {
+                nextStep: FunnelStep.FIRST_SHIFT,
+            },
+        });
 
         logger.debug({ candidateId }, "✅ Status updated. Preparing final screen...");
 
@@ -320,6 +375,20 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
         import("../modules/candidate/services/index.js").then(({ candidateService }) => {
             candidateService.processOnboardingFinish(ctx.api, updatedCandidate).catch(async (e) => {
                 logger.error({ err: e, candidateId }, "Failed in background processOnboardingFinish");
+                logBusinessEvent({
+                    event: "candidate.onboarding.background_processing_completed",
+                    level: "error",
+                    candidateId,
+                    telegramId: updatedCandidate?.user?.telegramId ?? ctx.from?.id,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: "AWAITING_FIRST_SHIFT",
+                    result: "failed",
+                    reasonCode: "BACKGROUND_PROCESSING_FAILED",
+                    module: "onboarding-handler",
+                    operation: "finishOnboarding",
+                    error: e,
+                });
                 try {
                     const { ADMIN_IDS } = await import("../config.js");
                     if (ADMIN_IDS[0]) {
@@ -332,6 +401,20 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
             });
         }).catch(e => {
             logger.error({ err: e, candidateId }, "Failed to import candidateService");
+            logBusinessEvent({
+                event: "candidate.onboarding.background_processing_completed",
+                level: "error",
+                candidateId,
+                telegramId: updatedCandidate?.user?.telegramId ?? ctx.from?.id,
+                actorType: "system",
+                actorRole: "system",
+                stage: "AWAITING_FIRST_SHIFT",
+                result: "failed",
+                reasonCode: "BACKGROUND_IMPORT_FAILED",
+                module: "onboarding-handler",
+                operation: "finishOnboarding",
+                error: e,
+            });
         });
 
         const { accessService } = await import("../services/access-service.js");
@@ -352,8 +435,36 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
         await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
 
         logger.info({ candidateId }, "✅ finishOnboarding complete!");
+        logBusinessEvent({
+            event: "candidate.first_shift.preferences_prompted",
+            candidateId,
+            telegramId: updatedCandidate?.user?.telegramId ?? existingCandidate?.user?.telegramId ?? ctx.from?.id,
+            actorType: "system",
+            actorRole: "system",
+            stage: "AWAITING_FIRST_SHIFT",
+            result: "success",
+            module: "onboarding-handler",
+            operation: "finishOnboarding",
+            safeContext: {
+                knowledgeBaseLinked: Boolean(teamChannelLink),
+            },
+        });
     } catch (e) {
         logger.error({ err: e, candidateId }, "Critical failure in finishOnboarding");
+        logBusinessEvent({
+            event: "candidate.onboarding.completed",
+            level: "error",
+            candidateId,
+            telegramId: existingCandidate?.user?.telegramId ?? ctx.from?.id,
+            actorType: "system",
+            actorRole: "system",
+            stage: "ONBOARDING",
+            result: "failed",
+            reasonCode: "FINISH_ONBOARDING_FAILED",
+            module: "onboarding-handler",
+            operation: "finishOnboarding",
+            error: e,
+        });
         await ScreenManager.renderScreen(ctx, "❌ <b>Сталася помилка при завершенні.</b>\n\nЗв'яжись, будь ласка, з адміном.");
     }
 }

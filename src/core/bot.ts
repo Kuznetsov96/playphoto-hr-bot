@@ -10,6 +10,7 @@ import { sequentialize } from "@grammyjs/runner";
 import logger from "./logger.js";
 import { di } from "./container.js";
 import { accessService } from "../services/access-service.js";
+import { sanitizeCallbackData, sanitizeTextForLogs } from "./log-sanitizer.js";
 
 import type { MyContext } from "../types/context.js";
 
@@ -40,15 +41,24 @@ bot.use(async (ctx, next) => {
     
     const updateId = ctx.update.update_id;
     const fromId = ctx.from?.id;
+    const correlationId = `tg-${updateId}`;
+    ctx.correlationId = correlationId;
+    const updateType = Object.keys(ctx.update).find(k => k !== "update_id") || "unknown";
+    const callbackAction = sanitizeCallbackData(ctx.callbackQuery?.data);
 
-    const logData = {
-        updateId,
-        from: fromId,
-        chat: ctx.chat?.id,
-        type: Object.keys(ctx.update).filter(k => k !== "update_id")[0],
-        payload: ctx.message?.text || ctx.callbackQuery?.data,
-    };
-    logger.info(logData, `📡 [RAW] Update #${updateId} arrived`);
+    logger.info({
+        event: "telegram.update.received",
+        correlation_id: correlationId,
+        update_id: updateId,
+        update_type: updateType,
+        telegram_id: fromId != null ? String(fromId) : undefined,
+        chat_id: ctx.chat?.id != null ? String(ctx.chat.id) : undefined,
+        chat_type: ctx.chat?.type,
+        callback_action: callbackAction,
+        has_text: Boolean(ctx.message?.text),
+        has_media: Boolean(ctx.message?.photo || ctx.message?.document || ctx.message?.video || ctx.message?.voice),
+        text_preview: sanitizeTextForLogs(ctx.message?.text || ctx.message?.caption),
+    });
 
     await next();
 });
@@ -143,9 +153,13 @@ bot.catch(async (err) => {
     }
 
     logger.error({ 
-        err: err.error, 
-        updateId: ctx.update.update_id,
-        userId: ctx.from?.id 
+        event: "telegram.update.failed",
+        err: err.error,
+        correlation_id: ctx.correlationId || `tg-${ctx.update.update_id}`,
+        update_id: ctx.update.update_id,
+        telegram_id: ctx.from?.id != null ? String(ctx.from.id) : undefined,
+        chat_id: ctx.chat?.id != null ? String(ctx.chat.id) : undefined,
+        update_type: Object.keys(ctx.update).find(k => k !== "update_id") || "unknown",
     }, `🔥 [CRITICAL] Error while handling update ${ctx.update.update_id}`);
 
     try {

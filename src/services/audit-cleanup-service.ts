@@ -3,6 +3,7 @@ import path from "path";
 import logger from "../core/logger.js";
 import { auditDestination } from "../core/audit-logger.js";
 import { redis } from "../core/redis.js";
+import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 
 /**
  * Quarterly rotation for audit.log.
@@ -26,6 +27,14 @@ export class AuditCleanupService {
         if (alreadyTriggered) return;
 
         logger.info("📋 Starting quarterly audit log rotation...");
+        logAuditEvent({
+            event: "logs.audit.rotation.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "audit-cleanup-service",
+            operation: "rotate",
+        });
 
         try {
             if (fs.existsSync(this.LOG_PATH)) {
@@ -41,6 +50,15 @@ export class AuditCleanupService {
                 auditDestination.reopen();
 
                 logger.info(`✅ Audit log rotated → ${archiveName} (${sizeMB} MB)`);
+                logAuditEvent({
+                    event: "logs.audit.rotation.completed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "audit-cleanup-service",
+                    operation: "rotate",
+                    safeContext: { archiveName, sizeMB, quarter },
+                });
             }
 
             // Delete archived audit logs older than 365 days
@@ -49,6 +67,16 @@ export class AuditCleanupService {
             await redis.set(triggerKey, "true", "EX", 100 * 24 * 60 * 60);
         } catch (e: any) {
             logger.error({ err: e.message }, "❌ Failed to rotate audit logs");
+            logAuditEvent({
+                event: "logs.audit.rotation.completed",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                module: "audit-cleanup-service",
+                operation: "rotate",
+                safeContext: { quarter },
+                error: e,
+            });
         }
     }
 
@@ -89,5 +117,13 @@ export class AuditCleanupService {
 
 export function startAuditCleanupLoop() {
     logger.info("📋 Starting audit cleanup loop (Quarterly rotation)...");
+    logBusinessEvent({
+        event: "logs.audit.rotation_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "audit-cleanup-service",
+        operation: "startAuditCleanupLoop",
+    });
     setInterval(() => AuditCleanupService.checkAndTrigger(), 60 * 1000);
 }

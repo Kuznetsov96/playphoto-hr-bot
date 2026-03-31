@@ -159,7 +159,14 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
         // --- TIMELINE TRACKING ---
         import("../services/timeline-service.js").then(({ timelineService }) => {
-            timelineService.trackEvent(existingCand?.userId || '', `Забронювала співбесіду: ${startTime.toLocaleString('uk-UA')}`, { slotId, startTime }).catch(() => {});
+            const trackedUserId = existingCand?.userId || result.slot.candidate?.userId;
+            if (trackedUserId) {
+                timelineService.trackEvent(
+                    trackedUserId,
+                    `Забронювала співбесіду: ${startTime.toLocaleString('uk-UA')}`,
+                    { slotId, startTime, event: "candidate.interview.booked" }
+                ).catch(() => {});
+            }
         }).catch(() => {});
 
         const { HR_IDS } = await import("../config.js");

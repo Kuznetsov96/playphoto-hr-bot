@@ -3,6 +3,7 @@ import { accessService } from "../services/access-service.js";
 import { TEAM_CHATS } from "../config.js";
 import type { MyContext } from "../types/context.js";
 import logger from "../core/logger.js";
+import { securityAudit } from "../core/audit-logger.js";
 
 export const accessHandlers = new Composer<MyContext>();
 
@@ -21,9 +22,25 @@ accessHandlers.on("chat_join_request", async (ctx) => {
 
         if (authorized) {
             logger.info({ telegramId: ctx.from.id }, "Approving authorized join request");
+            securityAudit({
+                event: "security.channel_join_request",
+                result: "success",
+                actorType: "candidate",
+                telegramId,
+                entityType: "channel_access",
+                context: { chatId, action: "approve" }
+            });
             await ctx.approveChatJoinRequest(ctx.from.id);
         } else {
             logger.info({ telegramId: ctx.from.id }, "Declining unauthorized join request");
+            securityAudit({
+                event: "security.channel_join_request",
+                result: "failed",
+                actorType: "candidate",
+                telegramId,
+                entityType: "channel_access",
+                context: { chatId, action: "decline" }
+            });
             await ctx.declineChatJoinRequest(ctx.from.id);
         }
     } catch (e) {
@@ -41,6 +58,14 @@ accessHandlers.on("chat_member", async (ctx) => {
 
     if (newMember.status === "member") {
         logger.info({ telegramId: newMember.user.id }, "New member joined the team channel");
+        securityAudit({
+            event: "security.channel_joined",
+            result: "success",
+            actorType: "candidate",
+            telegramId,
+            entityType: "channel_access",
+            context: { chatId }
+        });
         // Double check if they are authorized, if not - kick
         await accessService.syncUserAccess(telegramId);
     }

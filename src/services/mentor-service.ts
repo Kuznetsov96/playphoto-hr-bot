@@ -14,6 +14,7 @@ import { cleanupUserSessionMessages } from "../utils/cleanup.js";
 import { Bot } from "grammy";
 import prisma from "../db/core.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
+import { audit } from "../core/audit-logger.js";
 
 export class MentorService {
     async getStats() {
@@ -204,6 +205,16 @@ export class MentorService {
             isWaitlisted: false
         });
 
+        audit({
+            event: "candidate_materials_sent",
+            result: "success",
+            actorType: "admin",
+            telegramId: cand.user?.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: { fromStatus: cand.status, toStatus: CandidateStatus.ACCEPTED, currentStep: cand.currentStep }
+        });
+
         if (cand.user) {
             await cleanupUserSessionMessages(new Bot(process.env.BOT_TOKEN!) as any, Number(cand.user.telegramId));
             return { telegramId: Number(cand.user.telegramId), text: msgText };
@@ -239,6 +250,15 @@ export class MentorService {
                         materialsSent: true,
                         materialsSentAt: new Date()
                     });
+                    audit({
+                        event: "candidate_waitlist_notified",
+                        result: "success",
+                        actorType: "system",
+                        telegramId: cand.user.telegramId,
+                        entityType: "candidate",
+                        entityId: cand.id,
+                        context: { fromStatus: cand.status, currentStep: cand.currentStep }
+                    });
                     successCount++;
                 }
             } catch (e: any) {
@@ -265,6 +285,16 @@ export class MentorService {
                 await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS[msgKey]).catch(() => {});
             }
         }
+
+        audit({
+            event: "candidate_discovery_result_set",
+            result: "success",
+            actorType: "admin",
+            telegramId: cand.user?.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: { outcome: result, fromStatus: cand.status, toStatus: result === "passed" ? "DISCOVERY_COMPLETED" : "REJECTED" }
+        });
 
         return { candidate: cand, result };
     }
@@ -316,6 +346,16 @@ export class MentorService {
             await candidateRepository.update(candId, { status: "REJECTED" });
             await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["mentor-training-failed"]).catch(() => {});
         }
+
+        audit({
+            event: "candidate_training_result_set",
+            result: "success",
+            actorType: "admin",
+            telegramId: cand.user?.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: { outcome: result, fromStatus: cand.status, toStatus: result === "passed" ? CandidateStatus.NDA : "REJECTED" }
+        });
 
         if (cand.user) {
             await accessService.syncUserAccess(cand.user.telegramId, `Training result: ${result.toUpperCase()}`);

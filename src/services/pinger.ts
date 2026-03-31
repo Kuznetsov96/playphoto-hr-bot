@@ -8,6 +8,7 @@ import { CandidateStatus } from "@prisma/client";
 import { PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
 import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
+import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -35,6 +36,21 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
 
             await staffRepository.update(staff.id, { isActive: false });
             await scheduleSyncService.markStaffBotBlocked(telegramId);
+            logSecurityEvent({
+                event: "security.staff.bot_blocked",
+                telegramId,
+                userId: userWithProfile.id,
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "pinger",
+                operation: "handleBlockedUser",
+                safeContext: {
+                    staffId: staff.id,
+                    staffName,
+                    action: "auto_deactivated",
+                },
+            });
 
             const adminId = ADMIN_IDS[0];
             if (adminId) {
@@ -58,6 +74,22 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
                 status: CandidateStatus.REJECTED,
                 candidateDecision: "Бот заблоковано / акаунт видалено"
             });
+            logSecurityEvent({
+                event: "security.candidate.bot_blocked",
+                telegramId,
+                userId: userWithProfile.id,
+                candidateId: candidate.id,
+                actorType: "system",
+                actorRole: "system",
+                stage: candidate.status,
+                result: "success",
+                module: "pinger",
+                operation: "handleBlockedUser",
+                safeContext: {
+                    candidateName: name,
+                    action: "auto_rejected",
+                },
+            });
 
             const hrId = HR_IDS[0];
             if (hrId) {
@@ -78,6 +110,17 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
 
 export function startPingerLoop(bot: Bot<MyContext>) {
     logger.info("🔔 Pinger loop started...");
+    logBusinessEvent({
+        event: "broadcast.pinger_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "pinger",
+        operation: "startPingerLoop",
+        safeContext: {
+            intervalMs: PING_CONFIG.CHECK_INTERVAL_MS,
+        },
+    });
     setInterval(() => runPinger(bot), PING_CONFIG.CHECK_INTERVAL_MS);
 }
 
@@ -91,6 +134,19 @@ async function runPinger(bot: Bot<MyContext>) {
             if (msg.pendingReplies.length === 0) {
                 await trackedMessageRepository.stopTracking(msg.id);
                 logger.info(`✅ All replies received for message ${msg.messageId} in chat ${msg.chatId}. Tracking stopped.`);
+                logBusinessEvent({
+                    event: "broadcast.ping_tracking.completed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "pinger",
+                    operation: "runPinger",
+                    safeContext: {
+                        trackedMessageId: msg.id,
+                        chatId: msg.chatId,
+                        messageId: msg.messageId,
+                    },
+                });
 
                 // Try to delete last ping if exists
                 if (msg.lastPingMsgId) {
@@ -155,6 +211,20 @@ async function runPinger(bot: Bot<MyContext>) {
                 });
 
                 logger.info(`🔔 Ping sent to ${msg.chatId} for ${msg.pendingReplies.length} users.`);
+                logBusinessEvent({
+                    event: "broadcast.ping_sent",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "pinger",
+                    operation: "runPinger",
+                    safeContext: {
+                        trackedMessageId: msg.id,
+                        chatId: msg.chatId,
+                        messageId: msg.messageId,
+                        pendingReplies: msg.pendingReplies.length,
+                    },
+                });
             } catch (e: any) {
                 if (e.error_code === 403 || (e.error_code === 400 && e.description?.includes("chat not found"))) {
                     await trackedMessageRepository.stopTracking(msg.id);
@@ -166,15 +236,73 @@ async function runPinger(bot: Bot<MyContext>) {
                     } else {
                         logger.warn(`🚫 Bot blocked or chat not found for ${msg.chatId}. Tracking stopped.`);
                     }
+                    logBusinessEvent({
+                        event: "broadcast.ping_tracking.stopped",
+                        level: "warn",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "stopped",
+                        reasonCode: "CHAT_BLOCKED_OR_NOT_FOUND",
+                        module: "pinger",
+                        operation: "runPinger",
+                        safeContext: {
+                            trackedMessageId: msg.id,
+                            chatId: msg.chatId,
+                            messageId: msg.messageId,
+                        },
+                        error: e,
+                    });
                 } else if (e.error_code === 400 && e.description?.includes("message to be replied not found")) {
                     logger.warn(`⚠️ Original message not found in ${msg.chatId}. Stopping pinger.`);
                     await trackedMessageRepository.stopTracking(msg.id);
+                    logBusinessEvent({
+                        event: "broadcast.ping_tracking.stopped",
+                        level: "warn",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "stopped",
+                        reasonCode: "ORIGINAL_MESSAGE_NOT_FOUND",
+                        module: "pinger",
+                        operation: "runPinger",
+                        safeContext: {
+                            trackedMessageId: msg.id,
+                            chatId: msg.chatId,
+                            messageId: msg.messageId,
+                        },
+                        error: e,
+                    });
                 } else {
                     logger.error({ err: e, chatId: msg.chatId }, "❌ Failed to send ping");
+                    logBusinessEvent({
+                        event: "broadcast.ping_sent",
+                        level: "error",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "failed",
+                        reasonCode: "PING_SEND_FAILED",
+                        module: "pinger",
+                        operation: "runPinger",
+                        safeContext: {
+                            trackedMessageId: msg.id,
+                            chatId: msg.chatId,
+                            messageId: msg.messageId,
+                        },
+                        error: e,
+                    });
                 }
             }
         }
     } catch (e) {
         logger.error({ err: e }, "❌ Error in Pinger Loop");
+        logBusinessEvent({
+            event: "broadcast.pinger_loop.failed",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            module: "pinger",
+            operation: "runPinger",
+            error: e,
+        });
     }
 }

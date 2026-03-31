@@ -6,9 +6,8 @@ export class TimelineService {
     /**
      * Record a transition in the recruitment funnel
      */
-    async trackStatusChange(candidate: any, newStatus: CandidateStatus, author: "SYSTEM" | "ADMIN" = "SYSTEM", comment?: string) {
+    async trackStatusChange(candidate: any, oldStatus: CandidateStatus, newStatus: CandidateStatus, author: "SYSTEM" | "ADMIN" = "SYSTEM", comment?: string) {
         try {
-            const oldStatus = candidate.status;
             if (oldStatus === newStatus && !comment) return;
 
             const text = comment || `Зміна статусу: ${oldStatus} ➡️ ${newStatus}`;
@@ -22,6 +21,7 @@ export class TimelineService {
             );
 
             logger.info({ 
+                event: "candidate.status.changed",
                 candidateId: candidate.id, 
                 telegramId: candidate.user?.telegramId?.toString(),
                 oldStatus, 

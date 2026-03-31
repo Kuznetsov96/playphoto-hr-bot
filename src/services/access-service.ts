@@ -2,6 +2,7 @@ import { TEAM_CHATS } from "../config.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { Role, CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
+import { securityAudit } from "../core/audit-logger.js";
 
 export class AccessService {
     public chatId: number;
@@ -81,14 +82,37 @@ export class AccessService {
      */
     async revokeAccess(telegramId: bigint, reason: string = "Unauthorized") {
         try {
-            logger.warn({ telegramId, reason }, `[AUDIT] 🚨 REVOKING channel access for User ${telegramId.toString()} | Reason: ${reason}`);
+            securityAudit({
+                event: "security.channel_access.revoked",
+                result: "started",
+                actorType: "system",
+                telegramId,
+                entityType: "channel_access",
+                context: { reason, chatId: this.chatId }
+            });
             const api = this.getSafeApi();
             await api.banChatMember(this.chatId, Number(telegramId));
             await api.unbanChatMember(this.chatId, Number(telegramId));
-            logger.info({ telegramId }, `[AUDIT] ✅ Successfully revoked access for User ${telegramId.toString()}`);
+            securityAudit({
+                event: "security.channel_access.revoked",
+                result: "success",
+                actorType: "system",
+                telegramId,
+                entityType: "channel_access",
+                context: { reason, chatId: this.chatId }
+            });
         } catch (e: any) {
             if (e.description?.includes("user is not a member")) return;
-            logger.error({ err: e, telegramId }, `[AUDIT] ❌ Failed to revoke access for User ${telegramId.toString()}`);
+            securityAudit({
+                event: "security.channel_access.revoked",
+                result: "failed",
+                actorType: "system",
+                telegramId,
+                entityType: "channel_access",
+                error: e.message,
+                context: { reason, chatId: this.chatId }
+            });
+            logger.error({ err: e, telegramId }, "Failed to revoke channel access");
         }
     }
 

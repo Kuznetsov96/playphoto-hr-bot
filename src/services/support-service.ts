@@ -10,6 +10,7 @@ import { getAdminRoleByTelegramId } from "../config/roles.js";
 
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 
 const t = (key: string, args?: any) => {
     // @ts-ignore
@@ -110,6 +111,15 @@ export class SupportService {
         // Handler does Telegram UI (sending messages).
         // But wait, the previous sendMessageToStaff used API. 
 
+        logAuditEvent({
+            event: "support.ticket.created",
+            userId,
+            actorType: "staff",
+            result: "success",
+            module: "support",
+            safeContext: { ticketId: ticket.id, topicId: ticket.topicId }
+        });
+
         return ticket;
     }
 
@@ -121,6 +131,14 @@ export class SupportService {
         // Authorization: only admins can assign tickets
         if (!getAdminRoleByTelegramId(BigInt(adminTelegramId))) {
             logger.warn({ adminTelegramId, ticketId }, "⛔ Unauthorized ticket assign attempt");
+            logSecurityEvent({
+                event: "security.support.ticket_assign_denied",
+                telegramId: adminTelegramId,
+                actorType: "staff",
+                result: "failed",
+                module: "support",
+                safeContext: { ticketId }
+            });
             throw new Error("Недостатньо прав для цієї дії");
         }
 
@@ -133,6 +151,17 @@ export class SupportService {
             assignedAdminId: adminUser.id // Use CUID, not Telegram ID
         });
 
+        logAuditEvent({
+            event: "support.ticket.assigned",
+            telegramId: adminTelegramId,
+            actorType: "admin",
+            actorId: adminUser.id,
+            userId: ticket.userId,
+            result: "success",
+            module: "support",
+            safeContext: { ticketId }
+        });
+
         return ticket;
     }
 
@@ -142,6 +171,15 @@ export class SupportService {
 
         const newUrgent = !ticket.isUrgent;
         await supportRepository.updateTicket(ticketId, { isUrgent: newUrgent });
+
+        logAuditEvent({
+            event: "support.ticket.urgent_toggled",
+            userId: ticket.userId,
+            actorType: "admin",
+            result: "success",
+            module: "support",
+            safeContext: { ticketId, isUrgent: newUrgent }
+        });
 
         return { ticket, newUrgent };
     }
@@ -153,6 +191,14 @@ export class SupportService {
         // Authorization: only admins can transfer tickets
         if (!getAdminRoleByTelegramId(BigInt(initiatorId))) {
             logger.warn({ initiatorId, ticketId }, "⛔ Unauthorized ticket transfer attempt");
+            logSecurityEvent({
+                event: "security.support.ticket_transfer_denied",
+                telegramId: initiatorId,
+                actorType: "staff",
+                result: "failed",
+                module: "support",
+                safeContext: { ticketId, targetAdminId: String(targetAdminId) }
+            });
             throw new Error("Недостатньо прав для цієї дії");
         }
 
@@ -163,6 +209,17 @@ export class SupportService {
         await supportRepository.updateTicket(ticketId, {
             assignedAdminId: targetAdmin.id,
             status: "IN_PROGRESS"
+        });
+
+        logAuditEvent({
+            event: "support.ticket.transferred",
+            telegramId: initiatorId,
+            actorType: "admin",
+            actorId: targetAdmin.id,
+            userId: ticket.userId,
+            result: "success",
+            module: "support",
+            safeContext: { ticketId, targetAdminTelegramId: String(targetAdminId) }
         });
 
         return { ticket, targetAdmin };

@@ -6,17 +6,44 @@ import { FINANCE_IDS, FOP_DISPLAY_NAMES } from "../config.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 // Export for manual testing via command
 export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number, forceSync: boolean = false) {
     try {
         const todayStr = new Date().toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" }); // DD.MM.YYYY
         logger.info(`📊 Generating report for ${todayStr}...`);
+        logBusinessEvent({
+            event: "finance.daily_income_report.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "finance-report",
+            operation: "sendDailyIncomeReport",
+            safeContext: {
+                reportDate: todayStr,
+                forcedSync: forceSync,
+                targetChatId: chatId || null,
+            },
+        });
 
         const incomes = await techCashService.getIncomeForDate(todayStr);
 
         if (!incomes || incomes.length === 0) {
             logger.warn(`⚠️ No data for report on ${todayStr}.`);
+            logBusinessEvent({
+                event: "finance.daily_income_report.completed",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                result: "empty",
+                reasonCode: "NO_INCOME_DATA",
+                module: "finance-report",
+                operation: "sendDailyIncomeReport",
+                safeContext: {
+                    reportDate: todayStr,
+                },
+            });
             if (chatId) await bot.api.sendMessage(chatId, `⚠️ No data found for report on ${todayStr}.`);
             return;
         }
@@ -71,6 +98,19 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         }
 
         logger.info("✅ Daily report sent.");
+        logBusinessEvent({
+            event: "finance.daily_income_report.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "finance-report",
+            operation: "sendDailyIncomeReport",
+            safeContext: {
+                reportDate: todayStr,
+                locationCount: incomes.length,
+                recipientCount: RECIPIENTS.length,
+            },
+        });
 
         // AUTO-SYNC TO DDS
         // Only if running automatically (no chatId specified) or explicitly requested
@@ -81,6 +121,16 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
 
     } catch (e) {
         logger.error({ err: e }, "❌ Failed to generate daily report:");
+        logBusinessEvent({
+            event: "finance.daily_income_report.completed",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            module: "finance-report",
+            operation: "sendDailyIncomeReport",
+            error: e,
+        });
     }
 }
 
@@ -117,6 +167,19 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
 
         let addedCount = 0;
         let log = "";
+        logBusinessEvent({
+            event: "finance.dds_sync.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "finance-report",
+            operation: "syncToDDS",
+            safeContext: {
+                date: dateStr,
+                dryRun,
+                providedIncomeCount: incomes?.length || 0,
+            },
+        });
 
         // Pre-fetch DDS sheet ONCE instead of per-location (was 36 reads → 1)
         const existingDds = dryRun ? [] : await ddsService.getTransactionsForDates([dateStr]);
@@ -214,9 +277,36 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
         }
 
         if (dryRun) return { success: true, message: log || "No movements" };
+        logBusinessEvent({
+            event: "finance.dds_sync.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "finance-report",
+            operation: "syncToDDS",
+            safeContext: {
+                date: dateStr,
+                addedCount,
+                dryRun,
+            },
+        });
         return { success: true, message: `Added ${addedCount} records` };
     } catch (e: any) {
         logger.error({ err: e }, "DDS Sync Error");
+        logBusinessEvent({
+            event: "finance.dds_sync.completed",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            module: "finance-report",
+            operation: "syncToDDS",
+            safeContext: {
+                date: dateStr,
+                dryRun,
+            },
+            error: e,
+        });
         return { success: false, message: e.message };
     }
 }
@@ -226,6 +316,17 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
     try {
         const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
         logger.info(`⚖️ Auto-audit for ${dateStr}...`);
+        logBusinessEvent({
+            event: "finance.morning_audit_report.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "finance-report",
+            operation: "sendMorningAuditReport",
+            safeContext: {
+                reportDate: dateStr,
+            },
+        });
         const incomes = await techCashService.getIncomeForDate(dateStr);
 
         // 0. Pre-warm Monobank caches in parallel with DDS sync
@@ -246,6 +347,20 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
 
         if (!res.success) {
             logger.error(`❌ Auto-audit failed: ${res.message}`);
+            logBusinessEvent({
+                event: "finance.morning_audit_report.completed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "RECONCILIATION_FAILED",
+                module: "finance-report",
+                operation: "sendMorningAuditReport",
+                safeContext: {
+                    reportDate: dateStr,
+                    message: res.message,
+                },
+            });
             return;
         }
 
@@ -274,8 +389,32 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
                 await bot.api.sendMessage(SUPER_ADMIN_ID, chunk, { parse_mode: "HTML" });
             }
         }
+        logBusinessEvent({
+            event: "finance.morning_audit_report.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "finance-report",
+            operation: "sendMorningAuditReport",
+            safeContext: {
+                reportDate: dateStr,
+                hasActions: Boolean(reports.actions?.length),
+                unrecognizedChunks: reports.unrecognized.length,
+                expenseChunks: reports.expenses.length,
+            },
+        });
     } catch (e) {
         logger.error({ err: e }, "❌ Morning report error:");
+        logBusinessEvent({
+            event: "finance.morning_audit_report.completed",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            module: "finance-report",
+            operation: "sendMorningAuditReport",
+            error: e,
+        });
     }
 }
 
@@ -283,6 +422,14 @@ import { reportsQueue } from "../core/queue.js";
 
 export async function startDailyReportLoop(bot: Bot<MyContext>) {
     logger.info("📊 Starting daily report loop...");
+    logBusinessEvent({
+        event: "finance.report_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "finance-report",
+        operation: "startDailyReportLoop",
+    });
 
     let lastReportDate: string | null = null;
     let lastAuditDate: string | null = null;
