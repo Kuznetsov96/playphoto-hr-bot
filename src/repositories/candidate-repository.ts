@@ -3,6 +3,33 @@ import type { Candidate, User, Location, StaffProfile, TrainingSlot, InterviewSl
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
 
+const LEGACY_READABLE_CANDIDATE_STATUSES: CandidateStatus[] = [
+    CandidateStatus.SCREENING,
+    CandidateStatus.WAITLIST,
+    CandidateStatus.MANUAL_REVIEW,
+    CandidateStatus.INTERVIEW_SCHEDULED,
+    CandidateStatus.INTERVIEW_COMPLETED,
+    CandidateStatus.DECISION_PENDING,
+    CandidateStatus.ACCEPTED,
+    CandidateStatus.REJECTED,
+    CandidateStatus.DISCOVERY_SCHEDULED,
+    CandidateStatus.DISCOVERY_COMPLETED,
+    CandidateStatus.TRAINING_SCHEDULED,
+    CandidateStatus.TRAINING_COMPLETED,
+    CandidateStatus.OFFLINE_STAGING,
+    CandidateStatus.NDA,
+    CandidateStatus.KNOWLEDGE_TEST,
+    CandidateStatus.STAGING_SETUP,
+    CandidateStatus.AWAITING_FIRST_SHIFT,
+    CandidateStatus.HIRED,
+    CandidateStatus.BLOCKER
+];
+
+function isUnknownCandidateStatusError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("not found in enum 'CandidateStatus'");
+}
+
 export type CandidateWithRelations = Candidate & {
     user: User;
     location: Location | null;
@@ -128,33 +155,61 @@ export class CandidateRepository {
             CandidateStatus.HIRED
         ];
 
-        const candidates = await prisma.candidate.findMany({
-            where: {
-                hasUnreadMessage: true,
-                messages: { some: { scope } },
-                // If scope is HR, strictly exclude mentor statuses
-                ...(scope === "HR" ? {
-                    status: { notIn: mentorStatuses },
-                    OR: [
-                        { hrDecision: null as any },
-                        { hrDecision: { not: "ACCEPTED" } }
-                    ]
-                } : {})
-            },
-            include: {
-                user: true,
-                location: true,
-                firstShiftPartner: { include: { user: true } },
-                discoverySlot: true,
-                trainingSlot: true,
-                interviewSlot: true,
-                messages: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 1
-                }
-            },
-            orderBy: { user: { createdAt: 'desc' } }
-        }) as unknown as CandidateWithRelations[];
+        const buildWhere = (useLegacyHrFallback: boolean): Prisma.CandidateWhereInput => ({
+            hasUnreadMessage: true,
+            messages: { some: { scope } },
+            ...(scope === "HR" ? {
+                ...(useLegacyHrFallback
+                    ? { status: { in: LEGACY_READABLE_CANDIDATE_STATUSES } }
+                    : { status: { notIn: mentorStatuses } }),
+                OR: [
+                    { hrDecision: null as any },
+                    { hrDecision: { not: "ACCEPTED" } }
+                ]
+            } : {})
+        });
+
+        let candidates: CandidateWithRelations[];
+        try {
+            candidates = await prisma.candidate.findMany({
+                where: buildWhere(false),
+                include: {
+                    user: true,
+                    location: true,
+                    firstShiftPartner: { include: { user: true } },
+                    discoverySlot: true,
+                    trainingSlot: true,
+                    interviewSlot: true,
+                    messages: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 1
+                    }
+                },
+                orderBy: { user: { createdAt: 'desc' } }
+            }) as unknown as CandidateWithRelations[];
+        } catch (error) {
+            if (scope !== "HR" || !isUnknownCandidateStatusError(error)) {
+                throw error;
+            }
+
+            logger.warn({ err: error }, "Falling back to legacy-safe HR unread status filter");
+            candidates = await prisma.candidate.findMany({
+                where: buildWhere(true),
+                include: {
+                    user: true,
+                    location: true,
+                    firstShiftPartner: { include: { user: true } },
+                    discoverySlot: true,
+                    trainingSlot: true,
+                    interviewSlot: true,
+                    messages: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 1
+                    }
+                },
+                orderBy: { user: { createdAt: 'desc' } }
+            }) as unknown as CandidateWithRelations[];
+        }
 
         return candidates.filter(c => c.messages.length > 0 && c.messages[0]?.scope === scope);
     }
@@ -241,14 +296,39 @@ export class CandidateRepository {
     }
 
     async findByStatusWithUser(status: CandidateStatus | CandidateStatus[], whereExtra: Prisma.CandidateWhereInput = {}): Promise<CandidateWithRelations[]> {
-        return prisma.candidate.findMany({
-            where: {
-                status: Array.isArray(status) ? { in: status } : status,
-                ...whereExtra
-            },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
-            orderBy: { user: { createdAt: 'desc' } }
-        }) as unknown as Promise<CandidateWithRelations[]>;
+        const runQuery = (resolvedStatus: CandidateStatus | CandidateStatus[]) => {
+            return prisma.candidate.findMany({
+                where: {
+                    status: Array.isArray(resolvedStatus) ? { in: resolvedStatus } : resolvedStatus,
+                    ...whereExtra
+                },
+                include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
+                orderBy: { user: { createdAt: 'desc' } }
+            }) as unknown as Promise<CandidateWithRelations[]>;
+        };
+
+        try {
+            return await runQuery(status);
+        } catch (error) {
+            if (!Array.isArray(status) || !isUnknownCandidateStatusError(error)) {
+                throw error;
+            }
+
+            const fallbackStatuses = status.filter(candidateStatus =>
+                LEGACY_READABLE_CANDIDATE_STATUSES.includes(candidateStatus)
+            );
+
+            if (fallbackStatuses.length === 0) {
+                throw error;
+            }
+
+            logger.warn(
+                { err: error, requestedStatuses: status, fallbackStatuses },
+                "Falling back to legacy-safe candidate statuses"
+            );
+
+            return await runQuery(fallbackStatuses);
+        }
     }
 
     async updateMany(where: Prisma.CandidateWhereInput, data: Prisma.CandidateUpdateManyMutationInput) {
