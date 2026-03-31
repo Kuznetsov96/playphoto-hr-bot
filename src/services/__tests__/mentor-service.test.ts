@@ -153,7 +153,7 @@ describe('MentorService', () => {
 
     describe('notifyWaitlist', () => {
         it('should notify candidate with materialsSent=true even without hrDecision', async () => {
-            vi.mocked(candidateRepository.findByStatus).mockResolvedValue([
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
                 {
                     id: 'cand-legacy',
                     status: CandidateStatus.WAITLIST,
@@ -172,22 +172,24 @@ describe('MentorService', () => {
             expect(mockApi.sendMessage).toHaveBeenCalledWith(333, expect.any(String), expect.any(Object));
         });
 
-        it('should skip candidates with currentStep != TRAINING', async () => {
-            vi.mocked(candidateRepository.findByStatus).mockResolvedValue([
+        it('should only notify candidates who passed HR or have materials sent', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
                 {
-                    id: 'cand-hr',
-                    status: CandidateStatus.WAITLIST,
-                    currentStep: FunnelStep.INITIAL_TEST,
+                    id: 'cand-no-hr',
+                    status: CandidateStatus.WAITLIST_MENTOR,
+                    currentStep: FunnelStep.TRAINING,
                     isWaitlisted: true,
                     hrDecision: null,
+                    materialsSent: false,
                     user: { telegramId: 111n }
                 } as any,
                 {
                     id: 'cand-mentor',
-                    status: CandidateStatus.WAITLIST,
+                    status: CandidateStatus.WAITLIST_MENTOR,
                     currentStep: FunnelStep.TRAINING,
                     isWaitlisted: true,
                     hrDecision: 'ACCEPTED',
+                    materialsSent: false,
                     user: { telegramId: 222n }
                 } as any
             ]);

@@ -75,7 +75,7 @@ export async function formatCandidateProfile(
             text += `\n💍 ${candidate.appearance}\n`;
         }
 
-        if (candidate.hrDecision && candidate.status !== "WAITLIST" && options.viewerRole !== "MENTOR") {
+        if (candidate.hrDecision && candidate.status !== "WAITLIST" && candidate.status !== "WAITLIST_HR" && candidate.status !== "WAITLIST_MENTOR" && options.viewerRole !== "MENTOR") {
             const dec = candidate.hrDecision === "ACCEPTED" ? "✅" : "❌";
             const notif = candidate.notificationSent ? "" : " (⏳)";
             text += `\n${dec} <b>${candidate.hrDecision}</b>${notif}\n`;
