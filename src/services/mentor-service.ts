@@ -170,6 +170,16 @@ export class MentorService {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
 
+        // Guard: only candidates who passed HR review can receive materials
+        const isHRApproved = cand.hrDecision === "ACCEPTED";
+        const isAlreadyInMentorFlow = cand.currentStep === FunnelStep.TRAINING && cand.materialsSent;
+
+        if (!isHRApproved && !isAlreadyInMentorFlow) {
+            logger.warn({ candId, status: cand.status, hrDecision: cand.hrDecision, currentStep: cand.currentStep },
+                "⚠️ sendMaterials blocked: candidate not HR-approved");
+            return null;
+        }
+
         let msgText = "";
 
         if (cand.status === "WAITLIST") {
@@ -200,8 +210,13 @@ export class MentorService {
     }
 
     async notifyWaitlist(api: any) {
-        const filtered = await candidateRepository.findByStatus("WAITLIST", true);
-        
+        const all = await candidateRepository.findByStatus("WAITLIST", true);
+
+        // Only notify mentor-waitlist candidates (passed HR, stuck on slot booking)
+        const filtered = all.filter(c =>
+            c.currentStep === FunnelStep.TRAINING && c.hrDecision === "ACCEPTED"
+        );
+
         let successCount = 0;
         for (const cand of filtered) {
             try {
