@@ -416,7 +416,7 @@ export class ScheduleSyncService {
         let syncCount = 0;
 
         const cities = Object.values(CITY_NAME_MAP);
-        const creationPromises: Promise<any>[] = [];
+        const shiftsToCreate: Array<{ staffId: string; locationId: string; date: Date }> = [];
 
         for (let i = 2; i < rows.length; i++) {
             const row = rows[i];
@@ -438,11 +438,11 @@ export class ScheduleSyncService {
                             const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined) || currentLocation;
 
                             if (shiftLocation) {
-                                creationPromises.push(workShiftRepository.create({
-                                    staff: { connect: { id: staffProfile.id } },
-                                    location: { connect: { id: shiftLocation.id } },
-                                    date: date
-                                }));
+                                shiftsToCreate.push({
+                                    staffId: staffProfile.id,
+                                    locationId: shiftLocation.id,
+                                    date
+                                });
                                 syncCount++;
                             }
                         }
@@ -466,11 +466,21 @@ export class ScheduleSyncService {
             }
         }
 
-        // Parallelize DB creation
+        logger.info({ syncCount }, "🧱 Prepared shifts for schedule sync");
+
+        // Run inserts in real batches instead of creating all Prisma promises up front.
         const batchSize = 20;
-        for (let i = 0; i < creationPromises.length; i += batchSize) {
-            await Promise.all(creationPromises.slice(i, i + batchSize));
+        for (let i = 0; i < shiftsToCreate.length; i += batchSize) {
+            const batch = shiftsToCreate.slice(i, i + batchSize);
+            await Promise.all(batch.map(shift => workShiftRepository.create({
+                staff: { connect: { id: shift.staffId } },
+                location: { connect: { id: shift.locationId } },
+                date: shift.date
+            })));
+            logger.info({ completed: Math.min(i + batch.length, shiftsToCreate.length), total: shiftsToCreate.length }, "🧱 Schedule sync batch inserted");
         }
+
+        logger.info({ shiftsBefore, shiftsAfter: syncCount }, "✅ Schedule sync completed");
 
         return {
             success: true,
