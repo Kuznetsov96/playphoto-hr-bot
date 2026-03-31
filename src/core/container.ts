@@ -22,6 +22,7 @@ import { candidateService } from '../modules/candidate/services/index.js';
 import { broadcastService } from '../services/broadcast.js';
 import { hrService } from '../services/hr-service.js';
 import { mentorService } from '../services/mentor-service.js';
+import { audit } from './audit-logger.js';
 import type { Cradle } from '../types/di.js';
 
 const container = createContainer<Cradle>({
@@ -33,6 +34,7 @@ export function configureContainer() {
         db: asValue(prisma),
         logger: asValue(logger),
         redis: asValue(redis),
+        audit: asValue(audit),
 
         // Repositories (currently objects, so asValue)
         // TODO: Refactor repositories to classes to use asClass

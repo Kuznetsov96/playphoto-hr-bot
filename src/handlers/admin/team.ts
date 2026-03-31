@@ -17,6 +17,7 @@ import { userRepository } from "../../repositories/user-repository.js";
 import { startAdminStaffSearch } from "./search.js";
 import { InputFile } from "grammy";
 import logger from "../../core/logger.js";
+import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 
@@ -98,6 +99,8 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
     if (hasPermission(userRole as any, 'STAFF_SYNC')) {
         range.text("🔄 Full Sync", async (ctx) => {
             const msg = await ctx.reply("⏳ Starting Full System Sync...");
+            const telegramId = ctx.from?.id;
+            audit({ event: "team_sync", result: "started", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id });
             try {
                 // Get blocklist count BEFORE sync
                 const prisma = (await import("../../db/core.js")).default;
@@ -315,8 +318,10 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                     report += `📅 <b>${staffNotified}</b> staff notified about schedule changes`;
                 }
 
+                audit({ event: "team_sync", result: "success", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id });
                 await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, report, { parse_mode: "HTML" });
             } catch (e: any) {
+                audit({ event: "team_sync", result: "failed", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id, error: e.message });
                 logger.error({ err: e, telegramId }, "❌ [SYNC] Full sync failed:");
                 await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, `❌ <b>Sync Error:</b> ${e.message}`, { parse_mode: "HTML" });
             }
