@@ -4,6 +4,7 @@ import { interviewRepository } from "../repositories/interview-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import prisma from "../db/core.js";
 import { accessService } from "./access-service.js";
+import { Prisma } from "@prisma/client";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { MENTOR_IDS } from "../config.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
@@ -11,6 +12,45 @@ import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
+
+function isUnknownCandidateStatusError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("not found in enum 'CandidateStatus'");
+}
+
+async function safeCountByStatus(status: CandidateStatus): Promise<number> {
+    try {
+        return await prisma.candidate.count({ where: { status } });
+    } catch (error) {
+        if (!isUnknownCandidateStatusError(error)) {
+            throw error;
+        }
+
+        logger.warn({ err: error, status }, "Returning zero for unsupported candidate status count");
+        return 0;
+    }
+}
+
+async function safeFindCandidatesByStatus<TInclude extends Prisma.CandidateInclude>(
+    status: CandidateStatus,
+    include: TInclude,
+    orderBy: Prisma.CandidateOrderByWithRelationInput
+) {
+    try {
+        return await prisma.candidate.findMany({
+            where: { status },
+            include,
+            orderBy
+        });
+    } catch (error) {
+        if (!isUnknownCandidateStatusError(error)) {
+            throw error;
+        }
+
+        logger.warn({ err: error, status }, "Returning empty candidate list for unsupported status");
+        return [];
+    }
+}
 
 export async function notifyMentors(api: any, candidate: any) {
     if (!MENTOR_IDS || MENTOR_IDS.length === 0) return;
@@ -105,12 +145,12 @@ export const hrService = {
 
     async getFinalStepStats() {
         const [ndaPending, testPending, stagingSetup, activeStaging, fillingData, readyForSchedule] = await Promise.all([
-            prisma.candidate.count({ where: { status: CandidateStatus.NDA } }),
-            prisma.candidate.count({ where: { status: CandidateStatus.KNOWLEDGE_TEST } }),
-            prisma.candidate.count({ where: { status: CandidateStatus.STAGING_SETUP } }),
-            prisma.candidate.count({ where: { status: CandidateStatus.STAGING_ACTIVE } }),
-            prisma.candidate.count({ where: { status: CandidateStatus.READY_FOR_HIRE } }),
-            prisma.candidate.count({ where: { status: CandidateStatus.AWAITING_FIRST_SHIFT } })
+            safeCountByStatus(CandidateStatus.NDA),
+            safeCountByStatus(CandidateStatus.KNOWLEDGE_TEST),
+            safeCountByStatus(CandidateStatus.STAGING_SETUP),
+            safeCountByStatus(CandidateStatus.STAGING_ACTIVE),
+            safeCountByStatus(CandidateStatus.READY_FOR_HIRE),
+            safeCountByStatus(CandidateStatus.AWAITING_FIRST_SHIFT)
         ]);
 
         return {
@@ -125,51 +165,31 @@ export const hrService = {
     },
 
     async getNDAPendingCandidates() {
-        return prisma.candidate.findMany({
-            where: { status: CandidateStatus.NDA },
-            include: { user: true, location: true },
-            orderBy: { ndaSentAt: 'asc' }
-        });
+        return safeFindCandidatesByStatus(CandidateStatus.NDA, { user: true, location: true }, { ndaSentAt: 'asc' });
     },
 
     async getTestPendingCandidates() {
-        return prisma.candidate.findMany({
-            where: { status: CandidateStatus.KNOWLEDGE_TEST },
-            include: { user: true, location: true },
-            orderBy: { ndaConfirmedAt: 'asc' }
-        });
+        return safeFindCandidatesByStatus(CandidateStatus.KNOWLEDGE_TEST, { user: true, location: true }, { ndaConfirmedAt: 'asc' });
     },
 
     async getStagingSetupCandidates() {
-        return prisma.candidate.findMany({
-            where: { status: CandidateStatus.STAGING_SETUP },
-            include: { user: true, location: true },
-            orderBy: { user: { updatedAt: 'asc' } }
-        });
+        return safeFindCandidatesByStatus(CandidateStatus.STAGING_SETUP, { user: true, location: true }, { user: { updatedAt: 'asc' } });
     },
 
     async getActiveStagingCandidates() {
-        return prisma.candidate.findMany({
-            where: { status: CandidateStatus.STAGING_ACTIVE },
-            include: { user: true, location: true, firstShiftPartner: true },
-            orderBy: { firstShiftDate: 'asc' }
-        });
+        return safeFindCandidatesByStatus(
+            CandidateStatus.STAGING_ACTIVE,
+            { user: true, location: true, firstShiftPartner: true },
+            { firstShiftDate: 'asc' }
+        );
     },
 
     async getFillingDataCandidates() {
-        return prisma.candidate.findMany({
-            where: { status: CandidateStatus.READY_FOR_HIRE },
-            include: { user: true, location: true },
-            orderBy: { statusChangedAt: 'asc' }
-        });
+        return safeFindCandidatesByStatus(CandidateStatus.READY_FOR_HIRE, { user: true, location: true }, { statusChangedAt: 'asc' });
     },
 
     async getReadyForScheduleCandidates() {
-        return prisma.candidate.findMany({
-            where: { status: CandidateStatus.AWAITING_FIRST_SHIFT },
-            include: { user: true, location: true },
-            orderBy: { statusChangedAt: 'asc' }
-        });
+        return safeFindCandidatesByStatus(CandidateStatus.AWAITING_FIRST_SHIFT, { user: true, location: true }, { statusChangedAt: 'asc' });
     },
 
     async pingNDA(api: any, candId: string) {
