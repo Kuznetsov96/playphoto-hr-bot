@@ -118,8 +118,8 @@ export class LocationRepository {
 
     async findWithWaitlist(): Promise<any[]> {
         return prisma.location.findMany({
-            where: { candidates: { some: { status: "WAITLIST" as any } } },
-            include: { _count: { select: { candidates: { where: { status: "WAITLIST" as any } } } } }
+            where: { candidates: { some: { status: { in: ["WAITLIST", "WAITLIST_HR"] } as any } } },
+            include: { _count: { select: { candidates: { where: { status: { in: ["WAITLIST", "WAITLIST_HR"] } as any } } } } }
         });
     }
 }

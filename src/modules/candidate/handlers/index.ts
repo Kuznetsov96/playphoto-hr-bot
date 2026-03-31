@@ -134,7 +134,7 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
     }
 
     const isUnderage = age < 17;
-    const status = isUnderage ? CandidateStatus.REJECTED : CandidateStatus.WAITLIST;
+    const status = isUnderage ? CandidateStatus.REJECTED : CandidateStatus.WAITLIST_HR;
     const isWaitlisted = !isUnderage;
     const hrDecision = isUnderage ? "REJECTED_SYSTEM_UNDERAGE" : null;
 
@@ -312,7 +312,7 @@ candidateHandlers.on("message:text", async (ctx, next) => {
         }
 
         const isUnderage = age < 17;
-        const status = isUnderage ? CandidateStatus.REJECTED : CandidateStatus.WAITLIST;
+        const status = isUnderage ? CandidateStatus.REJECTED : CandidateStatus.WAITLIST_HR;
         const isWaitlisted = !isUnderage;
         const hrDecision = isUnderage ? "REJECTED_SYSTEM_UNDERAGE" : null;
 
@@ -434,7 +434,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
             status = CandidateStatus.SCREENING;
         } else {
             if (selectedLocs.length > 0 && selectedLocs[0]) finalLocationId = selectedLocs[0].id;
-            status = CandidateStatus.WAITLIST;
+            status = CandidateStatus.WAITLIST_HR;
             isWaitlisted = true;
         }
 
@@ -464,7 +464,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     });
 
     // Notify HR if needed
-    if (status === CandidateStatus.MANUAL_REVIEW || status === CandidateStatus.WAITLIST) {
+    if (status === CandidateStatus.MANUAL_REVIEW || status === CandidateStatus.WAITLIST_HR) {
         try {
             const { HR_IDS } = await import("../../../config.js");
             if (HR_IDS && HR_IDS.length > 0) {
@@ -489,7 +489,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     ctx.session.step = "idle";
     const finalKey = status === CandidateStatus.REJECTED ? "candidate-reject-underage" :
         status === CandidateStatus.MANUAL_REVIEW ? "candidate-success-manual-review" :
-            status === CandidateStatus.WAITLIST ? "candidate-success-waitlist" :
+            status === CandidateStatus.WAITLIST_HR ? "candidate-success-waitlist" :
                 "candidate-success-screening";
 
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[finalKey]);

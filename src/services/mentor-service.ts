@@ -83,7 +83,7 @@ export class MentorService {
     async getWaitlistCount() {
         return await prisma.candidate.count({
             where: {
-                status: CandidateStatus.WAITLIST,
+                status: { in: [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST] },
                 isWaitlisted: true,
                 currentStep: FunnelStep.TRAINING
             }
@@ -100,6 +100,8 @@ export class MentorService {
         const statusMap: Record<string, string> = {
             "ACCEPTED": cand.materialsSent ? "📩 Materials sent" : "🆕 New",
             "WAITLIST": "⏳ Waitlist",
+            "WAITLIST_HR": "⏳ Waitlist (HR)",
+            "WAITLIST_MENTOR": "⏳ Waitlist (Mentor)",
             "DISCOVERY_SCHEDULED": "🔍 Discovery scheduled",
             "DISCOVERY_COMPLETED": "✅ Discovery passed",
             "TRAINING_SCHEDULED": "📅 Training scheduled",
@@ -133,7 +135,8 @@ export class MentorService {
 
     async getCandidates(isWaitlist: boolean) {
         if (isWaitlist) {
-            return await candidateRepository.findByStatusWithUser(CandidateStatus.WAITLIST, {
+            return await candidateRepository.findByStatusWithUser(
+                [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST], {
                 isWaitlisted: true,
                 currentStep: FunnelStep.TRAINING
             });
@@ -170,9 +173,19 @@ export class MentorService {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
 
+        // Guard: only candidates who passed HR review can receive materials
+        const isHRApproved = cand.hrDecision === "ACCEPTED";
+        const isAlreadyInMentorFlow = cand.currentStep === FunnelStep.TRAINING && cand.materialsSent;
+
+        if (!isHRApproved && !isAlreadyInMentorFlow) {
+            logger.warn({ candId, status: cand.status, hrDecision: cand.hrDecision, currentStep: cand.currentStep },
+                "⚠️ sendMaterials blocked: candidate not HR-approved");
+            return null;
+        }
+
         let msgText = "";
 
-        if (cand.status === "WAITLIST") {
+        if (cand.status === "WAITLIST" || cand.status === "WAITLIST_MENTOR") {
             msgText = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для нашої короткої зустрічі-знайомства. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
         } else if (cand.materialsSent && !cand.discoverySlotId) {
             msgText = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
@@ -200,8 +213,17 @@ export class MentorService {
     }
 
     async notifyWaitlist(api: any) {
-        const filtered = await candidateRepository.findByStatus("WAITLIST", true);
-        
+        const mentorWaitlist = await candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST], {
+            isWaitlisted: true,
+            currentStep: FunnelStep.TRAINING
+        });
+
+        // Only notify candidates who passed HR or are already in mentor flow
+        const filtered = mentorWaitlist.filter(c =>
+            c.hrDecision === "ACCEPTED" || c.materialsSent
+        );
+
         let successCount = 0;
         for (const cand of filtered) {
             try {

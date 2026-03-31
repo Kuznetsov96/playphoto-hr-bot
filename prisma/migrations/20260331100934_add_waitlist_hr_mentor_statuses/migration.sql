@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "CandidateStatus" ADD VALUE 'WAITLIST_HR';
+ALTER TYPE "CandidateStatus" ADD VALUE 'WAITLIST_MENTOR';

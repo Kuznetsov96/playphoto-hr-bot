@@ -4,6 +4,7 @@ import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../types/context.js";
 import { mentorService } from "../services/mentor-service.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { FunnelStep } from "@prisma/client";
 import { InlineKeyboard, Composer } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
@@ -300,9 +301,10 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Training</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
         }).row();
     }
-    else if (cand.status === "ACCEPTED" || cand.status === "WAITLIST") {
+    else if (cand.status === "ACCEPTED" || cand.status === "WAITLIST_MENTOR" ||
+             (cand.status === "WAITLIST" && cand.currentStep === FunnelStep.TRAINING)) {
         if (!cand.materialsSent) {
-            const label = cand.status === "WAITLIST" ? "📚 Invite to Discovery" : "📚 Send Materials";
+            const label = (cand.status === "WAITLIST" || cand.status === "WAITLIST_MENTOR") ? "📚 Invite to Discovery" : "📚 Send Materials";
             range.text(label, async (ctx) => {
                 const result = await mentorService.sendMaterials(ctx.api, cand.id);
                 if (result) {
@@ -445,7 +447,7 @@ mentorManualTrainingTimeMenu.dynamic(async (ctx, range) => {
     const cand = await candidateRepository.findById(candId);
     if (!cand) return;
 
-    const isDiscovery = cand.status === "ACCEPTED" || cand.status === "WAITLIST";
+    const isDiscovery = cand.status === "ACCEPTED" || cand.status === "WAITLIST" || cand.status === "WAITLIST_MENTOR";
     const slots = await mentorService.getTrainingSlots(date);
     const freeSlots = slots.filter((s: any) => !s.isBooked);
 

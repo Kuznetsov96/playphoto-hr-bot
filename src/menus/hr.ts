@@ -448,7 +448,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
     }
 
     // 2. RECRUITMENT ACTIONS
-    if (["SCREENING", "WAITLIST"].includes(cStatus)) {
+    if (["SCREENING", "WAITLIST", "WAITLIST_HR"].includes(cStatus)) {
         range.text(cand.notificationSent ? "🔔 Remind" : STAFF_TEXTS["hr-btn-invite-individual"], async (ctx) => {
             await hrService.inviteCandidate(ctx.api, cand.id);
             await ctx.answerCallbackQuery("Sent! ✅");
