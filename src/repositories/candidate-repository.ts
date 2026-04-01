@@ -375,6 +375,88 @@ export class CandidateRepository {
         return candidate;
     }
 
+    async reopenNoShowCandidate(id: string, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
+        const client = tx || prisma;
+        const oldCandidate = await this.findById(id, tx);
+
+        if (!oldCandidate) {
+            throw new Error(`Candidate ${id} not found`);
+        }
+
+        if (oldCandidate.status !== CandidateStatus.REJECTED || oldCandidate.hrDecision !== "NOSHOW") {
+            throw new Error("CANDIDATE_NOT_NOSHOW_REJECTED");
+        }
+
+        const candidate = await client.candidate.update({
+            where: { id },
+            data: {
+                status: CandidateStatus.WAITLIST_HR,
+                hrDecision: null,
+                notificationSent: false,
+                currentStep: FunnelStep.INTERVIEW,
+                isWaitlisted: true,
+                statusChangedAt: new Date(),
+            },
+            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+        }) as unknown as CandidateWithRelations;
+
+        logger.info({
+            event: "candidate.reopened_from_noshow",
+            candidateId: id,
+            name: candidate.fullName,
+            changes: {
+                status: { from: oldCandidate.status, to: candidate.status },
+                hrDecision: { from: oldCandidate.hrDecision, to: candidate.hrDecision },
+            }
+        }, "📋 Candidate reopened from no-show");
+
+        logBusinessEvent({
+            event: "candidate.transition.reopened_noshow",
+            candidateId: id,
+            telegramId: candidate.user?.telegramId,
+            actorType: "system",
+            actorRole: "system",
+            stage: candidate.status,
+            result: "success",
+            module: "candidate-repository",
+            operation: "reopenNoShowCandidate",
+            safeContext: {
+                fromStatus: oldCandidate.status,
+                toStatus: candidate.status,
+                fromStep: oldCandidate.currentStep,
+                toStep: candidate.currentStep,
+                previousDecision: oldCandidate.hrDecision,
+            },
+        });
+
+        logAuditEvent({
+            event: "candidate.reopened_from_noshow",
+            candidateId: id,
+            telegramId: candidate.user?.telegramId,
+            actorType: "system",
+            actorRole: "system",
+            stage: candidate.status,
+            result: "success",
+            module: "candidate-repository",
+            operation: "reopenNoShowCandidate",
+            safeContext: {
+                fromStatus: oldCandidate.status,
+                toStatus: candidate.status,
+                fromStep: oldCandidate.currentStep,
+                toStep: candidate.currentStep,
+                previousDecision: oldCandidate.hrDecision,
+            },
+        });
+
+        if (candidate.user?.telegramId) {
+            import("../services/access-service.js").then(({ accessService }) => {
+                accessService.syncUserAccess(candidate.user.telegramId).catch(() => { });
+            }).catch(() => { });
+        }
+
+        return candidate;
+    }
+
     async findByCityAndStatus(city: string, status: CandidateStatus, isWaitlisted: boolean = false, extraWhere: Prisma.CandidateWhereInput = {}): Promise<CandidateWithRelations[]> {
         return prisma.candidate.findMany({
             where: { city, status, isWaitlisted, ...extraWhere },

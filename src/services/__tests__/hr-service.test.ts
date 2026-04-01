@@ -33,6 +33,7 @@ vi.mock('../../repositories/candidate-repository.js', () => ({
         findByStatusWithUser: vi.fn(),
         findById: vi.fn(),
         update: vi.fn(),
+        reopenNoShowCandidate: vi.fn(),
         findByCityAndStatus: vi.fn()
     }
 }));
@@ -64,6 +65,12 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
 vi.mock('../access-service.js', () => ({
     accessService: {
         syncUserAccess: vi.fn().mockResolvedValue({})
+    }
+}));
+
+vi.mock('../booking-service.js', () => ({
+    bookingService: {
+        cancelInterviewSlot: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
@@ -146,6 +153,28 @@ describe('hrService', () => {
             expect(result).toHaveLength(1);
             expect(result[0].city).toBe('Kyiv');
             expect(result[0].candidateCount).toBe(1);
+        });
+    });
+
+    describe('rescheduleCandidate', () => {
+        it('reopens no-show candidates through the dedicated recovery path', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand1',
+                status: CandidateStatus.REJECTED,
+                hrDecision: 'NOSHOW',
+                interviewSlotId: 'slot1',
+                user: { id: 'user1', telegramId: 123 }
+            } as any);
+
+            const { bookingService } = await import('../booking-service.js');
+            vi.mocked(candidateRepository.reopenNoShowCandidate).mockResolvedValue({ id: 'cand1' } as any);
+
+            const result = await hrService.rescheduleCandidate('cand1');
+
+            expect(result).toBe(true);
+            expect(bookingService.cancelInterviewSlot).toHaveBeenCalledWith('slot1');
+            expect(candidateRepository.reopenNoShowCandidate).toHaveBeenCalledWith('cand1');
+            expect(candidateRepository.update).not.toHaveBeenCalled();
         });
     });
 });
