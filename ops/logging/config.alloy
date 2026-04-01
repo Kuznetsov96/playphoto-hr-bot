@@ -1,0 +1,70 @@
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  external_labels = {
+    app  = "playphoto_hr_bot",
+    host = "playphoto",
+  }
+}
+
+loki.source.file "product" {
+  targets = [
+    {
+      __path__       = "/var/log/playphoto/product.log",
+      job            = "playphoto_hr_bot",
+      logical_stream = "product",
+      source         = "file",
+    },
+  ]
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.source.file "audit" {
+  targets = [
+    {
+      __path__       = "/var/log/playphoto/audit.log",
+      job            = "playphoto_hr_bot",
+      logical_stream = "audit",
+      source         = "file",
+    },
+  ]
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.source.file "security" {
+  targets = [
+    {
+      __path__       = "/var/log/playphoto/security.log",
+      job            = "playphoto_hr_bot",
+      logical_stream = "security",
+      source         = "file",
+    },
+  ]
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.source.file "ops" {
+  targets = [
+    {
+      __path__       = "/var/log/playphoto/monitor.log",
+      job            = "playphoto_hr_bot",
+      logical_stream = "ops",
+      source         = "file",
+      ops_log        = "monitor",
+    },
+    {
+      __path__       = "/var/log/playphoto/backup.log",
+      job            = "playphoto_hr_bot",
+      logical_stream = "ops",
+      source         = "file",
+      ops_log        = "backup",
+    },
+  ]
+  forward_to = [loki.write.local.receiver]
+}
