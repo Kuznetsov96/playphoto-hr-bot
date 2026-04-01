@@ -17,6 +17,15 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
 
 export class MentorService {
+    private getMentorWaitlistWhere() {
+        return {
+            status: { in: [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST] },
+            isWaitlisted: true,
+            currentStep: FunnelStep.TRAINING,
+            notificationSent: true
+        };
+    }
+
     async getStats() {
         const accepted = await candidateRepository.findByStatusWithUser([CandidateStatus.ACCEPTED, CandidateStatus.INTERVIEW_COMPLETED], {
             isWaitlisted: false,
@@ -83,11 +92,7 @@ export class MentorService {
 
     async getWaitlistCount() {
         return await prisma.candidate.count({
-            where: {
-                status: { in: [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST] },
-                isWaitlisted: true,
-                currentStep: FunnelStep.TRAINING
-            }
+            where: this.getMentorWaitlistWhere()
         });
     }
 
@@ -137,10 +142,9 @@ export class MentorService {
     async getCandidates(isWaitlist: boolean) {
         if (isWaitlist) {
             return await candidateRepository.findByStatusWithUser(
-                [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST], {
-                isWaitlisted: true,
-                currentStep: FunnelStep.TRAINING
-            });
+                [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST],
+                this.getMentorWaitlistWhere()
+            );
         }
         return await candidateRepository.findByStatusWithUser([CandidateStatus.ACCEPTED, CandidateStatus.INTERVIEW_COMPLETED], {
             isWaitlisted: false,
@@ -225,14 +229,13 @@ export class MentorService {
 
     async notifyWaitlist(api: any) {
         const mentorWaitlist = await candidateRepository.findByStatusWithUser(
-            [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST], {
-            isWaitlisted: true,
-            currentStep: FunnelStep.TRAINING
-        });
+            [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST],
+            this.getMentorWaitlistWhere()
+        );
 
         // Only notify candidates who passed HR or are already in mentor flow
         const filtered = mentorWaitlist.filter(c =>
-            c.hrDecision === "ACCEPTED" || c.materialsSent
+            c.notificationSent && (c.hrDecision === "ACCEPTED" || c.materialsSent)
         );
 
         let successCount = 0;
