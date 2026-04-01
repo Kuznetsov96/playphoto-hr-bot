@@ -6,6 +6,7 @@ If something breaks in production, this is the first file to use together with:
 
 - [docs/logging-standard.md](./logging-standard.md)
 - [docs/logging-production-audit-2026-04-01.md](./logging-production-audit-2026-04-01.md)
+- [docs/logging-centralized-stack.md](./logging-centralized-stack.md)
 
 ## What This Project Is Running On
 
@@ -39,14 +40,21 @@ There are three logical streams:
    - admin/support actions that must be reconstructable later
 3. `security`
    - security-sensitive actions such as access revocation
-   - today these events are stored inside `audit.log`
+   - these events are also persisted into `security.log`
+4. `ops`
+   - monitor and backup execution logs
 
 Current file locations on the server:
 
 - `/home/playphoto-mgr/playphoto_hr_bot/logs/product.log`
 - `/home/playphoto-mgr/playphoto_hr_bot/logs/audit.log`
+- `/home/playphoto-mgr/playphoto_hr_bot/logs/security.log`
 - `/home/playphoto-mgr/playphoto_hr_bot/logs/monitor.log`
 - `/home/playphoto-mgr/playphoto_hr_bot/logs/backup.log`
+
+Centralized query endpoint on the server:
+
+- Loki: `http://127.0.0.1:3100`
 
 ## What An Incident Investigator Should Look For
 
@@ -84,13 +92,14 @@ If you need help from another LLM, give it this exact context:
 5. Primary docs:
    - `docs/logging-standard.md`
    - `docs/logging-production-audit-2026-04-01.md`
+   - `docs/logging-centralized-stack.md`
    - `docs/logging-ops-runbook.md`
 6. Goal:
-   - reconstruct the incident from structured logs without reading code first
+   - reconstruct the incident from centralized logs without reading code first
 
 Recommended prompt for the next LLM:
 
-`Inspect production logging for playphoto_hr_bot on ssh playphoto. Start from docs/logging-standard.md, docs/logging-production-audit-2026-04-01.md, and docs/logging-ops-runbook.md. Use product and audit logs first, then code only if logs are insufficient.`
+`Inspect production logging for playphoto_hr_bot on ssh playphoto. Start from docs/logging-standard.md, docs/logging-production-audit-2026-04-01.md, docs/logging-centralized-stack.md, and docs/logging-ops-runbook.md. Query Loki first, use on-host file tails second, and read code only if logs are insufficient.`
 
 ## Safe First Commands
 
@@ -98,35 +107,33 @@ These are the first commands an engineer or LLM should run during an incident:
 
 ```bash
 ssh playphoto 'docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"'
-ssh playphoto 'docker logs --tail 100 playphoto_hr_bot-bot-1'
-ssh playphoto 'tail -n 100 /home/playphoto-mgr/playphoto_hr_bot/logs/product.log'
-ssh playphoto 'tail -n 100 /home/playphoto-mgr/playphoto_hr_bot/logs/audit.log'
+ssh playphoto 'curl -Gs http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode '\''query={app="playphoto_hr_bot",logical_stream="product"}'\'' --data-urlencode '\''limit=20'\'''
+ssh playphoto 'curl -Gs http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode '\''query={app="playphoto_hr_bot",logical_stream="audit"}'\'' --data-urlencode '\''limit=20'\'''
+ssh playphoto 'curl -Gs http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode '\''query={app="playphoto_hr_bot",logical_stream="security"}'\'' --data-urlencode '\''limit=20'\'''
 ```
 
 If the problem is about a specific candidate or user, search by Telegram ID or event:
 
 ```bash
-ssh playphoto 'grep -n "944643678" /home/playphoto-mgr/playphoto_hr_bot/logs/product.log | tail -n 20'
-ssh playphoto 'grep -n "candidate.screening.completed" /home/playphoto-mgr/playphoto_hr_bot/logs/product.log | tail -n 20'
-ssh playphoto 'grep -n "security.channel_access.revoked" /home/playphoto-mgr/playphoto_hr_bot/logs/audit.log | tail -n 20'
+ssh playphoto 'curl -Gs http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode '\''query={app="playphoto_hr_bot",logical_stream="product"} | json | telegram_id="944643678"'\'' --data-urlencode '\''limit=20'\'''
+ssh playphoto 'curl -Gs http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode '\''query={app="playphoto_hr_bot",logical_stream="product"} | json | event="candidate.screening.completed"'\'' --data-urlencode '\''limit=20'\'''
+ssh playphoto 'curl -Gs http://127.0.0.1:3100/loki/api/v1/query_range --data-urlencode '\''query={app="playphoto_hr_bot",logical_stream="security"} | json | event="security.channel_access.revoked"'\'' --data-urlencode '\''limit=20'\'''
 ```
 
 ## Known Current Gaps
 
 These are already known and do not need rediscovery every time:
 
-1. There is no verified centralized logging sink yet.
-2. `security` is not separated into its own persisted stream yet.
-3. Some startup and worker logs are still noisier than ideal.
-4. `monitor.log` currently contains repeated permission failures.
-5. `backup.log` currently contains backup/upload issues.
+1. Some callback payload values are still noisier than ideal.
+2. Historical log file ownership on disk is mixed between `root` and `playphoto-mgr`.
+3. Loki is localhost-only by design, so access requires SSH.
 
 ## What “10/10” Means Here
 
 The system is truly `10/10` only when all of these are true:
 
 1. structured app logs are present
-2. `product`, `audit`, and `security` are clearly separated
+2. `product`, `audit`, `security`, and `ops` are clearly separated
 3. centralized searchable retention exists
 4. access to sensitive logs is restricted
 5. an incident can be reconstructed without reading code first
@@ -137,7 +144,7 @@ The system is truly `10/10` only when all of these are true:
 If production is broken and you do not know what to do:
 
 1. Open this file and the production audit file.
-2. Ask the LLM to inspect `product.log` and `audit.log` first.
+2. Ask the LLM to query Loki first.
 3. Ask it to explain the issue in plain language.
 4. Only after that ask for a fix or deployment action.
 
