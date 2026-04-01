@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
 import logger from './logger.js';
+import { logBusinessEvent } from "./log-events.js";
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -15,7 +16,14 @@ export const redis = new Redis(REDIS_URL, {
 });
 
 redis.on('connect', () => {
-    logger.info('🔌 Redis connected');
+    logBusinessEvent({
+        event: "infra.redis.connected",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "redis",
+        operation: "connect",
+    });
 });
 
 redis.on('error', (err: Error) => {
@@ -23,7 +31,14 @@ redis.on('error', (err: Error) => {
 });
 
 redis.on('ready', () => {
-    logger.info('✅ Redis ready to accept commands');
+    logBusinessEvent({
+        event: "infra.redis.ready",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "redis",
+        operation: "ready",
+    });
 });
 
 export default redis;

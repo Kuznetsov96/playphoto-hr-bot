@@ -165,7 +165,7 @@ jobs:
         host: ${{ secrets.SERVER_IP }}
         username: playphoto-mgr
         key: ${{ secrets.SSH_PRIVATE_KEY }}
-        source: "docker-compose.yml,package.json,scripts/,.env,google-service-account.json"
+        source: "docker-compose.yml,package.json,scripts/,ops/logging/,.env,google-service-account.json"
         target: "/home/playphoto-mgr/playphoto_hr_bot/"
 
     - name: ⚡ Execute Remote Deploy
@@ -180,6 +180,7 @@ jobs:
           PROJECT_DIR="/home/playphoto-mgr/playphoto_hr_bot"
           cd "$PROJECT_DIR"
           chmod 600 .env google-service-account.json
+          chmod +x scripts/backup-db.sh scripts/monitor-disk.sh
 
           echo "=== [1/5] Cleanup Disk ==="
           DISK_PCT=$(df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %' || df -h / | awk 'NR==2 {print $5+0}')
@@ -203,7 +204,7 @@ jobs:
           docker compose run --rm bot npx prisma migrate deploy
 
           echo "=== [4/5] Restart Bot ==="
-          docker compose up -d --no-deps bot
+          docker compose up -d --no-deps loki alloy bot
 
           echo "=== [5/5] Health Check ==="
           CONTAINER_ID=$(docker compose ps -q bot)
@@ -220,6 +221,10 @@ jobs:
               exit 1
             fi
           done
+
+          echo "=== [Logging] Validate Loki & Alloy ==="
+          curl -fsS http://127.0.0.1:3100/ready >/dev/null
+          curl -fsS http://127.0.0.1:12345/-/ready >/dev/null
 
           docker image prune -f
       env:

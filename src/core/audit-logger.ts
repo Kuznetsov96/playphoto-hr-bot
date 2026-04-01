@@ -8,6 +8,7 @@ import { REDACT_CONFIG } from "./logger.js";
 const isProd = process.env.NODE_ENV === "production";
 const logDir = isProd ? "/app/logs" : path.resolve("logs");
 const auditLogPath = path.join(logDir, "audit.log");
+const securityLogPath = path.join(logDir, "security.log");
 
 if (!fs.existsSync(logDir)) {
     try {
@@ -24,6 +25,13 @@ export const auditDestination = pino.destination({
     append: true
 });
 
+export const securityDestination = pino.destination({
+    dest: securityLogPath,
+    minLength: 4096,
+    sync: false,
+    append: true
+});
+
 const auditLogger = pino(
     {
         level: "info",
@@ -33,6 +41,17 @@ const auditLogger = pino(
     pino.multistream([
         { stream: process.stdout },
         { stream: auditDestination },
+    ])
+);
+
+const securityLogger = pino(
+    {
+        level: "info",
+        redact: REDACT_CONFIG,
+    },
+    pino.multistream([
+        { stream: process.stdout },
+        { stream: securityDestination },
     ])
 );
 
@@ -71,11 +90,14 @@ export function audit(params: AuditParams): void {
 
 export function securityAudit(params: SecurityAuditParams): void {
     const { telegramId, severity = "warn", ...rest } = params;
-    auditLogger.warn({
+    const payload = {
         audit: true,
         security: true,
         severity,
         ...rest,
         telegramId: telegramId != null ? String(telegramId) : undefined,
-    });
+    };
+
+    auditLogger.warn(payload);
+    securityLogger.warn(payload);
 }
