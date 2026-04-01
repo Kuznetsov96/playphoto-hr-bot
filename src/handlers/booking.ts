@@ -16,6 +16,21 @@ import { ScreenManager } from "../utils/screen-manager.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
+export function buildMentorReschedulePatch(status: CandidateStatus) {
+    const isDiscovery = status === CandidateStatus.DISCOVERY_SCHEDULED;
+
+    return {
+        status: isDiscovery ? CandidateStatus.ACCEPTED : CandidateStatus.WAITLIST_MENTOR,
+        candidateDecision: null,
+        notificationSent: false,
+        currentStep: FunnelStep.TRAINING,
+        isWaitlisted: isDiscovery ? false : true,
+        discoverySlot: { disconnect: true },
+        trainingSlot: { disconnect: true },
+        trainingMeetLink: null
+    };
+}
+
 bookingHandlers.callbackQuery(/^booking_date_header_.+$/, async (ctx) => {
     await ctx.answerCallbackQuery();
 });
@@ -757,14 +772,7 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
 
         // Force disconnect any current slots on the candidate record to prevent "ghost" bookings
         if (candidate) {
-            await candidateRepository.update(candidate.id, {
-                status: wasDiscovery ? CandidateStatus.ACCEPTED : CandidateStatus.DISCOVERY_COMPLETED,
-                candidateDecision: null,
-                notificationSent: false,
-                discoverySlot: { disconnect: true },
-                trainingSlot: { disconnect: true },
-                trainingMeetLink: null
-            });
+            await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
         }
 
         // Release the specifically requested slot as well (context-safe)
