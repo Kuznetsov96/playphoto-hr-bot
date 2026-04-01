@@ -6,7 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS } from "../config.js";
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
@@ -17,6 +17,7 @@ import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { sessionRepository } from "../repositories/session-repository.js";
 
 
 /**
@@ -611,6 +612,9 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 11.2 NEW: Notify candidates who haven't picked a discovery/training slot (24h after access)
             await processTrainingReminders(bot);
 
+            // 11.3 Funnel anomaly detection and alerting
+            await processFunnelAnomalies(bot);
+
             // 12. NDA Reminders (Every 24h until confirmed)
             await processNDAReminders(bot);
 
@@ -627,6 +631,168 @@ export async function startWorker(bot: Bot<MyContext>) {
             logger.error({ err: error }, "Candidate workflow worker iteration failed");
         }
     }, 5 * 60 * 1000);
+}
+
+type AlertState = {
+    fingerprint: string;
+    alertedAt: string;
+};
+
+async function shouldSendFunnelAlert(key: string, fingerprint: string, minIntervalHours: number): Promise<boolean> {
+    const existing = await sessionRepository.findByKey(key);
+    if (!existing?.value) return true;
+
+    try {
+        const parsed = JSON.parse(existing.value) as AlertState;
+        if (parsed.fingerprint !== fingerprint) return true;
+        const alertedAt = new Date(parsed.alertedAt);
+        return Date.now() - alertedAt.getTime() >= minIntervalHours * 60 * 60 * 1000;
+    } catch {
+        return true;
+    }
+}
+
+async function saveFunnelAlertState(key: string, fingerprint: string) {
+    await sessionRepository.upsert(key, JSON.stringify({
+        fingerprint,
+        alertedAt: new Date().toISOString(),
+    } satisfies AlertState));
+}
+
+async function processFunnelAnomalies(bot: Bot<MyContext>) {
+    try {
+        const impossibleMentorStates = await prisma.candidate.findMany({
+            where: {
+                AND: [
+                    { interviewCompletedAt: null },
+                    {
+                        OR: [
+                            { hrDecision: null },
+                            { hrDecision: { not: "ACCEPTED" } }
+                        ]
+                    },
+                    {
+                        OR: [
+                            { materialsSent: true },
+                            { discoverySlotId: { not: null } },
+                            { trainingSlotId: { not: null } },
+                            {
+                                status: {
+                                    in: [
+                                        CandidateStatus.ACCEPTED,
+                                        CandidateStatus.WAITLIST_MENTOR,
+                                        CandidateStatus.DISCOVERY_SCHEDULED,
+                                        CandidateStatus.DISCOVERY_COMPLETED,
+                                        CandidateStatus.TRAINING_SCHEDULED,
+                                        CandidateStatus.TRAINING_COMPLETED,
+                                        CandidateStatus.NDA,
+                                        CandidateStatus.KNOWLEDGE_TEST,
+                                        CandidateStatus.STAGING_SETUP,
+                                        CandidateStatus.STAGING_ACTIVE,
+                                        CandidateStatus.OFFLINE_STAGING,
+                                        CandidateStatus.READY_FOR_HIRE,
+                                        CandidateStatus.AWAITING_FIRST_SHIFT,
+                                        CandidateStatus.HIRED,
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            select: {
+                id: true,
+                fullName: true,
+                status: true,
+                currentStep: true,
+                materialsSent: true,
+                discoverySlotId: true,
+                trainingSlotId: true,
+            },
+            orderBy: { statusChangedAt: "desc" },
+            take: 10,
+        });
+
+        if (impossibleMentorStates.length > 0) {
+            const fingerprint = impossibleMentorStates.map(c => `${c.id}:${c.status}:${c.currentStep}`).join("|");
+            logBusinessEvent({
+                event: "candidate.funnel.anomaly_detected",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                stage: "FUNNEL",
+                result: "failed",
+                reasonCode: "IMPOSSIBLE_MENTOR_STATE",
+                module: "worker",
+                operation: "processFunnelAnomalies",
+                safeContext: {
+                    count: impossibleMentorStates.length,
+                    sample: impossibleMentorStates.map(c => ({
+                        id: c.id,
+                        name: c.fullName,
+                        status: c.status,
+                        step: c.currentStep,
+                    })),
+                },
+            });
+
+            if (ADMIN_IDS.length > 0 && await shouldSendFunnelAlert("FUNNEL_IMPOSSIBLE_MENTOR_STATE", fingerprint, 6)) {
+                const preview = impossibleMentorStates
+                    .slice(0, 5)
+                    .map(c => `• ${c.fullName || c.id} — ${c.status}/${c.currentStep}`)
+                    .join("\n");
+                await bot.api.sendMessage(
+                    ADMIN_IDS[0]!,
+                    `⚠️ <b>Funnel anomaly detected</b>\n\nFound <b>${impossibleMentorStates.length}</b> candidate records in mentor/final stages without HR/interview evidence.\n\n${preview}`,
+                    { parse_mode: "HTML" }
+                ).catch(() => {});
+                await saveFunnelAlertState("FUNNEL_IMPOSSIBLE_MENTOR_STATE", fingerprint);
+            }
+        }
+
+        const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+        const recentSuspiciousMaterials = await prisma.candidate.count({
+            where: {
+                materialsSent: true,
+                materialsSentAt: { gte: fifteenMinutesAgo },
+                interviewCompletedAt: null,
+                OR: [
+                    { hrDecision: null },
+                    { hrDecision: { not: "ACCEPTED" } }
+                ]
+            }
+        });
+
+        if (recentSuspiciousMaterials >= 5) {
+            const fingerprint = `count:${recentSuspiciousMaterials}:since:${fifteenMinutesAgo.toISOString().slice(0, 16)}`;
+            logBusinessEvent({
+                event: "candidate.funnel.mass_transition_spike",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                stage: "FUNNEL",
+                result: "failed",
+                reasonCode: "SUSPICIOUS_MATERIALS_SPIKE",
+                module: "worker",
+                operation: "processFunnelAnomalies",
+                safeContext: {
+                    count: recentSuspiciousMaterials,
+                    windowMinutes: 15,
+                },
+            });
+
+            if (ADMIN_IDS.length > 0 && await shouldSendFunnelAlert("FUNNEL_SUSPICIOUS_MATERIALS_SPIKE", fingerprint, 2)) {
+                await bot.api.sendMessage(
+                    ADMIN_IDS[0]!,
+                    `⚠️ <b>Funnel spike detected</b>\n\n<b>${recentSuspiciousMaterials}</b> candidates received mentor materials in the last 15 minutes without recorded interview completion or HR approval.`,
+                    { parse_mode: "HTML" }
+                ).catch(() => {});
+                await saveFunnelAlertState("FUNNEL_SUSPICIOUS_MATERIALS_SPIKE", fingerprint);
+            }
+        }
+    } catch (e) {
+        logger.error({ err: e }, "Candidate funnel anomaly detection failed");
+    }
 }
 
 /**
