@@ -187,6 +187,9 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         } else if (e.message === "UNDERAGE_CANDIDATE") {
             await ctx.answerCallbackQuery("Цей етап доступний лише після 17 років.");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+        } else if (e.message === "AGE_LIMIT_CANDIDATE") {
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-age-limit"]);
         } else {
             await ctx.answerCallbackQuery("Сталася помилка.");
         }

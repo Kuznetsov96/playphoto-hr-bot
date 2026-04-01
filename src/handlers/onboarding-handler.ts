@@ -299,7 +299,7 @@ function getCandidateAge(birthDate: Date): number {
     return age;
 }
 
-const MAX_CANDIDATE_AGE = 25;
+const MAX_CANDIDATE_AGE = 26;
 
 async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     const candidateId = existingCandidate?.id;
