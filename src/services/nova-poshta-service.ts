@@ -142,7 +142,6 @@ export class NovaPoshtaService {
             });
 
             if (fallbackResult) {
-                logger.debug({ ttn }, 'Nova Poshta trustee fallback request succeeded');
                 return true;
             }
         }
