@@ -88,6 +88,13 @@ export interface SessionData {
         preferredTarget?: "HR" | "MENTOR";
     };
 
+    parcelPhotoDraft?: {
+        parcelId: string;
+        fileIds: string[];
+        startedAt: number;
+        lastPhotoAt?: number;
+    };
+
     // Legacy / Other module fields
     lastMenuMessageId?: number;
     staffSeenWelcome?: boolean;
