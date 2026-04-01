@@ -7,10 +7,9 @@ import { staffHubMenu } from "../menus/staff.js";
 import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import prisma from "../db/core.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
-    logger.info("[Cron] Starting daily shift reminders...");
-
     const now = new Date();
     // Use Kyiv time for the date check
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
@@ -25,11 +24,9 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
         const todayShifts = await workShiftRepository.findWithRelationsByDateRange(startOfDay, endOfDay);
 
         if (todayShifts.length === 0) {
-            logger.info("[Cron] No shifts found for today.");
+            logger.debug({ date: startOfDay.toISOString() }, "Shift reminders skipped because no shifts were found");
             return;
         }
-
-        logger.info(`[Cron] Found ${todayShifts.length} shifts. Sending notifications...`);
 
         // Pre-fetch onboarding candidates (HIRED + isMentorLocked) with firstShiftDate = today
         const onboardingCandidates = await prisma.candidate.findMany({
@@ -47,7 +44,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             const telegramId = (staff as any).user?.telegramId;
 
             if (!telegramId) {
-                logger.warn({ staffId: staff.id }, "[Cron] Staff has no telegramId, skipping.");
+                logger.warn({ staffId: staff.id }, "Shift reminder skipped because staff Telegram ID is missing");
                 continue;
             }
 
@@ -75,7 +72,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
 
                     const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
                     await bot.api.sendMessage(Number(telegramId), text, { parse_mode: "HTML", reply_markup: kb });
-                    logger.info({ telegramId }, "[Cron] First shift onboarding reminder sent to photographer.");
+                    logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "First shift onboarding reminder sent");
                 } else {
                     // Regular shift reminder
                     const dateStr = shift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -111,10 +108,10 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                         reply_markup: staffHubMenu,
                         disable_notification: true
                     });
-                    logger.info({ telegramId }, "[Cron] Shift reminder sent.");
+                    logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");
                 }
             } catch (err) {
-                logger.error({ err, telegramId }, "[Cron] Failed to send shift reminder.");
+                logger.error({ err, telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder delivery failed");
             }
         }
 
@@ -135,11 +132,34 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 for (const mentorId of MENTOR_IDS) {
                     await bot.api.sendMessage(mentorId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
                 }
-                logger.info({ candId: cand.id }, "[Cron] Onboarding reminder sent to mentors.");
+                logger.debug({ candidateId: cand.id }, "Mentor onboarding reminder sent");
             }
         }
+        logBusinessEvent({
+            event: "staff.shift_reminders.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "shift-reminder-service",
+            operation: "sendDailyShiftReminders",
+            safeContext: {
+                shiftsCount: todayShifts.length,
+                onboardingCandidatesCount: onboardingCandidates.length,
+            },
+        });
     } catch (error) {
-        logger.error({ error }, "[Cron] Error in daily shift reminders service.");
+        logger.error({ err: error }, "Shift reminder job failed");
+        logBusinessEvent({
+            event: "staff.shift_reminders.completed",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            reasonCode: "SHIFT_REMINDER_JOB_FAILED",
+            module: "shift-reminder-service",
+            operation: "sendDailyShiftReminders",
+            error,
+        });
     }
 }
 
@@ -157,10 +177,21 @@ export function startShiftReminderLoop(bot: Bot<MyContext>) {
     }
 
     const delay = nextRun.getTime() - now.getTime();
-    logger.info(`[Cron] Shift reminder loop started. Next run at ${nextRun.toLocaleString("uk-UA", { timeZone: "Europe/Kyiv" })} (in ${(delay / 1000 / 60 / 60).toFixed(2)} hours)`);
+    logBusinessEvent({
+        event: "staff.shift_reminder_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "shift-reminder-service",
+        operation: "startShiftReminderLoop",
+        safeContext: {
+            nextRunAt: nextRun.toISOString(),
+            delayHours: Number((delay / 1000 / 60 / 60).toFixed(2)),
+        },
+    });
 
     setTimeout(() => {
-        sendDailyShiftReminders(bot).catch(e => logger.error(e, "[Cron] Failed to run initial shift reminders"));
+        sendDailyShiftReminders(bot).catch(e => logger.error({ err: e }, "Initial shift reminder run failed"));
         setInterval(() => sendDailyShiftReminders(bot), 24 * 60 * 60 * 1000);
     }, delay);
 }

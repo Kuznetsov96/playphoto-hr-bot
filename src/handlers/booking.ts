@@ -130,7 +130,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
     try {
         await ctx.answerCallbackQuery("Бронюємо... ⏳");
-        logger.info({ userId: ctx.from.id, slotId }, `📅 [JOURNEY] Booking interview slot`);
+        logger.debug({ telegramId, slotId }, "Interview booking started");
         const result = await bookingService.bookInterviewSlot(telegramId, slotId, ctx.from.username);
 
         const startTime = (result.slot as any).startTime;
@@ -181,7 +181,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         }
 
     } catch (e: any) {
-        logger.error({ err: e, slotId, userId: telegramId }, "Помилка при бронюванні співбесіди");
+        logger.error({ err: e, slotId, telegramId }, "Interview booking failed");
         if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔");
         } else if (e.message === "UNDERAGE_CANDIDATE") {
@@ -249,7 +249,7 @@ bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
         }
 
     } catch (e) {
-        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при відмові від участі");
+        logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview cancellation failed");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -299,7 +299,7 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
         await ctx.editMessageText("Добре, давай оберемо інший зручний час: 🗓️✨", { reply_markup: keyboard });
 
     } catch (e) {
-        logger.error({ err: e, userId: ctx.from.id }, "Помилка при перенесенні співбесіди");
+        logger.error({ err: e, telegramId: ctx.from.id }, "Interview reschedule failed");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -312,7 +312,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     const telegramId = ctx.from.id;
 
     if (slots.length === 0) {
-        logger.info({ userId: telegramId }, "⏳ [JOURNEY] Candidate start_scheduling: No slots available. Moving to WAITLIST_HR.");
+        logger.debug({ telegramId }, "Interview scheduling waitlist fallback activated");
 
         // Auto-move to WAITLIST_HR so HR can see them
         await candidateRepository.updateMany(
@@ -381,7 +381,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
-    logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate clicked 'No interview slots fit'`);
+    logger.debug({ telegramId }, "Interview scheduling no-slots-fit selected");
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
@@ -411,7 +411,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
 bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
-    logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate declined the invite`);
+    logger.debug({ telegramId }, "Interview invite declined by candidate");
 
     const candidate = await candidateRepository.findByTelegramId(telegramId);
 
@@ -463,7 +463,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
 
     if (!allowedStatuses.includes(candidate.status) && !isWaitlistMentor) {
         logger.warn({ userId: telegramId, status: candidate.status, currentStep: candidate.currentStep },
-            "⚠️ start_training_scheduling blocked: invalid candidate status");
+            "Training scheduling blocked because candidate status is invalid");
         const { showCandidateStatus } = await import("../utils/candidate-ui.js");
         await showCandidateStatus(ctx, candidate);
         return;
@@ -472,7 +472,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
     const slots = await trainingRepository.findActiveSlots();
 
     if (slots.length === 0) {
-        logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate start_training_scheduling: No discovery slots available. Moving to WAITLIST.`);
+        logger.debug({ telegramId }, "Training scheduling waitlist fallback activated");
 
         // Auto-move to WAITLIST so Mentor can see them
         await candidateRepository.updateMany(
@@ -568,7 +568,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
     try {
         await ctx.answerCallbackQuery(isTrainingPhase ? "Бронюємо навчання... ⏳" : "Бронюємо знайомство... ⏳");
-        logger.info({ userId: ctx.from.id, slotId }, `🎓 [JOURNEY] Booking ${isTrainingPhase ? "training" : "discovery"} slot`);
+        logger.debug({ telegramId, slotId, phase: isTrainingPhase ? "training" : "discovery" }, "Training or discovery booking started");
 
         const result = isTrainingPhase 
             ? await bookingService.bookTrainingSlot(telegramId, slotId)
@@ -623,7 +623,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         }
 
     } catch (e: any) {
-        logger.error({ err: e, slotId, userId: telegramId }, "Помилка при бронюванні навчання або знайомства");
+        logger.error({ err: e, slotId, telegramId }, "Training or discovery booking failed");
         if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Цей час вже зайнятий, обери інший.");
         } else {
@@ -638,7 +638,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
-    logger.info({ userId: telegramId }, `⏳ [JOURNEY] Candidate clicked 'No training slots fit'`);
+    logger.debug({ telegramId }, "Training scheduling no-slots-fit selected");
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
@@ -728,7 +728,7 @@ bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
         }
 
     } catch (e) {
-        logger.error({ err: e, slotId, userId: ctx.from.id }, "Помилка при скасуванні навчання");
+        logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Training cancellation failed");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });
@@ -814,7 +814,7 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         await ctx.editMessageText("Добре, давай оберемо інший зручний час для навчання: 🗓️✨", { reply_markup: keyboard });
 
     } catch (e) {
-        logger.error({ err: e, userId: ctx.from.id }, "Помилка при перенесенні навчання");
+        logger.error({ err: e, telegramId: ctx.from.id }, "Training reschedule failed");
         await ctx.answerCallbackQuery("Сталася помилка.");
     }
 });

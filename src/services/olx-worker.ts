@@ -13,14 +13,14 @@ export class OLXWorker {
         if (this.isRunning) return;
         this.isRunning = true;
 
-        logger.info("🚀 [OLX Worker] Started polling for new messages");
+        logger.debug("OLX worker polling started");
 
         // Initial check
-        await this.poll(bot).catch(e => logger.error({ err: e }, "OLX Poll error"));
+        await this.poll(bot).catch(e => logger.error({ err: e }, "OLX worker poll failed"));
 
         // Interval: every 2 minutes
         setInterval(async () => {
-            await this.poll(bot).catch(e => logger.error({ err: e }, "OLX Poll error"));
+            await this.poll(bot).catch(e => logger.error({ err: e }, "OLX worker poll failed"));
         }, 2 * 60 * 1000);
     }
 

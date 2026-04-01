@@ -6,6 +6,7 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { locationRepository } from '../repositories/location-repository.js';
+import { logBusinessEvent } from '../core/log-events.js';
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -14,7 +15,6 @@ export class LogisticsService {
      * Synchronize incoming parcels from Nova Poshta
      */
     async syncIncomingParcels() {
-        logger.info('📦 Syncing incoming parcels from Nova Poshta...');
         const now = new Date();
         const dateFrom = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
         const dateTo = now.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
@@ -24,13 +24,12 @@ export class LogisticsService {
             if (NP_RECIPIENT_PHONE) {
                 const incoming = await novaPoshtaService.getIncomingByPhone(NP_RECIPIENT_PHONE, dateFrom, dateTo);
                 if (incoming && Array.isArray(incoming)) {
-                    logger.info(`📦 Found ${incoming.length} incoming parcels via phone`);
                     for (const doc of incoming) {
                         await this.processIncomingDocument(doc);
                     }
                 }
             } else {
-                logger.warn('📦 NP_RECIPIENT_PHONE not set — skipping auto-discovery');
+                logger.warn('Nova Poshta auto-discovery skipped because recipient phone is not configured');
             }
 
             // 2. Sync existing active parcels via Tracking API (Manual & Auto)
@@ -48,7 +47,7 @@ export class LogisticsService {
             // 6. Hand off parcels stuck in PICKUP_IN_PROGRESS after shift end
             await this.handoffExpiredShiftParcels();
         } catch (error) {
-            logger.error({ err: error }, '📦 Error during logistics sync');
+            logger.error({ err: error }, 'Logistics synchronization failed');
         }
     }
 
@@ -63,8 +62,6 @@ export class LogisticsService {
         });
 
         if (activeParcels.length === 0) return;
-
-        logger.info(`📦 Tracking status for ${activeParcels.length} active parcels...`);
 
         const trackingDocs = activeParcels.map(p => ({ DocumentNumber: p.ttn, Phone: "" }));
         const statuses = await novaPoshtaService.trackParcels(trackingDocs);
@@ -83,7 +80,20 @@ export class LogisticsService {
                         include: { location: true }
                     });
 
-                    logger.info({ ttn: updated.ttn, oldStatus: parcel.status, npStatus, newStatus }, '📦 Parcel status updated via Tracking API');
+                    logBusinessEvent({
+                        event: "logistics.parcel.status_updated",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "success",
+                        module: "logistics-service",
+                        operation: "syncActiveParcelsStatus",
+                        safeContext: {
+                            parcelId: updated.id,
+                            oldStatus: parcel.status,
+                            newStatus,
+                            statusSource: "nova_poshta_tracking",
+                        },
+                    });
                     await this.notifyStaffOnShift(updated.id, newStatus);
                 }
             }
@@ -184,7 +194,20 @@ export class LogisticsService {
                 }
             });
 
-            logger.info({ ttn, locationId: parcel.locationId, city, addressDesc }, '📦 New incoming parcel registered');
+            logBusinessEvent({
+                event: "logistics.parcel.registered",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "logistics-service",
+                operation: "processIncomingDocument",
+                safeContext: {
+                    parcelId: parcel.id,
+                    locationId: parcel.locationId,
+                    city,
+                    deliveryType: parcel.deliveryType,
+                },
+            });
 
             // Auto-learn: save npAddressRef to location for future instant matching
             if (location && addressRef && !location.npAddressRef) {
@@ -192,7 +215,7 @@ export class LogisticsService {
                     where: { id: location.id },
                     data: { npAddressRef: addressRef }
                 });
-                logger.info({ locationName: location.name, addressRef }, '📦 Auto-learned npAddressRef for location');
+                logger.debug({ locationName: location.name }, 'Logistics location address reference learned');
             }
 
             if (parcel.locationId) {
@@ -339,7 +362,7 @@ export class LogisticsService {
         }
 
         await bot.api.sendMessage(TEAM_CHATS.SUPPORT, text, options)
-            .catch(err => logger.error({ err }, 'Failed to notify support about unmatched parcel'));
+            .catch(err => logger.error({ err, parcelId }, 'Logistics unmatched parcel support notification failed'));
     }
 
     /**
@@ -385,7 +408,7 @@ export class LogisticsService {
             options.message_thread_id = threadId;
         }
 
-        await bot.api.sendMessage(targetChat, text, options).catch(err => logger.error({ err }, 'Failed to notify support about parcel'));
+        await bot.api.sendMessage(targetChat, text, options).catch(err => logger.error({ err, parcelId, type }, 'Logistics support notification failed'));
     }
 
     /**
@@ -442,7 +465,7 @@ export class LogisticsService {
                     options.reply_markup = kb;
                 }
                 await bot.api.sendMessage(Number(user.telegramId), text, options).catch(err => {
-                    logger.error({ err, telegramId: user.telegramId }, 'Failed to notify staff about parcel');
+                    logger.error({ err, telegramId: user.telegramId, parcelId }, 'Logistics staff notification failed');
                 });
             }
         }
@@ -617,7 +640,7 @@ export class LogisticsService {
                     Number(tid),
                     LOGISTICS_TEXTS_STAFF.pickup_reminder(parcel.ttn, endTimeStr),
                     { parse_mode: 'HTML', reply_markup: kb }
-                ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn }, 'Failed to send shift-end reminder'); return false; });
+                ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics shift-end reminder delivery failed'); return false; });
 
                 if (sent) {
                     await prisma.parcel.update({
@@ -626,7 +649,17 @@ export class LogisticsService {
                     });
                 }
 
-                logger.info({ ttn: parcel.ttn }, '📦 Shift-end reminder sent');
+                logBusinessEvent({
+                    event: "logistics.parcel.shift_end_reminder_sent",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "logistics-service",
+                    operation: "remindBeforeShiftEnd",
+                    safeContext: {
+                        parcelId: parcel.id,
+                    },
+                });
             }
         }
     }
@@ -669,7 +702,7 @@ export class LogisticsService {
                     await bot.api.sendMessage(Number(tid),
                         `⏰ Зміна закінчилась, але фото посилки <code>${parcel.ttn}</code> ще не завантажено.\nБудь ласка, надішли фото вмісту. 📸`,
                         { parse_mode: 'HTML', reply_markup: kb }
-                    ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send post-shift photo reminder'));
+                    ).catch(err => logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics post-shift photo reminder delivery failed'));
                 }
                 continue;
             }
@@ -696,10 +729,20 @@ export class LogisticsService {
                     Number(oldTid),
                     LOGISTICS_TEXTS_STAFF.shift_ended_handoff(parcel.ttn),
                     { parse_mode: 'HTML' }
-                ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to send handoff message to old staff'));
+                ).catch(err => logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics handoff notification to previous staff failed'));
             }
 
-            logger.info({ ttn: parcel.ttn }, '📦 Parcel handed off after shift end');
+            logBusinessEvent({
+                event: "logistics.parcel.handed_off_after_shift",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "logistics-service",
+                operation: "handoffExpiredShiftParcels",
+                safeContext: {
+                    parcelId: parcel.id,
+                },
+            });
 
             // Notify next shift (if already started)
             await this.notifyNextShiftAboutLeftover(parcel.id);
@@ -740,7 +783,7 @@ export class LogisticsService {
                 Number(tid),
                 LOGISTICS_TEXTS_STAFF.leftover_parcel(parcel.ttn),
                 { parse_mode: 'HTML', reply_markup: kb }
-            ).catch(err => logger.error({ err, ttn: parcel.ttn }, 'Failed to notify next shift about leftover parcel'));
+            ).catch(err => logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics leftover parcel notification to next shift failed'));
         }
     }
 
@@ -771,14 +814,24 @@ export class LogisticsService {
             const sent = await bot.api.sendMessage(Number(tid),
                 `⏰ <b>Нагадування:</b> будь ласка, завантаж фото вмісту посилки <code>${parcel.ttn}</code> (${parcel.location?.name || ''}).\n\nНатисни кнопку нижче: 📸`,
                 { parse_mode: 'HTML', reply_markup: kb }
-            ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn }, 'Failed to send photo reminder'); return false; });
+            ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics photo reminder delivery failed'); return false; });
 
             if (sent) {
                 await prisma.parcel.update({
                     where: { id: parcel.id },
                     data: { photoReminderSentAt: new Date() }
                 });
-                logger.info({ ttn: parcel.ttn }, '📦 Photo upload reminder sent');
+                logBusinessEvent({
+                    event: "logistics.parcel.photo_reminder_sent",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "logistics-service",
+                    operation: "remindPhotoUpload",
+                    safeContext: {
+                        parcelId: parcel.id,
+                    },
+                });
             }
         }
     }
@@ -803,7 +856,7 @@ export class LogisticsService {
             const daysSinceUpdate = Math.floor((Date.now() - parcel.updatedAt.getTime()) / (1000 * 60 * 60 * 24));
             await this.notifySupport(parcel.id, 'DELAYED');
             await prisma.parcel.update({ where: { id: parcel.id }, data: { staleAlertSentAt: new Date() } });
-            logger.warn({ ttn: parcel.ttn, days: daysSinceUpdate }, '📦 Stale parcel alert sent');
+            logger.warn({ ttn: parcel.ttn, days: daysSinceUpdate, parcelId: parcel.id }, 'Logistics stale parcel alert sent');
         }
     }
 }

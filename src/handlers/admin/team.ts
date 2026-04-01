@@ -259,7 +259,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                             ).catch(() => { });
                         }
                     } catch (err) {
-                        logger.error({ err, staffId: staff.id }, "❌ Failed to send welcome/mentor notification in Full Sync");
+                        logger.error({ err, staffId: staff.id }, "Team sync welcome or mentor notification failed");
                     }
                 }
 
@@ -322,7 +322,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, report, { parse_mode: "HTML" });
             } catch (e: any) {
                 audit({ event: "team_sync", result: "failed", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id, error: e.message });
-                logger.error({ err: e, telegramId }, "❌ [SYNC] Full sync failed:");
+                logger.error({ err: e, telegramId }, "Team full sync failed");
                 await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, `❌ <b>Sync Error:</b> ${e.message}`, { parse_mode: "HTML" });
             }
         });

@@ -24,8 +24,6 @@ import { logBusinessEvent } from "../core/log-events.js";
  * Перевіряє нагадування та фінальні опитування кожні 5 хвилин.
  */
 export async function startWorker(bot: Bot<MyContext>) {
-    logger.info("⚙️ Вокер воронки запущено з основним ботом...");
-
     let iteration = 0;
     setInterval(async () => {
         iteration++;
@@ -85,7 +83,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 },
                             });
                         } catch (sendErr: any) {
-                            logger.error({ err: sendErr, candidateId: cand.id }, "❌ Failed to send offer notification");
+                            logger.error({ err: sendErr, candidateId: cand.id }, "Candidate offer notification delivery failed");
                             logBusinessEvent({
                                 event: "candidate.offer.notification_sent",
                                 level: "error",
@@ -137,7 +135,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 },
                             });
                         } catch (sendErr) {
-                            logger.error({ err: sendErr, candidateId: cand.id }, "❌ Failed to send rejection notification");
+                            logger.error({ err: sendErr, candidateId: cand.id }, "Candidate rejection notification delivery failed");
                             logBusinessEvent({
                                 event: "candidate.rejection.notification_sent",
                                 level: "error",
@@ -158,7 +156,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     }
                 } catch (e) {
-                    logger.error({ err: e, candidateId: cand.id }, `❌ Помилка вокера для кандидата`);
+                    logger.error({ err: e, candidateId: cand.id }, "Candidate workflow processing failed");
                 }
             }
 
@@ -169,12 +167,6 @@ export async function startWorker(bot: Bot<MyContext>) {
             for (const slot of slots6h) {
                 if (!slot.candidate) continue;
                 try {
-                    logger.info({
-                        candidateId: slot.candidate.id,
-                        slotId: slot.id,
-                        telegramId: slot.candidate.user.telegramId
-                    }, "Sending 6h interview reminder");
-
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                     const firstName = extractFirstName(slot.candidate.fullName || "Кандидатко");
                     const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `наша HR ${HR_NAME}`;
@@ -235,12 +227,6 @@ export async function startWorker(bot: Bot<MyContext>) {
             for (const slot of slots10m) {
                 if (!slot.candidate) continue;
                 try {
-                    logger.info({
-                        candidateId: slot.candidate.id,
-                        slotId: slot.id,
-                        telegramId: slot.candidate.user.telegramId
-                    }, "Sending 10m interview reminder");
-
                     const meetLink = slot.candidate.googleMeetLink;
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                     const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `наша HR ${HR_NAME}`;
@@ -638,7 +624,7 @@ export async function startWorker(bot: Bot<MyContext>) {
             await processOnboardingReminders(bot);
 
         } catch (error) {
-            logger.error({ err: error }, "❌ Глобальна помилка вокера");
+            logger.error({ err: error }, "Candidate workflow worker iteration failed");
         }
     }, 5 * 60 * 1000);
 }
@@ -676,13 +662,12 @@ async function processTestReminders(bot: Bot<MyContext>) {
                 );
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про тест (24 години)");
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Помилка в processTestReminders");
+        logger.error({ err: e }, "Candidate test reminder job failed");
     }
 }
 
@@ -729,19 +714,17 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
                     reply_markup: kb
                 });
 
-                logger.info({ userId: (cand as any).user.telegramId }, "📢 Надіслано нагадування про навчання/знайомство (24 години)");
-
                 await prisma.user.update({
                     where: { id: cand.userId },
                     data: { updatedAt: new Date() }
                 });
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                else logger.warn({ err: e, userId: (cand as any).user?.telegramId }, "⚠️ Не вдалося надіслати нагадування про навчання");
+                else logger.warn({ err: e, telegramId: (cand as any).user?.telegramId }, "Candidate training reminder delivery failed");
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Помилка в processTrainingReminders");
+        logger.error({ err: e }, "Candidate training reminder job failed");
     }
 }
 
@@ -804,7 +787,7 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
 
                 await taskService.markDigestSent(s.id);
             } catch (e) {
-                logger.error({ err: e, staffId: staff.id }, "❌ Помилка надсилання дайджесту");
+                logger.error({ err: e, staffId: staff.id }, "Staff morning digest delivery failed");
             }
         }
     }
@@ -836,7 +819,7 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                 await taskService.markReminderSent(task.id);
             }
         } catch (e) {
-            logger.error({ err: e, taskId: task.id }, "❌ Помилка нагадування про дедлайн");
+            logger.error({ err: e, taskId: task.id }, "Task deadline reminder delivery failed");
         }
     }
 
@@ -866,13 +849,13 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                         reply_markup: kb
                     });
                 } catch (sendErr) {
-                    logger.error({ err: sendErr, adminId }, "❌ Помилка надсилання сповіщення сапорту");
+                    logger.error({ err: sendErr, adminId, taskId: task.id }, "Overdue task support notification delivery failed");
                 }
             }
 
             await taskService.markOverdueAdminNotified(task.id);
         } catch (e) {
-            logger.error({ err: e, taskId: task.id }, "❌ Помилка сповіщення про протерміноване завдання");
+            logger.error({ err: e, taskId: task.id }, "Overdue task notification job failed");
         }
     }
 }
@@ -892,7 +875,6 @@ async function processAutoCloseTasks() {
             data: { isCompleted: true },
         });
         if (result.count > 0) {
-            logger.info(`🕐 Auto-closed ${result.count} stale tasks (>48h after workDate)`);
             logBusinessEvent({
                 event: "task.auto_closed",
                 actorType: "system",
@@ -907,7 +889,7 @@ async function processAutoCloseTasks() {
             });
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Error in processAutoCloseTasks");
+        logger.error({ err: e }, "Task auto-close job failed");
     }
 }
 
@@ -935,7 +917,6 @@ async function processAutoCloseTopics(bot: Bot<MyContext>) {
                     where: { id: topic.id },
                     data: { isClosed: true },
                 });
-                logger.info(`🔒 Auto-closed topic ${topic.topicId} in chat ${topic.chatId} due to 48h inactivity`);
                 logBusinessEvent({
                     event: "support.topic.auto_closed",
                     actorType: "system",
@@ -950,7 +931,7 @@ async function processAutoCloseTopics(bot: Bot<MyContext>) {
                     },
                 });
             } catch (e) {
-                logger.warn({ err: e, topicId: topic.topicId }, "⚠️ Failed to auto-close topic");
+                logger.warn({ err: e, topicId: topic.topicId }, "Support outgoing topic auto-close failed");
                 // Mark as closed anyway to avoid retrying indefinitely
                 await prisma.outgoingTopic.update({
                     where: { id: topic.id },
@@ -959,7 +940,7 @@ async function processAutoCloseTopics(bot: Bot<MyContext>) {
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Error in processAutoCloseTopics");
+        logger.error({ err: e }, "Support outgoing topic auto-close job failed");
     }
 }
 
@@ -992,7 +973,6 @@ async function processAutoCloseTickets(bot: Bot<MyContext>) {
                     data: { status: "CLOSED" },
                 });
 
-                logger.info(`🔒 Auto-closed support ticket #${ticket.id} due to 48h inactivity`);
                 logBusinessEvent({
                     event: "support.ticket.auto_closed",
                     actorType: "system",
@@ -1007,7 +987,7 @@ async function processAutoCloseTickets(bot: Bot<MyContext>) {
                     },
                 });
             } catch (e) {
-                logger.warn({ err: e, ticketId: ticket.id }, "⚠️ Failed to auto-close support ticket");
+                logger.warn({ err: e, ticketId: ticket.id }, "Support ticket auto-close failed");
                 // Fallback: still mark as closed in DB to avoid retry loop if TG fails
                 await prisma.supportTicket.update({
                     where: { id: ticket.id },
@@ -1016,7 +996,7 @@ async function processAutoCloseTickets(bot: Bot<MyContext>) {
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Error in processAutoCloseTickets");
+        logger.error({ err: e }, "Support ticket auto-close job failed");
     }
 }
 
@@ -1024,7 +1004,6 @@ async function processAutoCloseTickets(bot: Bot<MyContext>) {
  * 🛡️ Reliability FIX: Нагадування кандидатам, які не дозаповнили анкету або документи.
  */
 async function processAbandonedApplications(bot: Bot<MyContext>) {
-    logger.info("🕵️‍♂️ Перевірка покинутих анкет та документів...");
     try {
         const { default: prisma } = await import("../db/core.js");
         const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -1044,7 +1023,6 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
         for (const cand of abandonedScreening) {
             try {
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], { parse_mode: "HTML" });
-                logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про анкету");
                 logBusinessEvent({
                     event: "candidate.screening.reminder_sent",
                     candidateId: cand.id,
@@ -1059,7 +1037,7 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                 else {
-                    logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування кандидату");
+                    logger.warn({ err: e, telegramId: cand.user.telegramId }, "Candidate screening reminder delivery failed");
                     logBusinessEvent({
                         event: "candidate.screening.reminder_sent",
                         level: "warn",
@@ -1080,7 +1058,7 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
 
         // 2. Документи/Онбординг — moved to processOnboardingReminders (recurring every 24h)
     } catch (e) {
-        logger.error({ err: e }, "❌ Помилка в processAbandonedApplications");
+        logger.error({ err: e }, "Candidate abandoned application reminder job failed");
     }
 }
 
@@ -1122,7 +1100,6 @@ async function processNDAReminders(bot: Bot<MyContext>) {
 
                 // Update user to reset throttle
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logger.info({ userId: cand.user.telegramId }, "📢 Надіслано нагадування про NDA (циклічне)");
                 logBusinessEvent({
                     event: "candidate.nda.reminder_sent",
                     candidateId: cand.id,
@@ -1137,7 +1114,7 @@ async function processNDAReminders(bot: Bot<MyContext>) {
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                 else {
-                    logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Не вдалося надіслати нагадування про NDA");
+                    logger.warn({ err: e, telegramId: cand.user.telegramId }, "Candidate NDA reminder delivery failed");
                     logBusinessEvent({
                         event: "candidate.nda.reminder_sent",
                         level: "warn",
@@ -1156,7 +1133,7 @@ async function processNDAReminders(bot: Bot<MyContext>) {
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Помилка в processNDAReminders");
+        logger.error({ err: e }, "Candidate NDA reminder job failed");
     }
 }
 
@@ -1202,7 +1179,6 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
                 }
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logger.info({ candId: cand.id }, "📢 Post-staging reminder sent to admin");
                 logBusinessEvent({
                     event: "candidate.staging.admin_reminder_sent",
                     candidateId: cand.id,
@@ -1215,7 +1191,7 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
                     operation: "processPostStagingReminder",
                 });
             } catch (e) {
-                logger.warn({ err: e, candId: cand.id }, "⚠️ Failed to send post-staging reminder");
+                logger.warn({ err: e, candidateId: cand.id }, "Candidate post-staging admin reminder delivery failed");
                 logBusinessEvent({
                     event: "candidate.staging.admin_reminder_sent",
                     level: "warn",
@@ -1233,7 +1209,7 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Error in processPostStagingReminder");
+        logger.error({ err: e }, "Candidate post-staging reminder job failed");
     }
 }
 
@@ -1274,7 +1250,6 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
                 await bot.api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
 
                 await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logger.info({ userId: cand.user.telegramId, missing: missing.length }, "📢 Smart onboarding reminder sent");
                 logBusinessEvent({
                     event: "candidate.onboarding.reminder_sent",
                     candidateId: cand.id,
@@ -1292,7 +1267,7 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                 else {
-                    logger.warn({ err: e, userId: cand.user.telegramId }, "⚠️ Failed to send onboarding reminder");
+                    logger.warn({ err: e, telegramId: cand.user.telegramId }, "Candidate onboarding reminder delivery failed");
                     logBusinessEvent({
                         event: "candidate.onboarding.reminder_sent",
                         level: "warn",
@@ -1314,7 +1289,7 @@ async function processOnboardingReminders(bot: Bot<MyContext>) {
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Error in processOnboardingReminders");
+        logger.error({ err: e }, "Candidate onboarding reminder job failed");
     }
 }
 
@@ -1384,10 +1359,9 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
                             `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
                     } catch (e: any) {
-                        if (!isBotBlocked(e)) logger.warn({ err: e }, "⚠️ Failed to send 7-day rejection message");
+                        if (!isBotBlocked(e)) logger.warn({ err: e, candidateId: cand.id }, "Candidate inactivity rejection message delivery failed");
                     }
                     await candidateRepository.update(cand.id, { status: "REJECTED" });
-                    logger.info({ userId: cand.user.telegramId }, "🚫 Кандидата автоматично переведено в REJECTED (7 днів неактивності)");
                     logBusinessEvent({
                         event: "candidate.auto_rejected_inactive",
                         candidateId: cand.id,
@@ -1413,7 +1387,6 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
                             `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
-                        logger.info({ userId: cand.user.telegramId }, "⚠️ Надіслано 5-денне попередження про неактивність");
                         logBusinessEvent({
                             event: "candidate.inactivity.warning_sent",
                             candidateId: cand.id,
@@ -1434,6 +1407,6 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
         }
 
     } catch (e) {
-        logger.error({ err: e }, "❌ Помилка в processAutoRejectInactiveCandidates");
+        logger.error({ err: e }, "Candidate auto-reject inactive job failed");
     }
 }

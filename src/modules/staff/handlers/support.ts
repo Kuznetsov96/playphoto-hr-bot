@@ -244,7 +244,7 @@ staffSupportHandlers.callbackQuery(/^close_topic_(\d+)$/, async (ctx) => {
         });
 
     } catch (e: any) {
-        logger.error({ err: e, topicId }, "Failed to close outgoing topic");
+        logger.error({ err: e, topicId }, "Support outgoing topic close failed");
         await ctx.answerCallbackQuery(`❌ Error: ${e.message}`);
     }
 });
@@ -268,7 +268,7 @@ staffSupportHandlers.callbackQuery(/^ticket_force_close_(\d+)$/, async (ctx) => 
         try {
             await ctx.api.closeForumTopic(SUPPORT_CHAT_ID, ticket.topicId);
         } catch (e) {
-            logger.warn({ err: e, ticketId }, "Failed to close topic during force close");
+            logger.warn({ err: e, ticketId }, "Support topic close failed during force-close flow");
         }
     }
 
@@ -427,7 +427,7 @@ staffSupportHandlers.callbackQuery(/^ticket_transfer_(\d+)_(\d+)$/, async (ctx) 
                 reply_markup: keyboard
             });
         } catch (e) {
-            logger.error({ err: e }, "❌ Failed to send DM to target admin");
+            logger.error({ err: e, targetAdminTelegramId: targetAdminTgId }, "Support direct admin notification failed");
             logBusinessEvent({
                 event: "support.ticket.transfer_notification_sent",
                 level: "warn",
@@ -522,7 +522,7 @@ async function closeTicket(ctx: MyContext, ticketId: number, initiator: "USER" |
             // Unified UI Closure
             await finalizeTopicUIClosure(ctx, String(TEAM_CHATS.SUPPORT), ticket.topicId, closedTitle);
         } catch (e) {
-            logger.error({ err: e }, "Failed to close topic UI");
+            logger.error({ err: e, ticketId }, "Support topic UI close failed");
         }
     }
 
@@ -546,7 +546,9 @@ async function closeTicket(ctx: MyContext, ticketId: number, initiator: "USER" |
         try {
             const keyboard = new InlineKeyboard().text(STAFF_TEXTS["staff-btn-home"], "staff_hub_nav");
             await sendSupportStatus(ctx, closureMsg, { parse_mode: "HTML", reply_markup: keyboard }, telegramId).catch(() => { });
-        } catch (e) { logger.error({ err: e }, "❌ Failed to send seamless closure message to user"); }
+        } catch (e) {
+            logger.error({ err: e, telegramId }, "Support closure notification failed");
+        }
 
         // RE-READING REQUIREMENT: "Seamless logic for photographer... messages from system should replace old ones"
         // If admin closes ticket, it's a system message.
@@ -576,7 +578,7 @@ async function safeHandle(
     try {
         return await fn();
     } catch (e) {
-        logger.error({ err: e }, `💥 [SUPPORT] Unhandled error in ${label}`);
+        logger.error({ err: e, operation: label }, "Support handler unhandled error");
         logBusinessEvent({
             event: "support.handler.unhandled_error",
             level: "error",
@@ -604,42 +606,42 @@ async function safeHandle(
  * Handles messages from Staff Members (Photographers)
  */
 async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise<boolean> {
-    const logMsg = (msg: string) => {
-        logger.debug(msg);
-    };
-
-    logMsg(`📨 [SUPPORT] handleStaffMessage ENTRY for user ${ctx.from?.id} in chat ${ctx.chat?.id} (${ctx.chat?.type})`);
     const telegramId = ctx.from?.id;
     if (!telegramId || !TEAM_CHATS.SUPPORT) {
-        logMsg(`❌ [SUPPORT] EXIT: No telegramId or SUPPORT chat`);
+        logger.debug({ telegramId, supportChatConfigured: Boolean(TEAM_CHATS.SUPPORT) }, "Support staff message skipped");
         return false;
     }
 
     // Only process private messages for support
     if (ctx.chat?.type !== "private") {
-        logMsg(`❌ [SUPPORT] EXIT: Not a private chat`);
+        logger.debug({ telegramId, chatType: ctx.chat?.type }, "Support staff message ignored outside private chat");
         return false;
     }
 
     // Check if user is Staff
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user || !user.staffProfile) {
-        logMsg(`❌ [SUPPORT] EXIT: No staff profile found for ${telegramId}`);
+        logger.debug({ telegramId }, "Support staff message ignored without active staff profile");
         return false;
     }
 
     // Shield: Prevent deactivated staff from sending support messages
     if (!user.staffProfile.isActive) {
-        logMsg(`❌ [SUPPORT] EXIT: Staff profile for ${telegramId} is INACTIVE`);
+        logger.warn({ telegramId, userId: user.id }, "Inactive staff support access blocked");
         await ctx.reply(STAFF_TEXTS["staff-deactivated-shield"], { parse_mode: "HTML" }).catch(() => { });
         return true;
     }
 
-    logMsg(`✅ [SUPPORT] Staff identified: ${user.staffProfile.fullName} (Active: ${user.staffProfile.isActive}, UserId: ${user.id})`);
-
     // Check Active Ticket
     const activeTicket = await supportRepository.findActiveTicketByUser(user.id);
-    logMsg(`🔍 [SUPPORT] Active ticket check: ${activeTicket ? `Found #${activeTicket.id}, topicId: ${activeTicket.topicId}, status: ${activeTicket.status}` : 'No active ticket'}`);
+    logger.debug({
+        telegramId,
+        userId: user.id,
+        hasActiveTicket: Boolean(activeTicket),
+        ticketId: activeTicket?.id,
+        topicId: activeTicket?.topicId,
+        ticketStatus: activeTicket?.status,
+    }, "Support ticket state resolved");
 
     // --- AUTO-AUDIT TICKET LOGIC ---
     const isAuditMsg = (text?: string) => text?.includes("Потрібне уточнення по фінансах");
@@ -687,7 +689,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             await ctx.reply("Дякую за відповідь! Твоє пояснення передано кураторам. Якщо будуть додаткові питання — ми напишемо сюди. 🌸");
             return true;
         } catch (e) {
-            logger.error({ err: e }, "Failed to auto-create audit ticket");
+            logger.error({ err: e, telegramId, userId: user.id }, "Support finance audit ticket auto-create failed");
         }
     }
 
@@ -737,7 +739,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             // Close ticket with unified message
             await closeTicket(ctx, ticketId, "ADMIN");
         } catch (e) {
-            logger.error({ err: e }, "❌ Failed to send reply");
+            logger.error({ err: e, ticketId }, "Support reply-and-close delivery failed");
             await ctx.reply(STAFF_TEXTS["support-error-reply-failed"]);
         }
 
@@ -799,7 +801,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             delete ctx.session.broadcastId;
             return true;
         } catch (e) {
-            logger.error({ err: e }, "❌ Failed to create broadcast decline ticket");
+            logger.error({ err: e, broadcastId, userId: user.id }, "Support broadcast decline ticket creation failed");
             ctx.session.step = "idle";
             delete ctx.session.broadcastId;
             await ctx.reply("Сталася помилка. Твій протест не зафіксовано в системі тікетів, але статус розсилки оновлено. Звернись до куратора. 🌸");
@@ -909,7 +911,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                     }
 
                 } catch (e: any) {
-                    logger.error({ err: e }, "❌ Failed to create topic");
+                    logger.error({ err: e, ticketId: ticket.id, userId: user.id }, "Support ticket topic creation failed");
 
                     // ROLLBACK: Close the ticket immediately so user isn't blocked
                     await supportService.closeTicket(ticket.id);
@@ -950,7 +952,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                 return true;
 
             } catch (e) {
-                logger.error({ err: e }, "❌ [SUPPORT] Failed to create ticket in create_ticket branch");
+                logger.error({ err: e, telegramId, userId: user.id }, "Support ticket creation flow failed");
                 ctx.session.step = "idle";
                 delete ctx.session.clarificationTaskId;
                 const { ScreenManager } = await import("../../../utils/screen-manager.js");
@@ -1053,7 +1055,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                 // Fallback: Send to General (but with context)
                 try {
                     if (activeTicket || activeOutgoingTopic) {
-                        logger.warn(`⚠️ [SUPPORT] Falling back to General for user ${user.id}`);
+                        logger.warn({ userId: user.id, topicId: targetTopicId }, "Support topic forwarding fallback activated");
                         const fallbackIntro = activeTicket
                             ? `🆘 <b>Повідомлення від фотографа до тікету #${activeTicket.id}</b>\n` +
                             `👤 <b>${user.staffProfile.fullName}</b>\n` +
@@ -1108,8 +1110,8 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         if (!staffUser) return false;
 
         try {
-            const telegramId = Number(staffUser.telegramId);
-            await ctx.copyMessage(telegramId);
+            const targetTelegramId = Number(staffUser.telegramId);
+            await ctx.copyMessage(targetTelegramId);
 
             // Touch updatedAt to track activity
             await prisma.outgoingTopic.update({
@@ -1126,7 +1128,6 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
                 adminName: ctx.from?.first_name
             });
 
-            logger.info({ topicId, telegramId }, "[SUPPORT] Outgoing topic reply forwarded to photographer");
             logBusinessEvent({
                 event: "support.outgoing_topic.reply_forwarded",
                 actorType: "admin",
@@ -1140,12 +1141,12 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
                 safeContext: {
                     topicId,
                     outgoingTopicId: outgoingTopic.id,
-                    targetTelegramId: telegramId,
+                    targetTelegramId,
                 },
             });
             return true;
         } catch (e: any) {
-            logger.error({ err: e }, `[SUPPORT] Failed to forward outgoing topic reply to photographer`);
+            logger.error({ err: e, topicId, targetTelegramId: Number(staffUser.telegramId) }, "Support outgoing topic reply forwarding failed");
             const errorMsg = e.description?.includes("blocked")
                 ? "❌ Не вдалося доставити повідомлення (користувач заблокував бота)."
                 : "❌ Не вдалося доставити повідомлення користувачу.";
@@ -1189,7 +1190,6 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
 
                     // Visual update (Topic title)
                     await updateTicketVisuals(ctx, ticket.id);
-                    logger.info({ ticketId: ticket.id, adminId: adminUser.id, role: adminRole }, "🎫 [SUPPORT] Ticket auto-assigned on reply");
                     logAuditEvent({
                         event: "support.ticket.auto_assigned_on_reply",
                         telegramId: ctx.from?.id,
@@ -1218,7 +1218,6 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         }
         // --------------------------------------
 
-        logger.info({ topicId, ticketId: ticket.id }, "[SUPPORT] Message forwarded to user, ticket touched");
         logBusinessEvent({
             event: "support.ticket.reply_forwarded",
             actorType: "admin",
@@ -1254,7 +1253,7 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
 
         return true;
     } catch (e: any) {
-        logger.error({ err: e }, `Failed to send reply to user ${ticket.userId}`);
+        logger.error({ err: e, ticketId: ticket.id, userId: ticket.userId }, "Support ticket reply delivery failed");
         logBusinessEvent({
             event: "support.ticket.reply_forwarded",
             level: "warn",

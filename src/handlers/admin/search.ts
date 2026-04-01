@@ -84,7 +84,7 @@ adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => 
 
     const kuznetsovId = ADMIN_IDS[0];
     if (!kuznetsovId) {
-        logger.error("[ADMIN_FWD] Kuznetsov ID not found in ADMIN_IDS");
+        logger.error("Admin topic forward target is not configured");
         return;
     }
 
@@ -102,10 +102,8 @@ adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => 
             const keyboard = new InlineKeyboard().url(STAFF_TEXTS["support-btn-go-to-topic"], topicUrl);
 
             await ctx.api.editMessageReplyMarkup(kuznetsovId, forwarded.message_id, { reply_markup: keyboard });
-            
-            logger.info({ topicId, kuznetsovId }, "[ADMIN_FWD] Forwarded topic card with Go to Topic button");
         } catch (e: any) {
-            logger.error({ err: e }, "[ADMIN_FWD] Failed to copy/edit message to Kuznetsov");
+            logger.error({ err: e, topicId, targetTelegramId: kuznetsovId }, "Admin topic forward failed");
         }
     }
 });
@@ -159,7 +157,7 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
             await ScreenManager.renderScreen(ctx, "✅ Response sent successfully!", kb);
             ctx.session.step = "idle";
         } catch (e: any) {
-            logger.error({ err: e }, "Failed to send direct reply");
+            logger.error({ err: e, targetTelegramId: targetTgId }, "Admin direct reply delivery failed");
             await ScreenManager.renderScreen(ctx, `❌ Failed to send: ${e.message}`);
         }
         return;
@@ -285,7 +283,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
                 parse_mode: "HTML"
             });
         } catch (e: any) {
-            logger.error(`❌ [ADMIN_CONV] Failed to create topic: ${e.message}`);
+            logger.error({ err: e, topicId: createdTopicId, supportChatId: SUPPORT_CHAT_ID }, "Admin conversation topic bootstrap failed");
         }
     }
 
@@ -328,7 +326,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
         replyMarkup.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities");
         await ScreenManager.renderScreen(ctx, replyText, replyMarkup);
     } catch (e: any) {
-        logger.error(`❌ [ADMIN_CONV] Delivery failed for ${user.id}: ${e.message}`);
+        logger.error({ err: e, userId: user.id, telegramId: user.telegramId }, "Admin message delivery failed");
         const errKb = new InlineKeyboard();
         if (staff) errKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
         else if (candidate) errKb.text("👤 Back to Profile", `view_candidate_${candidate.id}`).row();
@@ -359,7 +357,7 @@ export async function handleAdminTimelineExport(ctx: MyContext, userId: string) 
         });
 
     } catch (e: any) {
-        logger.error("Export failed:", e);
+        logger.error({ err: e, userId }, "Admin timeline export failed");
         await ctx.reply(`❌ Export failed: ${e.message}`);
     }
 }

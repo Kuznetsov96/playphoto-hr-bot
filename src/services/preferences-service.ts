@@ -86,10 +86,10 @@ class PreferencesService {
                 requestBody: { values: [rowData] },
             });
 
-            logger.info({ fullName: data.fullNameDot, row: targetRow }, "✅ Preference saved to Google Sheets");
+            logger.debug({ row: targetRow }, "Preference saved to Google Sheets");
             return true;
         } catch (error: any) {
-            logger.error({ err: error.message, fullName: data.fullNameDot }, "❌ Failed to save preference");
+            logger.error({ err: error }, "Preference save to Google Sheets failed");
             throw error;
         }
     }

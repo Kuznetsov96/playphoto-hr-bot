@@ -337,9 +337,9 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     // Sync channel access
                     await accessService.syncUserAccess(user.telegramId, "Auto-hire after onboarding").catch(() => { });
 
-                    logger.info({ userId: user.id }, "🚀 Auto-hire completed (waiting for schedule sync)");
+                    logger.debug({ userId: user.id }, "Auto-hire completed; waiting for schedule sync");
                 } catch (hireErr) {
-                    logger.error({ err: hireErr, userId: user.id }, "❌ Auto-hire failed, candidate stays in AWAITING_FIRST_SHIFT");
+                    logger.error({ err: hireErr, userId: user.id }, "Auto-hire failed; candidate remains awaiting first shift");
                 }
 
                 // Always show "schedule is being prepared" screen
@@ -377,7 +377,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             }
         }
     } catch (e: any) {
-        logger.error({ err: e }, "Pref save failed");
+        logger.error({ err: e }, "Preferences save failed");
         await ScreenManager.renderError(ctx, "❌ Помилка при збереженні. Будь ласка, повідомте адміністратора.");
     }
 });

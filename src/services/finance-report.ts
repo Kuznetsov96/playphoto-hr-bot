@@ -12,7 +12,6 @@ import { logBusinessEvent } from "../core/log-events.js";
 export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number, forceSync: boolean = false) {
     try {
         const todayStr = new Date().toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" }); // DD.MM.YYYY
-        logger.info(`📊 Generating report for ${todayStr}...`);
         logBusinessEvent({
             event: "finance.daily_income_report.started",
             actorType: "system",
@@ -30,7 +29,6 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         const incomes = await techCashService.getIncomeForDate(todayStr);
 
         if (!incomes || incomes.length === 0) {
-            logger.warn(`⚠️ No data for report on ${todayStr}.`);
             logBusinessEvent({
                 event: "finance.daily_income_report.completed",
                 level: "warn",
@@ -97,7 +95,6 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
             }
         }
 
-        logger.info("✅ Daily report sent.");
         logBusinessEvent({
             event: "finance.daily_income_report.completed",
             actorType: "system",
@@ -115,12 +112,11 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         // AUTO-SYNC TO DDS
         // Only if running automatically (no chatId specified) or explicitly requested
         if (!chatId || forceSync) {
-            logger.info("🔄 Syncing to DDS...");
             await syncToDDS(todayStr, incomes);
         }
 
     } catch (e) {
-        logger.error({ err: e }, "❌ Failed to generate daily report:");
+        logger.error({ err: e }, "Finance daily income report generation failed");
         logBusinessEvent({
             event: "finance.daily_income_report.completed",
             level: "error",
@@ -211,7 +207,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
 
                 if (loc?.cashInEnvelope) {
                     if (dryRun) log += `[SKIP] Cash for ${fullName} (CashInEnvelope)\n`;
-                    else logger.info(`[SKIP] Cash for ${fullName} (CashInEnvelope)`);
+                    else logger.debug({ location: fullName }, "Finance DDS sync skipped cash-in-envelope location");
                 } else if (netCash > 0) {
                     const locationLabel = `${fullName} (Готівка)`;
                     const exists = dryRun ? false : ddsService.matchTransaction(existingDds, netCash, locationLabel, dateStr);
@@ -222,7 +218,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                     } else if (dryRun) {
                         log += `[DRY] Add Cash: ${netCash} | FOP: ${fopCashName} | ${locationLabel} | Cat: ${articleName}\n`;
                     } else {
-                        logger.info(`➕ Adding Cash to DDS: ${netCash} UAH (${fullName})`);
+                        logger.debug({ location: fullName, amount: netCash, flow: "cash" }, "Finance DDS sync inserting transaction");
                         await ddsService.addTransaction({
                             date: dateStr,
                             amount: netCash,
@@ -252,7 +248,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                         } else if (dryRun) {
                             log += `[DRY] Add Terminal: ${netTerminal} (Origin: ${inc.totalTerminal}) | FOP: ${fopTerminalName} | ${locationLabel} | Cat: ${articleName}\n`;
                         } else {
-                            logger.info(`➕ Adding Terminal to DDS: ${netTerminal} UAH (${fullName})`);
+                            logger.debug({ location: fullName, amount: netTerminal, flow: "terminal" }, "Finance DDS sync inserting transaction");
                             await ddsService.addTransaction({
                                 date: dateStr,
                                 amount: netTerminal,
@@ -271,7 +267,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                 // Only sleep after actual writes, skip for no-ops
                 if (!dryRun && wroteThisIteration) await new Promise(resolve => setTimeout(resolve, 1500));
             } catch (e: any) {
-                logger.error({ err: e, location: inc.locationName }, "❌ Error syncing location to DDS");
+                logger.error({ err: e, location: inc.locationName }, "Finance DDS sync failed for location");
                 // Continue to next location
             }
         }
@@ -292,7 +288,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
         });
         return { success: true, message: `Added ${addedCount} records` };
     } catch (e: any) {
-        logger.error({ err: e }, "DDS Sync Error");
+        logger.error({ err: e, date: dateStr, dryRun }, "Finance DDS sync failed");
         logBusinessEvent({
             event: "finance.dds_sync.completed",
             level: "error",
@@ -315,7 +311,6 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
 export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
     try {
         const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
-        logger.info(`⚖️ Auto-audit for ${dateStr}...`);
         logBusinessEvent({
             event: "finance.morning_audit_report.started",
             actorType: "system",
@@ -331,12 +326,11 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
 
         // 0. Pre-warm Monobank caches in parallel with DDS sync
         const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
-            logger.warn({ err: e }, "❄️ Pre-warm failed, audit will fetch on demand")
+            logger.warn({ err: e, reportDate: dateStr }, "Finance audit pre-warm failed; using on-demand fetch")
         );
 
         // 1. "Catch-up" Sync: Ensure late-night reports from yesterday are in DDS
-        logger.info(`🔄 Catch-up sync for ${dateStr}...`);
-        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
+        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e, reportDate: dateStr }, "Finance catch-up DDS sync failed"));
 
         // Wait for pre-warm to finish (likely already done while DDS sync was running)
         await preWarmPromise;
@@ -346,7 +340,7 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
         const res = await reconciliationService.runReconciliation(dateStr, undefined, undefined, incomes);
 
         if (!res.success) {
-            logger.error(`❌ Auto-audit failed: ${res.message}`);
+            logger.error({ reportDate: dateStr, message: res.message }, "Finance morning audit reconciliation failed");
             logBusinessEvent({
                 event: "finance.morning_audit_report.completed",
                 level: "error",
@@ -404,7 +398,7 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
             },
         });
     } catch (e) {
-        logger.error({ err: e }, "❌ Morning report error:");
+        logger.error({ err: e }, "Finance morning audit report failed");
         logBusinessEvent({
             event: "finance.morning_audit_report.completed",
             level: "error",
@@ -421,7 +415,6 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
 import { reportsQueue } from "../core/queue.js";
 
 export async function startDailyReportLoop(bot: Bot<MyContext>) {
-    logger.info("📊 Starting daily report loop...");
     logBusinessEvent({
         event: "finance.report_loop.started",
         actorType: "system",
@@ -444,29 +437,24 @@ export async function startDailyReportLoop(bot: Bot<MyContext>) {
         // 08:00 Audit Report (for Yesterday)
         if (localDate.getHours() === 8 && localDate.getMinutes() === 0) {
             if (lastAuditDate !== todayStr) {
-                logger.info("🕗 08:00 AM Audit Time! Starting...");
                 const yesterday = new Date(localDate);
                 yesterday.setDate(yesterday.getDate() - 1);
 
                 await reportsQueue.add('send-morning-audit', { dateIso: yesterday.toISOString() });
                 lastAuditDate = todayStr;
-                logger.info("📥 [QUEUE] Morning audit job added");
             } else {
-                logger.debug("⏭️ Аудит за сьогодні вже запущено.");
+                logger.debug({ reportDate: todayStr }, "Finance morning audit already queued for this day");
             }
         }
 
         // 21:40 Daily Income Report (for Today)
         if (localDate.getHours() === 21 && localDate.getMinutes() === 40) {
             if (lastReportDate !== todayStr) {
-                logger.info("🕘 09:40 PM Report Time! Collecting data...");
-
                 await reportsQueue.add('send-daily-income', { chatId: null }); // null = auto recipients
 
                 lastReportDate = todayStr;
-                logger.info("📥 [QUEUE] Daily income report job added");
             } else {
-                logger.debug("⏭️ Звіт за сьогодні вже відправлено.");
+                logger.debug({ reportDate: todayStr }, "Finance daily income report already queued for this day");
             }
         }
     }, 60 * 1000);

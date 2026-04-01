@@ -5,6 +5,7 @@ import { LOGISTICS_TEXTS_STAFF, LOGISTICS_TEXTS_ADMIN } from "../../../constants
 import { TEAM_CHATS } from "../../../config.js";
 import logger from "../../../core/logger.js";
 import { audit } from "../../../core/audit-logger.js";
+import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
@@ -22,7 +23,11 @@ async function editOrReplyText(
             await ctx.editMessageText(text, options);
             return;
         } catch (err) {
-            logger.warn({ err, data: ctx.callbackQuery.data, userId: ctx.from?.id }, "⚠️ [LOGISTICS] Failed to edit message, falling back to reply");
+            logger.warn({
+                err,
+                callbackAction: sanitizeCallbackData(ctx.callbackQuery.data),
+                telegramId: ctx.from?.id
+            }, "Logistics message edit failed; falling back to reply");
         }
     }
 
@@ -98,7 +103,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
         audit({ event: "parcel_accept", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, actorId: user.staffProfile.id });
     } catch (err: any) {
         audit({ event: "parcel_accept", result: "failed", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: ctx.match?.[1], updateId: ctx.update.update_id, error: err.message });
-        logger.error({ err, parcelId: ctx.match?.[1], userId: ctx.from?.id }, "❌ [LOGISTICS] parcel_accept handler failed");
+        logger.error({ err, parcelId: ctx.match?.[1], telegramId: ctx.from?.id }, "Logistics parcel accept handler failed");
         await ctx.answerCallbackQuery({ text: "Не вдалося обробити кнопку. Спробуй ще раз.", show_alert: true }).catch(() => { });
     }
 });
@@ -314,10 +319,10 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                     await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photo.file_id, options);
                 } catch (e: any) {
                     if (e.description?.includes("thread not found")) {
-                        logger.warn(`⚠️ [LOGISTICS] Logistics thread ${TEAM_CHATS.LOGISTICS} not found, falling back to general thread`);
+                        logger.warn({ logisticsThreadId: TEAM_CHATS.LOGISTICS }, "Logistics thread missing; falling back to general support chat");
                         delete options.message_thread_id;
                         await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photo.file_id, options).catch(err => {
-                            logger.error({ err }, "❌ [LOGISTICS] Failed to send photo even to general thread");
+                            logger.error({ err, parcelId }, "Logistics parcel photo delivery failed in fallback channel");
                         });
                     } else {
                         throw e;
@@ -325,7 +330,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 }
             } catch (err: any) {
                 audit({ event: "parcel_photo_upload", result: "failed", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, error: err.message });
-                logger.error({ err, parcelId, userId: ctx.from?.id }, "❌ [LOGISTICS] Photo upload handler failed");
+                logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics parcel photo upload handler failed");
                 throw err;
             }
         } else {

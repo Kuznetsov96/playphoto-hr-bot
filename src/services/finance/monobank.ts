@@ -97,7 +97,7 @@ class MonobankClient {
         }
 
         // 2. API Fetch
-        logger.info(`🌐 Monobank [${this.name}]: Fetching fresh client info...`);
+        logger.debug({ provider: "monobank", accountGroup: this.name }, "Monobank client info cache miss");
         const info = await this.fetchWithAuth("/personal/client-info", onWait);
 
         // 3. Save to Redis (1800s = 30 minutes)
@@ -362,13 +362,12 @@ export const monobankService = {
                 });
 
                 if (uahAccounts.length > 0) {
-                    logger.info(`[MONO] FOP ${key}: Found ${fopAccounts.length} FOP accounts out of ${uahAccounts.length} Total. Key: ${key.toUpperCase()}`);
-                    uahAccounts.forEach((a: any) => {
-                        logger.info(`   - Account: IBAN ${a.iban.substring(0, 10)}...${a.iban.slice(-4)}, Type: ${a.type}, ID: ${a.id}`);
-                    });
-
                     if (fopAccounts.length === 0) {
-                        logger.warn(`[MONO] ${key} has UAH accounts but NONE matched IBAN list or 'fop' type.`);
+                        logger.warn({
+                            provider: "monobank",
+                            accountGroup: key.toUpperCase(),
+                            uahAccountCount: uahAccounts.length,
+                        }, "Monobank UAH accounts found but no eligible FOP accounts matched");
                     }
                 }
 
@@ -396,7 +395,7 @@ export const monobankService = {
         const from = Math.floor(midnight.getTime() / 1000);
         const to = from + 259200; // 72h window
 
-        logger.info(`\u2744\ufe0f Pre-warming Monobank caches for ${auditDate.toLocaleDateString('uk-UA')}...`);
+        logger.debug({ auditDate: auditDate.toLocaleDateString('uk-UA') }, "Monobank audit cache pre-warm started");
 
         await Promise.all(Object.entries(monoClients).map(async ([key, client]) => {
             try {
@@ -413,12 +412,10 @@ export const monobankService = {
                 for (const acc of fopAccounts) {
                     await client.getStatements(acc.id, from, to);
                 }
-                logger.info(`\u2744\ufe0f [${key.toUpperCase()}] Pre-warmed: ${fopAccounts.length} accounts`);
+                logger.debug({ accountGroup: key.toUpperCase(), accountCount: fopAccounts.length }, "Monobank audit cache pre-warm completed");
             } catch (e: any) {
-                logger.warn(`\u2744\ufe0f [${key.toUpperCase()}] Pre-warm failed: ${e.message}`);
+                logger.warn({ err: e, accountGroup: key.toUpperCase() }, "Monobank audit cache pre-warm failed");
             }
         }));
-
-        logger.info(`\u2744\ufe0f Pre-warm complete.`);
     }
 };

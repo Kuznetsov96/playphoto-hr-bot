@@ -23,7 +23,7 @@ class DashboardService {
     async getDailyStatus(onWait?: (msg: string) => void): Promise<DailyStatus> {
         const todayStr = new Date().toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
 
-        logger.info(`📊 Generating Daily Status for ${todayStr}...`);
+        logger.debug({ reportDate: todayStr }, "Finance dashboard daily status generation started");
 
         // 1. Get Balances (Parallel)
         const balances = await monobankService.getAllBalances(onWait);
