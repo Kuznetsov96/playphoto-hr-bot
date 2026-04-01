@@ -348,6 +348,10 @@ model Parcel {
   npCity         String? // City from NP (for fallback mapping)
   npAddress      String? // Full address description from NP
   recipientPhone String? // For authorization/proxies
+  npTrusteeOrderRef    String? // NP change request Ref for recipient updates
+  npTrusteeOrderNumber String? // NP change request Number for recipient updates
+  npTrusteeError       String? // Last NP trustee creation error
+  npTrusteeLastAttemptAt DateTime? // Last time trustee creation was attempted
   description    String?
   deliveryType   String // "Warehouse", "Postomat", "Address"
 
