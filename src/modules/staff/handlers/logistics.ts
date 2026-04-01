@@ -9,21 +9,8 @@ import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
-const PARCEL_PHOTO_BUFFER_MS = 1500;
-
-type PendingParcelPhotoUpload = {
-    parcelId: string;
-    chatKey: string;
-    fileIds: string[];
-    flushTimer?: NodeJS.Timeout;
-};
-
-const pendingParcelPhotoUploads = new Map<string, PendingParcelPhotoUpload>();
-
-function getParcelPhotoChatKey(ctx: MyContext): string | null {
-    const rawKey = ctx.chat?.id ?? ctx.from?.id;
-    return rawKey !== undefined ? String(rawKey) : null;
-}
+const PARCEL_PHOTO_REMINDER_MS = 1000 * 60 * 15;
+const parcelPhotoReminderTimers = new Map<string, NodeJS.Timeout>();
 
 async function editOrReplyText(
     ctx: MyContext,
@@ -48,6 +35,62 @@ async function editOrReplyText(
     }
 
     await ctx.reply(text, options);
+}
+
+function buildParcelPhotoDraftKeyboard(parcelId: string) {
+    return new InlineKeyboard()
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo_done, `parcel_photo_done_${parcelId}`)
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, `parcel_photo_cancel_${parcelId}`);
+}
+
+function getParcelPhotoReminderKey(ctx: MyContext) {
+    const rawKey = ctx.chat?.id ?? ctx.from?.id;
+    return rawKey !== undefined ? String(rawKey) : null;
+}
+
+function clearParcelPhotoReminder(ctx: MyContext) {
+    const reminderKey = getParcelPhotoReminderKey(ctx);
+    if (!reminderKey) return;
+
+    const timer = parcelPhotoReminderTimers.get(reminderKey);
+    if (timer) {
+        clearTimeout(timer);
+        parcelPhotoReminderTimers.delete(reminderKey);
+    }
+}
+
+function scheduleParcelPhotoReminder(ctx: MyContext, parcelId: string) {
+    const reminderKey = getParcelPhotoReminderKey(ctx);
+    if (!reminderKey) return;
+
+    clearParcelPhotoReminder(ctx);
+
+    const timer = setTimeout(() => {
+        const draft = ctx.session.parcelPhotoDraft;
+        if (!draft || draft.parcelId !== parcelId || draft.fileIds.length === 0) {
+            parcelPhotoReminderTimers.delete(reminderKey);
+            return;
+        }
+
+        parcelPhotoReminderTimers.delete(reminderKey);
+
+        void ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_reminder(draft.fileIds.length), {
+            parse_mode: 'HTML',
+            reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
+        }).catch((err) => {
+            logger.warn({ err, parcelId, telegramId: ctx.from?.id }, "Failed to send parcel photo upload reminder");
+        });
+    }, PARCEL_PHOTO_REMINDER_MS);
+
+    parcelPhotoReminderTimers.set(reminderKey, timer);
+}
+
+function resetParcelPhotoDraft(ctx: MyContext) {
+    clearParcelPhotoReminder(ctx);
+    delete ctx.session.parcelPhotoDraft;
+    if (ctx.session.step.startsWith('awaiting_parcel_photo_')) {
+        ctx.session.step = 'idle';
+    }
 }
 
 async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photoFileIds: string[]) {
@@ -136,79 +179,72 @@ async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photo
     }
 }
 
-function scheduleParcelPhotoFlush(ctx: MyContext, chatKey: string) {
-    const pending = pendingParcelPhotoUploads.get(chatKey);
-    if (!pending) return;
-
-    if (pending.flushTimer) {
-        clearTimeout(pending.flushTimer);
+async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
+    const draft = ctx.session.parcelPhotoDraft;
+    if (!draft || draft.parcelId !== parcelId || draft.fileIds.length === 0) {
+        await ctx.answerCallbackQuery(LOGISTICS_TEXTS_STAFF.photo_upload_empty);
+        return;
     }
 
-    pending.flushTimer = setTimeout(() => {
-        const current = pendingParcelPhotoUploads.get(chatKey);
-        if (!current) return;
+    audit({
+        event: "parcel_photo_upload",
+        result: "started",
+        actorType: "staff",
+        telegramId: ctx.from?.id,
+        entityType: "parcel",
+        entityId: parcelId,
+        updateId: ctx.update.update_id,
+        context: { photoCount: draft.fileIds.length }
+    });
 
-        pendingParcelPhotoUploads.delete(chatKey);
+    try {
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            select: { contentPhotoIds: true }
+        });
 
-        void (async () => {
-            audit({
-                event: "parcel_photo_upload",
-                result: "started",
-                actorType: "staff",
-                telegramId: ctx.from?.id,
-                entityType: "parcel",
-                entityId: current.parcelId,
-                updateId: ctx.update.update_id,
-                context: { photoCount: current.fileIds.length }
-            });
+        const mergedPhotoIds = Array.from(new Set([
+            ...(parcel?.contentPhotoIds || []),
+            ...draft.fileIds
+        ]));
 
-            try {
-                const parcel = await prisma.parcel.findUnique({
-                    where: { id: current.parcelId },
-                    select: { contentPhotoIds: true }
-                });
-
-                const mergedPhotoIds = Array.from(new Set([
-                    ...(parcel?.contentPhotoIds || []),
-                    ...current.fileIds
-                ]));
-
-                await prisma.parcel.update({
-                    where: { id: current.parcelId },
-                    data: {
-                        contentPhotoIds: mergedPhotoIds,
-                        status: 'VERIFYING'
-                    }
-                });
-
-                await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
-                await sendParcelPhotosToSupport(ctx, current.parcelId, mergedPhotoIds);
-
-                audit({
-                    event: "parcel_photo_upload",
-                    result: "success",
-                    actorType: "staff",
-                    telegramId: ctx.from?.id,
-                    entityType: "parcel",
-                    entityId: current.parcelId,
-                    updateId: ctx.update.update_id,
-                    context: { photoCount: current.fileIds.length }
-                });
-            } catch (err: any) {
-                audit({
-                    event: "parcel_photo_upload",
-                    result: "failed",
-                    actorType: "staff",
-                    telegramId: ctx.from?.id,
-                    entityType: "parcel",
-                    entityId: current.parcelId,
-                    updateId: ctx.update.update_id,
-                    error: err.message
-                });
-                logger.error({ err, parcelId: current.parcelId, telegramId: ctx.from?.id }, "Logistics parcel photo upload handler failed");
+        await prisma.parcel.update({
+            where: { id: parcelId },
+            data: {
+                contentPhotoIds: mergedPhotoIds,
+                status: 'VERIFYING'
             }
-        })();
-    }, PARCEL_PHOTO_BUFFER_MS);
+        });
+
+        resetParcelPhotoDraft(ctx);
+
+        await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_received(mergedPhotoIds.length));
+        await sendParcelPhotosToSupport(ctx, parcelId, mergedPhotoIds);
+
+        audit({
+            event: "parcel_photo_upload",
+            result: "success",
+            actorType: "staff",
+            telegramId: ctx.from?.id,
+            entityType: "parcel",
+            entityId: parcelId,
+            updateId: ctx.update.update_id,
+            context: { photoCount: draft.fileIds.length }
+        });
+    } catch (err: any) {
+        audit({
+            event: "parcel_photo_upload",
+            result: "failed",
+            actorType: "staff",
+            telegramId: ctx.from?.id,
+            entityType: "parcel",
+            entityId: parcelId,
+            updateId: ctx.update.update_id,
+            error: err.message
+        });
+        logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics parcel photo upload handler failed");
+        await editOrReplyText(ctx, "Не вдалося передати фото сапорту. Спробуй натиснути «Готово» ще раз або напиши в підтримку.");
+    }
 }
 
 // 1. Accept Parcel
@@ -402,15 +438,42 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) =
 staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
-    await ctx.reply("Будь ласка, надішліть фото вмісту посилки: 📸");
+    ctx.session.parcelPhotoDraft = {
+        parcelId,
+        fileIds: [],
+        startedAt: Date.now()
+    };
+    scheduleParcelPhotoReminder(ctx, parcelId);
+    await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_prompt, {
+        parse_mode: 'HTML',
+        reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
+    });
     await ctx.answerCallbackQuery();
+});
+
+staffLogisticsHandlers.callbackQuery(/^parcel_photo_done_(.+)$/, async (ctx) => {
+    const parcelId = ctx.match[1] as string;
+    await ctx.answerCallbackQuery("Завершую відправку фото...");
+    await finalizeParcelPhotoDraft(ctx, parcelId);
+});
+
+staffLogisticsHandlers.callbackQuery(/^parcel_photo_cancel_(.+)$/, async (ctx) => {
+    const parcelId = ctx.match[1] as string;
+    const draft = ctx.session.parcelPhotoDraft;
+
+    if (!draft || draft.parcelId !== parcelId) {
+        await ctx.answerCallbackQuery("Активне завантаження вже завершене.");
+        return;
+    }
+
+    resetParcelPhotoDraft(ctx);
+    await ctx.answerCallbackQuery("Скасовано.");
+    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled);
 });
 
 // Handle text and photo inputs
 staffLogisticsHandlers.on("message", async (ctx, next) => {
     const step = ctx.session.step || '';
-    const chatKey = getParcelPhotoChatKey(ctx);
-    const pendingPhotoUpload = chatKey ? pendingParcelPhotoUploads.get(chatKey) : undefined;
 
     if (step.startsWith('awaiting_np_phone_')) {
         const parcelId = step.replace('awaiting_np_phone_', '');
@@ -486,40 +549,36 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
         return;
     }
 
-    if (step.startsWith('awaiting_parcel_photo_') || pendingPhotoUpload) {
-        const parcelId = step.startsWith('awaiting_parcel_photo_')
-            ? step.replace('awaiting_parcel_photo_', '')
-            : pendingPhotoUpload!.parcelId;
+    if (step.startsWith('awaiting_parcel_photo_')) {
+        const parcelId = step.replace('awaiting_parcel_photo_', '');
+        const draft = ctx.session.parcelPhotoDraft;
         const photo = ctx.message?.photo?.[ctx.message.photo.length - 1];
 
-        if (photo) {
-            if (!chatKey) {
-                await ctx.reply("Не вдалося обробити фото. Спробуй ще раз, будь ласка.");
-                return;
-            }
-
-            ctx.session.step = 'idle';
-
-            const current = pendingParcelPhotoUploads.get(chatKey);
-            if (current && current.parcelId !== parcelId && current.flushTimer) {
-                clearTimeout(current.flushTimer);
-                pendingParcelPhotoUploads.delete(chatKey);
-            }
-
-            const upload = pendingParcelPhotoUploads.get(chatKey) || {
+        if (!draft || draft.parcelId !== parcelId) {
+            ctx.session.parcelPhotoDraft = {
                 parcelId,
-                chatKey,
-                fileIds: []
+                fileIds: [],
+                startedAt: Date.now()
             };
+        }
 
-            if (!upload.fileIds.includes(photo.file_id)) {
-                upload.fileIds.push(photo.file_id);
+        if (photo) {
+            const currentDraft = ctx.session.parcelPhotoDraft!;
+            if (!currentDraft.fileIds.includes(photo.file_id)) {
+                currentDraft.fileIds.push(photo.file_id);
             }
+            currentDraft.lastPhotoAt = Date.now();
+            scheduleParcelPhotoReminder(ctx, parcelId);
 
-            pendingParcelPhotoUploads.set(chatKey, upload);
-            scheduleParcelPhotoFlush(ctx, chatKey);
+            await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_progress(currentDraft.fileIds.length), {
+                parse_mode: 'HTML',
+                reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
+            });
         } else {
-            await ctx.reply("Будь ласка, надішли саме фото. 📸");
+            await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_waiting, {
+                parse_mode: 'HTML',
+                reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
+            });
         }
         return;
     }
