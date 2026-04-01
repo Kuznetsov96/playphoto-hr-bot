@@ -600,6 +600,26 @@ export class LogisticsService {
         return (new Date(kyivStr).getTime() - new Date(utcStr).getTime()) / 60000;
     }
 
+    private getKyivCalendarDateRange(now: Date, dayOffset = 0): { shiftStart: Date; shiftEnd: Date } {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Europe/Kyiv',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).formatToParts(now);
+
+        let y = 0, mo = 0, d = 0;
+        for (const p of parts) {
+            if (p.type === 'year') y = parseInt(p.value);
+            if (p.type === 'month') mo = parseInt(p.value);
+            if (p.type === 'day') d = parseInt(p.value);
+        }
+
+        const shiftStart = new Date(Date.UTC(y, mo - 1, d + dayOffset));
+        const shiftEnd = new Date(Date.UTC(y, mo - 1, d + dayOffset + 1));
+        return { shiftStart, shiftEnd };
+    }
+
     /**
      * Sends a reminder to staff who accepted a parcel but haven't picked it up yet,
      * when 2 hours remain before their shift ends.
@@ -753,10 +773,7 @@ export class LogisticsService {
      * Notifies the staff of the next shift about a leftover parcel.
      * Called after handoff and also at start of each sync cycle.
      */
-    async notifyNextShiftAboutLeftover(parcelId: string) {
-        const now = new Date();
-        const { shiftStart, shiftEnd } = this.getKyivShiftDateRange(now);
-
+    private async notifyShiftAboutLeftover(parcelId: string, shiftStart: Date, shiftEnd: Date) {
         const parcel = await prisma.parcel.findUnique({
             where: { id: parcelId },
             include: { location: true }
@@ -785,6 +802,17 @@ export class LogisticsService {
                 { parse_mode: 'HTML', reply_markup: kb }
             ).catch(err => logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics leftover parcel notification to next shift failed'));
         }
+    }
+
+    async notifyNextShiftAboutLeftover(parcelId: string) {
+        const now = new Date();
+        const { shiftStart, shiftEnd } = this.getKyivShiftDateRange(now);
+        await this.notifyShiftAboutLeftover(parcelId, shiftStart, shiftEnd);
+    }
+
+    async notifyTomorrowShiftAboutLeftover(parcelId: string) {
+        const { shiftStart, shiftEnd } = this.getKyivCalendarDateRange(new Date(), 1);
+        await this.notifyShiftAboutLeftover(parcelId, shiftStart, shiftEnd);
     }
 
     /**
