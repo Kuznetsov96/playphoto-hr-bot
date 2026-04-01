@@ -829,13 +829,18 @@ export const hrService = {
             await bookingService.cancelInterviewSlot(cand.interviewSlotId);
         }
 
-        // 2. Set status back to WAITLIST_HR so they can book again
-        await candidateRepository.update(candId, {
-            status: CandidateStatus.WAITLIST_HR,
-            hrDecision: null,
-            notificationSent: false,
-            currentStep: FunnelStep.INTERVIEW
-        });
+        // 2. Keep the global funnel guard strict: reopening a no-show rejection
+        // is a deliberate HR recovery action, not a generic REJECTED -> WAITLIST_HR transition.
+        if (cand.status === CandidateStatus.REJECTED && cand.hrDecision === "NOSHOW") {
+            await candidateRepository.reopenNoShowCandidate(candId);
+        } else {
+            await candidateRepository.update(candId, {
+                status: CandidateStatus.WAITLIST_HR,
+                hrDecision: null,
+                notificationSent: false,
+                currentStep: FunnelStep.INTERVIEW
+            });
+        }
 
         // 3. Log to Timeline
         const { timelineRepository } = await import("../repositories/timeline-repository.js");
