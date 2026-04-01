@@ -2,6 +2,14 @@ import { Prisma, CandidateStatus, FunnelStep } from "@prisma/client";
 import type { Candidate, User, Location, StaffProfile, TrainingSlot, InterviewSlot, Message } from "@prisma/client";
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
+import {
+    buildNextCandidateFunnelState,
+    InvalidCandidateTransitionError,
+    normalizeCandidateFunnelPatch,
+    validateCandidateFunnelTransition,
+    type CandidateFunnelSnapshot,
+} from "../services/candidate-funnel-guard.js";
+import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 
 const LEGACY_READABLE_CANDIDATE_STATUSES: CandidateStatus[] = [
     CandidateStatus.SCREENING,
@@ -41,6 +49,33 @@ export type CandidateWithRelations = Candidate & {
 };
 
 export class CandidateRepository {
+    private async getFunnelSnapshot(client: Prisma.TransactionClient | typeof prisma, id: string): Promise<CandidateFunnelSnapshot | null> {
+        return client.candidate.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                fullName: true,
+                status: true,
+                currentStep: true,
+                hrDecision: true,
+                isWaitlisted: true,
+                notificationSent: true,
+                materialsSent: true,
+                interviewCompletedAt: true,
+                interviewSlotId: true,
+                discoverySlotId: true,
+                trainingSlotId: true,
+            }
+        }) as unknown as Promise<CandidateFunnelSnapshot | null>;
+    }
+
+    private validateFunnelPatch(oldCandidate: CandidateFunnelSnapshot, data: Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput) {
+        const normalizedData = normalizeCandidateFunnelPatch(oldCandidate, data);
+        const transition = buildNextCandidateFunnelState(oldCandidate, normalizedData);
+        validateCandidateFunnelTransition(transition);
+        return { normalizedData, transition };
+    }
+
     async findByTelegramId(telegramId: number, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations | null> {
         return (tx || prisma).candidate.findFirst({
             where: { user: { telegramId: BigInt(telegramId) } },
@@ -225,25 +260,72 @@ export class CandidateRepository {
 
     async update(id: string, data: Prisma.CandidateUpdateInput, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
         const client = tx || prisma;
+        const oldCandidate = await this.getFunnelSnapshot(client, id);
+        if (!oldCandidate) {
+            throw new Error(`Candidate ${id} not found`);
+        }
+        let normalizedData = data;
+        let transition = buildNextCandidateFunnelState(oldCandidate, data);
 
-        // Log status changes and slot (dis)connections
-        const oldCandidate = (data.status !== undefined || data.interviewSlot !== undefined || data.discoverySlot !== undefined || data.trainingSlot !== undefined)
-            ? await client.candidate.findUnique({ where: { id }, select: { fullName: true, status: true, interviewSlotId: true, discoverySlotId: true, trainingSlotId: true } })
-            : null;
+        try {
+            const validation = this.validateFunnelPatch(oldCandidate, data);
+            normalizedData = validation.normalizedData as Prisma.CandidateUpdateInput;
+            transition = validation.transition;
+        } catch (error) {
+            if (error instanceof InvalidCandidateTransitionError) {
+                logBusinessEvent({
+                    event: "candidate.transition.blocked",
+                    level: "warn",
+                    candidateId: id,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: oldCandidate.status,
+                    result: "blocked",
+                    reasonCode: error.reasonCode,
+                    module: "candidate-repository",
+                    operation: "update",
+                    safeContext: {
+                        fromStatus: error.context.oldState.status,
+                        toStatus: error.context.nextState.status,
+                        fromStep: error.context.oldState.currentStep,
+                        toStep: error.context.nextState.currentStep,
+                        changedFields: error.context.changedFields,
+                    },
+                    error,
+                });
+                logAuditEvent({
+                    event: "candidate.transition.blocked",
+                    actorType: "system",
+                    actorRole: "system",
+                    candidateId: id,
+                    result: "failed",
+                    reasonCode: error.reasonCode,
+                    module: "candidate-repository",
+                    operation: "update",
+                    safeContext: {
+                        fromStatus: error.context.oldState.status,
+                        toStatus: error.context.nextState.status,
+                        changedFields: error.context.changedFields,
+                    },
+                    error,
+                });
+            }
+            throw error;
+        }
 
         // Auto-track status change time
-        if (data.status !== undefined) {
-            (data as any).statusChangedAt = new Date();
+        if ((normalizedData as any).status !== undefined) {
+            (normalizedData as any).statusChangedAt = new Date();
         }
         const candidate = await client.candidate.update({
             where: { id },
-            data,
+            data: normalizedData,
             include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
         }) as unknown as CandidateWithRelations;
 
         if (oldCandidate) {
             const changes: Record<string, { from: unknown; to: unknown }> = {};
-            if (data.status !== undefined && oldCandidate.status !== candidate.status) {
+            if ((normalizedData as any).status !== undefined && oldCandidate.status !== candidate.status) {
                 changes.status = { from: oldCandidate.status, to: candidate.status };
                 
                 // --- AUTOMATIC TIMELINE TRACKING ---
@@ -262,11 +344,29 @@ export class CandidateRepository {
             }
             if (Object.keys(changes).length > 0) {
                 logger.info({ event: "candidate.updated", candidateId: id, name: candidate.fullName, changes }, "📋 Candidate updated");
+                logBusinessEvent({
+                    event: "candidate.transition.applied",
+                    candidateId: id,
+                    telegramId: candidate.user?.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    stage: candidate.status,
+                    result: "success",
+                    module: "candidate-repository",
+                    operation: "update",
+                    safeContext: {
+                        fromStatus: transition.oldState.status,
+                        toStatus: transition.nextState.status,
+                        fromStep: transition.oldState.currentStep,
+                        toStep: transition.nextState.currentStep,
+                        changedFields: transition.changedFields,
+                    },
+                });
             }
         }
 
         // If status changed, sync channel access in background
-        if (data.status !== undefined && candidate.user?.telegramId) {
+        if ((normalizedData as any).status !== undefined && candidate.user?.telegramId) {
             import("../services/access-service.js").then(({ accessService }) => {
                 accessService.syncUserAccess(candidate.user.telegramId).catch(() => { });
             }).catch(() => { });
@@ -332,15 +432,86 @@ export class CandidateRepository {
     }
 
     async updateMany(where: Prisma.CandidateWhereInput, data: Prisma.CandidateUpdateManyMutationInput) {
-        if (data.status !== undefined) {
-            (data as any).statusChangedAt = new Date();
+        let normalizedData = data;
+        const touchesFunnelFields = data.status !== undefined ||
+            data.currentStep !== undefined ||
+            data.materialsSent !== undefined ||
+            data.hrDecision !== undefined ||
+            data.interviewCompletedAt !== undefined;
+
+        if (touchesFunnelFields) {
+            const candidates = await prisma.candidate.findMany({
+                where,
+                select: {
+                    id: true,
+                    fullName: true,
+                    status: true,
+                    currentStep: true,
+                    hrDecision: true,
+                    isWaitlisted: true,
+                    notificationSent: true,
+                    materialsSent: true,
+                    interviewCompletedAt: true,
+                    interviewSlotId: true,
+                    discoverySlotId: true,
+                    trainingSlotId: true,
+                }
+            }) as unknown as CandidateFunnelSnapshot[];
+
+            for (const candidate of candidates) {
+                try {
+                    const validation = this.validateFunnelPatch(candidate, data);
+                    normalizedData = validation.normalizedData as Prisma.CandidateUpdateManyMutationInput;
+                } catch (error) {
+                    if (error instanceof InvalidCandidateTransitionError) {
+                        logBusinessEvent({
+                            event: "candidate.transition.blocked",
+                            level: "warn",
+                            candidateId: candidate.id,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: candidate.status,
+                            result: "blocked",
+                            reasonCode: error.reasonCode,
+                            module: "candidate-repository",
+                            operation: "updateMany",
+                            safeContext: {
+                                fromStatus: error.context.oldState.status,
+                                toStatus: error.context.nextState.status,
+                                changedFields: error.context.changedFields,
+                            },
+                            error,
+                        });
+                    }
+                    throw error;
+                }
+            }
+        }
+
+        if ((normalizedData as any).status !== undefined) {
+            (normalizedData as any).statusChangedAt = new Date();
         }
         const result = await prisma.candidate.updateMany({
             where,
-            data
+            data: normalizedData
         });
-        if (data.status !== undefined && result.count > 0) {
-            logger.info({ count: result.count, newStatus: data.status, where: JSON.stringify(where).slice(0, 200) }, "📋 Candidate updateMany");
+        if ((normalizedData as any).status !== undefined && result.count > 0) {
+            logger.info({ count: result.count, newStatus: (normalizedData as any).status, where: JSON.stringify(where).slice(0, 200) }, "📋 Candidate updateMany");
+            logBusinessEvent({
+                event: "candidate.transition.bulk_applied",
+                candidateId: undefined,
+                actorType: "system",
+                actorRole: "system",
+                stage: String((normalizedData as any).status),
+                result: "success",
+                module: "candidate-repository",
+                operation: "updateMany",
+                safeContext: {
+                    count: result.count,
+                    where: JSON.stringify(where).slice(0, 500),
+                    status: String((normalizedData as any).status),
+                },
+            });
         }
         return result;
     }
