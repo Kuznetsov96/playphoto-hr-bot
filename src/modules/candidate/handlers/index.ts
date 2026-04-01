@@ -8,6 +8,9 @@ import { extractFirstName } from "../../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../../utils/location-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 
+const MIN_CANDIDATE_AGE = 17;
+const MAX_CANDIDATE_AGE = 26;
+
 // --- HELPERS ---
 /**
  * Safely extract locationIds array from candidateData.
@@ -24,6 +27,51 @@ function getLocationIds(candidateData: any): string[] {
     return [];
 }
 
+function getCandidateAge(date: Date): number {
+    const today = new Date();
+    let age = today.getFullYear() - date.getFullYear();
+    const m = today.getMonth() - date.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
+        age--;
+    }
+    return age;
+}
+
+function getAgeRejection(age: number): "UNDERAGE" | "AGE_LIMIT" | null {
+    if (age < MIN_CANDIDATE_AGE) return "UNDERAGE";
+    if (age > MAX_CANDIDATE_AGE) return "AGE_LIMIT";
+    return null;
+}
+
+function getAgeRejectionMeta(age: number) {
+    const rejection = getAgeRejection(age);
+    if (rejection === "UNDERAGE") {
+        return {
+            status: CandidateStatus.REJECTED,
+            isWaitlisted: false,
+            hrDecision: "REJECTED_SYSTEM_UNDERAGE" as string | null,
+            finalKey: "candidate-reject-underage" as const,
+            reasonCode: "UNDERAGE" as const
+        };
+    }
+    if (rejection === "AGE_LIMIT") {
+        return {
+            status: CandidateStatus.REJECTED,
+            isWaitlisted: false,
+            hrDecision: "AGE_LIMIT" as string | null,
+            finalKey: "candidate-reject-age-limit" as const,
+            reasonCode: "AGE_LIMIT" as const
+        };
+    }
+    return {
+        status: CandidateStatus.WAITLIST_HR,
+        isWaitlisted: true,
+        hrDecision: null,
+        finalKey: "candidate-success-waitlist" as const,
+        reasonCode: "NO_VACANCIES" as const
+    };
+}
+
 // --- VALIDATION SCHEMAS ---
 const CandidateSchema = z.object({
     fullName: z.string()
@@ -34,14 +82,11 @@ const CandidateSchema = z.object({
         .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
     birthDate: z.date()
         .refine(date => {
-            const today = new Date();
-            let age = today.getFullYear() - date.getFullYear();
-            const m = today.getMonth() - date.getMonth();
-            if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
-                age--;
-            }
-            return age >= 17;
+            return getCandidateAge(date) >= MIN_CANDIDATE_AGE;
         }, "Ми приймаємо на роботу лише з 17 років")
+        .refine(date => {
+            return getCandidateAge(date) <= MAX_CANDIDATE_AGE;
+        }, "Дякуємо! Наразі ми не можемо продовжити анкету. Якщо умови зміняться, ми обов'язково напишемо тобі тут.")
         .refine(date => date > new Date(1950, 0, 1), "Введіть реальну дату народження"),
 });
 
@@ -133,27 +178,16 @@ async function renderLocationSelection(ctx: MyContext) {
 export async function handleNoVacancies(ctx: MyContext, city: string) {
     const bdStr = ctx.session.candidateData.birthDate;
     const birthDate = bdStr ? new Date(bdStr) : new Date();
-
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
-    }
-
-    const isUnderage = age < 17;
-    const status = isUnderage ? CandidateStatus.REJECTED : CandidateStatus.WAITLIST_HR;
-    const isWaitlisted = !isUnderage;
-    const hrDecision = isUnderage ? "REJECTED_SYSTEM_UNDERAGE" : null;
+    const ageMeta = getAgeRejectionMeta(getCandidateAge(birthDate));
 
     await persistCandidate(ctx, {
         fullName: ctx.session.candidateData.fullName,
         birthDate,
         gender: ctx.session.candidateData.gender,
         city,
-        status,
-        isWaitlisted,
-        hrDecision
+        status: ageMeta.status,
+        isWaitlisted: ageMeta.isWaitlisted,
+        hrDecision: ageMeta.hrDecision
     });
 
     logger.info({
@@ -162,13 +196,13 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
         update_id: ctx.update.update_id,
         telegram_id: ctx.from?.id != null ? String(ctx.from.id) : undefined,
         stage: "SCREENING",
-        result: isUnderage ? "rejected" : "waitlisted",
-        reason_code: isUnderage ? "UNDERAGE" : "NO_VACANCIES",
-        safe_context: { city, status }
+        result: ageMeta.status === CandidateStatus.REJECTED ? "rejected" : "waitlisted",
+        reason_code: ageMeta.reasonCode,
+        safe_context: { city, status: ageMeta.status }
     }, "Candidate screening completed with no vacancies");
 
-    if (isUnderage) {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+    if (ageMeta.status === CandidateStatus.REJECTED) {
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
     } else {
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-info-no-vacancies"](city));
     }
@@ -323,31 +357,21 @@ candidateHandlers.on("message:text", async (ctx, next) => {
         const bdStr = ctx.session.candidateData.birthDate;
         const birthDate = bdStr ? new Date(bdStr) : new Date();
 
-        const today = new Date();
-        let age = today.getFullYear() - birthDate.getFullYear();
-        const m = today.getMonth() - birthDate.getMonth();
-        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-            age--;
-        }
-
-        const isUnderage = age < 17;
-        const status = isUnderage ? CandidateStatus.REJECTED : CandidateStatus.WAITLIST_HR;
-        const isWaitlisted = !isUnderage;
-        const hrDecision = isUnderage ? "REJECTED_SYSTEM_UNDERAGE" : null;
+        const ageMeta = getAgeRejectionMeta(getCandidateAge(birthDate));
 
         await persistCandidate(ctx, {
             fullName: ctx.session.candidateData.fullName,
             birthDate,
             gender: ctx.session.candidateData.gender,
             city: normalizedCity,
-            status,
-            isWaitlisted,
-            hrDecision,
+            status: ageMeta.status,
+            isWaitlisted: ageMeta.isWaitlisted,
+            hrDecision: ageMeta.hrDecision,
             isOtherCity: true
         });
 
-        if (isUnderage) {
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+        if (ageMeta.status === CandidateStatus.REJECTED) {
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
         } else {
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-success-other-city"](normalizedCity));
         }
@@ -433,18 +457,16 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     let isWaitlisted = false;
     let finalLocationId = locationIds.length > 0 ? locationIds[0] : undefined;
 
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
-    }
-
     let hrDecision: string | null = null;
+    const age = getCandidateAge(birthDate);
+    const ageRejection = getAgeRejection(age);
 
-    if (age < 17) {
+    if (ageRejection === "UNDERAGE") {
         status = CandidateStatus.REJECTED;
         hrDecision = "REJECTED_SYSTEM_UNDERAGE";
+    } else if (ageRejection === "AGE_LIMIT") {
+        status = CandidateStatus.REJECTED;
+        hrDecision = "AGE_LIMIT";
     } else {
         const selectedLocs = await Promise.all((locationIds || []).map((id: string) => locationRepository.findById(id!)));
         const availableLoc = selectedLocs.find((l: any) => l && l.neededCount > 0);
@@ -490,6 +512,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
         stage: "SCREENING",
         result: "success",
         reason_code:
+            status === CandidateStatus.REJECTED && hrDecision === "AGE_LIMIT" ? "AGE_LIMIT" :
             status === CandidateStatus.REJECTED ? "UNDERAGE" :
             status === CandidateStatus.MANUAL_REVIEW ? "MANUAL_REVIEW" :
             status === CandidateStatus.WAITLIST_HR ? "NO_CAPACITY" :
@@ -527,7 +550,8 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     }
 
     ctx.session.step = "idle";
-    const finalKey = status === CandidateStatus.REJECTED ? "candidate-reject-underage" :
+    const finalKey = status === CandidateStatus.REJECTED && hrDecision === "AGE_LIMIT" ? "candidate-reject-age-limit" :
+        status === CandidateStatus.REJECTED ? "candidate-reject-underage" :
         status === CandidateStatus.MANUAL_REVIEW ? "candidate-success-manual-review" :
             status === CandidateStatus.WAITLIST_HR ? "candidate-success-waitlist" :
                 "candidate-success-screening";
