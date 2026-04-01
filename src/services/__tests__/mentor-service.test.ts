@@ -89,6 +89,7 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
 
 import { mentorService } from '../mentor-service.js';
 import { candidateRepository } from '../../repositories/candidate-repository.js';
+import prisma from '../../db/core.js';
 
 describe('MentorService', () => {
     beforeEach(() => {
@@ -152,6 +153,33 @@ describe('MentorService', () => {
     });
 
     describe('notifyWaitlist', () => {
+        it('should query mentor waitlist with notificationSent=true guard', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
+
+            await mentorService.getCandidates(true);
+
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST],
+                expect.objectContaining({
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.TRAINING,
+                    notificationSent: true
+                })
+            );
+        });
+
+        it('should count mentor waitlist with notificationSent=true guard', async () => {
+            await mentorService.getWaitlistCount();
+
+            expect((prisma as any).candidate.count).toHaveBeenCalledWith({
+                where: expect.objectContaining({
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.TRAINING,
+                    notificationSent: true
+                })
+            });
+        });
+
         it('should notify candidate with materialsSent=true even without hrDecision', async () => {
             vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
                 {
@@ -161,6 +189,7 @@ describe('MentorService', () => {
                     isWaitlisted: true,
                     hrDecision: null,
                     materialsSent: true,
+                    notificationSent: true,
                     user: { telegramId: 333n }
                 } as any
             ]);
@@ -181,6 +210,7 @@ describe('MentorService', () => {
                     isWaitlisted: true,
                     hrDecision: null,
                     materialsSent: false,
+                    notificationSent: false,
                     user: { telegramId: 111n }
                 } as any,
                 {
@@ -190,6 +220,7 @@ describe('MentorService', () => {
                     isWaitlisted: true,
                     hrDecision: 'ACCEPTED',
                     materialsSent: false,
+                    notificationSent: true,
                     user: { telegramId: 222n }
                 } as any
             ]);
@@ -205,6 +236,28 @@ describe('MentorService', () => {
                 status: 'ACCEPTED',
                 isWaitlisted: false
             }));
+        });
+
+        it('should skip corrupt waitlist candidate with materialsSent=true but notificationSent=false', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
+                {
+                    id: 'cand-corrupt',
+                    status: CandidateStatus.WAITLIST_MENTOR,
+                    currentStep: FunnelStep.TRAINING,
+                    isWaitlisted: true,
+                    hrDecision: null,
+                    materialsSent: true,
+                    notificationSent: false,
+                    user: { telegramId: 444n }
+                } as any
+            ]);
+
+            const mockApi = { sendMessage: vi.fn().mockResolvedValue({}) };
+            const count = await mentorService.notifyWaitlist(mockApi);
+
+            expect(count).toBe(0);
+            expect(mockApi.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).not.toHaveBeenCalled();
         });
     });
 });
