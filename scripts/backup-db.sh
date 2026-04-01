@@ -14,6 +14,7 @@ LOG_FILE="$PROJECT_DIR/logs/backup.log"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
 
 mkdir -p "$BACKUP_DIR" "$PROJECT_DIR/logs"
+cd "$PROJECT_DIR"
 
 # Load env variables
 if [ -f "$PROJECT_DIR/.env" ]; then

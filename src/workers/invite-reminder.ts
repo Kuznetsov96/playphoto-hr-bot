@@ -1,6 +1,7 @@
 import { PrismaClient, CandidateStatus } from "@prisma/client";
 import { InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 
@@ -16,7 +17,14 @@ const TEXT_48H_RESET = `🐾 На жаль, термін дії запрошен
  * - 48 hours: resets them to waitlist.
  */
 export async function processInviteReminders(bot: any) {
-    logger.info("🔄 [WORKER] Starting invite reminder process...");
+    logBusinessEvent({
+        event: "candidate.invite_reminder_scan.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "started",
+        module: "invite-reminder-worker",
+        operation: "processInviteReminders",
+    });
 
     try {
         const now = new Date();
@@ -34,6 +42,9 @@ export async function processInviteReminders(bot: any) {
             include: { user: true }
         });
 
+        let resetCount = 0;
+        let pingCount = 0;
+
         for (const cand of pendingCandidates) {
             if (!cand.interviewInvitedAt) continue;
 
@@ -41,8 +52,6 @@ export async function processInviteReminders(bot: any) {
 
             // Check if older than 48 hours -> Reset
             if (invitedTime <= resetThreshold.getTime()) {
-                logger.info({ candId: cand.id }, "🔄 [WORKER] 48h passed. Resetting candidate to WAITLIST_HR.");
-
                 await candidateRepository.update(cand.id, {
                     status: CandidateStatus.WAITLIST_HR,
                     isWaitlisted: true,
@@ -53,6 +62,7 @@ export async function processInviteReminders(bot: any) {
                 try {
                     await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_48H_RESET, { parse_mode: "HTML" });
                 } catch (e) { }
+                resetCount += 1;
 
             }
             // Check if older than 24 hours but NOT older than 48 hours -> Ping
@@ -67,7 +77,6 @@ export async function processInviteReminders(bot: any) {
 
                 // Let's use the time window: 24h to 24h 59m
                 if (invitedTime <= pingThreshold.getTime() && invitedTime > pingThreshold.getTime() - 60 * 60 * 1000) {
-                    logger.info({ candId: cand.id }, "🔄 [WORKER] 24h passed. Sending ping.");
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_24H_PING, {
                             parse_mode: "HTML",
@@ -76,10 +85,23 @@ export async function processInviteReminders(bot: any) {
                                 .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
                         });
                     } catch (e) { }
+                    pingCount += 1;
                 }
             }
         }
-        logger.info("✅ [WORKER] Invite reminder process finished.");
+        logBusinessEvent({
+            event: "candidate.invite_reminder_scan.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "invite-reminder-worker",
+            operation: "processInviteReminders",
+            safeContext: {
+                candidateCount: pendingCandidates.length,
+                resetCount,
+                pingCount,
+            },
+        });
     } catch (e: any) {
         logger.error({ err: e }, "❌ [WORKER] Failed to process invite reminders.");
     }

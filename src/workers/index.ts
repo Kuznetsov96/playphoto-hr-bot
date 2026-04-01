@@ -7,11 +7,19 @@ import { Bot } from 'grammy';
 import process from 'process';
 import { sendDailyIncomeReport, sendMorningAuditReport } from '../services/finance-report.js';
 import { preferencesService } from '../services/preferences-service.js';
+import { logBusinessEvent } from '../core/log-events.js';
 
 const connection = redis;
 
 export const startWorkers = () => {
-    logger.info('👷 Starting workers...');
+    logBusinessEvent({
+        event: "workers.registry.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "started",
+        module: "workers",
+        operation: "startWorkers",
+    });
 
     const defaultWorker = new Worker(QUEUES.DEFAULT, async job => {
         logger.info({ jobId: job.id, name: job.name }, 'Processing job');
@@ -77,5 +85,13 @@ export const startWorkers = () => {
         });
     });
 
-    logger.info(`✅ ${workers.length} workers started`);
+    logBusinessEvent({
+        event: "workers.registry.completed",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "workers",
+        operation: "startWorkers",
+        safeContext: { workerCount: workers.length },
+    });
 };

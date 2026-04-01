@@ -39,6 +39,56 @@ services:
       - ./logs:/app/logs
       - ./google-service-account.json:/app/google-service-account.json
 
+  loki:
+    image: grafana/loki:3.4.2
+    restart: always
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./ops/logging/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "-", "http://localhost:3100/ready" ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  alloy:
+    image: grafana/alloy:v1.14.0
+    restart: always
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    depends_on:
+      loki:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:12345:12345"
+    volumes:
+      - ./ops/logging/config.alloy:/etc/alloy/config.alloy:ro
+      - ./logs:/var/log/playphoto:ro
+      - alloy_data:/var/lib/alloy/data
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "-", "http://localhost:12345/-/ready" ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
   postgres:
     image: postgres:15-alpine
     restart: always
@@ -92,3 +142,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  loki_data:
+  alloy_data:

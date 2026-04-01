@@ -3,9 +3,10 @@ import * as dotenv from "dotenv";
     return this.toString();
 };
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 import logger from "./core/logger.js";
+import { logBusinessEvent } from "./core/log-events.js";
 
 import { bot } from "./core/bot.js";
 import { redis } from "./core/redis.js";
@@ -19,6 +20,7 @@ import { startMonthlyPreferencesLoop } from "./services/monthly-preferences-trig
 import { startLogisticsLoop } from "./services/logistics-worker.js";
 import { startLogCleanupLoop } from "./services/log-cleanup-service.js";
 import { startAuditCleanupLoop } from "./services/audit-cleanup-service.js";
+import { startSecurityCleanupLoop } from "./services/security-cleanup-service.js";
 import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
 import { configureContainer } from "./core/container.js";
@@ -29,7 +31,14 @@ let runner: RunnerHandle | undefined;
 
 async function bootstrap() {
     configureContainer();
-    logger.info("🎬 Ініціалізація PlayPhoto HR Bot...");
+    logBusinessEvent({
+        event: "bot.bootstrap.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "started",
+        module: "main",
+        operation: "bootstrap",
+    });
 
     try {
         // 🛡️ CRITICAL CONFIGURATION CHECK
@@ -52,15 +61,20 @@ async function bootstrap() {
         }
 
         await prisma.$connect();
-        logger.info("✅ База даних підключена успішно!");
 
         if (redis.status === 'wait') {
             await redis.connect();
         }
-        logger.info("✅ Redis Ready in Bootstrap!");
 
         // 0. Register global menus FIRST so they are available to handlers
-        logger.info("🛠️ Registering menus...");
+        logBusinessEvent({
+            event: "bot.menus.registration.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "main",
+            operation: "registerMenus",
+        });
         const { registerAdminMenusHierarchy } = await import("./handlers/admin/bootstrap.js");
         await registerAdminMenusHierarchy(bot);
         
@@ -79,12 +93,34 @@ async function bootstrap() {
         const { candidateGenderMenu } = await import("./menus/candidate.js");
         bot.use(candidateGenderMenu);
 
-        logger.info("✅ ALL menus registered in bot and registry");
+        logBusinessEvent({
+            event: "bot.menus.registration.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "main",
+            operation: "registerMenus",
+        });
 
         // 1. Register handlers
-        logger.info("🛠️ Registering handlers...");
+        logBusinessEvent({
+            event: "bot.handlers.registration.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "started",
+            module: "main",
+            operation: "registerHandlers",
+        });
         const { handlers } = await import("./handlers/index.js");
         bot.use(handlers);
+        logBusinessEvent({
+            event: "bot.handlers.registration.completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "main",
+            operation: "registerHandlers",
+        });
 
         // Start background services
         startWorker(bot as any);
@@ -96,6 +132,7 @@ async function bootstrap() {
         startLogisticsLoop(bot as any);
         startLogCleanupLoop();
         startAuditCleanupLoop();
+        startSecurityCleanupLoop();
         remindersService.startRemindersLoop(bot.api);
         
         webhookService.listen(bot.api);
@@ -103,7 +140,14 @@ async function bootstrap() {
 
         // Ensure clean start
         await bot.api.deleteWebhook({ drop_pending_updates: true });
-        logger.info("🧹 Webhook cleared");
+        logBusinessEvent({
+            event: "bot.webhook.cleared",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "main",
+            operation: "deleteWebhook",
+        });
 
         // Start the bot with runner for parallel processing
         runner = run(bot, {
@@ -115,7 +159,17 @@ async function bootstrap() {
         });
 
         if (runner.isRunning()) {
-            logger.info({ bot: (await bot.api.getMe()).username }, "🚀 Бот запущений через Runner та готовий до роботи!");
+            logBusinessEvent({
+                event: "bot.runner.started",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "main",
+                operation: "startRunner",
+                safeContext: {
+                    bot: (await bot.api.getMe()).username,
+                },
+            });
         }
 
         // Configure persistent menu button
