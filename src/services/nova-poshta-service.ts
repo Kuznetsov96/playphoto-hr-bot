@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { NOVA_POSHTA_API_KEY, NP_RECIPIENT_PHONE } from '../config.js';
+import { NOVA_POSHTA_API_KEY } from '../config.js';
 import logger from '../core/logger.js';
 
 export interface NPTrackingResult {
@@ -15,13 +15,31 @@ export interface NPTrackingResult {
     RecipientDateTime: string;
 }
 
+export type NPTrusteeErrorCode = 'SHIPMENT_LOCKED' | 'API_ERROR';
+
+export interface NPTrusteeCreationResult {
+    success: boolean;
+    errorCode?: NPTrusteeErrorCode;
+    errorMessage?: string;
+    orderRef?: string;
+    orderNumber?: string;
+}
+
+interface NPApiResponseEnvelope<T = any> {
+    success: boolean;
+    data: T | null;
+    errors: string[];
+    warnings: string[];
+    info: string[];
+}
+
 export class NovaPoshtaService {
     private readonly apiUrl = 'https://api.novaposhta.ua/v2.0/json/';
 
     /**
      * Common method to call NP API
      */
-    async callApi(modelName: string, calledMethod: string, methodProperties: any = {}) {
+    private async callApiDetailed<T = any>(modelName: string, calledMethod: string, methodProperties: any = {}): Promise<NPApiResponseEnvelope<T>> {
         const body = {
             apiKey: NOVA_POSHTA_API_KEY,
             modelName,
@@ -39,19 +57,61 @@ export class NovaPoshtaService {
             const data: any = await response.json();
 
             if (!data.success) {
-                logger.error({ modelName, calledMethod, safeContext: { errorsCount: data.errors?.length || 0, warningsCount: data.warnings?.length || 0 } }, 'Nova Poshta API request failed');
-                return null;
+                logger.error({
+                    modelName,
+                    calledMethod,
+                    safeContext: {
+                        errorsCount: data.errors?.length || 0,
+                        warningsCount: data.warnings?.length || 0,
+                        infoCount: data.info?.length || 0,
+                        errors: (data.errors || []).slice(0, 3),
+                        warnings: (data.warnings || []).slice(0, 3),
+                        info: (data.info || []).slice(0, 3)
+                    }
+                }, 'Nova Poshta API request failed');
+                return {
+                    success: false,
+                    data: null,
+                    errors: data.errors || [],
+                    warnings: data.warnings || [],
+                    info: data.info || []
+                };
             }
 
             if (data.warnings && data.warnings.length > 0) {
-                logger.warn({ modelName, calledMethod, safeContext: { warningsCount: data.warnings.length } }, 'Nova Poshta API returned warnings');
+                logger.warn({
+                    modelName,
+                    calledMethod,
+                    safeContext: {
+                        warningsCount: data.warnings.length,
+                        warnings: data.warnings.slice(0, 3),
+                        info: (data.info || []).slice(0, 3)
+                    }
+                }, 'Nova Poshta API returned warnings');
             }
 
-            return data.data;
+            return {
+                success: true,
+                data: data.data,
+                errors: data.errors || [],
+                warnings: data.warnings || [],
+                info: data.info || []
+            };
         } catch (error) {
             logger.error({ err: error, modelName, calledMethod }, 'Nova Poshta API network request failed');
-            return null;
+            return {
+                success: false,
+                data: null,
+                errors: error instanceof Error ? [error.message] : ['Unknown network error'],
+                warnings: [],
+                info: []
+            };
         }
+    }
+
+    async callApi(modelName: string, calledMethod: string, methodProperties: any = {}) {
+        const result = await this.callApiDetailed(modelName, calledMethod, methodProperties);
+        return result.success ? result.data : null;
     }
 
     /**
@@ -114,7 +174,7 @@ export class NovaPoshtaService {
      * Change recipient on a parcel (Зміна даних отримувача)
      * Uses AdditionalServiceGeneral.save with OrderType=orderChangeEW
      */
-    async createTrustee(ttn: string, recipientPhone: string, recipientName?: string): Promise<boolean> {
+    async createTrustee(ttn: string, recipientPhone: string, recipientName?: string): Promise<NPTrusteeCreationResult> {
         const methodProperties: Record<string, string> = {
             OrderType: 'orderChangeEW',
             IntDocNumber: ttn,
@@ -127,33 +187,41 @@ export class NovaPoshtaService {
             methodProperties.RecipientContactName = recipientName;
         }
 
-        const primaryResult = await this.callApi('AdditionalServiceGeneral', 'save', methodProperties);
-        if (primaryResult) {
-            return true;
+        const primaryResult = await this.callApiDetailed('AdditionalServiceGeneral', 'save', methodProperties);
+        if (primaryResult.success) {
+            const firstRecord = Array.isArray(primaryResult.data) ? primaryResult.data[0] : null;
+            return {
+                success: true,
+                orderRef: firstRecord?.Ref,
+                orderNumber: firstRecord?.Number
+            };
         }
 
-        const customerPhone = NP_RECIPIENT_PHONE?.replace(/\D/g, '') || '';
-        if (customerPhone) {
-            const fallbackResult = await this.callApi('AdditionalService', 'save', {
-                OrderType: 'orderTrustee',
-                IntDocNumber: ttn,
-                CustomerPhone: customerPhone,
-                TrusteePhone: recipientPhone
-            });
+        const firstError = primaryResult.errors[0] || primaryResult.info[0] || primaryResult.warnings[0] || 'Unknown API error';
+        const loweredError = firstError.toLowerCase();
 
-            if (fallbackResult) {
-                return true;
-            }
-        }
+        const errorCode: NPTrusteeErrorCode = (
+            loweredError.includes('further data changes are not possible') ||
+            loweredError.includes('delivered to the recipient')
+        )
+            ? 'SHIPMENT_LOCKED'
+            : 'API_ERROR';
 
         logger.warn(
             {
                 ttn,
-                fallbackTried: Boolean(customerPhone)
+                recipientPhone,
+                errorCode,
+                errorMessage: firstError
             },
             'Nova Poshta trustee creation failed'
         );
-        return false;
+
+        return {
+            success: false,
+            errorCode,
+            errorMessage: firstError
+        };
     }
 }
 

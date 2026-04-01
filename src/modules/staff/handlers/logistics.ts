@@ -123,8 +123,12 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
         }
     });
 
+    const { logisticsService } = await import("../../../services/logistics-service.js");
+    await logisticsService.notifyTomorrowShiftAboutLeftover(parcelId).catch(err => {
+        logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics next-shift leftover notification after reject failed");
+    });
+
     if (newRejectionCount >= 2) {
-        const { logisticsService } = await import("../../../services/logistics-service.js");
         await logisticsService.notifySupport(parcelId, 'REJECTED');
     }
 
@@ -152,26 +156,47 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
         const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-        const trusteeCreated = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
-        if (!trusteeCreated) {
+        const trusteeResult = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
+        if (!trusteeResult.success) {
+            await prisma.parcel.update({
+                where: { id: parcelId },
+                data: {
+                    npTrusteeError: trusteeResult.errorMessage || trusteeResult.errorCode || 'Unknown API error',
+                    npTrusteeLastAttemptAt: new Date()
+                }
+            });
             audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
-            const retryKb = new InlineKeyboard()
-                .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
-                .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+            if (trusteeResult.errorCode === 'SHIPMENT_LOCKED') {
+                await editOrReplyText(
+                    ctx,
+                    "Нова Пошта вже перевела цю посилку у стан, де доручення через API більше не оформлюється. Спробуй відкрити комірку в застосунку НП або напиши в підтримку."
+                );
+                await ctx.answerCallbackQuery("Доручення вже недоступне.");
+            } else {
+                const retryKb = new InlineKeyboard()
+                    .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
+                    .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
 
-            await editOrReplyText(
-                ctx,
-                "Не вдалося оформити доручення в Новій Пошті. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
-                retryKb
-            );
-            await ctx.answerCallbackQuery("Доручення не створено.");
+                await editOrReplyText(
+                    ctx,
+                    "Не вдалося оформити доручення в Новій Пошті. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
+                    retryKb
+                );
+                await ctx.answerCallbackQuery("Доручення не створено.");
+            }
             return;
         }
 
         await prisma.parcel.update({
             where: { id: parcelId },
-            data: { recipientPhone: phoneToUse }
+            data: {
+                recipientPhone: phoneToUse,
+                npTrusteeOrderRef: trusteeResult.orderRef || null,
+                npTrusteeOrderNumber: trusteeResult.orderNumber || null,
+                npTrusteeError: null,
+                npTrusteeLastAttemptAt: new Date()
+            }
         });
     }
 
@@ -236,23 +261,42 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
             if (parcel) {
                 const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-                const trusteeCreated = await novaPoshtaService.createTrustee(parcel.ttn, phone);
-                if (!trusteeCreated) {
-                    const retryKb = new InlineKeyboard()
-                        .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
-                        .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+                const trusteeResult = await novaPoshtaService.createTrustee(parcel.ttn, phone);
+                if (!trusteeResult.success) {
+                    await prisma.parcel.update({
+                        where: { id: parcelId },
+                        data: {
+                            npTrusteeError: trusteeResult.errorMessage || trusteeResult.errorCode || 'Unknown API error',
+                            npTrusteeLastAttemptAt: new Date()
+                        }
+                    });
+                    if (trusteeResult.errorCode === 'SHIPMENT_LOCKED') {
+                        await ctx.reply(
+                            "Номер збережено, але Нова Пошта вже не дозволяє оформити доручення для цієї посилки через API. Спробуй відкрити комірку в застосунку НП або напиши в підтримку."
+                        );
+                    } else {
+                        const retryKb = new InlineKeyboard()
+                            .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
+                            .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
 
-                    await ctx.reply(
-                        "Номер збережено, але доручення в Новій Пошті не створилося. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
-                        { reply_markup: retryKb }
-                    );
+                        await ctx.reply(
+                            "Номер збережено, але доручення в Новій Пошті не створилося. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
+                            { reply_markup: retryKb }
+                        );
+                    }
                     audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
                     return;
                 }
 
                 await prisma.parcel.update({
                     where: { id: parcelId },
-                    data: { recipientPhone: phone }
+                    data: {
+                        recipientPhone: phone,
+                        npTrusteeOrderRef: trusteeResult.orderRef || null,
+                        npTrusteeOrderNumber: trusteeResult.orderNumber || null,
+                        npTrusteeError: null,
+                        npTrusteeLastAttemptAt: new Date()
+                    }
                 });
             }
 
