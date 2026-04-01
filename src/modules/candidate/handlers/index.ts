@@ -125,7 +125,7 @@ async function renderLocationSelection(ctx: MyContext) {
         const { text, kb } = await renderLocationSelectionContent(ctx);
         await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
     } catch (e: any) {
-        logger.error({ err: e.message }, "❌ Failed to render location selection");
+        logger.error({ err: e }, "Candidate location selection rendering failed");
         await ScreenManager.renderScreen(ctx, "🐾 Ой! Виникла помилка при завантаженні локацій. Спробуй /start ще раз.");
     }
 }
@@ -562,7 +562,7 @@ candidateHandlers.callbackQuery(/^cancel_staging_(.+)$/, async (ctx) => {
         }
     } catch (e) {
         const { default: logger } = await import("../../../core/logger.js");
-        logger.error({ err: e, candId }, "Failed to cancel staging");
+        logger.error({ err: e, candId }, "Candidate staging cancellation failed");
         await ctx.reply("⚠️ Щось пішло не так. Спробуй ще раз або напиши адміну.");
     }
 });

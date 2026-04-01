@@ -26,7 +26,6 @@ export class AuditCleanupService {
         const alreadyTriggered = await redis.get(triggerKey);
         if (alreadyTriggered) return;
 
-        logger.info("📋 Starting quarterly audit log rotation...");
         logAuditEvent({
             event: "logs.audit.rotation.started",
             actorType: "system",
@@ -49,7 +48,6 @@ export class AuditCleanupService {
                 // Reopen Pino destination so it creates a fresh audit.log
                 auditDestination.reopen();
 
-                logger.info(`✅ Audit log rotated → ${archiveName} (${sizeMB} MB)`);
                 logAuditEvent({
                     event: "logs.audit.rotation.completed",
                     actorType: "system",
@@ -66,7 +64,7 @@ export class AuditCleanupService {
 
             await redis.set(triggerKey, "true", "EX", 100 * 24 * 60 * 60);
         } catch (e: any) {
-            logger.error({ err: e.message }, "❌ Failed to rotate audit logs");
+            logger.error({ err: e }, "Audit log rotation failed");
             logAuditEvent({
                 event: "logs.audit.rotation.completed",
                 actorType: "system",
@@ -91,11 +89,11 @@ export class AuditCleanupService {
                 const stat = fs.statSync(filePath);
                 if (stat.mtimeMs < cutoff) {
                     fs.unlinkSync(filePath);
-                    logger.info(`🗑 Deleted old audit archive: ${file}`);
+                    logger.debug({ file }, "Old audit log archive deleted");
                 }
             }
         } catch (e: any) {
-            logger.error({ err: e.message }, "❌ Failed to purge old audit archives");
+            logger.error({ err: e }, "Old audit log archive purge failed");
         }
     }
 
@@ -116,7 +114,6 @@ export class AuditCleanupService {
 }
 
 export function startAuditCleanupLoop() {
-    logger.info("📋 Starting audit cleanup loop (Quarterly rotation)...");
     logBusinessEvent({
         event: "logs.audit.rotation_loop.started",
         actorType: "system",

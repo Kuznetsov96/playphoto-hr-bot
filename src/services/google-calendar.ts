@@ -26,7 +26,7 @@ class GoogleCalendarService {
         const auth = this.serviceAuth;
         
         if (!auth) {
-            throw new Error("❌ No Google Calendar Service Account found. Please provide google-service-account.json");
+            throw new Error("No Google Calendar service account found. Please provide google-service-account.json");
         }
         
         return google.calendar({ version: 'v3', auth });
@@ -77,7 +77,7 @@ class GoogleCalendarService {
             : MEET_LINK_HIRING;
 
         if (!staticLink) {
-            logger.warn({ calendarType: details.calendarType }, "⚠️ No static Meet link configured (MEET_LINK_TRAINING / MEET_LINK_HIRING). Candidates will not receive a meeting link!");
+            logger.warn({ calendarType: details.calendarType }, "Static Meet link is not configured");
             logBusinessEvent({
                 event: "integration.google_calendar.meet_link_missing",
                 level: "warn",
@@ -127,7 +127,7 @@ class GoogleCalendarService {
                 meetLink: staticLink
             };
         } catch (error: any) {
-            logger.error({ err: error.message, calendarId }, "❌ Google Calendar API Error (Event creation failed, but using static link)");
+            logger.error({ err: error, calendarId }, "Google Calendar event creation failed");
             logBusinessEvent({
                 event: "integration.google_calendar.event_create_failed",
                 level: "error",
@@ -192,7 +192,7 @@ class GoogleCalendarService {
                 },
             });
         } catch (error) {
-            logger.error({ err: error }, '❌ Помилка при видаленні події:');
+            logger.error({ err: error, eventId }, "Google Calendar event deletion failed");
             logBusinessEvent({
                 event: "integration.google_calendar.event_delete_failed",
                 level: "error",

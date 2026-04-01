@@ -10,7 +10,6 @@ export const restoreAccessService = {
      * Use this to recover from accidental mass kicks.
      */
     async restoreAllStaffAccess(adminApi: any) {
-        logger.info("🛠 Starting mass access restoration...");
         logAuditEvent({
             event: "admin.staff_access_restore.started",
             actorType: "system",
@@ -66,7 +65,7 @@ export const restoreAccessService = {
                         });
                     }
                 } catch (e: any) {
-                    logger.error({ err: e, userId: user.telegramId }, "Failed to restore access for user");
+                    logger.error({ err: e, telegramId: user.telegramId, userId: user.id }, "Staff access restore failed");
                     failed++;
                     logBusinessEvent({
                         event: "staff.access_restore_invite_sent",

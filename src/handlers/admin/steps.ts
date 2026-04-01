@@ -191,7 +191,7 @@ async function handleSyncOtherSheet(ctx: MyContext, text: string) {
 
         await ScreenManager.renderScreen(ctx, report, "admin-system");
     } catch (e: any) {
-        logger.error({ err: e, sheetName }, "❌ [SYNC] Custom sync failed:");
+        logger.error({ err: e, sheetName }, "Custom sync failed");
         await ScreenManager.renderScreen(ctx, `❌ Error: ${e.message}`, "admin-system");
     }
     ctx.session.step = "idle";

@@ -8,7 +8,6 @@ import { logBusinessEvent } from "../core/log-events.js";
 
 export const remindersService = {
     async processNDAReminders(botApi: any) {
-        logger.info("🕒 Checking for candidates awaiting NDA confirmation (12h+)...");
         logBusinessEvent({
             event: "candidate.nda_legacy_reminder_scan.started",
             actorType: "system",
@@ -23,7 +22,6 @@ export const remindersService = {
             const candidates = await candidateRepository.findAwaitingNDAReminder(12);
             
             if (candidates.length === 0) {
-                logger.info("✅ No candidates need NDA reminders at this time.");
                 logBusinessEvent({
                     event: "candidate.nda_legacy_reminder_scan.completed",
                     actorType: "system",
@@ -35,8 +33,6 @@ export const remindersService = {
                 });
                 return;
             }
-
-            logger.info(`🔔 Found ${candidates.length} candidates for NDA reminder.`);
 
             for (const cand of candidates) {
                 try {
@@ -50,7 +46,6 @@ export const remindersService = {
 
                     // Mark as reminded to avoid double automatic ping
                     await candidateRepository.update(cand.id, { ndaReminderSentAt: new Date() } as any);
-                    logger.info(`✅ Auto-ping sent to ${cand.fullName} (TG: ${cand.user.telegramId})`);
                     logBusinessEvent({
                         event: "candidate.nda_legacy_reminder_sent",
                         candidateId: cand.id,
@@ -63,7 +58,7 @@ export const remindersService = {
                         operation: "processNDAReminders",
                     });
                 } catch (e) {
-                    logger.error({ err: e, candId: cand.id }, "❌ Failed to send automated NDA reminder");
+                    logger.error({ err: e, candidateId: cand.id }, "Legacy NDA reminder delivery failed");
                     logBusinessEvent({
                         event: "candidate.nda_legacy_reminder_sent",
                         level: "warn",
@@ -90,7 +85,7 @@ export const remindersService = {
                 safeContext: { candidateCount: candidates.length },
             });
         } catch (e) {
-            logger.error({ err: e }, "❌ Error processing NDA reminders");
+            logger.error({ err: e }, "Legacy NDA reminder processing failed");
             logBusinessEvent({
                 event: "candidate.nda_legacy_reminder_scan.completed",
                 level: "error",
@@ -105,7 +100,6 @@ export const remindersService = {
     },
 
     startRemindersLoop(botApi: any) {
-        logger.info("🕒 Starting automated NDA reminders loop (every 15m)...");
         logBusinessEvent({
             event: "candidate.nda_legacy_reminder_loop.started",
             actorType: "system",
