@@ -18,6 +18,7 @@ import { processInviteReminders } from "../workers/invite-reminder.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { sessionRepository } from "../repositories/session-repository.js";
+import { isImpossibleMentorState } from "./funnel-anomaly-detector.js";
 
 
 /**
@@ -661,7 +662,7 @@ async function saveFunnelAlertState(key: string, fingerprint: string) {
 
 async function processFunnelAnomalies(bot: Bot<MyContext>) {
     try {
-        const impossibleMentorStates = await prisma.candidate.findMany({
+        const suspiciousMentorStates = await prisma.candidate.findMany({
             where: {
                 AND: [
                     { interviewCompletedAt: null },
@@ -705,13 +706,24 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
                 fullName: true,
                 status: true,
                 currentStep: true,
+                interviewCompletedAt: true,
+                hrDecision: true,
                 materialsSent: true,
                 discoverySlotId: true,
                 trainingSlotId: true,
+                discoveryCompletedAt: true,
+                trainingCompletedAt: true,
+                ndaSentAt: true,
+                ndaConfirmedAt: true,
+                quizScore: true,
+                testPassed: true,
+                firstShiftDate: true,
+                firstShiftTime: true,
             },
             orderBy: { statusChangedAt: "desc" },
-            take: 10,
+            take: 100,
         });
+        const impossibleMentorStates = suspiciousMentorStates.filter(isImpossibleMentorState).slice(0, 10);
 
         if (impossibleMentorStates.length > 0) {
             const fingerprint = impossibleMentorStates.map(c => `${c.id}:${c.status}:${c.currentStep}`).join("|");
