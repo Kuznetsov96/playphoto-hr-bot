@@ -16,6 +16,8 @@ function getAge(birthDate: Date): number {
     return age;
 }
 
+const MAX_CANDIDATE_AGE = 26;
+
 function toIsoOrUndefined(value: unknown): string | undefined {
     if (value instanceof Date) return value.toISOString();
     if (typeof value === "string" || typeof value === "number") {
@@ -44,8 +46,14 @@ export class BookingService {
             if (candidate.status === "REJECTED" || candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
                 throw new Error("UNDERAGE_CANDIDATE");
             }
+            if (candidate.hrDecision === "AGE_LIMIT") {
+                throw new Error("AGE_LIMIT_CANDIDATE");
+            }
             if (candidate.birthDate && getAge(new Date(candidate.birthDate)) < 17) {
                 throw new Error("UNDERAGE_CANDIDATE");
+            }
+            if (candidate.birthDate && getAge(new Date(candidate.birthDate)) > MAX_CANDIDATE_AGE) {
+                throw new Error("AGE_LIMIT_CANDIDATE");
             }
 
             // --- SMART RESCHEDULE LOGIC ---
