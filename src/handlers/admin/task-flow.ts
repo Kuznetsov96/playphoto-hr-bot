@@ -208,7 +208,7 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                 deliveryStatus = "✅ Task created, but user has no Telegram ID linked.";
             }
         } catch (notifErr: any) {
-            logger.warn({ err: notifErr }, "⚠️ Failed to send task notification to photographer");
+            logger.warn({ err: notifErr }, "Task notification delivery failed");
             deliveryStatus = "⚠️ Task created, but <b>could not deliver notification</b> (user might have blocked the bot).";
         }
 

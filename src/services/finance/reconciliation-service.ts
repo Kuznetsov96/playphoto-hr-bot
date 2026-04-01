@@ -125,7 +125,9 @@ export class ReconciliationService {
 
                     // Balance already available from the same getClientInfo response
                     fopBalances[key] = fopAccounts.reduce((sum: number, acc: any) => sum + (acc.balance / 100), 0);
-                } catch (e) { logger.error({ err: e }, `❌ Mono fetch failed for ${key}`); }
+                } catch (e) {
+                    logger.error({ err: e, accountGroup: key }, "Finance reconciliation Monobank fetch failed");
+                }
             }));
 
             const ddsBalances: Record<string, number> = {};
@@ -274,7 +276,9 @@ export class ReconciliationService {
                                 }
                             }
                         }
-                    } catch (e) { logger.error({ err: e, loc: locCfg.name }, "Loc error"); }
+                    } catch (e) {
+                        logger.error({ err: e, location: locCfg.name }, "Finance reconciliation location processing failed");
+                    }
                 }
 
                 // Phase 2.7: Cleanup with DDS (Strict 1.3% check)

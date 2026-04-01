@@ -1,6 +1,7 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 const WORK_UA_LOGIN_URL = "https://www.work.ua/employer/login/";
 const COOKIES_KEY = "work_ua_cookies";
@@ -26,7 +27,6 @@ export class WorkUABrowserService {
                     username: proxyUser,
                     password: proxyPass
                 };
-                logger.info({ proxy: proxyServer }, "🌐 Using proxy for Work.ua");
             }
 
             this.browser = await chromium.launch(launchOptions);
@@ -35,20 +35,18 @@ export class WorkUABrowserService {
             const page = await context.newPage();
             const targetUrl = `https://www.work.ua/employer/my/applicants/${responseId}/`;
 
-            logger.info({ responseId }, "🌐 Navigating to applicant page...");
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await page.waitForTimeout(3000);
 
             // ПЕРЕВІРКА: чи нас не викинуло на логін?
             if (page.url().includes('/login/') || await page.locator('button:has-text("Увійти")').count() > 0) {
-                logger.warn("🔑 Session expired, logging in again...");
+                logger.warn({ responseId }, "Work.ua browser session expired; re-authenticating");
                 await this.login(page);
                 await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
                 await page.waitForTimeout(3000);
             }
 
             // 2. ВІДКРИТТЯ ФОРМИ (якщо треба)
-            logger.info("🔍 Checking if message form is open...");
             if (await page.locator('textarea#message').count() === 0) {
                 const openBtns = [
                     'button:has-text("Відповісти")',
@@ -63,7 +61,6 @@ export class WorkUABrowserService {
                 for (const sel of openBtns) {
                     const btn = page.locator(sel).first();
                     if (await btn.count() > 0 && await btn.isVisible()) {
-                        logger.info({ selector: sel }, "🔘 Clicking reply button...");
                         await btn.click();
                         btnClicked = true;
                         await page.waitForTimeout(2000);
@@ -72,7 +69,7 @@ export class WorkUABrowserService {
                 }
                 
                 if (!btnClicked) {
-                    logger.warn("⚠️ Could not find 'Reply' button, maybe form is already visible or UI is different");
+                    logger.warn({ responseId }, "Work.ua reply form trigger not found");
                 }
             }
 
@@ -81,19 +78,43 @@ export class WorkUABrowserService {
             await textarea.waitFor({ state: 'visible', timeout: 15000 });
             await textarea.fill("");
             await page.keyboard.type(text, { delay: 30 });
-            logger.info("✍️ Text typed");
 
             // 4. ВІДПРАВКА
             const sendBtn = page.locator('form button[type="submit"], button.tw-bg-blue-pacific-600').filter({ hasText: 'Надіслати' }).first();
             await sendBtn.waitFor({ state: 'visible', timeout: 5000 });
             await sendBtn.click({ force: true });
-            logger.info("✅ Send button clicked");
 
             await page.waitForTimeout(3000);
             await this.saveCookies(context);
+            logBusinessEvent({
+                event: "work_ua.message.sent",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "work-ua-browser-service",
+                operation: "sendMessage",
+                safeContext: {
+                    responseId,
+                    usedProxy: Boolean(proxyServer),
+                },
+            });
             return true;
         } catch (e: any) {
-            logger.error({ err: e.message }, "❌ Browser automation failed");
+            logger.error({ err: e, responseId }, "Work.ua browser automation failed");
+            logBusinessEvent({
+                event: "work_ua.message.sent",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "BROWSER_AUTOMATION_FAILED",
+                module: "work-ua-browser-service",
+                operation: "sendMessage",
+                safeContext: {
+                    responseId,
+                },
+                error: e,
+            });
             return false;
         } finally {
             if (context) await context.close();
@@ -117,9 +138,8 @@ export class WorkUABrowserService {
             try {
                 const cookies = JSON.parse(cookiesStr);
                 await context.addCookies(cookies);
-                logger.info("🍪 Loaded session cookies from Redis");
             } catch (e) {
-                logger.error("❌ Failed to parse cookies from Redis");
+                logger.error({ err: e }, "Work.ua cookie cache parse failed");
             }
         }
 
@@ -136,7 +156,6 @@ export class WorkUABrowserService {
                 };
             }).filter(c => c.name !== '');
             await context.addCookies(parsedCookies);
-            logger.info("🔑 Injected raw session cookies from .env");
         }
 
         return context;
@@ -147,7 +166,7 @@ export class WorkUABrowserService {
         const password = process.env.WORK_UA_PASSWORD;
         if (!email || !password) throw new Error("Credentials missing");
 
-        logger.info({ email }, "🔑 Logging in to Work.ua...");
+        logger.debug({ hasEmail: Boolean(email) }, "Work.ua browser login started");
         await page.goto(WORK_UA_LOGIN_URL, { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(2000);
         
@@ -167,7 +186,7 @@ export class WorkUABrowserService {
         await page.locator('button[type="submit"]').filter({ hasText: "Увійти" }).first().click();
         
         await page.waitForURL('**/employer/**', { timeout: 20000 });
-        logger.info("🎉 Login successful");
+        logger.debug("Work.ua browser login completed");
     }
 
     private async saveCookies(context: BrowserContext) {

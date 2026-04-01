@@ -58,7 +58,7 @@ class TechCashService {
         const dbLocations = await locationRepository.findActiveWithSheet();
 
         if (dbLocations.length === 0) {
-            logger.warn("⚠️ No locations configured for TechCash sync in DB.");
+            logger.warn("TechCash sync skipped because no active locations are configured");
             return [];
         }
 
@@ -69,15 +69,12 @@ class TechCashService {
         const targetMonth = parseInt(parts[1]!);
         const targetYear = parseInt(parts[2]!);
 
-        logger.info({ dateStr, targetDay, targetMonth, targetYear }, "🔍 Searching TechCash for date");
+        logger.debug({ dateStr, targetDay, targetMonth, targetYear }, "TechCash date lookup started");
 
         // Helper to process rows for a single location
         const processRows = (rows: any[], loc: any) => {
             if (!rows || rows.length === 0) return;
             // Log last few cells in column A for debugging
-            const lastCells = rows.slice(-5).map((r: any[]) => String(r[0] || "").trim()).filter(Boolean);
-            logger.info({ location: loc.name, lastDates: lastCells }, "📋 TechCash sheet tail (col A)");
-
             // Find all matching rows by parsing date from cell
             const matchingRows = rows.filter((r: any[]) => {
                 if (!r[0]) return false;
@@ -134,7 +131,7 @@ class TechCashService {
                     comment
                 });
             } else {
-                logger.warn({ location: loc.name, sheet: (loc as any).sheet }, "⚠️ No matching date row found in TechCash sheet");
+                logger.warn({ location: loc.name, sheet: (loc as any).sheet }, "TechCash date row not found");
             }
         };
 
@@ -158,7 +155,7 @@ class TechCashService {
                 });
             }
         } catch (batchErr: any) {
-            logger.warn({ err: batchErr.message }, "⚠️ batchGet failed, falling back to individual sheet requests");
+            logger.warn({ err: batchErr, locationsCount: dbLocations.length }, "TechCash batch read failed; falling back to per-sheet reads");
 
             // Fall back: fetch each sheet individually so one bad sheet doesn't break everything
             for (const loc of dbLocations) {
@@ -170,7 +167,7 @@ class TechCashService {
                     });
                     processRows(res.data.values, loc);
                 } catch (e: any) {
-                    logger.error({ err: e.message, location: loc.name, sheet: (loc as any).sheet }, `❌ Error reading TechCash sheet for ${loc.name}`);
+                    logger.error({ err: e, location: loc.name, sheet: (loc as any).sheet }, "TechCash sheet read failed");
                 }
             }
         }

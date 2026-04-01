@@ -15,13 +15,10 @@ accessHandlers.on("chat_join_request", async (ctx) => {
     // Check if this is our team channel
     if (chatId !== TEAM_CHATS.CHANNEL) return;
 
-    logger.info({ telegramId: ctx.from.id, chatId }, "Received chat join request");
-
     try {
         const authorized = await accessService.isAuthorized(telegramId);
 
         if (authorized) {
-            logger.info({ telegramId: ctx.from.id }, "Approving authorized join request");
             securityAudit({
                 event: "security.channel_join_request",
                 result: "success",
@@ -32,7 +29,6 @@ accessHandlers.on("chat_join_request", async (ctx) => {
             });
             await ctx.approveChatJoinRequest(ctx.from.id);
         } else {
-            logger.info({ telegramId: ctx.from.id }, "Declining unauthorized join request");
             securityAudit({
                 event: "security.channel_join_request",
                 result: "failed",
@@ -44,7 +40,7 @@ accessHandlers.on("chat_join_request", async (ctx) => {
             await ctx.declineChatJoinRequest(ctx.from.id);
         }
     } catch (e) {
-        logger.error({ err: e, telegramId: ctx.from.id }, "Error handling join request");
+        logger.error({ err: e, telegramId: ctx.from.id, chatId }, "Channel join request handling failed");
     }
 });
 
@@ -57,7 +53,6 @@ accessHandlers.on("chat_member", async (ctx) => {
     const telegramId = BigInt(newMember.user.id);
 
     if (newMember.status === "member") {
-        logger.info({ telegramId: newMember.user.id }, "New member joined the team channel");
         securityAudit({
             event: "security.channel_joined",
             result: "success",

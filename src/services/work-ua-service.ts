@@ -18,7 +18,6 @@ export class WorkUAService {
      * Починає цикл опитування Work.ua API (Polling)
      */
     startPolling(api: Api) {
-        logger.info("🕒 Work.ua polling service started (every 15m)");
         logBusinessEvent({
             event: "integration.workua.polling_loop.started",
             actorType: "system",
@@ -36,7 +35,7 @@ export class WorkUAService {
             try {
                 await this.checkNewResponses(api);
             } catch (e) {
-                logger.error({ err: e }, "❌ Error in Work.ua polling loop");
+                logger.error({ err: e }, "Work.ua polling iteration failed");
                 logBusinessEvent({
                     event: "integration.workua.polling_iteration.failed",
                     level: "error",
@@ -68,8 +67,8 @@ export class WorkUAService {
             });
 
             if (!res.ok) {
-                const text = await res.text();
-                logger.error({ status: res.status, body: text.slice(0, 100) }, "❌ Work.ua API vacancies error");
+                await res.text().catch(() => "");
+                logger.error({ status: res.status }, "Work.ua vacancies API request failed");
                 logBusinessEvent({
                     event: "integration.workua.vacancies_refreshed",
                     level: "error",
@@ -97,7 +96,6 @@ export class WorkUAService {
                     });
                 }
                 this.lastVacanciesFetch = Date.now();
-                logger.info({ count: this.vacanciesMap.size }, "✅ Work.ua vacancies map updated");
                 logBusinessEvent({
                     event: "integration.workua.vacancies_refreshed",
                     actorType: "system",
@@ -111,7 +109,7 @@ export class WorkUAService {
                 });
             }
         } catch (e) {
-            logger.error({ err: e }, "Failed to fetch Work.ua vacancies");
+            logger.error({ err: e }, "Work.ua vacancies refresh failed");
             logBusinessEvent({
                 event: "integration.workua.vacancies_refreshed",
                 level: "error",
@@ -144,7 +142,6 @@ export class WorkUAService {
 
         // Якщо це перший запуск (немає lastId), ініціалізуємо його найновішим ID
         if (!lastId) {
-            logger.info("🆕 Work.ua initialization: fetching latest response ID...");
             const initUrl = `${WORK_UA_API_BASE}/jobs/responses?limit=1&sort=0`; 
             try {
                 const initRes = await fetch(initUrl, {
@@ -152,8 +149,8 @@ export class WorkUAService {
                 });
 
                 if (!initRes.ok) {
-                    const text = await initRes.text();
-                    logger.error({ status: initRes.status, body: text.slice(0, 100) }, "❌ Work.ua API init error");
+                    await initRes.text().catch(() => "");
+                    logger.error({ status: initRes.status }, "Work.ua initialization API request failed");
                     logBusinessEvent({
                         event: "integration.workua.initialized",
                         level: "error",
@@ -174,7 +171,6 @@ export class WorkUAService {
                 if (initData.status === 'ok' && initData.items?.[0]) {
                     const latestId = initData.items[0].id;
                     await redis.set(LAST_ID_KEY, String(latestId));
-                    logger.info({ latestId }, "✅ Work.ua service initialized with the latest ID");
                     logBusinessEvent({
                         event: "integration.workua.initialized",
                         actorType: "system",
@@ -188,7 +184,7 @@ export class WorkUAService {
                     });
                 }
             } catch (e) {
-                logger.error({ err: e }, "Failed to initialize Work.ua service");
+                logger.error({ err: e }, "Work.ua initialization failed");
                 logBusinessEvent({
                     event: "integration.workua.initialized",
                     level: "error",
@@ -204,7 +200,6 @@ export class WorkUAService {
             return;
         }
 
-        logger.info({ lastId }, "🔍 Checking Work.ua for new responses...");
         const url = `${WORK_UA_API_BASE}/jobs/responses?limit=50&sort=1&last_id=${lastId}`;
 
         try {
@@ -217,8 +212,8 @@ export class WorkUAService {
             });
 
             if (!response.ok) {
-                const text = await response.text();
-                logger.error({ status: response.status, body: text.slice(0, 100) }, "❌ Work.ua API error response");
+                await response.text().catch(() => "");
+                logger.error({ status: response.status }, "Work.ua responses API request failed");
                 logBusinessEvent({
                     event: "integration.workua.responses_checked",
                     level: "error",
@@ -307,7 +302,7 @@ export class WorkUAService {
                 });
             }
         } catch (e) {
-            logger.error({ err: e }, "Error calling Work.ua API");
+            logger.error({ err: e }, "Work.ua responses check failed");
             logBusinessEvent({
                 event: "integration.workua.responses_checked",
                 level: "error",

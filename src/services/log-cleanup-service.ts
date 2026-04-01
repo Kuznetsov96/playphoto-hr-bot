@@ -28,7 +28,6 @@ export class LogCleanupService {
             return;
         }
 
-        logger.info("🧹 Starting scheduled log cleanup (Monthly)...");
         logBusinessEvent({
             event: "logs.product.rotation.started",
             actorType: "system",
@@ -49,7 +48,6 @@ export class LogCleanupService {
                 productDestination?.reopen();
                 this.purgeOldArchives();
 
-                logger.info({ archiveName, sizeMB }, "✅ Product log rotated");
                 logBusinessEvent({
                     event: "logs.product.rotation.completed",
                     actorType: "system",
@@ -60,7 +58,7 @@ export class LogCleanupService {
                     safeContext: { archiveName, sizeMB },
                 });
             } else {
-                logger.warn(`📂 Log file not found at ${this.LOG_PATH}, skipping cleanup.`);
+                logger.warn({ logPath: this.LOG_PATH }, "Product log rotation skipped because source file is missing");
                 logBusinessEvent({
                     event: "logs.product.rotation.completed",
                     level: "warn",
@@ -76,7 +74,7 @@ export class LogCleanupService {
             // 2. Mark as triggered for this month
             await redis.set(triggerKey, "true", "EX", 32 * 24 * 60 * 60); 
         } catch (e: any) {
-            logger.error({ err: e.message }, "❌ Failed to cleanup logs");
+            logger.error({ err: e }, "Product log rotation failed");
             logBusinessEvent({
                 event: "logs.product.rotation.completed",
                 level: "error",
@@ -101,11 +99,11 @@ export class LogCleanupService {
                 const stat = fs.statSync(filePath);
                 if (stat.mtimeMs < cutoff) {
                     fs.unlinkSync(filePath);
-                    logger.info({ file }, "🗑 Deleted old product log archive");
+                    logger.debug({ file }, "Old product log archive deleted");
                 }
             }
         } catch (e: any) {
-            logger.error({ err: e.message }, "❌ Failed to purge old product log archives");
+            logger.error({ err: e }, "Old product log archive purge failed");
         }
     }
 
@@ -124,7 +122,6 @@ export class LogCleanupService {
 }
 
 export function startLogCleanupLoop() {
-    logger.info("🧹 Starting log cleanup loop (Monthly on the 1st)...");
     logBusinessEvent({
         event: "logs.product.rotation_loop.started",
         actorType: "system",

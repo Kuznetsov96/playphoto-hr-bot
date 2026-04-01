@@ -41,8 +41,6 @@ export class MonthlyPreferencesTrigger {
             return;
         }
 
-        logger.info(`📅 Triggering monthly schedule preferences broadcast for ${monthName}...`);
-
         const messageText = `📢 <b>Побажання на ${monthName}</b>\n\nПривіт! Час планувати графік на наступний місяць. 😊\n\nБудь ласка, познач дні, коли ти <b>НЕ ЗМОЖЕШ</b> вийти на зміну. \n\nДедлайн: <b>2 дні</b>. Після цього бот почне нагадувати тобі кожні 4 години! ⏳\n\nНатисни кнопку нижче, щоб заповнити:`;
 
         try {
@@ -64,7 +62,6 @@ export class MonthlyPreferencesTrigger {
                 }
             );
 
-            logger.info({ totalSent }, "✅ Monthly preferences broadcast sent and queued for pings.");
             logBusinessEvent({
                 event: "staff.preferences_monthly_trigger.completed",
                 actorType: "system",
@@ -78,7 +75,7 @@ export class MonthlyPreferencesTrigger {
                 },
             });
         } catch (e: any) {
-            logger.error({ err: e.message }, "❌ Failed to trigger monthly preferences");
+            logger.error({ err: e }, "Monthly preferences trigger failed");
             logBusinessEvent({
                 event: "staff.preferences_monthly_trigger.completed",
                 level: "error",
@@ -114,7 +111,6 @@ export class MonthlyPreferencesTrigger {
 }
 
 export function startMonthlyPreferencesLoop(bot: Bot<MyContext>) {
-    logger.info("📅 Starting monthly preferences loop...");
     logBusinessEvent({
         event: "staff.preferences_monthly_loop.started",
         actorType: "system",

@@ -1,6 +1,7 @@
 import { timelineRepository } from "../repositories/timeline-repository.js";
 import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 export class TimelineService {
     /**
@@ -20,13 +21,20 @@ export class TimelineService {
                 { oldStatus, newStatus, candidateId: candidate.id }
             );
 
-            logger.info({ 
+            logBusinessEvent({
                 event: "candidate.status.changed",
-                candidateId: candidate.id, 
-                telegramId: candidate.user?.telegramId?.toString(),
-                oldStatus, 
-                newStatus 
-            }, `📈 [TIMELINE] Status Change: ${oldStatus} -> ${newStatus}`);
+                candidateId: candidate.id,
+                telegramId: candidate.user?.telegramId,
+                actorType: author === "ADMIN" ? "admin" : "system",
+                actorRole: author === "ADMIN" ? "admin" : "system",
+                result: "success",
+                module: "timeline-service",
+                operation: "trackStatusChange",
+                safeContext: {
+                    oldStatus,
+                    newStatus,
+                },
+            });
         } catch (e) {
             logger.error({ err: e, candidateId: candidate.id }, "Failed to track status change in timeline");
         }
@@ -44,7 +52,7 @@ export class TimelineService {
                 text,
                 metadata
             );
-            logger.info({ userId, event: text }, `📝 [TIMELINE] Event: ${text}`);
+            logger.debug({ userId, eventType: metadata?.event || null }, "Timeline event recorded");
         } catch (e) {
             logger.error({ err: e, userId }, "Failed to track timeline event");
         }

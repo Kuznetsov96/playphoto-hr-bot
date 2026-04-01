@@ -39,17 +39,17 @@ export class NovaPoshtaService {
             const data: any = await response.json();
 
             if (!data.success) {
-                logger.error({ errors: data.errors, warnings: data.warnings, modelName, calledMethod }, 'Nova Poshta API Error');
+                logger.error({ modelName, calledMethod, safeContext: { errorsCount: data.errors?.length || 0, warningsCount: data.warnings?.length || 0 } }, 'Nova Poshta API request failed');
                 return null;
             }
 
             if (data.warnings && data.warnings.length > 0) {
-                logger.warn({ warnings: data.warnings, modelName, calledMethod }, 'Nova Poshta API Warning');
+                logger.warn({ modelName, calledMethod, safeContext: { warningsCount: data.warnings.length } }, 'Nova Poshta API returned warnings');
             }
 
             return data.data;
         } catch (error) {
-            logger.error({ error, modelName, calledMethod }, 'Nova Poshta API Network Error');
+            logger.error({ err: error, modelName, calledMethod }, 'Nova Poshta API network request failed');
             return null;
         }
     }
@@ -142,7 +142,7 @@ export class NovaPoshtaService {
             });
 
             if (fallbackResult) {
-                logger.info({ ttn, recipientPhone }, '📦 NP trustee created via orderTrustee fallback');
+                logger.debug({ ttn }, 'Nova Poshta trustee fallback request succeeded');
                 return true;
             }
         }
@@ -150,11 +150,9 @@ export class NovaPoshtaService {
         logger.warn(
             {
                 ttn,
-                recipientPhone,
-                recipientName,
                 fallbackTried: Boolean(customerPhone)
             },
-            '📦 NP trustee creation failed. Check API privileges or try through the NP mobile app.'
+            'Nova Poshta trustee creation failed'
         );
         return false;
     }
