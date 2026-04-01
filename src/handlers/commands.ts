@@ -61,9 +61,9 @@ commandHandlers.callbackQuery("cancel_step", async (ctx) => {
 commandHandlers.command("test_birthdays", async (ctx) => {
     try { await ctx.deleteMessage(); } catch (e) { }
     if (!ADMIN_IDS.includes(ctx.from?.id || 0)) return;
-    await ctx.reply("🎂 Running manual birthday check...");
+    await ctx.reply("Запускаю ручну перевірку днів народження...");
     await checkBirthdays(ctx.api as any); // bot was passed as Bot<MyContext>, ctx.api is close enough if we change service
-    await ctx.reply("✅ Check completed.");
+    await ctx.reply("Перевірку завершено.");
 });
 
 commandHandlers.command("staff", async (ctx) => {
@@ -89,7 +89,7 @@ commandHandlers.command("start", async (ctx) => {
         try {
             await cleanupMessages(ctx);
         } catch (e) {
-            logger.warn(`[Start Debug] cleanupMessages failed: ${e}`);
+            logger.warn({ err: e, userId }, "Start cleanupMessages failed");
         }
 
         ctx.session.step = "idle";
@@ -135,7 +135,6 @@ commandHandlers.command("start", async (ctx) => {
                 ctx.session.candidateData.source = sourceName;
                 ctx.session.candidateData.clickSource = sourceName;
             }
-            logger.info({ userId, sourceName }, "📍 Candidate source tracked via deep-link");
             logBusinessEvent({
                 event: "candidate.source.tracked",
                 telegramId: userId,
@@ -255,7 +254,7 @@ commandHandlers.command("start", async (ctx) => {
             shouldEnterScreening = true;
         }
     } catch (e: any) {
-        logger.error({ err: e, userId }, "❌ Error in /start command");
+        logger.error({ err: e, userId }, "Start command failed");
         const kb = new InlineKeyboard()
             .text("🤍 Написати в підтримку", "staff_help");
         await ctx.reply(
@@ -303,7 +302,7 @@ commandHandlers.command("restore_access", requireRole('SUPER_ADMIN', 'CO_FOUNDER
         });
         await ctx.reply(summary, { parse_mode: "HTML" });
     } catch (e: any) {
-        logger.error({ err: e }, "Error in /restore_access command");
+        logger.error({ err: e, telegramId: ctx.from?.id }, "Restore access command failed");
         logAuditEvent({
             event: "admin.restore_access.executed",
             telegramId: ctx.from?.id,
@@ -340,7 +339,7 @@ commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPO
             updateId: ctx.update.update_id,
         });
     } catch (e: any) {
-        logger.error({ err: e }, "Failure in /admin command");
+        logger.error({ err: e, telegramId: ctx.from?.id }, "Admin command failed");
         logBusinessEvent({
             event: "admin.panel.opened",
             level: "error",
@@ -419,7 +418,7 @@ commandHandlers.command("debug_user", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), 
         await ctx.reply(info, { parse_mode: "HTML" });
 
     } catch (e: any) {
-        logger.error({ err: e }, "Failure in /debug_user command");
+        logger.error({ err: e, query }, "Debug user command failed");
         await ctx.reply(`💥 Error: ${e.message}`);
     }
 });
@@ -435,7 +434,7 @@ commandHandlers.command("mentor", requireRole('SUPER_ADMIN', 'MENTOR_LEAD'), asy
         const text = await mentorService.getHubText();
         await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", { forceNew: true, pushToStack: true });
     } catch (error) {
-        logger.error({ err: error }, "failure in /mentor command");
+        logger.error({ err: error, telegramId: ctx.from?.id }, "Mentor command failed");
         await ctx.reply(`💥 Сталася помилка: <code>${(error as Error).message}</code>`, { parse_mode: "HTML" });
     }
 });
@@ -461,7 +460,6 @@ commandHandlers.command("reset_me", async (ctx) => {
         // 1. Delete Candidate Data
         if (user.candidate) {
             await candidateRepository.deleteRelatedData(user.candidate.id);
-            logger.info({ targetId }, "Candidate data deleted via /reset_me");
             logAuditEvent({
                 event: "admin.user_reset.candidate_data_deleted",
                 telegramId: callerId,
@@ -482,7 +480,6 @@ commandHandlers.command("reset_me", async (ctx) => {
         if (user.staffProfile && (targetId === 7096140693n || match)) {
             const { staffRepository } = await import("../repositories/staff-repository.js");
             await staffRepository.deleteRelatedData(user.staffProfile.id);
-            logger.info({ targetId }, "Staff profile and related data deleted via /reset_me");
             logAuditEvent({
                 event: "admin.user_reset.staff_profile_deleted",
                 telegramId: callerId,
@@ -505,7 +502,7 @@ commandHandlers.command("reset_me", async (ctx) => {
 
         await ctx.reply(`🧹 <b>Дані для ID ${targetId} повністю очищено!</b>\n\nТепер можна натиснути /start для початку з чистого листа. ✨`, { parse_mode: "HTML" });
     } catch (e: any) {
-        logger.error({ err: e, targetId }, "Error in /reset_me");
+        logger.error({ err: e, targetId }, "Reset user command failed");
         logAuditEvent({
             event: "admin.user_reset.executed",
             telegramId: callerId,
@@ -580,15 +577,15 @@ commandHandlers.command("set_step", async (ctx) => {
                 const staff = await staffRepository.findByUserId(candidate.userId);
                 if (staff) {
                     await staffRepository.update(staff.id, { isWelcomeSent: false });
-                    logger.info({ userId }, "Reset isWelcomeSent to false for testing");
+                    logger.debug({ userId }, "Testing helper reset isWelcomeSent");
                 }
                 // Reset role to CANDIDATE so the sync filter picks it up as a "new hire"
                 await userRepository.update(candidate.userId, { role: 'CANDIDATE' });
-                logger.info({ userId }, "Reset role to CANDIDATE for testing");
+                logger.debug({ userId }, "Testing helper reset role to candidate");
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "Failed to update DB in /set_step");
+        logger.error({ err: e, telegramId: userId, step }, "Set step command DB update failed");
     }
 
     await ctx.reply(`✅ Step set to: <b>${target.session}</b>\n\nNow send any message or press /start to trigger the handler.`, { parse_mode: "HTML" });

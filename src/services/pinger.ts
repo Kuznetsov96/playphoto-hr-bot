@@ -32,7 +32,7 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
         // --- Staff ---
         if (staff?.isActive) {
             const staffName = staff.surnameNameDot || staff.fullName;
-            logger.warn({ telegramId, staffName }, "🚫 [BLOCKED] Staff blocked the bot. Auto-deactivating...");
+            logger.warn({ telegramId, staffId: staff.id }, "Staff blocked bot; auto-deactivation started");
 
             await staffRepository.update(staff.id, { isActive: false });
             await scheduleSyncService.markStaffBotBlocked(telegramId);
@@ -68,7 +68,7 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
         // --- Candidate ---
         if (candidate && ACTIVE_CANDIDATE_STATUSES.includes(candidate.status as CandidateStatus)) {
             const name = candidate.fullName || "Candidate";
-            logger.warn({ telegramId, name }, "🚫 [BLOCKED] Candidate blocked the bot. Auto-rejecting...");
+            logger.warn({ telegramId, candidateId: candidate.id, stage: candidate.status }, "Candidate blocked bot; auto-reject started");
 
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.REJECTED,
@@ -102,14 +102,13 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
             return;
         }
 
-        logger.warn({ telegramId }, "🚫 Bot blocked — user is not active staff or active candidate. Skipping.");
+        logger.warn({ telegramId }, "Bot blocked event ignored for inactive or unsupported user");
     } catch (e) {
-        logger.error({ err: e, telegramId }, "❌ [BLOCKED] handleBlockedUser failed");
+        logger.error({ err: e, telegramId }, "Blocked user handler failed");
     }
 }
 
 export function startPingerLoop(bot: Bot<MyContext>) {
-    logger.info("🔔 Pinger loop started...");
     logBusinessEvent({
         event: "broadcast.pinger_loop.started",
         actorType: "system",
@@ -133,7 +132,6 @@ async function runPinger(bot: Bot<MyContext>) {
             // 1. If no pending replies, stop pinging
             if (msg.pendingReplies.length === 0) {
                 await trackedMessageRepository.stopTracking(msg.id);
-                logger.info(`✅ All replies received for message ${msg.messageId} in chat ${msg.chatId}. Tracking stopped.`);
                 logBusinessEvent({
                     event: "broadcast.ping_tracking.completed",
                     actorType: "system",
@@ -182,7 +180,7 @@ async function runPinger(bot: Bot<MyContext>) {
                 try {
                     await bot.api.deleteMessage(Number(msg.chatId), msg.lastPingMsgId);
                 } catch (e) {
-                    logger.warn(`Failed to delete old ping in ${msg.chatId}: ${e}`);
+                    logger.warn({ err: e, chatId: msg.chatId, trackedMessageId: msg.id }, "Previous ping deletion failed");
                 }
             }
 
@@ -210,7 +208,6 @@ async function runPinger(bot: Bot<MyContext>) {
                     nextPingAt: new Date(Date.now() + nextPingInterval)
                 });
 
-                logger.info(`🔔 Ping sent to ${msg.chatId} for ${msg.pendingReplies.length} users.`);
                 logBusinessEvent({
                     event: "broadcast.ping_sent",
                     actorType: "system",
@@ -234,7 +231,7 @@ async function runPinger(bot: Bot<MyContext>) {
                     if (chatId > 0 && msg.lastPingMsgId) {
                         await handleBlockedUser(bot, chatId);
                     } else {
-                        logger.warn(`🚫 Bot blocked or chat not found for ${msg.chatId}. Tracking stopped.`);
+                        logger.warn({ chatId: msg.chatId, trackedMessageId: msg.id }, "Ping tracking stopped because chat is blocked or missing");
                     }
                     logBusinessEvent({
                         event: "broadcast.ping_tracking.stopped",
@@ -253,7 +250,7 @@ async function runPinger(bot: Bot<MyContext>) {
                         error: e,
                     });
                 } else if (e.error_code === 400 && e.description?.includes("message to be replied not found")) {
-                    logger.warn(`⚠️ Original message not found in ${msg.chatId}. Stopping pinger.`);
+                    logger.warn({ chatId: msg.chatId, trackedMessageId: msg.id, messageId: msg.messageId }, "Ping tracking stopped because original message was not found");
                     await trackedMessageRepository.stopTracking(msg.id);
                     logBusinessEvent({
                         event: "broadcast.ping_tracking.stopped",
@@ -272,7 +269,7 @@ async function runPinger(bot: Bot<MyContext>) {
                         error: e,
                     });
                 } else {
-                    logger.error({ err: e, chatId: msg.chatId }, "❌ Failed to send ping");
+                    logger.error({ err: e, chatId: msg.chatId, trackedMessageId: msg.id }, "Ping delivery failed");
                     logBusinessEvent({
                         event: "broadcast.ping_sent",
                         level: "error",
@@ -293,7 +290,7 @@ async function runPinger(bot: Bot<MyContext>) {
             }
         }
     } catch (e) {
-        logger.error({ err: e }, "❌ Error in Pinger Loop");
+        logger.error({ err: e }, "Pinger loop iteration failed");
         logBusinessEvent({
             event: "broadcast.pinger_loop.failed",
             level: "error",

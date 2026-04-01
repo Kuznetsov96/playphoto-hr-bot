@@ -172,10 +172,10 @@ export class StaffService {
 
         try {
             await api.sendMessage(telegramId, welcomeText, { parse_mode: "HTML", reply_markup: kb });
-            logger.info({ staffId, telegramId }, "✅ Finalized staff activation and sent welcome");
+            logger.debug({ staffId, telegramId }, "Staff activation welcome sent");
             return true;
         } catch (e) {
-            logger.warn({ err: e, staffId, telegramId }, "⚠️ Welcome message not delivered (user may not have started the bot)");
+            logger.warn({ err: e, staffId, telegramId }, "Staff activation welcome delivery failed");
             return false;
         }
     }

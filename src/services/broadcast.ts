@@ -243,7 +243,7 @@ export const broadcastService = {
                 if (prefMonthName) {
                     const alreadyFilled = await redis.get(`pref_filled:${userId}:${prefMonthName}`);
                     if (alreadyFilled) {
-                        logger.info({ userId, month: prefMonthName }, "⏭️ Skipping preferences broadcast — already filled");
+                        logger.debug({ userId, month: prefMonthName }, "Preferences broadcast skipped because it was already completed");
                         continue;
                     }
                 }

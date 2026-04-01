@@ -35,7 +35,7 @@ class DDSService {
                 requestBody: { values },
             }, { timeout: 30000 });
         } catch (error: any) {
-            logger.error({ err: error }, "❌ DDS Append Error");
+            logger.error({ err: error }, "DDS append failed");
             throw error;
         }
     }
@@ -64,7 +64,7 @@ class DDSService {
             logger.debug({ dateStrings, found: filtered.length, totalRows: rows.length }, "📥 Fetched transactions from DDS");
             return filtered;
         } catch (error) {
-            logger.error({ err: error, dateStrings }, "❌ DDS Fetch Error");
+            logger.error({ err: error, dateStrings }, "DDS fetch failed");
             return [];
         }
     }

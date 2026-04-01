@@ -15,7 +15,6 @@ export class CandidateService {
     async processOnboardingFinish(api: any, candidate: any) {
         const candidateId = candidate?.id;
         const fullName = candidate?.fullName || "Unknown";
-        logger.info({ candidateId, fullName }, "🚀 processOnboardingFinish: Starting background tasks...");
         logBusinessEvent({
             event: "candidate.onboarding.background_processing_started",
             candidateId,
@@ -34,7 +33,7 @@ export class CandidateService {
                 throw new Error(`Candidate user data missing: telegramId not found for ${fullName} (${candidateId})`);
             }
 
-            logger.debug({ candidateId }, "📝 Attempting Google Sheets registration...");
+            logger.debug({ candidateId }, "Candidate team registration started");
             const locId = candidate.locationId;
             const loc = locId ? await locationRepository.findById(locId) : null;
 
@@ -52,7 +51,6 @@ export class CandidateService {
             });
 
             if (regResult && ADMIN_IDS[0]) {
-                logger.info({ candidateId }, "✅ Registration success. Notifying admin...");
                 const locName = loc?.name || candidate.city || "—";
                 await api.sendMessage(ADMIN_IDS[0], `✅ <b>${fullName}</b> auto-added to TEAM sheet!\n📍 ${locName}`, { parse_mode: "HTML" }).catch(() => { });
             }
@@ -75,12 +73,10 @@ export class CandidateService {
         } catch (regErr: any) {
             const errorMsg = regErr.message || "Unknown error";
             logger.error({
-                err: errorMsg,
+                err: regErr,
                 candidateId,
-                fullName,
                 spreadsheetId: SPREADSHEET_ID_TEAM,
-                stack: regErr.stack
-            }, "Failed to auto-register in TEAM sheet");
+            }, "Candidate team registration failed");
 
             if (ADMIN_IDS[0]) {
                 await api.sendMessage(ADMIN_IDS[0], `❌ Failed to add <b>${fullName}</b> to TEAM sheet: <code>${errorMsg}</code>`, { parse_mode: "HTML" }).catch(() => { });
@@ -106,7 +102,7 @@ export class CandidateService {
         }
 
         // 2. MEDIA HANDLING (Secondary Priority, Background)
-        logger.debug({ candidateId: candidate.id }, "📁 Handling media (passport photos)...");
+        logger.debug({ candidateId: candidate.id }, "Candidate documents archive processing started");
         const fileIds = (candidate.passportPhotoIds || "").split(',').filter(Boolean);
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `onb-${candidate.id}-`));
 
@@ -174,7 +170,7 @@ Location: ${candidate.location?.name || '—'}
                 },
             });
         } catch (mediaErr) {
-            logger.error({ err: mediaErr }, "Failed to process documents media");
+            logger.error({ err: mediaErr, candidateId }, "Candidate documents archive processing failed");
             logBusinessEvent({
                 event: "candidate.documents_archive.delivered",
                 level: "error",

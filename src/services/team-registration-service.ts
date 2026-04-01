@@ -176,21 +176,17 @@ class TeamRegistrationService {
                 requestBody: { values }
             });
 
-            logger.info({ 
-                fullName: data.fullName, 
+            logger.debug({ 
                 spreadsheetId: SPREADSHEET_ID_TEAM,
                 range: "'В роботі'!A2:R2"
-            }, "✅ New hire registered at the TOP of Google Sheets (TEAM)");
+            }, "Team registration row inserted");
             return true;
         } catch (error: any) {
             logger.error({ 
-                err: error.message, 
-                fullName: data.fullName, 
+                err: error, 
                 spreadsheetId: SPREADSHEET_ID_TEAM,
-                stack: error.stack,
-                details: error.response?.data,
                 authType: process.env.GOOGLE_REFRESH_TOKEN ? "OAuth2" : "ServiceAccount"
-            }, "❌ Failed to register new hire in Google Sheets");
+            }, "Team registration Google Sheets write failed");
             throw error;
         }
     }

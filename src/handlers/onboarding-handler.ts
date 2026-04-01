@@ -161,7 +161,7 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 return;
             }
             await candidateRepository.update(candidate.id, { fullName: val.data } as any);
-            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "fullName" }, "Onboarding field saved");
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "fullName" }, "Candidate onboarding field saved");
 
             const bd = candidate.birthDate;
             if (bd) {
@@ -186,7 +186,7 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 return;
             }
             await candidateRepository.update(candidate.id, { birthDate: date } as any);
-            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "birthDate" }, "Onboarding field saved");
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "birthDate" }, "Candidate onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.PHONE;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.PHONE), undefined, { pushToStack: true });
@@ -200,7 +200,7 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 return;
             }
             await candidateRepository.update(candidate.id, { phone: val.data } as any);
-            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "phone" }, "Onboarding field saved");
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "phone" }, "Candidate onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.EMAIL;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.EMAIL), undefined, { pushToStack: true });
@@ -213,7 +213,7 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 return;
             }
             await candidateRepository.update(candidate.id, { email: val.data } as any);
-            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "email" }, "Onboarding field saved");
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "email" }, "Candidate onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.PASSPORT_FRONT;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.PASSPORT_FRONT), undefined, { pushToStack: true });
@@ -230,14 +230,14 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
                 return;
             }
             await candidateRepository.update(candidate.id, { iban: ibanVal } as any);
-            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "iban" }, "Onboarding field saved");
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "iban" }, "Candidate onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.INSTAGRAM;
             await ScreenManager.renderScreen(ctx, getStepPrompt(STEPS.INSTAGRAM), undefined, { pushToStack: true });
         }
         else if (step === STEPS.INSTAGRAM) {
             await candidateRepository.update(candidate.id, { instagram: text } as any);
-            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "instagram" }, "Onboarding field saved");
+            logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "instagram" }, "Candidate onboarding field saved");
 
             ctx.session.candidateData.step = STEPS.FINAL;
             // Re-fetch candidate with all saved data
@@ -270,7 +270,7 @@ onboardingHandlers.on("message:photo", async (ctx, next) => {
     // Save photo to DB immediately
     const updatedPhotoIds = ctx.session.candidateData.passportPhotoIds.join(',');
     await candidateRepository.update(candidate.id, { passportPhotoIds: updatedPhotoIds } as any);
-    logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "passportPhotoIds", photoCount: ctx.session.candidateData.passportPhotoIds.length }, "Onboarding photo saved");
+    logger.info({ event: "candidate.onboarding.field_saved", candidateId: candidate.id, step, field: "passportPhotoIds", photoCount: ctx.session.candidateData.passportPhotoIds.length }, "Candidate onboarding photo saved");
 
     try {
         if (step === STEPS.PASSPORT_FRONT) {
@@ -303,7 +303,6 @@ const MAX_CANDIDATE_AGE = 25;
 
 async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     const candidateId = existingCandidate?.id;
-    logger.info({ candidateId }, "🏁 Starting finishOnboarding...");
     logBusinessEvent({
         event: "candidate.onboarding.completed",
         candidateId,
@@ -329,7 +328,6 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
 
             await cleanupMessages(ctx).catch(() => {});
             await ScreenManager.renderScreen(ctx, text, undefined, { forceNew: true });
-            logger.info({ candidateId, age: getCandidateAge(existingCandidate.birthDate) }, "Candidate soft-rejected: age limit");
             logBusinessEvent({
                 event: "candidate.onboarding.completed",
                 level: "warn",
@@ -369,7 +367,7 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
             },
         });
 
-        logger.debug({ candidateId }, "✅ Status updated. Preparing final screen...");
+        logger.debug({ candidateId }, "Candidate onboarding status updated");
 
         // Safe Job Offloading: Process heavy media & admin messages in background
         import("../modules/candidate/services/index.js").then(({ candidateService }) => {
@@ -434,7 +432,6 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
         // This is the point where user sees the change
         await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
 
-        logger.info({ candidateId }, "✅ finishOnboarding complete!");
         logBusinessEvent({
             event: "candidate.first_shift.preferences_prompted",
             candidateId,
@@ -450,7 +447,7 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
             },
         });
     } catch (e) {
-        logger.error({ err: e, candidateId }, "Critical failure in finishOnboarding");
+        logger.error({ err: e, candidateId }, "Candidate onboarding completion failed");
         logBusinessEvent({
             event: "candidate.onboarding.completed",
             level: "error",

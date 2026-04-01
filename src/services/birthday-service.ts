@@ -23,7 +23,6 @@ function getBirthdayRecipients(): number[] {
 }
 
 export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, month: number) {
-    logger.info(`🎂 Greeting candidates with birthday on ${day}/${month}...`);
     logBusinessEvent({
         event: "candidate.birthday_greetings.started",
         actorType: "system",
@@ -64,8 +63,6 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             const isFemale = c.gender === "female";
 
             if (isExactly17 && wasUnderage && isFemale) {
-                logger.info({ candidateId: c.id }, "🎈 Candidate turned 17! Activating...");
-
                 await candidateRepository.update(c.id, {
                     status: "WAITLIST_HR",
                     hrDecision: null,
@@ -142,7 +139,6 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
 }
 
 export async function checkBirthdays(bot: Bot<MyContext>) {
-    logger.info("🎂 Checking birthdays...");
     logBusinessEvent({
         event: "birthday.check.started",
         actorType: "system",
@@ -370,7 +366,6 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
         // Check if already done today
         const alreadyDone = await redis.get(todayKey);
         if (alreadyDone) {
-            logger.info("🎂 Birthday check already performed today, skipping.");
             logBusinessEvent({
                 event: "birthday.check.skipped",
                 actorType: "system",
@@ -388,12 +383,12 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
             // Mark as done for 24h
             await redis.set(todayKey, "true", "EX", 24 * 60 * 60);
         } catch (e) {
-            logger.error({ err: e }, "Failed during scheduled birthday check");
+            logger.error({ err: e }, "Scheduled birthday check failed");
         }
     };
 
     // Run check on startup
-    runCheck().catch(e => logger.error({ err: e }, "Failed during initial birthday check"));
+    runCheck().catch(e => logger.error({ err: e }, "Initial birthday check failed"));
 
     // 2. Schedule next check
     const scheduleNext = () => {
@@ -413,7 +408,11 @@ export function startBirthdayLoop(bot: Bot<MyContext>) {
         const delay = nextRunKyiv.getTime() - kyivNow.getTime();
 
         // For logging, we show the next run time in Kyiv
-        logger.info(`🎂 Birthday loop: Next check scheduled at ${nextRunKyiv.getHours().toString().padStart(2, '0')}:${nextRunKyiv.getMinutes().toString().padStart(2, '0')} Kyiv time (in ${Math.round(delay / 1000 / 60)} min)`);
+        logger.debug({
+            nextRunHourKyiv: nextRunKyiv.getHours(),
+            nextRunMinuteKyiv: nextRunKyiv.getMinutes(),
+            delayMinutes: Math.round(delay / 1000 / 60),
+        }, "Birthday loop next run scheduled");
 
         setTimeout(() => {
             runCheck().finally(() => {

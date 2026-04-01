@@ -39,7 +39,6 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
-    logger.info({ telegramId }, "👤 Accessing Staff Hub...");
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     const isNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
 
@@ -48,10 +47,10 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
         hasStaffProfile: !!user?.staffProfile, 
         isActive: user?.staffProfile?.isActive,
         isNewCandidate 
-    }, "🔍 showStaffHub state");
+    }, "Staff hub state evaluated");
 
     if (!user || (!user.staffProfile?.isActive && !isNewCandidate)) {
-        logger.warn({ telegramId }, "🚫 Access denied to Staff Hub");
+        logger.warn({ telegramId }, "Staff hub access denied");
         return ctx.reply("У тебе немає доступу до меню фотографа. 🌸");
     }
 
@@ -290,11 +289,10 @@ export async function startSupportFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
-    logger.info({ telegramId }, "🚀 Starting support flow...");
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
     
     if (!user) {
-        logger.error({ telegramId }, "❌ User not found in startSupportFlow");
+        logger.error({ telegramId }, "Support flow start failed because user was not found");
         return ctx.reply("Помилка: користувача не знайдено. Спробуй натиснути /start.");
     }
 

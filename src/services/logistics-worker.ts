@@ -6,7 +6,6 @@ import { logBusinessEvent } from "../core/log-events.js";
 const SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 export function startLogisticsLoop(bot: Bot) {
-    logger.info("📦 Starting Logistics Sync Loop (every 1h)");
     logBusinessEvent({
         event: "logistics.sync_loop.started",
         actorType: "system",
@@ -21,7 +20,7 @@ export function startLogisticsLoop(bot: Bot) {
     
     // Immediate sync on startup
     logisticsService.syncIncomingParcels().catch(err => {
-        logger.error({ err }, "Failed to perform initial logistics sync");
+        logger.error({ err }, "Initial logistics sync failed");
         logBusinessEvent({
             event: "logistics.sync_iteration.completed",
             level: "error",
@@ -47,7 +46,7 @@ export function startLogisticsLoop(bot: Bot) {
                 operation: "startLogisticsLoop",
             });
         } catch (error) {
-            logger.error({ err: error }, "Error in logistics sync loop");
+            logger.error({ err: error }, "Logistics sync loop iteration failed");
             logBusinessEvent({
                 event: "logistics.sync_iteration.completed",
                 level: "error",

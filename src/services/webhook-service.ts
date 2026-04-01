@@ -23,7 +23,7 @@ export class WebhookService {
             res.writeHead(404);
             res.end();
         }).listen(port, '0.0.0.0', () => {
-            logger.info(`🌐 Webhook server listening on port ${port} (Health Check Only)`);
+            logger.debug({ port }, "Webhook health-check server listening");
         });
     }
 }

@@ -23,7 +23,6 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
     let userRole = null;
     if (telegramId) {
         userRole = await getUserAdminRole(BigInt(telegramId));
-        logger.info(`[FINANCE MENU] User ${telegramId} role resolved to: ${userRole}`);
     }
 
     const isSuperAdmin = userRole === 'SUPER_ADMIN';
@@ -253,7 +252,7 @@ async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, target
             // ----------------------------------------------
             
             success++;
-        } catch (e) { logger.error({ err: e, sid }, "Ask fail"); }
+        } catch (e) { logger.error({ err: e, sid }, "Finance audit request delivery failed"); }
     }
 
     if (success > 0) {
@@ -377,7 +376,7 @@ async function handleDailyStatus(ctx: MyContext) {
         await redis.set(redisKeyLastReport, sentMsg.message_id.toString());
 
     } catch (e: any) {
-        logger.error({ err: e }, "❌ Daily Status Error:");
+        logger.error({ err: e }, "Finance daily status rendering failed");
         const currentLoadingId = await redis.get(redisKeyLoading);
         if (currentLoadingId) {
             await ctx.api.editMessageText(ctx.chat!.id, parseInt(currentLoadingId), `❌ Error: ${e.message}`).catch(() => { });
@@ -451,7 +450,7 @@ async function generateStatement(ctx: MyContext, fopKey: string) {
             await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "❌ No transactions found.");
         }
     } catch (error: any) {
-        logger.error({ err: error, fopKey }, "❌ Statement Error:");
+        logger.error({ err: error, fopKey }, "Finance statement generation failed");
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `❌ Error: ${error.message}`);
     }
 }
@@ -482,7 +481,7 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
 
     // Warm Monobank caches in parallel with DDS catch-up to avoid cold-start waits in manual audits.
     const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
-        logger.warn({ err: e }, "❄️ Manual audit pre-warm failed, continuing with on-demand fetch")
+        logger.warn({ err: e }, "Finance manual audit pre-warm failed; continuing with on-demand fetch")
     );
 
     // 1. "Catch-up" Sync: Ensure DDS is up to date before auditing
@@ -490,9 +489,9 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
         const { syncToDDS } = await import("../../services/finance-report.js");
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🔄 Catching up DDS for ${dateStr}...`).catch(() => { });
         incomes = await techCashService.getIncomeForDate(dateStr);
-        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e }, "❌ Catch-up sync failed:"));
+        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e }, "Finance audit catch-up DDS sync failed"));
     } catch (e) {
-        logger.error({ err: e }, "❌ Pre-audit sync error");
+        logger.error({ err: e }, "Finance pre-audit sync failed");
     }
 
     await ctx.api.editMessageText(
@@ -566,7 +565,7 @@ async function runAuditForDate(ctx: MyContext, date: Date) {
             await ctx.reply(chunk, { parse_mode: "HTML" });
         }
     } catch (error: any) {
-        logger.error({ err: error }, "❌ Audit Error:");
+        logger.error({ err: error }, "Finance audit run failed");
         await ctx.reply(`❌ Error: ${error.message}`);
     }
 }
@@ -604,7 +603,7 @@ async function runDdsSyncForDate(ctx: MyContext, date: Date) {
                 : `❌ DDS sync failed: ${result.message}`
         ).catch(() => { });
     } catch (e: any) {
-        logger.error({ err: e }, "❌ DDS Sync Error:");
+        logger.error({ err: e }, "Finance DDS sync command failed");
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `❌ Error: ${e.message}`).catch(() => { });
     }
 }

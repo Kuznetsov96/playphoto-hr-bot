@@ -53,7 +53,7 @@ export class ScheduleSyncService {
             });
             this.sheets = google.sheets({ version: 'v4', auth: this.auth });
         } else {
-            logger.warn("⚠️ google-service-account.json not found — Google Sheets sync disabled");
+            logger.warn("Google Sheets sync disabled because service account file is missing");
             this.auth = null;
             this.sheets = null;
         }
@@ -80,7 +80,7 @@ export class ScheduleSyncService {
             }
             return BigInt(cleaned);
         } catch (e) {
-            logger.error({ err: e, idStr, cleaned }, "❌ Failed to parse Telegram ID:");
+            logger.error({ err: e, sourceValue: idStr }, "Telegram ID parse failed");
             return null;
         }
     }
@@ -115,7 +115,6 @@ export class ScheduleSyncService {
                             ]
                         }
                     });
-                    logger.info({ telegramId, sheetRow }, "📋 [BLOCKED] Staff marked in TEAM sheet");
                     logSecurityEvent({
                         event: "security.staff.block_marked_in_sheet",
                         telegramId,
@@ -131,7 +130,7 @@ export class ScheduleSyncService {
                     return true;
                 }
             }
-            logger.warn({ telegramId }, "⚠️ [BLOCKED] Staff not found in TEAM sheet");
+            logger.warn({ telegramId }, "Staff not found in team sheet during block marking");
             logSecurityEvent({
                 event: "security.staff.block_mark_in_sheet_failed",
                 telegramId,
@@ -144,7 +143,7 @@ export class ScheduleSyncService {
             });
             return false;
         } catch (e: any) {
-            logger.error({ err: e.message, telegramId }, "❌ [BLOCKED] Failed to update TEAM sheet");
+            logger.error({ err: e, telegramId }, "Failed to update team sheet during block marking");
             logSecurityEvent({
                 event: "security.staff.block_mark_in_sheet_failed",
                 level: "error",
@@ -166,7 +165,6 @@ export class ScheduleSyncService {
      */
     async syncBlocklist() {
         this.ensureSheets();
-        logger.info("⏳ Starting blocklist synchronization...");
         try {
             const res = await this.sheets.spreadsheets.values.get({
                 spreadsheetId: SPREADSHEET_ID_TEAM,
@@ -183,7 +181,6 @@ export class ScheduleSyncService {
                 });
             }
 
-            logger.info(`🔄 Syncing ${blockedIds.size} blocked IDs...`);
             logSecurityEvent({
                 event: "security.blocklist.sync_started",
                 actorType: "system",
@@ -218,7 +215,6 @@ export class ScheduleSyncService {
 
             for (const user of currentlyBlockedInDb) {
                 if (!blockedIds.has(user.telegramId)) {
-                    logger.info({ telegramId: user.telegramId }, "🔓 Unblocking user (removed from sheet)");
                     await (userRepository as any).update(user.id, { isBlocked: false });
                     logSecurityEvent({
                         event: "security.blocklist.user_unblocked",
@@ -246,7 +242,7 @@ export class ScheduleSyncService {
             });
             return { success: true, count: blockedIds.size };
         } catch (e: any) {
-            logger.error({ err: e }, "❌ Failed to sync blocklist (maybe sheet 'Blocklist' is missing)");
+            logger.error({ err: e }, "Blocklist synchronization failed");
             logSecurityEvent({
                 event: "security.blocklist.sync_failed",
                 level: "error",
@@ -267,7 +263,6 @@ export class ScheduleSyncService {
      */
     async syncTeam(api?: Api) {
         this.ensureSheets();
-        logger.info("⏳ Starting team synchronization...");
         const blocklistRes = await this.syncBlocklist();
         await this.fixLocations();
 
@@ -281,11 +276,9 @@ export class ScheduleSyncService {
 
         const rows = res.data.values;
         if (!rows || rows.length === 0) {
-            logger.warn("⚠️ No data found in 'В роботі' sheet.");
+            logger.warn("No data found in team sheet");
             return { success: false, message: "No data in Team sheet" };
         }
-
-        logger.info(`🔄 Syncing ${rows.length} rows from 'В роботі' sheet...`);
 
         let staffAdded = 0;
         let staffUpdated = 0;
@@ -367,7 +360,6 @@ export class ScheduleSyncService {
                     // --- NEW: Channel Removal Logic ---
                     // If staff was active and is now being deactivated
                     if (profile.isActive && !isActive) {
-                        logger.info({ fullName, telegramId }, "🚫 [SYNC] Staff deactivated. Removing from team channel...");
                         if (api) {
                             try {
                                 // Ban removes the user and prevents them from re-joining until unbanned
@@ -375,7 +367,6 @@ export class ScheduleSyncService {
                                 await api.banChatMember(TEAM_CHATS.CHANNEL, Number(telegramId));
                                 // Optional: immediately unban so they can be re-invited/join later if needed, but they are kicked now
                                 await api.unbanChatMember(TEAM_CHATS.CHANNEL, Number(telegramId));
-                                logger.info({ fullName }, "✅ [SYNC] Successfully removed from channel");
                                 logSecurityEvent({
                                     event: "security.staff.channel_access_removed",
                                     telegramId,
@@ -391,7 +382,7 @@ export class ScheduleSyncService {
                                     },
                                 });
                             } catch (e: any) {
-                                logger.warn({ err: e, fullName }, "⚠️ [SYNC] Failed to remove staff from channel (maybe already left or bot lacks perms)");
+                                logger.warn({ err: e, fullName }, "Failed to remove deactivated staff from channel");
                                 logSecurityEvent({
                                     event: "security.staff.channel_access_remove_failed",
                                     telegramId,
@@ -409,7 +400,7 @@ export class ScheduleSyncService {
                                 });
                             }
                         } else {
-                            logger.warn({ fullName }, "⚠️ [SYNC] Skipping channel removal: no API instance provided");
+                            logger.warn({ fullName }, "Channel removal skipped because API instance was not provided");
                         }
                     }
 
@@ -449,7 +440,7 @@ export class ScheduleSyncService {
                     if (hireReady) {
                         await userRepository.update(user.id, { role: "STAFF" });
                     } else {
-                        logger.warn({ fullName, status: cand?.status }, "⚠️ [SYNC] Skipping role→STAFF: candidate still in recruitment funnel");
+                        logger.warn({ fullName, status: cand?.status }, "Staff role promotion skipped because candidate is still in funnel");
                         logBusinessEvent({
                             event: "staff.role_promotion.skipped",
                             level: "warn",
@@ -469,7 +460,7 @@ export class ScheduleSyncService {
                     }
                 }
             } catch (err) {
-                logger.error({ err, fullName }, "❌ Error syncing staff member");
+                logger.error({ err, fullName }, "Staff member synchronization failed");
             }
         }
 
@@ -506,7 +497,6 @@ export class ScheduleSyncService {
 
     async syncSchedule(sheetName: string = "Актуальний розклад", existingTeamMap?: { [key: string]: TeamMember }) {
         this.ensureSheets();
-        logger.info(`⏳ Starting schedule sync (v2) from sheet: ${sheetName}...`);
         const teamMap = existingTeamMap || await this.fetchTeamMapping();
         const res = await this.sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID_SCHEDULE,
@@ -606,7 +596,6 @@ export class ScheduleSyncService {
             }
         }
 
-        logger.info({ syncCount }, "🧱 Prepared shifts for schedule sync");
         logBusinessEvent({
             event: "schedule.sync.prepared",
             actorType: "system",
@@ -631,10 +620,9 @@ export class ScheduleSyncService {
                 location: { connect: { id: shift.locationId } },
                 date: shift.date
             })));
-            logger.info({ completed: Math.min(i + batch.length, shiftsToCreate.length), total: shiftsToCreate.length }, "🧱 Schedule sync batch inserted");
+            logger.debug({ completed: Math.min(i + batch.length, shiftsToCreate.length), total: shiftsToCreate.length }, "Schedule sync batch inserted");
         }
 
-        logger.info({ shiftsBefore, shiftsAfter: syncCount }, "✅ Schedule sync completed");
         logBusinessEvent({
             event: "schedule.sync.completed",
             actorType: "system",
@@ -786,7 +774,7 @@ export class ScheduleSyncService {
         }
 
         if (bestScore > 30 && bestMatch) {
-            logger.info({ locStr, bestScore, matched: bestMatch.name, city: bestMatch.city }, "✅ [SYNC] Location matched");
+            logger.debug({ locationLabel: locStr, bestScore, matched: bestMatch.name, city: bestMatch.city }, "Schedule sync location matched");
             return bestMatch;
         }
 
@@ -964,7 +952,7 @@ export class ScheduleSyncService {
             }
 
             if (rowIndex === -1) {
-                logger.warn({ telegramId }, "⚠️ Could not find photographer in Team sheet to update first shift date");
+                logger.warn({ telegramId }, "Could not find photographer in team sheet for first shift date update");
                 return;
             }
 
@@ -978,9 +966,9 @@ export class ScheduleSyncService {
                 }
             });
 
-            logger.info({ telegramId, dateStr, rowIndex }, "✅ Updated first shift date in Team spreadsheet");
+            logger.debug({ telegramId, dateStr, rowIndex }, "First shift date updated in team spreadsheet");
         } catch (error) {
-            logger.error({ error, telegramId }, "❌ Failed to update first shift date in Team spreadsheet");
+            logger.error({ err: error, telegramId }, "Failed to update first shift date in team spreadsheet");
         }
     }
 }

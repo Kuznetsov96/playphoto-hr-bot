@@ -35,12 +35,8 @@ adminMenu.dynamic(async (ctx, range) => {
     if (telegramId) {
         userRole = await getUserAdminRole(BigInt(telegramId));
     }
-
-    logger.info({ userId: telegramId, userRole }, "🔍 [ADMIN] Rendering main menu");
-
     if (hasPermission(userRole, 'STAFF_SCHEDULE')) {
         range.text(ADMIN_TEXTS["admin-main-team"], async (ctx) => {
-            logger.info({ userId: ctx.from?.id }, "🔘 [ADMIN] Team button pressed");
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-team"], "admin-team-ops", { pushToStack: true });
         });
     }
