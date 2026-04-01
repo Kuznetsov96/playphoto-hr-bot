@@ -9,6 +9,22 @@ import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
+const PARCEL_PHOTO_BUFFER_MS = 1500;
+
+type PendingParcelPhotoUpload = {
+    parcelId: string;
+    chatKey: string;
+    fileIds: string[];
+    flushTimer?: NodeJS.Timeout;
+};
+
+const pendingParcelPhotoUploads = new Map<string, PendingParcelPhotoUpload>();
+
+function getParcelPhotoChatKey(ctx: MyContext): string | null {
+    const rawKey = ctx.chat?.id ?? ctx.from?.id;
+    return rawKey !== undefined ? String(rawKey) : null;
+}
+
 async function editOrReplyText(
     ctx: MyContext,
     text: string,
@@ -32,6 +48,167 @@ async function editOrReplyText(
     }
 
     await ctx.reply(text, options);
+}
+
+async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photoFileIds: string[]) {
+    const parcel = await prisma.parcel.findUnique({
+        where: { id: parcelId },
+        include: { location: true, responsibleStaff: true }
+    });
+
+    if (!parcel) {
+        throw new Error(`Parcel ${parcelId} not found after photo upload`);
+    }
+
+    const kb = new InlineKeyboard()
+        .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
+        .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
+
+    const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
+        ttn: parcel.ttn,
+        location: parcel.location?.name || 'Unknown',
+        sender: parcel.responsibleStaff?.fullName || 'Photographer'
+    });
+
+    const threadOptions: Record<string, unknown> = {};
+    if (TEAM_CHATS.LOGISTICS !== undefined) {
+        threadOptions.message_thread_id = TEAM_CHATS.LOGISTICS;
+    }
+
+    try {
+        if (photoFileIds.length === 1) {
+            await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photoFileIds[0]!, {
+                caption,
+                parse_mode: 'HTML',
+                reply_markup: kb,
+                ...threadOptions
+            });
+        } else {
+            const media = photoFileIds.map((fileId, index) => ({
+                type: 'photo' as const,
+                media: fileId,
+                ...(index === 0 ? { caption, parse_mode: 'HTML' as const } : {})
+            }));
+
+            await ctx.api.sendMediaGroup(TEAM_CHATS.SUPPORT, media, threadOptions);
+            await ctx.api.sendMessage(
+                TEAM_CHATS.SUPPORT,
+                `⬆️ ${photoFileIds.length} photos for TTN <code>${parcel.ttn}</code>`,
+                {
+                    parse_mode: 'HTML',
+                    reply_markup: kb,
+                    ...threadOptions
+                }
+            );
+        }
+    } catch (e: any) {
+        if (e.description?.includes("thread not found")) {
+            logger.warn({ logisticsThreadId: TEAM_CHATS.LOGISTICS }, "Logistics thread missing; falling back to general support chat");
+            delete threadOptions.message_thread_id;
+
+            if (photoFileIds.length === 1) {
+                await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photoFileIds[0]!, {
+                    caption,
+                    parse_mode: 'HTML',
+                    reply_markup: kb
+                });
+            } else {
+                const media = photoFileIds.map((fileId, index) => ({
+                    type: 'photo' as const,
+                    media: fileId,
+                    ...(index === 0 ? { caption, parse_mode: 'HTML' as const } : {})
+                }));
+
+                await ctx.api.sendMediaGroup(TEAM_CHATS.SUPPORT, media);
+                await ctx.api.sendMessage(
+                    TEAM_CHATS.SUPPORT,
+                    `⬆️ ${photoFileIds.length} photos for TTN <code>${parcel.ttn}</code>`,
+                    {
+                        parse_mode: 'HTML',
+                        reply_markup: kb
+                    }
+                );
+            }
+            return;
+        }
+
+        throw e;
+    }
+}
+
+function scheduleParcelPhotoFlush(ctx: MyContext, chatKey: string) {
+    const pending = pendingParcelPhotoUploads.get(chatKey);
+    if (!pending) return;
+
+    if (pending.flushTimer) {
+        clearTimeout(pending.flushTimer);
+    }
+
+    pending.flushTimer = setTimeout(() => {
+        const current = pendingParcelPhotoUploads.get(chatKey);
+        if (!current) return;
+
+        pendingParcelPhotoUploads.delete(chatKey);
+
+        void (async () => {
+            audit({
+                event: "parcel_photo_upload",
+                result: "started",
+                actorType: "staff",
+                telegramId: ctx.from?.id,
+                entityType: "parcel",
+                entityId: current.parcelId,
+                updateId: ctx.update.update_id,
+                context: { photoCount: current.fileIds.length }
+            });
+
+            try {
+                const parcel = await prisma.parcel.findUnique({
+                    where: { id: current.parcelId },
+                    select: { contentPhotoIds: true }
+                });
+
+                const mergedPhotoIds = Array.from(new Set([
+                    ...(parcel?.contentPhotoIds || []),
+                    ...current.fileIds
+                ]));
+
+                await prisma.parcel.update({
+                    where: { id: current.parcelId },
+                    data: {
+                        contentPhotoIds: mergedPhotoIds,
+                        status: 'VERIFYING'
+                    }
+                });
+
+                await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
+                await sendParcelPhotosToSupport(ctx, current.parcelId, mergedPhotoIds);
+
+                audit({
+                    event: "parcel_photo_upload",
+                    result: "success",
+                    actorType: "staff",
+                    telegramId: ctx.from?.id,
+                    entityType: "parcel",
+                    entityId: current.parcelId,
+                    updateId: ctx.update.update_id,
+                    context: { photoCount: current.fileIds.length }
+                });
+            } catch (err: any) {
+                audit({
+                    event: "parcel_photo_upload",
+                    result: "failed",
+                    actorType: "staff",
+                    telegramId: ctx.from?.id,
+                    entityType: "parcel",
+                    entityId: current.parcelId,
+                    updateId: ctx.update.update_id,
+                    error: err.message
+                });
+                logger.error({ err, parcelId: current.parcelId, telegramId: ctx.from?.id }, "Logistics parcel photo upload handler failed");
+            }
+        })();
+    }, PARCEL_PHOTO_BUFFER_MS);
 }
 
 // 1. Accept Parcel
@@ -232,6 +409,8 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
 // Handle text and photo inputs
 staffLogisticsHandlers.on("message", async (ctx, next) => {
     const step = ctx.session.step || '';
+    const chatKey = getParcelPhotoChatKey(ctx);
+    const pendingPhotoUpload = chatKey ? pendingParcelPhotoUploads.get(chatKey) : undefined;
 
     if (step.startsWith('awaiting_np_phone_')) {
         const parcelId = step.replace('awaiting_np_phone_', '');
@@ -307,76 +486,38 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
         return;
     }
 
-    if (step.startsWith('awaiting_parcel_photo_')) {
-        const parcelId = step.replace('awaiting_parcel_photo_', '');
+    if (step.startsWith('awaiting_parcel_photo_') || pendingPhotoUpload) {
+        const parcelId = step.startsWith('awaiting_parcel_photo_')
+            ? step.replace('awaiting_parcel_photo_', '')
+            : pendingPhotoUpload!.parcelId;
         const photo = ctx.message?.photo?.[ctx.message.photo.length - 1];
 
         if (photo) {
-            audit({ event: "parcel_photo_upload", result: "started", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
-            try {
-                await prisma.parcel.update({
-                    where: { id: parcelId },
-                    data: { 
-                        contentPhotoIds: {
-                            push: photo.file_id
-                        },
-                        status: 'VERIFYING'
-                    }
-                });
-
-                const parcel = await prisma.parcel.findUnique({
-                    where: { id: parcelId },
-                    include: { location: true, responsibleStaff: true }
-                });
-
-                if (!parcel) {
-                    throw new Error(`Parcel ${parcelId} not found after photo upload`);
-                }
-
-                ctx.session.step = 'idle';
-                await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_received);
-
-                audit({ event: "parcel_photo_upload", result: "success", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
-
-                const kb = new InlineKeyboard()
-                    .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
-                    .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
-
-                const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
-                    ttn: parcel.ttn,
-                    location: parcel.location?.name || 'Unknown',
-                    sender: parcel.responsibleStaff?.fullName || 'Photographer'
-                });
-
-                const options: any = { 
-                    caption,
-                    parse_mode: 'HTML', 
-                    reply_markup: kb
-                };
-                
-                if (TEAM_CHATS.LOGISTICS !== undefined) {
-                    options.message_thread_id = TEAM_CHATS.LOGISTICS;
-                }
-
-                // Send to Support Chat (with fallback for thread)
-                try {
-                    await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photo.file_id, options);
-                } catch (e: any) {
-                    if (e.description?.includes("thread not found")) {
-                        logger.warn({ logisticsThreadId: TEAM_CHATS.LOGISTICS }, "Logistics thread missing; falling back to general support chat");
-                        delete options.message_thread_id;
-                        await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, photo.file_id, options).catch(err => {
-                            logger.error({ err, parcelId }, "Logistics parcel photo delivery failed in fallback channel");
-                        });
-                    } else {
-                        throw e;
-                    }
-                }
-            } catch (err: any) {
-                audit({ event: "parcel_photo_upload", result: "failed", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, error: err.message });
-                logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics parcel photo upload handler failed");
-                throw err;
+            if (!chatKey) {
+                await ctx.reply("Не вдалося обробити фото. Спробуй ще раз, будь ласка.");
+                return;
             }
+
+            ctx.session.step = 'idle';
+
+            const current = pendingParcelPhotoUploads.get(chatKey);
+            if (current && current.parcelId !== parcelId && current.flushTimer) {
+                clearTimeout(current.flushTimer);
+                pendingParcelPhotoUploads.delete(chatKey);
+            }
+
+            const upload = pendingParcelPhotoUploads.get(chatKey) || {
+                parcelId,
+                chatKey,
+                fileIds: []
+            };
+
+            if (!upload.fileIds.includes(photo.file_id)) {
+                upload.fileIds.push(photo.file_id);
+            }
+
+            pendingParcelPhotoUploads.set(chatKey, upload);
+            scheduleParcelPhotoFlush(ctx, chatKey);
         } else {
             await ctx.reply("Будь ласка, надішли саме фото. 📸");
         }
