@@ -255,6 +255,7 @@ export const hrService = {
             // We DON'T update status immediately. 
             // Instead, we leave it as INTERVIEW_COMPLETED so the worker can 
             // send the notification after 6 hours and THEN update the status.
+            currentStep: FunnelStep.INTERVIEW,
             hrDecision: decision,
             notificationSent: false,
             materialsSent: false,
@@ -704,6 +705,7 @@ export const hrService = {
 
         await candidateRepository.update(slot.candidate.id, {
             status: CandidateStatus.INTERVIEW_COMPLETED,
+            currentStep: FunnelStep.INTERVIEW,
             interviewCompletedAt: new Date(),
             notificationSent: false,
             materialsSent: false,

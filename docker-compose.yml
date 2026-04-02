@@ -78,7 +78,7 @@ services:
       - ./logs:/var/log/playphoto:ro
       - alloy_data:/var/lib/alloy/data
     healthcheck:
-      test: [ "CMD", "wget", "-q", "-O", "-", "http://localhost:12345/-/ready" ]
+      test: [ "CMD", "alloy", "validate", "/etc/alloy/config.alloy" ]
       interval: 15s
       timeout: 5s
       retries: 10

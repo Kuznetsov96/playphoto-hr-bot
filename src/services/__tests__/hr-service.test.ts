@@ -114,6 +114,7 @@ describe('hrService', () => {
             const result = await hrService.makeDecision(mockApi, 'cand1', 'ACCEPTED');
             expect(result).toBe(true);
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
+                currentStep: 'INTERVIEW',
                 hrDecision: 'ACCEPTED',
                 notificationSent: false,
                 materialsSent: false,
@@ -129,6 +130,7 @@ describe('hrService', () => {
 
             // Should NOT have status REJECTED or notificationSent: true immediately
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
+                currentStep: 'INTERVIEW',
                 hrDecision: 'REJECTED',
                 notificationSent: false,
                 materialsSent: false,
