@@ -1,7 +1,8 @@
 
 import { z } from "zod";
-import { taskRepository } from "../repositories/task-repository.js";
+import { taskRepository, type TaskWithRelations } from "../repositories/task-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
+import { workShiftRepository } from "../repositories/work-shift-repository.js";
 
 // Zod schemas
 const CreateTaskSchema = z.object({
@@ -24,19 +25,67 @@ type CreateTaskInput = z.infer<typeof CreateTaskSchema>;
 type UpdateTaskStatusInput = z.infer<typeof UpdateTaskStatusSchema>;
 
 export class TaskService {
+    private async resolveTaskLocation(staffId: string, workDate?: Date | null, fallbackCity?: string | null, fallbackLocationName?: string | null) {
+        if (workDate) {
+            const shift = await workShiftRepository.findShiftWithLocationOnDate(staffId, workDate);
+            if (shift?.location) {
+                return {
+                    city: shift.location.city,
+                    locationName: shift.location.name,
+                };
+            }
+        }
+
+        if (fallbackCity || fallbackLocationName) {
+            return {
+                city: fallbackCity ?? null,
+                locationName: fallbackLocationName ?? null,
+            };
+        }
+
+        const staff = await staffRepository.findById(staffId);
+        return {
+            city: staff?.location?.city ?? null,
+            locationName: staff?.location?.name ?? null,
+        };
+    }
+
+    private async hydrateTaskLocation(task: TaskWithRelations | null): Promise<TaskWithRelations | null> {
+        if (!task) return null;
+
+        const resolvedLocation = await this.resolveTaskLocation(
+            task.staffId,
+            task.workDate,
+            task.city ?? null,
+            task.locationName ?? null,
+        );
+
+        return {
+            ...task,
+            city: resolvedLocation.city,
+            locationName: resolvedLocation.locationName,
+        };
+    }
+
     /**
      * Create a new task for a staff member
      */
     async createTask(input: CreateTaskInput) {
         const validated = CreateTaskSchema.parse(input);
+        const resolvedLocation = await this.resolveTaskLocation(
+            validated.staffId,
+            validated.workDate,
+            validated.city ?? null,
+            validated.locationName ?? null,
+        );
 
         return taskRepository.create({
             staff: { connect: { id: validated.staffId } },
             taskText: validated.taskText,
             workDate: validated.workDate ?? null,
             deadlineTime: validated.deadlineTime ?? null,
-            city: validated.city ?? null,
-            locationName: validated.locationName ?? null,
+            city: resolvedLocation.city,
+            locationName: resolvedLocation.locationName,
             fileId: validated.fileId ?? null,
             createdById: validated.createdById,
             isCompleted: false
@@ -47,7 +96,8 @@ export class TaskService {
      * Get task by ID
      */
     async getTaskById(taskId: string) {
-        return taskRepository.findById(taskId);
+        const task = await taskRepository.findById(taskId);
+        return this.hydrateTaskLocation(task);
     }
 
     /**
@@ -60,7 +110,8 @@ export class TaskService {
         const endOfDay = new Date(date);
         endOfDay.setHours(23, 59, 59, 999);
 
-        return taskRepository.findByDateRange(startOfDay, endOfDay, hideCompleted);
+        const tasks = await taskRepository.findByDateRange(startOfDay, endOfDay, hideCompleted);
+        return Promise.all(tasks.map((task) => this.hydrateTaskLocation(task))) as Promise<TaskWithRelations[]>;
     }
 
     /**
