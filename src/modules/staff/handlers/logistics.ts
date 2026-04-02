@@ -43,6 +43,10 @@ function buildParcelPhotoDraftKeyboard(parcelId: string) {
         .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, `parcel_photo_cancel_${parcelId}`);
 }
 
+function getDraftParcelId(ctx: MyContext): string | null {
+    return ctx.session.parcelPhotoDraft?.parcelId || null;
+}
+
 function getParcelPhotoReminderKey(ctx: MyContext) {
     const rawKey = ctx.chat?.id ?? ctx.from?.id;
     return rawKey !== undefined ? String(rawKey) : null;
@@ -104,8 +108,8 @@ async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photo
     }
 
     const kb = new InlineKeyboard()
-        .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcelId}`)
-        .text("🗑 Delete", `admin_parcel_delete_direct_${parcelId}`);
+        .text("✅ Everything is fine", `apc_${parcelId}`)
+        .text("🗑 Delete", `apd_${parcelId}`);
 
     const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
         ttn: parcel.ttn,
@@ -457,11 +461,34 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_done_(.+)$/, async (ctx) => 
     await finalizeParcelPhotoDraft(ctx, parcelId);
 });
 
+staffLogisticsHandlers.callbackQuery("parcel_photo_done", async (ctx) => {
+    const parcelId = getDraftParcelId(ctx);
+    if (!parcelId) {
+        await ctx.answerCallbackQuery("Активне завантаження вже завершене.");
+        return;
+    }
+
+    await ctx.answerCallbackQuery("Завершую відправку фото...");
+    await finalizeParcelPhotoDraft(ctx, parcelId);
+});
+
 staffLogisticsHandlers.callbackQuery(/^parcel_photo_cancel_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const draft = ctx.session.parcelPhotoDraft;
 
     if (!draft || draft.parcelId !== parcelId) {
+        await ctx.answerCallbackQuery("Активне завантаження вже завершене.");
+        return;
+    }
+
+    resetParcelPhotoDraft(ctx);
+    await ctx.answerCallbackQuery("Скасовано.");
+    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled);
+});
+
+staffLogisticsHandlers.callbackQuery("parcel_photo_cancel", async (ctx) => {
+    const parcelId = getDraftParcelId(ctx);
+    if (!parcelId) {
         await ctx.answerCallbackQuery("Активне завантаження вже завершене.");
         return;
     }
