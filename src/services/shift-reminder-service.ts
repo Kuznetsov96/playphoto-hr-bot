@@ -3,7 +3,6 @@ import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { taskService } from "./task-service.js";
-import { staffHubMenu } from "../menus/staff.js";
 import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import prisma from "../db/core.js";
@@ -102,10 +101,11 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                     const greeting = `👋 <b>Доброго ранку, ${firstName}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
 
                     const fullText = `${greeting}\n\n${shiftText}${taskSummary}${parcelsSummary}`;
+                    const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
 
                     await bot.api.sendMessage(Number(telegramId), fullText, {
                         parse_mode: "HTML",
-                        reply_markup: staffHubMenu,
+                        reply_markup: kb,
                         disable_notification: true
                     });
                     logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");

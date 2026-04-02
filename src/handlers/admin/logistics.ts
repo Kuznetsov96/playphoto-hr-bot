@@ -95,10 +95,10 @@ adminLogisticsHandlers.callbackQuery("admin_logistics_nav", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-// Confirm Parcel (Everything is fine) - matches both admin_parcel_confirm_TTN AND admin_parcel_confirm_direct_TTN
-adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(?:direct_)?(.+)$/, async (ctx) => {
+// Confirm Parcel - supports legacy admin_parcel_confirm_* and short apc_* callbacks.
+adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_confirm_(?:direct_)?|apc_)(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    const isDirect = ctx.callbackQuery.data.includes('_direct_');
+    const isDirect = ctx.callbackQuery.data.includes('_direct_') || ctx.callbackQuery.data.startsWith('apc_');
 
     await prisma.parcel.update({
         where: { id: parcelId },
@@ -122,10 +122,10 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_confirm_(?:direct_)?(.+)$/, 
     }
 });
 
-// Delete Parcel - matches both admin_parcel_delete_TTN AND admin_parcel_delete_direct_TTN
-adminLogisticsHandlers.callbackQuery(/^admin_parcel_delete_(?:direct_)?(.+)$/, async (ctx) => {
+// Delete Parcel - supports legacy admin_parcel_delete_* and short apd_* callbacks.
+adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_delete_(?:direct_)?|apd_)(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    const isDirect = ctx.callbackQuery.data.includes('_direct_');
+    const isDirect = ctx.callbackQuery.data.includes('_direct_') || ctx.callbackQuery.data.startsWith('apd_');
     
     await prisma.parcel.update({ where: { id: parcelId }, data: { status: 'CANCELLED' } }).catch(() => { });
 
@@ -207,8 +207,8 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
 
     if (parcel && parcel.contentPhotoIds.length > 0) {
         const kb = new InlineKeyboard()
-            .text("✅ Everything is fine", `admin_parcel_confirm_direct_${parcel.id}`)
-            .text("🗑 Delete", `admin_parcel_delete_direct_${parcel.id}`);
+            .text("✅ Everything is fine", `apc_${parcel.id}`)
+            .text("🗑 Delete", `apd_${parcel.id}`);
 
         // Only show navigation in private bot chat
         if (ctx.chat?.type === 'private') {
