@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { FunnelStep } from '@prisma/client';
 import { BookingService } from '../booking-service.js';
 import prisma from '../../db/core.js';
 import { googleCalendar } from '../google-calendar.js';
@@ -44,6 +45,7 @@ vi.mock('../../repositories/interview-repository.js', () => ({
 
 vi.mock('../../repositories/training-repository.js', () => ({
     trainingRepository: {
+        findSlotWithCandidate: vi.fn(),
         findSlotById: vi.fn(),
         updateSlot: vi.fn()
     }
@@ -141,6 +143,68 @@ describe('BookingService', () => {
 
             expect(trainingRepository.updateSlot).toHaveBeenCalled();
             expect(result.id).toBe('tslot1');
+        });
+    });
+
+    describe('cancelInterviewSlot', () => {
+        it('realigns legacy interview records to the interview step while disconnecting the slot', async () => {
+            vi.mocked(interviewRepository.findSlotWithCandidate).mockResolvedValue({
+                id: 'slot1',
+                googleEventId: null,
+                candidate: {
+                    id: 'cand1',
+                    user: { telegramId: 12345n }
+                }
+            } as any);
+
+            await bookingService.cancelInterviewSlot('slot1');
+
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
+                googleMeetLink: null,
+                interviewSlot: { disconnect: true },
+                currentStep: FunnelStep.INTERVIEW,
+            });
+            expect(interviewRepository.updateSlot).toHaveBeenCalledWith('slot1', {
+                isBooked: false,
+                candidate: { disconnect: true },
+                googleEventId: null
+            });
+        });
+    });
+
+    describe('cancelTrainingSlot', () => {
+        it('realigns mentor-stage records to the training step while disconnecting both slot types', async () => {
+            vi.mocked(trainingRepository.findSlotWithCandidate).mockResolvedValue({
+                id: 'tslot1',
+                googleEventId: null,
+                candidate: {
+                    id: 'cand-training',
+                    user: { telegramId: 111n }
+                },
+                candidateDiscovery: {
+                    id: 'cand-discovery',
+                    user: { telegramId: 222n }
+                }
+            } as any);
+
+            await bookingService.cancelTrainingSlot('tslot1');
+
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-training', {
+                trainingMeetLink: null,
+                trainingSlot: { disconnect: true },
+                currentStep: FunnelStep.TRAINING,
+            });
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-discovery', {
+                trainingMeetLink: null,
+                discoverySlot: { disconnect: true },
+                currentStep: FunnelStep.TRAINING,
+            });
+            expect(trainingRepository.updateSlot).toHaveBeenCalledWith('tslot1', {
+                isBooked: false,
+                candidate: { disconnect: true },
+                candidateDiscovery: { disconnect: true },
+                googleEventId: null
+            });
         });
     });
 });

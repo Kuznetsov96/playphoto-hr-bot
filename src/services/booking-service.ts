@@ -1,4 +1,5 @@
 import prisma from "../db/core.js";
+import { FunnelStep } from "@prisma/client";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
@@ -154,7 +155,10 @@ export class BookingService {
         if (slot.candidate) {
             await candidateRepository.update(slot.candidate.id, {
                 googleMeetLink: null,
-                interviewSlot: { disconnect: true }
+                interviewSlot: { disconnect: true },
+                // Recovery path for legacy inconsistent records where the interview
+                // slot exists but currentStep was left in a later funnel stage.
+                currentStep: FunnelStep.INTERVIEW,
             });
 
             logBusinessEvent({
@@ -192,7 +196,10 @@ export class BookingService {
         if (slot.candidate) {
             await candidateRepository.update(slot.candidate.id, {
                 trainingMeetLink: null,
-                trainingSlot: { disconnect: true }
+                trainingSlot: { disconnect: true },
+                // Recovery path for legacy inconsistent records where a mentor-stage
+                // slot exists but currentStep drifted away from TRAINING.
+                currentStep: FunnelStep.TRAINING,
             });
 
             logBusinessEvent({
@@ -215,7 +222,10 @@ export class BookingService {
         if (slot.candidateDiscovery) {
             await candidateRepository.update(slot.candidateDiscovery.id, {
                 trainingMeetLink: null,
-                discoverySlot: { disconnect: true }
+                discoverySlot: { disconnect: true },
+                // Recovery path for legacy inconsistent records where a mentor-stage
+                // slot exists but currentStep drifted away from TRAINING.
+                currentStep: FunnelStep.TRAINING,
             });
 
             logBusinessEvent({
