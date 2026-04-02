@@ -23,29 +23,50 @@ import { accessService } from "../services/access-service.js";
 
 export const commandHandlers = new Composer<MyContext>();
 
+async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaited<ReturnType<typeof getUserAdminRole>>>) {
+    if (adminRole === 'SUPER_ADMIN' || adminRole === 'CO_FOUNDER' || adminRole === 'SUPPORT') {
+        const text = await staffService.getAdminHeader(adminRole as any);
+        await ScreenManager.renderScreen(ctx, text, "admin-main", { forceNew: true });
+        return;
+    }
+
+    if (adminRole === 'HR_LEAD') {
+        const { hrService } = await import("../services/hr-service.js");
+        const text = await hrService.getHubText();
+        await ScreenManager.renderScreen(ctx, text, "hr-hub-menu", { forceNew: true });
+        return;
+    }
+
+    if (adminRole === 'MENTOR_LEAD') {
+        const { mentorService } = await import("../services/mentor-service.js");
+        const text = await mentorService.getHubText();
+        await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", { forceNew: true });
+    }
+}
+
 // --- GLOBAL CALLBACKS ---
 commandHandlers.callbackQuery("cancel_step", async (ctx) => {
     ctx.session.step = "idle";
     const telegramId = ctx.from?.id;
-    
+
     if (telegramId) {
-        const { getAdminRoleByTelegramId } = await import("../config/roles.js");
-        const adminRole = getAdminRoleByTelegramId(BigInt(telegramId));
+        const adminRole = await getUserAdminRole(BigInt(telegramId));
 
         if (adminRole) {
-            await ctx.answerCallbackQuery();
-            const { hrService } = await import("../services/hr-service.js");
-            const { hrHubMenu } = await import("../menus/hr.js");
-            const text = await hrService.getHubText();
-            await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: hrHubMenu }).catch(async () => {
-                await ctx.reply(text, { parse_mode: "HTML", reply_markup: hrHubMenu });
-            });
+            await ctx.answerCallbackQuery("Дію скасовано ❌");
+
+            if (ctx.chat?.type !== "private") {
+                await ctx.deleteMessage().catch(() => { });
+                return;
+            }
+
+            await showAdminCancelHome(ctx, adminRole);
             return;
         }
 
         const { userRepository } = await import("../repositories/user-repository.js");
         const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
-        
+
         if (user?.staffProfile?.isActive) {
             await ctx.answerCallbackQuery();
             const { showStaffHub } = await import("../modules/staff/handlers/menu.js");
@@ -98,7 +119,7 @@ commandHandlers.command("start", async (ctx) => {
         await prisma.user.updateMany({
             where: { telegramId: BigInt(userId), botBlockedAt: { not: null } },
             data: { botBlockedAt: null }
-        }).catch(() => {});
+        }).catch(() => { });
 
         // 0. Handle Deep-links (Broadcast Query & Source Tracking)
         if (payload?.startsWith("bcq_")) {
@@ -128,7 +149,7 @@ commandHandlers.command("start", async (ctx) => {
         } else if (payload?.startsWith("source_")) {
             const platform = payload.replace("source_", "");
             const sourceName = platform.charAt(0).toUpperCase() + platform.slice(1);
-            
+
             if (!ctx.session.candidateData) {
                 ctx.session.candidateData = { source: sourceName, clickSource: sourceName } as any;
             } else {
@@ -164,7 +185,7 @@ commandHandlers.command("start", async (ctx) => {
                     safeContext: { targetHub: userAdminRole },
                 });
                 await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
-                
+
                 if (userAdminRole === 'SUPER_ADMIN' || userAdminRole === 'CO_FOUNDER' || userAdminRole === 'SUPPORT') {
                     const text = await staffService.getAdminHeader(userAdminRole as any);
                     await ScreenManager.renderScreen(ctx, text, "admin-main", { forceNew: true, pushToStack: true });
@@ -191,7 +212,7 @@ commandHandlers.command("start", async (ctx) => {
 
         // 2. Staff Logic
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
-        
+
         if (user?.staffProfile) {
             if (user.staffProfile.isActive) {
                 logBusinessEvent({
@@ -286,7 +307,7 @@ commandHandlers.command("ping_admin", async (ctx) => {
 
 commandHandlers.command("restore_access", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), async (ctx) => {
     await ctx.reply("🛠 <b>Починаю відновлення доступу...</b>\n\nЦе може зайняти кілька хвилин. Я надішлю звіт по завершенню. ✨", { parse_mode: "HTML" });
-    
+
     try {
         const { restoreAccessService } = await import("../services/restore-access.js");
         const summary = await restoreAccessService.restoreAllStaffAccess(ctx.api);
@@ -521,7 +542,7 @@ commandHandlers.command("reset_me", async (ctx) => {
 
 // --- DEV TOOLS ---
 commandHandlers.command("set_step", async (ctx) => {
-    try { await ctx.deleteMessage().catch(() => {}); } catch (e) { }
+    try { await ctx.deleteMessage().catch(() => { }); } catch (e) { }
     const userId = ctx.from?.id;
     if (!userId) return;
 
@@ -536,7 +557,7 @@ commandHandlers.command("set_step", async (ctx) => {
         return ctx.reply("Usage: /set_step STEP_NAME\nAvailable: FULL_NAME, BIRTH_DATE, PHONE, EMAIL, PASSPORT_FRONT, PASSPORT_BACK, PASSPORT_ANNEX, IBAN, INSTAGRAM, NDA, PREFS");
     }
 
-    const STEPS: Record<string, {session: string, status?: CandidateStatus, funnel?: FunnelStep}> = {
+    const STEPS: Record<string, { session: string, status?: CandidateStatus, funnel?: FunnelStep }> = {
         FULL_NAME: { session: 'ONB_FULL_NAME', status: CandidateStatus.TRAINING_COMPLETED, funnel: FunnelStep.TRAINING },
         BIRTH_DATE: { session: 'ONB_BIRTH_DATE', status: CandidateStatus.TRAINING_COMPLETED, funnel: FunnelStep.TRAINING },
         PHONE: { session: 'ONB_PHONE', status: CandidateStatus.TRAINING_COMPLETED, funnel: FunnelStep.TRAINING },
@@ -611,7 +632,7 @@ commandHandlers.command("pass_test", async (ctx) => {
     }
 
     const candId = candidate.id;
-    
+
     await candidateRepository.update(candId, {
         testPassed: true,
         status: CandidateStatus.OFFLINE_STAGING,
@@ -624,7 +645,7 @@ commandHandlers.command("pass_test", async (ctx) => {
     const successText = `⚡️ <b>Режим розробника: Тест пропущено</b>\n\n` +
         `Наступний крок — <b>офлайн-стажування</b> на локації.\n\n` +
         `Обери зручний день, щоб завітати до нас: 👇`;
-    
+
     const kb = new InlineKeyboard();
     const today = new Date();
     const weekdays = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
