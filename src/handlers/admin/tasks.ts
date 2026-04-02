@@ -58,10 +58,12 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
             text += (ADMIN_TEXTS["admin-tasks-urgent"] || STAFF_TEXTS["admin-tasks-urgent"] || "admin-tasks-urgent");
             for (const task of urgentTasks) {
                 const staffName = formatStaffName(task.staff.fullName);
-                const englishCity = task.city ? normalizeCity(task.city) : "";
+                const resolvedCity = task.city || task.staff?.location?.city || "";
+                const resolvedLocationName = task.locationName || task.staff?.location?.name || (ADMIN_TEXTS["admin-tasks-loc-unknown"] || STAFF_TEXTS["admin-tasks-loc-unknown"] || "admin-tasks-loc-unknown");
+                const englishCity = resolvedCity ? normalizeCity(resolvedCity) : "";
                 const cityPrefix = englishCity ? `${englishCity}, ` : "";
                 const timeStr = task.deadlineTime ? ` • ${task.deadlineTime.replace(":", ".")}` : "";
-                const locationShort = truncateText(cityPrefix + (task.locationName || (ADMIN_TEXTS["admin-tasks-loc-unknown"] || STAFF_TEXTS["admin-tasks-loc-unknown"] || "admin-tasks-loc-unknown")), 25);
+                const locationShort = truncateText(cityPrefix + resolvedLocationName, 25);
                 text += `  ⏳ <b>${staffName}</b>\n     └ ${locationShort}${timeStr}\n`;
             }
         }
@@ -133,7 +135,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
 
     const staffName = formatStaffName(task.staff.fullName);
     const status = task.isCompleted ? ADMIN_TEXTS["admin-tasks-status-done"] : ADMIN_TEXTS["admin-tasks-status-pending"];
-    
+
     let dateDisplay = ADMIN_TEXTS["admin-tasks-date-soon"];
     if (task.workDate) {
         const wd = new Date(task.workDate);
@@ -142,16 +144,19 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
         const year = wd.getFullYear();
         dateDisplay = `${day}.${month}.${year}`;
     }
-    
+
     const deadline = task.deadlineTime ? ` (do ${task.deadlineTime})` : "";
 
     let text = ADMIN_TEXTS["admin-tasks-details-title"] + "\n\n";
     text = text.replace(/[\u200B-\u200D\uFEFF\u2060-\u206F\u202A-\u202E]/g, "");
-    
+
+    const resolvedCity = task.city || task.staff?.location?.city || ADMIN_TEXTS["admin-tasks-loc-unknown"];
+    const resolvedLocationName = task.locationName || task.staff?.location?.name || ADMIN_TEXTS["admin-tasks-loc-unknown"];
+
     text += ADMIN_TEXTS["admin-tasks-whom"]({ name: staffName }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-date"]({ date: dateDisplay, deadline }) + "\n";
-    text += ADMIN_TEXTS["admin-tasks-city"]({ city: task.city || ADMIN_TEXTS["admin-tasks-loc-unknown"] }) + "\n";
-    text += ADMIN_TEXTS["admin-tasks-location"]({ location: task.locationName || ADMIN_TEXTS["admin-tasks-loc-unknown"] }) + "\n";
+    text += ADMIN_TEXTS["admin-tasks-city"]({ city: resolvedCity }) + "\n";
+    text += ADMIN_TEXTS["admin-tasks-location"]({ location: resolvedLocationName }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-text"]({ text: task.taskText }) + "\n\n";
 
     if (task.fileId) {
