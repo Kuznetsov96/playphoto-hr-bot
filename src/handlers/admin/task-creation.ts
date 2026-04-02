@@ -10,6 +10,41 @@ import logger from "../../core/logger.js";
 
 const composer = new Composer<MyContext>();
 
+async function getTaskCreationStaff(locationId: string, dateStr?: string) {
+    if (dateStr) {
+        const staffWithShift = await staffRepository.findWithShiftAtLocation(locationId, new Date(dateStr));
+        if (staffWithShift.length > 0) {
+            return {
+                staff: staffWithShift,
+                source: "schedule" as const,
+            };
+        }
+    }
+
+    return {
+        staff: await staffRepository.findByLocation(locationId),
+        source: "location" as const,
+    };
+}
+
+function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "location" = "location") {
+    const prettyDate = dateStr ? dateStr.split("-").reverse().slice(0, 2).join(".") : null;
+
+    if (source === "schedule" && prettyDate) {
+        return `🗓️ <i>Showing photographers scheduled here on ${prettyDate}</i>`;
+    }
+
+    if (source === "schedule") {
+        return `🗓️ <i>Showing photographers scheduled for this date</i>`;
+    }
+
+    if (prettyDate) {
+        return `⚠️ <i>No shifts found for ${prettyDate}. Showing all active staff for this location</i>`;
+    }
+
+    return `⚠️ <i>Showing all active staff for this location</i>`;
+}
+
 // Обробник початку створення завдання
 composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
     ctx.session.adminFlow = 'TASK';
@@ -121,7 +156,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
         ctx.session.taskCreation.locationName = `${location.name} (${city})`;
         ctx.session.taskCreation.step = "selecting_staff";
 
-        const staff = await staffRepository.findByLocation(location.id);
+        const { staff, source } = await getTaskCreationStaff(location.id, ctx.session.taskCreation.date);
         const staffKeyboard = new InlineKeyboard();
         const selectedIds = ctx.session.taskCreation.selectedStaffIds || [];
 
@@ -137,7 +172,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
 
         await ScreenManager.renderScreen(
             ctx,
-            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${location.name} (${city})\n👤 <b>Select staff (multi-select):</b>`,
+            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${location.name} (${city})\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
             staffKeyboard,
             { pushToStack: true }
         );
@@ -165,7 +200,7 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
     ctx.session.taskCreation.locationName = `${location.name} (${location.city})`;
     ctx.session.taskCreation.step = "selecting_staff";
 
-    const staff = await staffRepository.findByLocation(locationId);
+    const { staff, source } = await getTaskCreationStaff(locationId, ctx.session.taskCreation.date);
     const keyboard = new InlineKeyboard();
     const selectedIds = ctx.session.taskCreation.selectedStaffIds || [];
 
@@ -181,7 +216,7 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
 
     await ScreenManager.renderScreen(
         ctx,
-        `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n👤 <b>Select staff (multi-select):</b>`,
+        `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
         keyboard,
         { pushToStack: true }
     );
@@ -198,7 +233,7 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     if (index === -1) ctx.session.taskCreation.selectedStaffIds.push(staffId);
     else ctx.session.taskCreation.selectedStaffIds.splice(index, 1);
 
-    const staff = await staffRepository.findByLocation(ctx.session.taskCreation.locationId || "");
+    const { staff, source } = await getTaskCreationStaff(ctx.session.taskCreation.locationId || "", ctx.session.taskCreation.date);
     const keyboard = new InlineKeyboard();
     const selectedIds = ctx.session.taskCreation.selectedStaffIds;
 
@@ -214,7 +249,7 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
 
     await ScreenManager.renderScreen(
         ctx,
-        `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n👤 <b>Select staff (${selectedIds.length} selected):</b>`,
+        `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (${selectedIds.length} selected):</b>`,
         keyboard
     );
     await ctx.answerCallbackQuery();
@@ -362,7 +397,7 @@ composer.on("message:text", async (ctx, next) => {
     if (ctx.session.adminFlow !== 'TASK') return await next();
 
     if (step === "entering_text" || step === "setting_time") {
-        await ctx.deleteMessage().catch(() => {});
+        await ctx.deleteMessage().catch(() => { });
         if (!await checkTaskCreationRole(ctx)) {
             delete ctx.session.taskCreation;
             const errKb = new InlineKeyboard()
@@ -370,7 +405,7 @@ composer.on("message:text", async (ctx, next) => {
                 .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
             return await ScreenManager.renderScreen(ctx, "❌ Access Denied", errKb);
         }
-        
+
         if (step === "entering_text") await handleTaskInput(ctx, ctx.message.text);
         else {
             const timeInput = ctx.message.text.trim();
@@ -383,7 +418,7 @@ composer.on("message:text", async (ctx, next) => {
 
 composer.on("message:photo", async (ctx, next) => {
     if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
-        await ctx.deleteMessage().catch(() => {});
+        await ctx.deleteMessage().catch(() => { });
         if (!await checkTaskCreationRole(ctx)) return;
         const photo = ctx.message.photo[ctx.message.photo.length - 1];
         await handleTaskInput(ctx, ctx.message.caption, photo?.file_id);
@@ -392,7 +427,7 @@ composer.on("message:photo", async (ctx, next) => {
 
 composer.on("message:document", async (ctx, next) => {
     if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
-        await ctx.deleteMessage().catch(() => {});
+        await ctx.deleteMessage().catch(() => { });
         if (!await checkTaskCreationRole(ctx)) return;
         await handleTaskInput(ctx, ctx.message.caption, ctx.message.document.file_id);
     } else await next();

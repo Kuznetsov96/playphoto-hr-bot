@@ -3,6 +3,23 @@ import type { WorkShift } from "@prisma/client";
 import prisma from "../db/core.js";
 
 export class WorkShiftRepository {
+    async findShiftWithLocationOnDate(staffId: string, date: Date) {
+        const startOfDay = new Date(date);
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const endOfDay = new Date(date);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        return prisma.workShift.findFirst({
+            where: {
+                staffId,
+                date: { gte: startOfDay, lte: endOfDay }
+            },
+            include: { location: true },
+            orderBy: { date: 'asc' }
+        });
+    }
+
     async findByDateRange(start: Date, end: Date): Promise<WorkShift[]> {
         return prisma.workShift.findMany({
             where: {
