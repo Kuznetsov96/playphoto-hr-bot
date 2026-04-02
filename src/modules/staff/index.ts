@@ -30,7 +30,7 @@ staffModule.on("message", async (ctx) => {
     // Only handle if not in a specific step
     const isIdle = !ctx.session.step || ctx.session.step === "idle";
 
-    if (isIdle) {
+    if (isIdle && ctx.chat?.type === "private") {
         const { ScreenManager } = await import("../../utils/screen-manager.js");
         await ScreenManager.showUnknownCommand(ctx);
     }
