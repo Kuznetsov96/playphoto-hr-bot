@@ -42,6 +42,7 @@ export const LOGISTICS_TEXTS_STAFF = {
     'ask_phone': (phone: string) => `Оформлюємо доручення на твій номер <b>${phone}</b>?\n\n<i>(Нова Пошта надішле код саме на цей номер)</i>`,
     'btn_confirm_phone': '✅ Так, номер вірний',
     'btn_change_phone': '✏️ Інший номер',
+    'manual_proxy_requested': 'Номер збережено. Передаю сапорту задачу на ручне оформлення доручення в Новій Пошті.\n\nЩойно доручення підтвердять, я попрошу тебе додати фото вмісту посилки. ✨',
     'mandatory_pickup': '🚨 <b>ОБОВ’ЯЗКОВО:</b> Посилку потрібно забрати сьогодні, інакше вона поїде назад!',
     'already_taken': (name: string) => `Цю посилку вже забирає <b>${name}</b>.`,
     'transferred': `Цю посилку вже передано наступній зміні. Гарного дня! 🌿`,
@@ -61,11 +62,20 @@ export const LOGISTICS_TEXTS_ADMIN = {
     'menu_title': '📦 Logistics Management',
     'parcel_details': (ttn: string, status: string, loc: string) => `<b>Parcel:</b> <code>${ttn}</code>\n<b>Location:</b> ${loc}\n<b>Status:</b> ${status}`,
     'btn_mark_picked_up_manual': '📬 Picked Up Manually',
+    'btn_mark_manual_proxy_done': '✅ Доручення оформлено',
     'btn_verify': '✅ Everything is fine',
     'btn_view_photo': '🖼 View Content Photo',
     'alert_not_picked_up': (ttn: string, days: number) => `⚠️ <b>ALARM:</b> Parcel <code>${ttn}</code> has not been picked up for ${days} days!`,
     'confirmed': '✅ Parcel confirmed and cleared from active list.',
     'manual_pickup_marked': '📬 Parcel marked as picked up manually. Staff should now finish the photo step.',
+    'manual_proxy_requested': (p: { ttn: string; loc: string; staff: string; phone: string }) =>
+        `📝 <b>Потрібно оформити доручення вручну</b>\n\n` +
+        `ТТН: <code>${p.ttn}</code>\n` +
+        `Локація: <b>${p.loc}</b>\n` +
+        `Фотограф: ${p.staff}\n` +
+        `Номер для доручення: <code>${p.phone}</code>\n\n` +
+        `Після оформлення натисни кнопку нижче, щоб відкрити фотографу наступний крок.`,
+    'manual_proxy_marked': '✅ Доручення підтверджено. Фотограф може переходити до фото вмісту.',
     'new_photo_alert': (ttn: string, loc: string) => `📸 <b>New Content Photo Received!</b>\n\nParcel: <code>${ttn}</code>\nLocation: ${loc}\n\nPlease verify the contents.`,
     'new_photo_caption': (p: { ttn: string, location: string, sender: string }) =>
         `📸 <b>Content Photo for TTN:</b> <code>${p.ttn}</code>\n` +

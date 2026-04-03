@@ -146,6 +146,41 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_manual_pickup_(.+)$/, async 
     await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.manual_pickup_marked, "admin-logistics");
 });
 
+adminLogisticsHandlers.callbackQuery(/^admin_parcel_manual_proxy_done_(.+)$/, async (ctx) => {
+    const parcelId = ctx.match[1] as string;
+    const { logisticsService } = await import("../../services/logistics-service.js");
+    const updated = await logisticsService.notifyManualProxyReady(parcelId);
+
+    if (!updated) {
+        await ctx.answerCallbackQuery("Parcel not found.");
+        return;
+    }
+
+    await prisma.parcel.update({
+        where: { id: parcelId },
+        data: {
+            npTrusteeError: null,
+            npTrusteeLastAttemptAt: new Date()
+        }
+    });
+
+    audit({ event: "parcel_manual_proxy_done", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+
+    await ctx.answerCallbackQuery("Manual proxy confirmed.");
+
+    if (ctx.chat?.id === TEAM_CHATS.SUPPORT) {
+        const text = `✅ <b>Manual proxy confirmed.</b>\n\nPhotographer can continue with the content photo flow.`;
+        if (ctx.callbackQuery.message?.photo) {
+            await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
+        } else {
+            await ctx.editMessageText(text, { parse_mode: 'HTML' });
+        }
+        return;
+    }
+
+    await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.manual_proxy_marked, "admin-logistics");
+});
+
 // Delete Parcel - supports legacy admin_parcel_delete_* and short apd_* callbacks.
 adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_delete_(?:direct_)?|apd_)(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
