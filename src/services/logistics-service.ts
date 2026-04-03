@@ -10,6 +10,8 @@ import { logBusinessEvent } from '../core/log-events.js';
 
 const bot = new Bot(BOT_TOKEN);
 
+type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED';
+
 export class LogisticsService {
     /**
      * Synchronize incoming parcels from Nova Poshta
@@ -368,10 +370,10 @@ export class LogisticsService {
     /**
      * Notifies support about a parcel issue
      */
-    async notifySupport(parcelId: string, type: 'NO_SHIFT' | 'REJECTED' | 'DELAYED') {
+    async notifySupport(parcelId: string, type: LogisticsSupportIssueType) {
         const parcel = await prisma.parcel.findUnique({
             where: { id: parcelId },
-            include: { location: true }
+            include: { location: true, responsibleStaff: true }
         });
         if (!parcel) return;
 
@@ -393,6 +395,15 @@ export class LogisticsService {
             case 'DELAYED':
                 text = `⏳ <b>Parcel Delayed</b>\n\nParcel ${ttn} at ${loc} has been waiting for too long!\n\nPlease check the status. 📦`;
                 break;
+            case 'SHIPMENT_LOCKED':
+                text =
+                    `🚧 <b>NP Shipment Locked</b>\n\n` +
+                    `Parcel ${ttn} for ${loc} is already in a state where trustee creation via API is blocked.\n\n` +
+                    `<b>Photographer:</b> ${parcel.responsibleStaff?.fullName || 'Unknown'}\n` +
+                    `<b>Current status:</b> ${parcel.status}\n` +
+                    `<b>Last NP error:</b> ${parcel.npTrusteeError || 'Unknown'}\n\n` +
+                    `Please verify who actually received the parcel and make sure the content photo flow is completed.`;
+                break;
         }
 
         const kb = new InlineKeyboard().text("⚙️ Manage Parcel", `admin_parcel_view_details_${parcelId}`);
@@ -409,6 +420,82 @@ export class LogisticsService {
         }
 
         await bot.api.sendMessage(targetChat, text, options).catch(err => logger.error({ err, parcelId, type }, 'Logistics support notification failed'));
+    }
+
+    async handleShipmentLocked(
+        parcelId: string,
+        params: {
+            telegramId?: number;
+            attemptedPhone?: string;
+            errorMessage?: string | undefined;
+            shouldNotifySupport?: boolean;
+            source: 'parcel_phone_ok' | 'parcel_phone_change';
+        }
+    ) {
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { location: true, responsibleStaff: true }
+        });
+        if (!parcel) return;
+
+        const shouldMarkDelivered = !['DELIVERED', 'VERIFYING', 'COMPLETED', 'CANCELLED'].includes(parcel.status);
+
+        if (shouldMarkDelivered) {
+            await prisma.parcel.update({
+                where: { id: parcelId },
+                data: {
+                    status: 'DELIVERED',
+                    staleAlertSentAt: null,
+                }
+            });
+
+            logBusinessEvent({
+                event: 'logistics.parcel.status_updated',
+                actorType: params.telegramId ? 'staff' : 'system',
+                actorRole: params.telegramId ? 'staff' : 'system',
+                telegramId: params.telegramId,
+                result: 'success',
+                module: 'logistics-service',
+                operation: 'handleShipmentLocked',
+                reasonCode: 'SHIPMENT_LOCKED',
+                safeContext: {
+                    parcelId,
+                    oldStatus: parcel.status,
+                    newStatus: 'DELIVERED',
+                    statusSource: 'np_trustee_locked',
+                },
+            });
+        }
+
+        logBusinessEvent({
+            event: 'logistics.parcel.trustee_locked',
+            level: 'warn',
+            actorType: params.telegramId ? 'staff' : 'system',
+            actorRole: params.telegramId ? 'staff' : 'system',
+            telegramId: params.telegramId,
+            result: 'failed',
+            reasonCode: 'SHIPMENT_LOCKED',
+            module: 'logistics-service',
+            operation: 'handleShipmentLocked',
+            safeContext: {
+                parcelId,
+                ttn: parcel.ttn,
+                locationName: parcel.location?.name || 'Unknown',
+                deliveryType: parcel.deliveryType,
+                parcelStatus: shouldMarkDelivered ? 'DELIVERED' : parcel.status,
+                attemptedPhone: params.attemptedPhone,
+                responsibleStaffId: parcel.responsibleStaffId,
+                responsibleStaffName: parcel.responsibleStaff?.fullName || null,
+                hasContentPhotos: parcel.contentPhotoIds.length > 0,
+                source: params.source,
+                shouldNotifySupport: Boolean(params.shouldNotifySupport),
+                npTrusteeError: params.errorMessage || parcel.npTrusteeError || null,
+            },
+        });
+
+        if (params.shouldNotifySupport) {
+            await this.notifySupport(parcelId, 'SHIPMENT_LOCKED');
+        }
     }
 
     /**
