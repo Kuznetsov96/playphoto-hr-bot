@@ -52,6 +52,10 @@ function getParcelPhotoReminderKey(ctx: MyContext) {
     return rawKey !== undefined ? String(rawKey) : null;
 }
 
+function hasShipmentLockedMarker(value: string | null | undefined) {
+    return /SHIPMENT_LOCKED|delivered to the recipient|further data changes are not possible/i.test(value || '');
+}
+
 function clearParcelPhotoReminder(ctx: MyContext) {
     const reminderKey = getParcelPhotoReminderKey(ctx);
     if (!reminderKey) return;
@@ -386,6 +390,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
         const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
         const trusteeResult = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
         if (!trusteeResult.success) {
+            const shouldNotifySupport = !hasShipmentLockedMarker(parcel.npTrusteeError);
             await prisma.parcel.update({
                 where: { id: parcelId },
                 data: {
@@ -396,9 +401,17 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
             audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
             if (trusteeResult.errorCode === 'SHIPMENT_LOCKED') {
+                const { logisticsService } = await import("../../../services/logistics-service.js");
+                await logisticsService.handleShipmentLocked(parcelId, {
+                    telegramId,
+                    attemptedPhone: phoneToUse,
+                    errorMessage: trusteeResult.errorMessage,
+                    shouldNotifySupport,
+                    source: 'parcel_phone_ok'
+                });
                 await editOrReplyText(
                     ctx,
-                    "Нова Пошта вже перевела цю посилку у стан, де доручення через API більше не оформлюється. Спробуй відкрити комірку в застосунку НП або напиши в підтримку."
+                    "Нова Пошта вже перевела цю посилку у стан, де доручення через API більше не оформлюється. Ми вже позначили кейс для підтримки. Якщо посилка вже у тебе, додай фото вмісту. Якщо ні, напиши в підтримку."
                 );
                 await ctx.answerCallbackQuery("Доручення вже недоступне.");
             } else {
@@ -543,6 +556,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
                 const trusteeResult = await novaPoshtaService.createTrustee(parcel.ttn, phone);
                 if (!trusteeResult.success) {
+                    const shouldNotifySupport = !hasShipmentLockedMarker(parcel.npTrusteeError);
                     await prisma.parcel.update({
                         where: { id: parcelId },
                         data: {
@@ -551,8 +565,16 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                         }
                     });
                     if (trusteeResult.errorCode === 'SHIPMENT_LOCKED') {
+                        const { logisticsService } = await import("../../../services/logistics-service.js");
+                        await logisticsService.handleShipmentLocked(parcelId, {
+                            telegramId,
+                            attemptedPhone: phone,
+                            errorMessage: trusteeResult.errorMessage,
+                            shouldNotifySupport,
+                            source: 'parcel_phone_change'
+                        });
                         await ctx.reply(
-                            "Номер збережено, але Нова Пошта вже не дозволяє оформити доручення для цієї посилки через API. Спробуй відкрити комірку в застосунку НП або напиши в підтримку."
+                            "Номер збережено, але Нова Пошта вже не дозволяє оформити доручення для цієї посилки через API. Ми вже позначили кейс для підтримки. Якщо посилка вже у тебе, додай фото вмісту. Якщо ні, напиши в підтримку."
                         );
                     } else {
                         const retryKb = new InlineKeyboard()
