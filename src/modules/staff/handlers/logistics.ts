@@ -5,6 +5,7 @@ import { LOGISTICS_TEXTS_STAFF, LOGISTICS_TEXTS_ADMIN } from "../../../constants
 import { TEAM_CHATS } from "../../../config.js";
 import logger from "../../../core/logger.js";
 import { audit } from "../../../core/audit-logger.js";
+import { logBusinessEvent } from "../../../core/log-events.js";
 import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
@@ -41,6 +42,11 @@ function buildParcelPhotoDraftKeyboard(parcelId: string) {
     return new InlineKeyboard()
         .text(LOGISTICS_TEXTS_STAFF.btn_photo_done, `parcel_photo_done_${parcelId}`)
         .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, `parcel_photo_cancel_${parcelId}`);
+}
+
+function buildParcelPhotoRestartKeyboard(parcelId: string) {
+    return new InlineKeyboard()
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
 }
 
 function getDraftParcelId(ctx: MyContext): string | null {
@@ -186,9 +192,38 @@ async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photo
 async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
     const draft = ctx.session.parcelPhotoDraft;
     if (!draft || draft.parcelId !== parcelId || draft.fileIds.length === 0) {
+        logBusinessEvent({
+            event: "logistics.parcel.photo_upload_done_without_photos",
+            actorType: "staff",
+            actorRole: "staff",
+            telegramId: ctx.from?.id,
+            result: "failed",
+            module: "staff-logistics-handler",
+            operation: "finalizeParcelPhotoDraft",
+            safeContext: {
+                parcelId,
+                draftExists: Boolean(draft),
+                draftPhotoCount: draft?.fileIds.length ?? 0,
+            },
+        });
         await ctx.answerCallbackQuery(LOGISTICS_TEXTS_STAFF.photo_upload_empty);
+        await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_empty, buildParcelPhotoDraftKeyboard(parcelId));
         return;
     }
+
+    logBusinessEvent({
+        event: "logistics.parcel.photo_upload_finalize_started",
+        actorType: "staff",
+        actorRole: "staff",
+        telegramId: ctx.from?.id,
+        result: "started",
+        module: "staff-logistics-handler",
+        operation: "finalizeParcelPhotoDraft",
+        safeContext: {
+            parcelId,
+            photoCount: draft.fileIds.length,
+        },
+    });
 
     audit({
         event: "parcel_photo_upload",
@@ -225,6 +260,20 @@ async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
         await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_received(mergedPhotoIds.length));
         await sendParcelPhotosToSupport(ctx, parcelId, mergedPhotoIds);
 
+        logBusinessEvent({
+            event: "logistics.parcel.photo_upload_finalized",
+            actorType: "staff",
+            actorRole: "staff",
+            telegramId: ctx.from?.id,
+            result: "success",
+            module: "staff-logistics-handler",
+            operation: "finalizeParcelPhotoDraft",
+            safeContext: {
+                parcelId,
+                photoCount: mergedPhotoIds.length,
+            },
+        });
+
         audit({
             event: "parcel_photo_upload",
             result: "success",
@@ -247,6 +296,20 @@ async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
             error: err.message
         });
         logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics parcel photo upload handler failed");
+        logBusinessEvent({
+            event: "logistics.parcel.photo_upload_finalized",
+            actorType: "staff",
+            actorRole: "staff",
+            telegramId: ctx.from?.id,
+            result: "failed",
+            module: "staff-logistics-handler",
+            operation: "finalizeParcelPhotoDraft",
+            safeContext: {
+                parcelId,
+                photoCount: draft.fileIds.length,
+            },
+            error: err,
+        });
         await editOrReplyText(ctx, "Не вдалося передати фото сапорту. Спробуй натиснути «Готово» ще раз або напиши в підтримку.");
     }
 }
@@ -415,6 +478,16 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_(?!done(?:_|$)|cancel(?:_|$)
         fileIds: [],
         startedAt: Date.now()
     };
+    logBusinessEvent({
+        event: "logistics.parcel.photo_upload_started",
+        actorType: "staff",
+        actorRole: "staff",
+        telegramId: ctx.from?.id,
+        result: "started",
+        module: "staff-logistics-handler",
+        operation: "parcel_photo_callback",
+        safeContext: { parcelId },
+    });
     scheduleParcelPhotoReminder(ctx, parcelId);
     await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_prompt, {
         parse_mode: 'HTML',
@@ -449,9 +522,22 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_cancel_(.+)$/, async (ctx) =
         return;
     }
 
+    logBusinessEvent({
+        event: "logistics.parcel.photo_upload_cancelled",
+        actorType: "staff",
+        actorRole: "staff",
+        telegramId: ctx.from?.id,
+        result: "success",
+        module: "staff-logistics-handler",
+        operation: "parcel_photo_cancel",
+        safeContext: {
+            parcelId,
+            photoCount: draft.fileIds.length,
+        },
+    });
     resetParcelPhotoDraft(ctx);
     await ctx.answerCallbackQuery("Скасовано.");
-    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled);
+    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled, buildParcelPhotoRestartKeyboard(parcelId));
 });
 
 staffLogisticsHandlers.callbackQuery("parcel_photo_cancel", async (ctx) => {
@@ -463,7 +549,7 @@ staffLogisticsHandlers.callbackQuery("parcel_photo_cancel", async (ctx) => {
 
     resetParcelPhotoDraft(ctx);
     await ctx.answerCallbackQuery("Скасовано.");
-    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled);
+    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled, buildParcelPhotoRestartKeyboard(parcelId));
 });
 
 // Handle text and photo inputs
@@ -528,6 +614,19 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 currentDraft.fileIds.push(photo.file_id);
             }
             currentDraft.lastPhotoAt = Date.now();
+            logBusinessEvent({
+                event: "logistics.parcel.photo_added_to_draft",
+                actorType: "staff",
+                actorRole: "staff",
+                telegramId: ctx.from?.id,
+                result: "success",
+                module: "staff-logistics-handler",
+                operation: "awaiting_parcel_photo_message",
+                safeContext: {
+                    parcelId,
+                    photoCount: currentDraft.fileIds.length,
+                },
+            });
             scheduleParcelPhotoReminder(ctx, parcelId);
 
             await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_progress(currentDraft.fileIds.length), {
