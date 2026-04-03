@@ -498,6 +498,65 @@ export class LogisticsService {
         }
     }
 
+    async markPickedUpManually(
+        parcelId: string,
+        params: {
+            telegramId?: number;
+            source?: 'admin_logistics';
+            notifyStaff?: boolean;
+        } = {}
+    ) {
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { location: true, responsibleStaff: true }
+        });
+        if (!parcel) return null;
+        if (parcel.status === 'COMPLETED' || parcel.status === 'CANCELLED') {
+            return parcel;
+        }
+
+        const updated = await prisma.parcel.update({
+            where: { id: parcelId },
+            data: {
+                status: 'DELIVERED',
+                acceptedAt: parcel.acceptedAt ?? new Date(),
+                staleAlertSentAt: null,
+                photoReminderSentAt: null,
+                shiftEndReminderSentAt: null,
+            },
+            include: { location: true, responsibleStaff: true }
+        });
+
+        logBusinessEvent({
+            event: 'logistics.parcel.manual_pickup_marked',
+            actorType: 'admin',
+            actorRole: 'admin',
+            telegramId: params.telegramId,
+            result: 'success',
+            reasonCode: 'MANUAL_PICKUP',
+            module: 'logistics-service',
+            operation: 'markPickedUpManually',
+            safeContext: {
+                parcelId,
+                ttn: updated.ttn,
+                oldStatus: parcel.status,
+                newStatus: updated.status,
+                locationName: updated.location?.name || 'Unknown',
+                deliveryType: updated.deliveryType,
+                responsibleStaffId: updated.responsibleStaffId,
+                responsibleStaffName: updated.responsibleStaff?.fullName || null,
+                hasContentPhotos: updated.contentPhotoIds.length > 0,
+                source: params.source || 'admin_logistics',
+            },
+        });
+
+        if (params.notifyStaff !== false) {
+            await this.notifyStaffOnShift(parcelId, 'DELIVERED');
+        }
+
+        return updated;
+    }
+
     /**
      * Notifies staff on shift about a parcel
      */
@@ -962,7 +1021,10 @@ export class LogisticsService {
 
         const staleParcels = await prisma.parcel.findMany({
             where: {
-                status: 'ARRIVED',
+                OR: [
+                    { status: 'ARRIVED' },
+                    { status: 'DELIVERED', contentPhotoIds: { isEmpty: true } }
+                ],
                 updatedAt: { lt: twoDaysAgo },
                 staleAlertSentAt: null,
             },

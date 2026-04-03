@@ -279,7 +279,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
         const parcel = await prisma.parcel.findUnique({
             where: { id: parcelId },
-            include: { responsibleStaff: true }
+            include: { responsibleStaff: true, location: true }
         });
 
         if (!parcel) {
@@ -289,9 +289,10 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
         if (parcel.status === 'DELIVERED') {
             const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
+            const locationName = parcel.location?.name || 'локації';
             const text = parcel.deliveryType === 'Address'
-                ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, 'локацію')
-                : LOGISTICS_TEXTS_STAFF.delivered_pickup_completed(parcel.ttn, 'локацію');
+                ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, locationName)
+                : LOGISTICS_TEXTS_STAFF.delivered_pickup_completed(parcel.ttn, locationName);
 
             await editOrReplyText(ctx, text, kb);
             await ctx.answerCallbackQuery("Посилку вже видано. Додай фото вмісту.");
