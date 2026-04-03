@@ -464,7 +464,8 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) =
 });
 
 // 5. Trigger Photo Upload
-staffLogisticsHandlers.callbackQuery(/^parcel_photo_(.+)$/, async (ctx) => {
+// Exclude the "done" and "cancel" callbacks so they reach their dedicated handlers.
+staffLogisticsHandlers.callbackQuery(/^parcel_photo_(?!done(?:_|$)|cancel(?:_|$))(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
     ctx.session.parcelPhotoDraft = {
