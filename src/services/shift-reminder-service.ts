@@ -88,13 +88,13 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                             locationId: shift.locationId,
                             OR: [
                                 { status: { in: ['EXPECTED', 'ARRIVED'] } },
-                                { status: 'DELIVERED', deliveryType: 'Address', contentPhotoIds: { isEmpty: true } }
+                                { status: 'DELIVERED', contentPhotoIds: { isEmpty: true } }
                             ]
                         }
                     });
 
                     const parcelsSummary = pendingParcelsCount > 0
-                        ? `\n\n📦 <b>Забрати посилки: ${pendingParcelsCount} шт!</b>\nВідкрий меню «📦 Посилки локації» та обов'язково забери їх сьогодні.`
+                        ? `\n\n📦 <b>Активні посилки на локації: ${pendingParcelsCount} шт.</b>\nВідкрий меню «📦 Посилки локації»: там можуть бути як посилки на забір, так і посилки, де треба дозавантажити фото вмісту.`
                         : "";
 
                     const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографине';
@@ -166,7 +166,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
 export function startShiftReminderLoop(bot: Bot<MyContext>) {
     // We want to run this at 08:00 AM Kyiv time every day
     const now = new Date();
-    
+
     // Calculate 08:00 today in Kyiv
     let nextRun = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
     nextRun.setHours(8, 0, 0, 0);
