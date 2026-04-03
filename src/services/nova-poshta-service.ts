@@ -15,7 +15,29 @@ export interface NPTrackingResult {
     RecipientDateTime: string;
 }
 
-export type NPTrusteeErrorCode = 'SHIPMENT_LOCKED' | 'API_ERROR';
+export type NPTrusteeErrorCode = 'SHIPMENT_LOCKED' | 'NOT_DOCUMENT_OWNER' | 'API_ERROR';
+
+export interface NPChangePossibilityResult {
+    CanChangeSender: boolean;
+    CanChangeRecipient: boolean;
+    CanChangePayerTypeOrPaymentMethod: boolean;
+    CanChangeBackwardDeliveryDocuments: boolean;
+    CanChangeBackwardDeliveryMoney: boolean;
+    CanChangeCash2Card: boolean;
+    CanChangeBackwardDeliveryOther: boolean;
+    CanChangeAfterpaymentType: boolean;
+    CanChangeLiftingOnFloor: boolean;
+    CanChangeLiftingOnFloorWithElevator: boolean;
+    CanChangeFillingWarranty: boolean;
+    SenderCounterparty?: string;
+    ContactPersonSender?: string;
+    SenderPhone?: string;
+    RecipientCounterparty?: string;
+    ContactPersonRecipient?: string;
+    RecipientPhone?: string;
+    PayerType?: string;
+    PaymentMethod?: string;
+}
 
 export interface NPTrusteeCreationResult {
     success: boolean;
@@ -23,6 +45,7 @@ export interface NPTrusteeCreationResult {
     errorMessage?: string;
     orderRef?: string;
     orderNumber?: string;
+    method?: 'checkPossibilityChangeEW' | 'orderChangeEW';
 }
 
 interface NPApiResponseEnvelope<T = any> {
@@ -35,6 +58,35 @@ interface NPApiResponseEnvelope<T = any> {
 
 export class NovaPoshtaService {
     private readonly apiUrl = 'https://api.novaposhta.ua/v2.0/json/';
+
+    private isShipmentLockedError(message: string): boolean {
+        const loweredError = message.toLowerCase();
+        return loweredError.includes('further data changes are not possible') ||
+            loweredError.includes('delivered to the recipient');
+    }
+
+    private isOwnershipError(message: string): boolean {
+        const loweredError = message.toLowerCase();
+        return loweredError.includes('документ не належить даному користувачу') ||
+            loweredError.includes('документ не належить користувачу') ||
+            loweredError.includes('document does not belong to this user');
+    }
+
+    private classifyError(message: string): NPTrusteeErrorCode {
+        if (this.isShipmentLockedError(message)) {
+            return 'SHIPMENT_LOCKED';
+        }
+
+        if (this.isOwnershipError(message)) {
+            return 'NOT_DOCUMENT_OWNER';
+        }
+
+        return 'API_ERROR';
+    }
+
+    private getPrimaryErrorMessage<T>(result: NPApiResponseEnvelope<T>): string {
+        return result.errors[0] || result.info[0] || result.warnings[0] || 'Unknown API error';
+    }
 
     /**
      * Common method to call NP API
@@ -170,58 +222,172 @@ export class NovaPoshtaService {
         return this.callApi('Address', 'getWarehouses', { CityRef: cityRef });
     }
 
+    async checkPossibilityChangeEW(ttn: string): Promise<NPApiResponseEnvelope<NPChangePossibilityResult[]>> {
+        const result = await this.callApiDetailed<NPChangePossibilityResult[]>('AdditionalServiceGeneral', 'CheckPossibilityChangeEW', {
+            IntDocNumber: ttn
+        });
+
+        if (result.success) {
+            const firstRecord = Array.isArray(result.data) ? result.data[0] : null;
+            logger.info({
+                ttn,
+                method: 'CheckPossibilityChangeEW',
+                canChangeRecipient: firstRecord?.CanChangeRecipient ?? null,
+                canChangeSender: firstRecord?.CanChangeSender ?? null,
+                payerType: firstRecord?.PayerType ?? null,
+                paymentMethod: firstRecord?.PaymentMethod ?? null,
+                senderCounterparty: firstRecord?.SenderCounterparty ?? null,
+                recipientCounterparty: firstRecord?.RecipientCounterparty ?? null
+            }, 'Nova Poshta change possibility checked');
+        } else {
+            logger.warn({
+                ttn,
+                method: 'CheckPossibilityChangeEW',
+                errorMessage: this.getPrimaryErrorMessage(result)
+            }, 'Nova Poshta change possibility check failed');
+        }
+
+        return result;
+    }
+
+    private async tryOrderChangeEW(
+        ttn: string,
+        recipientPhone: string,
+        recipientName: string | undefined,
+        possibility: NPChangePossibilityResult
+    ): Promise<NPTrusteeCreationResult> {
+        const methodProperties: Record<string, string> = {
+            OrderType: 'orderChangeEW',
+            IntDocNumber: ttn,
+            RecipientPhone: recipientPhone,
+            PayerType: possibility.PayerType || 'Recipient',
+            PaymentMethod: possibility.PaymentMethod || 'Cash'
+        };
+
+        if (possibility.ContactPersonSender) {
+            methodProperties.SenderContactName = possibility.ContactPersonSender;
+        }
+        if (possibility.SenderPhone) {
+            methodProperties.SenderPhone = possibility.SenderPhone;
+        }
+        if (possibility.RecipientCounterparty) {
+            methodProperties.Recipient = possibility.RecipientCounterparty;
+        }
+
+        const resolvedRecipientName = recipientName || possibility.ContactPersonRecipient;
+        if (resolvedRecipientName) {
+            methodProperties.RecipientContactName = resolvedRecipientName;
+        }
+
+        const result = await this.callApiDetailed<any[]>('AdditionalServiceGeneral', 'save', methodProperties);
+        if (result.success) {
+            const firstRecord = Array.isArray(result.data) ? result.data[0] : null;
+            logger.info({
+                ttn,
+                method: 'orderChangeEW',
+                payerType: methodProperties.PayerType,
+                paymentMethod: methodProperties.PaymentMethod,
+                hasSenderPhone: Boolean(methodProperties.SenderPhone),
+                hasRecipientCounterparty: Boolean(methodProperties.Recipient),
+                hasRecipientContactName: Boolean(methodProperties.RecipientContactName),
+                orderRef: firstRecord?.Ref ?? null,
+                orderNumber: firstRecord?.Number ?? null
+            }, 'Nova Poshta change request created');
+            return {
+                success: true,
+                orderRef: firstRecord?.Ref,
+                orderNumber: firstRecord?.Number,
+                method: 'orderChangeEW'
+            };
+        }
+
+        const firstError = this.getPrimaryErrorMessage(result);
+        logger.warn({
+            ttn,
+            method: 'orderChangeEW',
+            errorMessage: firstError,
+            payerType: methodProperties.PayerType,
+            paymentMethod: methodProperties.PaymentMethod,
+            hasSenderPhone: Boolean(methodProperties.SenderPhone),
+            hasRecipientCounterparty: Boolean(methodProperties.Recipient),
+            hasRecipientContactName: Boolean(methodProperties.RecipientContactName)
+        }, 'Nova Poshta change request failed');
+        return {
+            success: false,
+            errorCode: this.classifyError(firstError),
+            errorMessage: firstError,
+            method: 'orderChangeEW'
+        };
+    }
+
     /**
      * Change recipient on a parcel (Зміна даних отримувача)
      * Uses AdditionalServiceGeneral.save with OrderType=orderChangeEW
      */
     async createTrustee(ttn: string, recipientPhone: string, recipientName?: string): Promise<NPTrusteeCreationResult> {
-        const methodProperties: Record<string, string> = {
-            OrderType: 'orderChangeEW',
-            IntDocNumber: ttn,
-            RecipientPhone: recipientPhone,
-            PayerType: 'Recipient',
-            PaymentMethod: 'Cash'
-        };
-
-        if (recipientName) {
-            methodProperties.RecipientContactName = recipientName;
-        }
-
-        const primaryResult = await this.callApiDetailed('AdditionalServiceGeneral', 'save', methodProperties);
-        if (primaryResult.success) {
-            const firstRecord = Array.isArray(primaryResult.data) ? primaryResult.data[0] : null;
+        const possibilityResult = await this.checkPossibilityChangeEW(ttn);
+        if (!possibilityResult.success) {
+            const primaryError = this.getPrimaryErrorMessage(possibilityResult);
+            const errorCode = this.classifyError(primaryError);
+            logger.warn({
+                ttn,
+                method: 'CheckPossibilityChangeEW',
+                errorCode,
+                errorMessage: primaryError
+            }, 'Nova Poshta change flow stopped during possibility check');
             return {
-                success: true,
-                orderRef: firstRecord?.Ref,
-                orderNumber: firstRecord?.Number
+                success: false,
+                errorCode,
+                errorMessage: primaryError,
+                method: 'checkPossibilityChangeEW'
             };
         }
 
-        const firstError = primaryResult.errors[0] || primaryResult.info[0] || primaryResult.warnings[0] || 'Unknown API error';
-        const loweredError = firstError.toLowerCase();
+        const possibility = Array.isArray(possibilityResult.data) ? possibilityResult.data[0] : null;
+        if (!possibility) {
+            return {
+                success: false,
+                errorCode: 'API_ERROR',
+                errorMessage: 'Nova Poshta returned empty possibility response',
+                method: 'checkPossibilityChangeEW'
+            };
+        }
 
-        const errorCode: NPTrusteeErrorCode = (
-            loweredError.includes('further data changes are not possible') ||
-            loweredError.includes('delivered to the recipient')
-        )
-            ? 'SHIPMENT_LOCKED'
-            : 'API_ERROR';
+        if (!possibility.CanChangeRecipient) {
+            logger.warn({
+                ttn,
+                method: 'CheckPossibilityChangeEW',
+                canChangeRecipient: possibility.CanChangeRecipient,
+                payerType: possibility.PayerType ?? null,
+                paymentMethod: possibility.PaymentMethod ?? null,
+                currentRecipientPhone: possibility.RecipientPhone ?? null,
+                currentRecipientCounterparty: possibility.RecipientCounterparty ?? null
+            }, 'Nova Poshta forbids recipient change for shipment');
+            return {
+                success: false,
+                errorCode: 'SHIPMENT_LOCKED',
+                errorMessage: 'Nova Poshta does not allow changing the recipient for this shipment',
+                method: 'checkPossibilityChangeEW'
+            };
+        }
+
+        const primaryResult = await this.tryOrderChangeEW(ttn, recipientPhone, recipientName, possibility);
+        if (primaryResult.success) {
+            return primaryResult;
+        }
 
         logger.warn(
             {
                 ttn,
                 recipientPhone,
-                errorCode,
-                errorMessage: firstError
+                errorCode: primaryResult.errorCode,
+                errorMessage: primaryResult.errorMessage,
+                method: primaryResult.method
             },
             'Nova Poshta trustee creation failed'
         );
 
-        return {
-            success: false,
-            errorCode,
-            errorMessage: firstError
-        };
+        return primaryResult;
     }
 }
 
