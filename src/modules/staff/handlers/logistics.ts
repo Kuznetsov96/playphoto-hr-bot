@@ -283,6 +283,17 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             return;
         }
 
+        if (parcel.status === 'DELIVERED') {
+            const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
+            const text = parcel.deliveryType === 'Address'
+                ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, 'локацію')
+                : LOGISTICS_TEXTS_STAFF.delivered_pickup_completed(parcel.ttn, 'локацію');
+
+            await editOrReplyText(ctx, text, kb);
+            await ctx.answerCallbackQuery("Посилку вже видано. Додай фото вмісту.");
+            return;
+        }
+
         if (parcel.responsibleStaffId && parcel.responsibleStaffId !== user.staffProfile.id) {
             await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'));
             await ctx.answerCallbackQuery("Цю посилку вже взяли.");
@@ -525,7 +536,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             }
             ctx.session.step = 'idle';
             const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
-            
+
             // Auto-trigger the API request if we just saved the phone. 
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
             if (parcel) {

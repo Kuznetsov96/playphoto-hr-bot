@@ -42,11 +42,11 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     const isNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
 
-    logger.debug({ 
-        telegramId, 
-        hasStaffProfile: !!user?.staffProfile, 
+    logger.debug({
+        telegramId,
+        hasStaffProfile: !!user?.staffProfile,
         isActive: user?.staffProfile?.isActive,
-        isNewCandidate 
+        isNewCandidate
     }, "Staff hub state evaluated");
 
     if (!user || (!user.staffProfile?.isActive && !isNewCandidate)) {
@@ -65,10 +65,10 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
 
     // Check if it's a completely new user without any schedule yet
     const allShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, new Date(0), 1) : [];
-    
+
     const { getUserAdminRole } = await import("../../../middleware/role-check.js");
     const adminRole = await getUserAdminRole(BigInt(telegramId));
-    
+
     const isNewHireWithoutSchedule = (isNewCandidate || allShifts.length === 0) && !adminRole;
 
     let shiftLine: string;
@@ -83,10 +83,10 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
             `Ми вже створюємо для тебе перші робочі зміни! ✨\n` +
             `Як тільки графік буде готовий, ти отримаєш сповіщення тут.\n\n` +
             `📖 Поки що можеш ознайомитися з нашою <b>Базою знань</b>, щоб підготуватися до першого дня.`;
-        
+
         kb.url("📖 База знань", KNOWLEDGE_BASE_LINK).row()
-          .text("💬 Підтримка", "open_support_dialog");
-        
+            .text("💬 Підтримка", "open_support_dialog");
+
         text = `💫 <b>Вітаємо в команді PlayPhoto!</b>\n\n${shiftLine}`;
         return ScreenManager.renderScreen(ctx, text, kb, { forceNew, pushToStack: true });
     }
@@ -166,7 +166,7 @@ export async function showStaffSchedule(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), {
         pushToStack: true
     });
-    await ctx.answerCallbackQuery().catch(() => {});
+    await ctx.answerCallbackQuery().catch(() => { });
 }
 
 /**
@@ -211,7 +211,7 @@ export async function showStaffTasks(ctx: MyContext, forceNew: boolean = false) 
     kb.text("🏠 Меню", "staff_hub_nav");
 
     await ScreenManager.renderScreen(ctx, text, kb, { forceNew, pushToStack: true });
-    await ctx.answerCallbackQuery().catch(() => {});
+    await ctx.answerCallbackQuery().catch(() => { });
 }
 
 /**
@@ -242,7 +242,7 @@ export async function showStaffLogistics(ctx: MyContext) {
             locationId: shift.locationId,
             OR: [
                 { status: { in: ['EXPECTED', 'ARRIVED'] } },
-                { status: 'DELIVERED', deliveryType: 'Address', contentPhotoIds: { isEmpty: true } }
+                { status: 'DELIVERED', contentPhotoIds: { isEmpty: true } }
             ]
         },
         orderBy: { createdAt: 'desc' }
@@ -260,7 +260,10 @@ export async function showStaffLogistics(ctx: MyContext) {
         let statusEmoji = "📦";
         let statusText = "Очікується";
         if (parcel.status === 'ARRIVED') { statusEmoji = "🏢"; statusText = "У відділенні/поштоматі"; }
-        if (parcel.status === 'DELIVERED') { statusEmoji = "🚚"; statusText = "Доставлено кур'єром"; }
+        if (parcel.status === 'DELIVERED') {
+            statusEmoji = parcel.deliveryType === 'Address' ? "🚚" : "📬";
+            statusText = parcel.deliveryType === 'Address' ? "Доставлено кур'єром" : "Вже видано Новою Поштою";
+        }
 
         text += `${index + 1}. ${statusEmoji} <b>ТТН:</b> <code>${parcel.ttn}</code>\n`;
         text += `   <b>Статус:</b> ${statusText}\n`;
@@ -270,7 +273,7 @@ export async function showStaffLogistics(ctx: MyContext) {
 
         if (parcel.status === 'ARRIVED') {
             kb.text(`✅ Забрати #${index + 1}`, `parcel_accept_${parcel.id}`)
-              .text(`❌ Відмовитись`, `parcel_reject_${parcel.id}`).row();
+                .text(`❌ Відмовитись`, `parcel_reject_${parcel.id}`).row();
         } else if (parcel.status === 'DELIVERED') {
             kb.text(`📸 Додати фото вмісту #${index + 1}`, `parcel_photo_${parcel.id}`).row();
         }
@@ -290,7 +293,7 @@ export async function startSupportFlow(ctx: MyContext) {
     if (!telegramId) return;
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
-    
+
     if (!user) {
         logger.error({ telegramId }, "Support flow start failed because user was not found");
         return ctx.reply("Помилка: користувача не знайдено. Спробуй натиснути /start.");
@@ -299,7 +302,7 @@ export async function startSupportFlow(ctx: MyContext) {
     const activeTicket = await supportRepository.findActiveTicketByUser(user.id);
     if (activeTicket) {
         if (ctx.callbackQuery)
-            await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => {});
+            await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => { });
         await ScreenManager.renderScreen(
             ctx,
             STAFF_TEXTS["support-info-already-open"],
@@ -311,7 +314,7 @@ export async function startSupportFlow(ctx: MyContext) {
     const activeOutgoingTopic = await supportRepository.findActiveOutgoingTopicByUser(user.id);
     if (activeOutgoingTopic) {
         if (ctx.callbackQuery)
-            await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => {});
+            await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => { });
         await ScreenManager.renderScreen(
             ctx,
             "💬 <b>Обговорення відкрито:</b>\nАдміністратор створив діалог з тобою. Просто напиши повідомлення сюди, і я його передам.",
@@ -321,10 +324,10 @@ export async function startSupportFlow(ctx: MyContext) {
     }
 
     ctx.session.step = "create_ticket";
-    if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => {});
-    
+    if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => { });
+
     const isNewCandidate = user.candidate?.status === 'AWAITING_FIRST_SHIFT' && !user.staffProfile;
-    const cancelCallback = isNewCandidate ? "staff_hub_nav" : "staff_hub_nav"; 
+    const cancelCallback = isNewCandidate ? "staff_hub_nav" : "staff_hub_nav";
     // Both point to staff_hub_nav, but showStaffHub logic will handle the redirect correctly.
     // To be extra safe and avoid any "refresh" loops, we ensure the text is clear.
 
@@ -338,7 +341,7 @@ export async function startSupportFlow(ctx: MyContext) {
 // --- HANDLERS ---
 
 staffHandlers.command("support", async (ctx) => {
-    await ctx.deleteMessage().catch(() => {});
+    await ctx.deleteMessage().catch(() => { });
     await startSupportFlow(ctx);
 });
 
@@ -356,7 +359,7 @@ staffHandlers.callbackQuery(/^staff_task_toggle_(.+)$/, async (ctx) => {
     const taskId = ctx.match![1]!;
     await taskService.toggleTaskStatus(taskId);
     await showStaffTasks(ctx);
-    await ctx.answerCallbackQuery("Статус змінено! ✨").catch(() => {});
+    await ctx.answerCallbackQuery("Статус змінено! ✨").catch(() => { });
 });
 
 staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {

@@ -33,6 +33,7 @@ export const LOGISTICS_TEXTS_STAFF = {
     'expected': (ttn: string, loc: string) => `📦 <b>Очікується посилка!</b>\n\nНа локацію <b>${loc}</b> прямує посилка.\nТТН: <code>${ttn}</code>\n\nЯ повідомлю, як тільки вона прибуде! ✨`,
     'arrived': (ttn: string, loc: string) => `🔔 <b>Посилка прибула!</b>\n\nТТН <code>${ttn}</code> вже чекає у відділенні/поштоматі для <b>${loc}</b>.\n\nЧи зможеш забрати її сьогодні?`,
     'delivered_address': (ttn: string, loc: string) => `🚚 <b>Кур'єр доставив посилку!</b>\n\nТТН <code>${ttn}</code> доставлено на <b>${loc}</b>.\nБудь ласка, розпакуй та сфотографуй вміст. ✨`,
+    'delivered_pickup_completed': (ttn: string, loc: string) => `📬 <b>Нова Пошта вже відмітила посилку як отриману.</b>\n\nТТН <code>${ttn}</code> для <b>${loc}</b> вже видано.\n\nЯкщо посилка вже у тебе, додай фото вмісту. Якщо її забрала не ти, напиши в підтримку.`,
     'btn_accept': '✅ Так, заберу',
     'btn_reject': '❌ Не можу',
     'btn_photo': '📸 Сфотографувати вміст',
@@ -64,7 +65,7 @@ export const LOGISTICS_TEXTS_ADMIN = {
     'alert_not_picked_up': (ttn: string, days: number) => `⚠️ <b>ALARM:</b> Parcel <code>${ttn}</code> has not been picked up for ${days} days!`,
     'confirmed': '✅ Parcel confirmed and cleared from active list.',
     'new_photo_alert': (ttn: string, loc: string) => `📸 <b>New Content Photo Received!</b>\n\nParcel: <code>${ttn}</code>\nLocation: ${loc}\n\nPlease verify the contents.`,
-    'new_photo_caption': (p: { ttn: string, location: string, sender: string }) => 
+    'new_photo_caption': (p: { ttn: string, location: string, sender: string }) =>
         `📸 <b>Content Photo for TTN:</b> <code>${p.ttn}</code>\n` +
         `📍 <b>Location:</b> ${p.location}\n` +
         `👤 <b>Photographer:</b> ${p.sender}\n\n` +
