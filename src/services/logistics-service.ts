@@ -106,8 +106,8 @@ export class LogisticsService {
      *
      * Rules:
      * - PICKUP_IN_PROGRESS / VERIFYING: staff is handling it — freeze, ignore NP updates
-     * - EXPECTED/IN_TRANSIT → NP says DELIVERED/COMPLETED: cap at ARRIVED (staff must Accept first)
-     * - ARRIVED → NP says COMPLETED: stay ARRIVED (staff must Accept first)
+    * - Address delivery: DELIVERED means courier dropoff, allow direct photo flow
+    * - Warehouse/postomat: DELIVERED/COMPLETED means NP already handed it out, allow photo flow
      */
     private resolveStatusTransition(currentStatus: ParcelStatus, npStatus: ParcelStatus, deliveryType: string | null): ParcelStatus {
         // VERIFYING: photos uploaded, awaiting admin — freeze completely
@@ -127,11 +127,11 @@ export class LogisticsService {
             return 'DELIVERED';
         }
 
-        // NP says DELIVERED or COMPLETED but staff hasn't accepted yet — cap at ARRIVED
-        // so the parcel stays visible and staff can go through the accept flow
+        // For warehouse/postomat parcels, DELIVERED/COMPLETED means the parcel was already
+        // handed out by Nova Poshta. Don't send staff into trustee flow again.
         if (npStatus === 'DELIVERED' || npStatus === 'COMPLETED') {
             if (currentStatus === 'EXPECTED' || currentStatus === 'IN_TRANSIT' || currentStatus === 'ARRIVED') {
-                return 'ARRIVED';
+                return 'DELIVERED';
             }
         }
 
@@ -454,8 +454,10 @@ export class LogisticsService {
                 text = LOGISTICS_TEXTS_STAFF.arrived(parcel.ttn, parcel.location?.name || '');
                 kb.text(LOGISTICS_TEXTS_STAFF.btn_accept, `parcel_accept_${parcel.id}`)
                     .text(LOGISTICS_TEXTS_STAFF.btn_reject, `parcel_reject_${parcel.id}`);
-            } else if (triggerStatus === 'DELIVERED' && parcel.deliveryType === 'Address') {
-                text = LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, parcel.location?.name || '');
+            } else if (triggerStatus === 'DELIVERED') {
+                text = parcel.deliveryType === 'Address'
+                    ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, parcel.location?.name || '')
+                    : LOGISTICS_TEXTS_STAFF.delivered_pickup_completed(parcel.ttn, parcel.location?.name || '');
                 kb.text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
             }
 
@@ -499,15 +501,15 @@ export class LogisticsService {
 
         let y = 0, mo = 0, d = 0, h = 0;
         for (const p of parts) {
-            if (p.type === 'year')  y  = parseInt(p.value);
+            if (p.type === 'year') y = parseInt(p.value);
             if (p.type === 'month') mo = parseInt(p.value);
-            if (p.type === 'day')   d  = parseInt(p.value);
-            if (p.type === 'hour')  h  = parseInt(p.value);
+            if (p.type === 'day') d = parseInt(p.value);
+            if (p.type === 'hour') h = parseInt(p.value);
         }
 
         if (h >= 20) d++;
         const shiftStart = new Date(Date.UTC(y, mo - 1, d));
-        const shiftEnd   = new Date(Date.UTC(y, mo - 1, d + 1));
+        const shiftEnd = new Date(Date.UTC(y, mo - 1, d + 1));
         return { shiftStart, shiftEnd };
     }
 
@@ -520,14 +522,14 @@ export class LogisticsService {
         // dayOfWeek: 0=Sun,1=Mon,...,6=Sat
         const DAY_RANGES: { days: number[]; pattern: RegExp }[] = [
             { days: [1, 2, 3, 4, 5], pattern: /пн.{0,5}пт/i },
-            { days: [6, 0],          pattern: /сб.{0,5}нд/i },
-            { days: [6],             pattern: /сб/i },
-            { days: [0],             pattern: /нд/i },
-            { days: [1],             pattern: /пн/i },
-            { days: [2],             pattern: /вт/i },
-            { days: [3],             pattern: /ср/i },
-            { days: [4],             pattern: /чт/i },
-            { days: [5],             pattern: /пт/i },
+            { days: [6, 0], pattern: /сб.{0,5}нд/i },
+            { days: [6], pattern: /сб/i },
+            { days: [0], pattern: /нд/i },
+            { days: [1], pattern: /пн/i },
+            { days: [2], pattern: /вт/i },
+            { days: [3], pattern: /ср/i },
+            { days: [4], pattern: /чт/i },
+            { days: [5], pattern: /пт/i },
         ];
 
         for (const line of schedule.split('\n')) {
@@ -575,9 +577,9 @@ export class LogisticsService {
         const weekdayStr = kyivParts.find(p => p.type === 'weekday')?.value ?? '';
         const kyivDow = weekdayNames[weekdayStr] ?? 0;
 
-        const kyivDay   = kyivParts.find(p => p.type === 'day')?.value   ?? '01';
+        const kyivDay = kyivParts.find(p => p.type === 'day')?.value ?? '01';
         const kyivMonth = kyivParts.find(p => p.type === 'month')?.value ?? '01';
-        const kyivYear  = kyivParts.find(p => p.type === 'year')?.value  ?? '2000';
+        const kyivYear = kyivParts.find(p => p.type === 'year')?.value ?? '2000';
 
         const closeTime = this.parseScheduleCloseTime(location.schedule, kyivDow);
         if (!closeTime) return null;
