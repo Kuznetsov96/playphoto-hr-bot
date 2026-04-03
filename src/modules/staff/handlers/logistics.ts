@@ -52,10 +52,6 @@ function getParcelPhotoReminderKey(ctx: MyContext) {
     return rawKey !== undefined ? String(rawKey) : null;
 }
 
-function hasShipmentLockedMarker(value: string | null | undefined) {
-    return /SHIPMENT_LOCKED|delivered to the recipient|further data changes are not possible/i.test(value || '');
-}
-
 function clearParcelPhotoReminder(ctx: MyContext) {
     const reminderKey = getParcelPhotoReminderKey(ctx);
     if (!reminderKey) return;
@@ -388,70 +384,16 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
 
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
-        const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-        const trusteeResult = await novaPoshtaService.createTrustee(parcel.ttn, phoneToUse);
-        if (!trusteeResult.success) {
-            const shouldNotifySupport = !hasShipmentLockedMarker(parcel.npTrusteeError);
-            await prisma.parcel.update({
-                where: { id: parcelId },
-                data: {
-                    npTrusteeError: trusteeResult.errorMessage || trusteeResult.errorCode || 'Unknown API error',
-                    npTrusteeLastAttemptAt: new Date()
-                }
-            });
-            audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
-
-            if (trusteeResult.errorCode === 'SHIPMENT_LOCKED') {
-                const { logisticsService } = await import("../../../services/logistics-service.js");
-                await logisticsService.handleShipmentLocked(parcelId, {
-                    telegramId,
-                    attemptedPhone: phoneToUse,
-                    errorMessage: trusteeResult.errorMessage,
-                    shouldNotifySupport,
-                    source: 'parcel_phone_ok'
-                });
-                await editOrReplyText(
-                    ctx,
-                    "Нова Пошта вже перевела цю посилку у стан, де доручення через API більше не оформлюється. Ми вже позначили кейс для підтримки. Якщо посилка вже у тебе, додай фото вмісту. Якщо ні, напиши в підтримку."
-                );
-                await ctx.answerCallbackQuery("Доручення вже недоступне.");
-            } else {
-                const retryKb = new InlineKeyboard()
-                    .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
-                    .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
-
-                await editOrReplyText(
-                    ctx,
-                    "Не вдалося оформити доручення в Новій Пошті. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
-                    retryKb
-                );
-                await ctx.answerCallbackQuery("Доручення не створено.");
-            }
-            return;
-        }
-
-        await prisma.parcel.update({
-            where: { id: parcelId },
-            data: {
-                recipientPhone: phoneToUse,
-                npTrusteeOrderRef: trusteeResult.orderRef || null,
-                npTrusteeOrderNumber: trusteeResult.orderNumber || null,
-                npTrusteeError: null,
-                npTrusteeLastAttemptAt: new Date()
-            }
+        const { logisticsService } = await import("../../../services/logistics-service.js");
+        await logisticsService.requestManualProxy(parcelId, {
+            telegramId,
+            requestedPhone: phoneToUse,
         });
     }
 
     audit({ event: "parcel_phone_confirm", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
-
-    const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
-
-    await editOrReplyText(
-        ctx,
-        "Чудово! API-запит на оформлення доручення відправлено. Якщо виникнуть проблеми з відкриттям комірки у додатку НП — пиши в підтримку.\n\nНатисни кнопку нижче, коли забереш посилку та сфотографуєш її вміст. ✨",
-        kb
-    );
-    await ctx.answerCallbackQuery();
+    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.manual_proxy_requested);
+    await ctx.answerCallbackQuery("Передано сапорту.");
 });
 
 // 4. Change Phone
@@ -550,61 +492,17 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 });
             }
             ctx.session.step = 'idle';
-            const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
-
-            // Auto-trigger the API request if we just saved the phone. 
+            // Hand off proxy creation to support after saving the number.
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
             if (parcel) {
-                const { novaPoshtaService } = await import("../../../services/nova-poshta-service.js");
-                const trusteeResult = await novaPoshtaService.createTrustee(parcel.ttn, phone);
-                if (!trusteeResult.success) {
-                    const shouldNotifySupport = !hasShipmentLockedMarker(parcel.npTrusteeError);
-                    await prisma.parcel.update({
-                        where: { id: parcelId },
-                        data: {
-                            npTrusteeError: trusteeResult.errorMessage || trusteeResult.errorCode || 'Unknown API error',
-                            npTrusteeLastAttemptAt: new Date()
-                        }
-                    });
-                    if (trusteeResult.errorCode === 'SHIPMENT_LOCKED') {
-                        const { logisticsService } = await import("../../../services/logistics-service.js");
-                        await logisticsService.handleShipmentLocked(parcelId, {
-                            telegramId,
-                            attemptedPhone: phone,
-                            errorMessage: trusteeResult.errorMessage,
-                            shouldNotifySupport,
-                            source: 'parcel_phone_change'
-                        });
-                        await ctx.reply(
-                            "Номер збережено, але Нова Пошта вже не дозволяє оформити доручення для цієї посилки через API. Ми вже позначили кейс для підтримки. Якщо посилка вже у тебе, додай фото вмісту. Якщо ні, напиши в підтримку."
-                        );
-                    } else {
-                        const retryKb = new InlineKeyboard()
-                            .text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row()
-                            .text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
-
-                        await ctx.reply(
-                            "Номер збережено, але доручення в Новій Пошті не створилося. Спробуй ще раз або зміни номер. Якщо помилка повториться, напиши в підтримку.",
-                            { reply_markup: retryKb }
-                        );
-                    }
-                    audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
-                    return;
-                }
-
-                await prisma.parcel.update({
-                    where: { id: parcelId },
-                    data: {
-                        recipientPhone: phone,
-                        npTrusteeOrderRef: trusteeResult.orderRef || null,
-                        npTrusteeOrderNumber: trusteeResult.orderNumber || null,
-                        npTrusteeError: null,
-                        npTrusteeLastAttemptAt: new Date()
-                    }
+                const { logisticsService } = await import("../../../services/logistics-service.js");
+                await logisticsService.requestManualProxy(parcelId, {
+                    telegramId,
+                    requestedPhone: phone,
                 });
             }
 
-            await ctx.reply("Номер збережено і API-запит відправлено! Натисни кнопку нижче, як забереш посилку та зробиш фото. ✨", { reply_markup: kb });
+            await ctx.reply(LOGISTICS_TEXTS_STAFF.manual_proxy_requested);
         } else {
             await ctx.reply("⚠️ Некоректний формат.\nБудь ласка, введіть номер телефону в форматі 380... (наприклад: 380991234567).");
         }

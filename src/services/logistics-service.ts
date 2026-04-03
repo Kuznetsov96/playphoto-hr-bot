@@ -10,7 +10,7 @@ import { logBusinessEvent } from '../core/log-events.js';
 
 const bot = new Bot(BOT_TOKEN);
 
-type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED';
+type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED' | 'MANUAL_PROXY';
 
 export class LogisticsService {
     /**
@@ -404,9 +404,22 @@ export class LogisticsService {
                     `<b>Last NP error:</b> ${parcel.npTrusteeError || 'Unknown'}\n\n` +
                     `Please verify who actually received the parcel and make sure the content photo flow is completed.`;
                 break;
+            case 'MANUAL_PROXY':
+                text =
+                    `📝 <b>Manual NP Proxy Required</b>\n\n` +
+                    `Parcel ${ttn} for ${loc} needs a manual trustee/proxy assignment in Nova Poshta.\n\n` +
+                    `<b>Photographer:</b> ${parcel.responsibleStaff?.fullName || 'Unknown'}\n` +
+                    `<b>Phone:</b> ${parcel.recipientPhone || parcel.responsibleStaff?.npPhone || parcel.responsibleStaff?.phone || 'Unknown'}\n` +
+                    `<b>Status:</b> ${parcel.status}\n\n` +
+                    `After you create the proxy manually, confirm it below so the photographer can continue with the content photo flow.`;
+                break;
         }
 
-        const kb = new InlineKeyboard().text("⚙️ Manage Parcel", `admin_parcel_view_details_${parcelId}`);
+        const kb = new InlineKeyboard();
+        if (type === 'MANUAL_PROXY') {
+            kb.text("✅ Proxy Created", `admin_parcel_manual_proxy_done_${parcelId}`).row();
+        }
+        kb.text("⚙️ Manage Parcel", `admin_parcel_view_details_${parcelId}`);
         const targetChat = TEAM_CHATS.SUPPORT;
         const threadId = TEAM_CHATS.LOGISTICS;
 
@@ -420,6 +433,72 @@ export class LogisticsService {
         }
 
         await bot.api.sendMessage(targetChat, text, options).catch(err => logger.error({ err, parcelId, type }, 'Logistics support notification failed'));
+    }
+
+    async requestManualProxy(parcelId: string, params: { telegramId?: number; requestedPhone: string }) {
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { location: true, responsibleStaff: true }
+        });
+        if (!parcel) return null;
+
+        const updated = await prisma.parcel.update({
+            where: { id: parcelId },
+            data: {
+                recipientPhone: params.requestedPhone,
+                npTrusteeOrderRef: null,
+                npTrusteeOrderNumber: null,
+                npTrusteeError: 'MANUAL_PROXY_REQUESTED',
+                npTrusteeLastAttemptAt: new Date()
+            },
+            include: { location: true, responsibleStaff: true }
+        });
+
+        logBusinessEvent({
+            event: 'logistics.parcel.manual_proxy_requested',
+            actorType: 'staff',
+            actorRole: 'staff',
+            telegramId: params.telegramId,
+            result: 'success',
+            reasonCode: 'MANUAL_PROXY',
+            module: 'logistics-service',
+            operation: 'requestManualProxy',
+            safeContext: {
+                parcelId,
+                ttn: updated.ttn,
+                requestedPhone: params.requestedPhone,
+                locationName: updated.location?.name || 'Unknown',
+                responsibleStaffId: updated.responsibleStaffId,
+                responsibleStaffName: updated.responsibleStaff?.fullName || null
+            }
+        });
+
+        await this.notifySupport(parcelId, 'MANUAL_PROXY');
+        return updated;
+    }
+
+    async notifyManualProxyReady(parcelId: string) {
+        const parcel = await prisma.parcel.findUnique({
+            where: { id: parcelId },
+            include: { responsibleStaff: true, location: true }
+        });
+        if (!parcel?.responsibleStaffId || !parcel.responsibleStaff) return null;
+
+        const user = await prisma.user.findUnique({ where: { id: parcel.responsibleStaff.userId } });
+        if (!user) return null;
+
+        const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+        const text =
+            `✅ <b>Доручення оформлено.</b>\n\n` +
+            `Посилку <code>${parcel.ttn}</code> для <b>${parcel.location?.name || 'локації'}</b> вже можна забирати у Новій Пошті.\n\n` +
+            `Коли забереш посилку, натисни кнопку нижче й надішли фото вмісту.`;
+
+        await bot.api.sendMessage(Number(user.telegramId), text, {
+            parse_mode: 'HTML',
+            reply_markup: kb
+        }).catch(err => logger.error({ err, parcelId, telegramId: user.telegramId }, 'Logistics manual proxy ready notification failed'));
+
+        return parcel;
     }
 
     async handleShipmentLocked(
