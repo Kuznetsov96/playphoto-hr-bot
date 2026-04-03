@@ -73,6 +73,9 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
     }
 
     if (parcel.status !== 'COMPLETED' && parcel.status !== 'CANCELLED') {
+        if (parcel.contentPhotoIds.length === 0) {
+            kb.text(LOGISTICS_TEXTS_ADMIN.btn_mark_picked_up_manual, `admin_parcel_manual_pickup_${parcel.id}`).row();
+        }
         kb.text("✅ Complete", `admin_parcel_confirm_${parcel.id}`).row();
     }
 
@@ -122,11 +125,32 @@ adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_confirm_(?:direct_)?|apc_
     }
 });
 
+adminLogisticsHandlers.callbackQuery(/^admin_parcel_manual_pickup_(.+)$/, async (ctx) => {
+    const parcelId = ctx.match[1] as string;
+    const { logisticsService } = await import("../../services/logistics-service.js");
+
+    const updated = await logisticsService.markPickedUpManually(parcelId, {
+        telegramId: ctx.from?.id,
+        source: 'admin_logistics',
+        notifyStaff: true,
+    });
+
+    if (!updated) {
+        await ctx.answerCallbackQuery("Parcel not found.");
+        return;
+    }
+
+    audit({ event: "parcel_manual_pickup", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+
+    await ctx.answerCallbackQuery("Manual pickup marked.");
+    await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.manual_pickup_marked, "admin-logistics");
+});
+
 // Delete Parcel - supports legacy admin_parcel_delete_* and short apd_* callbacks.
 adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_delete_(?:direct_)?|apd_)(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const isDirect = ctx.callbackQuery.data.includes('_direct_') || ctx.callbackQuery.data.startsWith('apd_');
-    
+
     await prisma.parcel.update({ where: { id: parcelId }, data: { status: 'CANCELLED' } }).catch(() => { });
 
     audit({ event: "parcel_delete", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
