@@ -5,6 +5,7 @@ import { MONO_TOKENS, EXCLUDED_IBANS } from "../../config.js";
 import { redis } from "../../core/redis.js";
 import prisma from "../../db/core.js";
 import logger from "../../core/logger.js";
+import { createKyivDate, formatKyivDate, getKyivDateParts } from "./utils.js";
 
 const BASE_URL = "https://api.monobank.ua";
 
@@ -162,8 +163,8 @@ class MonobankClient {
 
         // 2. Fallback: Only if NO IBANs are configured, try to detect FOP-like accounts
         return uahAccounts
-            .filter((acc: any) => (acc.type === 'fop' || (acc.iban && acc.iban.includes('2600'))) && 
-                                  (!acc.iban || !EXCLUDED_IBANS.includes(acc.iban.toUpperCase())))
+            .filter((acc: any) => (acc.type === 'fop' || (acc.iban && acc.iban.includes('2600'))) &&
+                (!acc.iban || !EXCLUDED_IBANS.includes(acc.iban.toUpperCase())))
             .map((acc: any) => acc.id);
     }
 
@@ -390,12 +391,12 @@ export const monobankService = {
      */
     async preWarmForAudit(auditDate: Date) {
         const { MONO_FOP_IBANS } = await import("../../config.js");
-        // Normalize to midnight — must match how reconciliation calculates from/to
-        const midnight = new Date(auditDate.getFullYear(), auditDate.getMonth(), auditDate.getDate());
+        const kyivDate = getKyivDateParts(auditDate);
+        const midnight = createKyivDate(kyivDate.year, kyivDate.month - 1, kyivDate.day);
         const from = Math.floor(midnight.getTime() / 1000);
         const to = from + 259200; // 72h window
 
-        logger.debug({ auditDate: auditDate.toLocaleDateString('uk-UA') }, "Monobank audit cache pre-warm started");
+        logger.debug({ auditDate: formatKyivDate(auditDate) }, "Monobank audit cache pre-warm started");
 
         await Promise.all(Object.entries(monoClients).map(async ([key, client]) => {
             try {

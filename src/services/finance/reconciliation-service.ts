@@ -2,7 +2,7 @@ import { monobankService, monoClients } from "./monobank.js";
 import { ddsService } from "./dds.js";
 import { DDS_BALANCE_CELLS, FOP_DISPLAY_NAMES, MONO_FOP_IBANS, EXCLUDED_IBANS } from "../../config.js";
 import { techCashService } from "./tech-cash.js";
-import { normalizeFinanceString, FINANCE_KEYWORDS } from "./utils.js";
+import { createKyivDate, normalizeFinanceString, FINANCE_KEYWORDS, formatKyivDate } from "./utils.js";
 import logger from "../../core/logger.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
@@ -66,11 +66,11 @@ export class ReconciliationService {
             const nextDate = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
 
             const prevDate = new Date(targetDate.getTime() - 24 * 60 * 60 * 1000);
-            const prevDateStr = `${String(prevDate.getDate()).padStart(2, '0')}.${String(prevDate.getMonth() + 1).padStart(2, '0')}.${prevDate.getFullYear()}`;
+            const prevDateStr = formatKyivDate(prevDate);
             const [shifts, ddsTxs, ddsTxsPrev, allStaff, dbLocations, incomes] = await Promise.all([
                 workShiftRepository.findWithRelationsByDateRange(targetDate, nextDate),
                 (async () => {
-                    const nextDateStr = `${String(nextDate.getDate()).padStart(2, '0')}.${String(nextDate.getMonth() + 1).padStart(2, '0')}.${nextDate.getFullYear()}`;
+                    const nextDateStr = formatKyivDate(nextDate);
                     return ddsService.getTransactionsForDates([dateStr, nextDateStr]);
                 })(),
                 ddsService.getTransactionsForDates([prevDateStr]),
@@ -86,8 +86,10 @@ export class ReconciliationService {
             const unrecognized: any[] = [];
             const expenses: any[] = [];
 
-            const from = Math.floor(targetDate.getTime() / 1000);
-            const endOfTargetDay = Math.floor(new Date(Number(y), Number(m) - 1, Number(d) + 1).getTime() / 1000);
+            const auditWindowStart = createKyivDate(Number(y), Number(m) - 1, Number(d));
+            const auditWindowEnd = createKyivDate(Number(y), Number(m) - 1, Number(d) + 1);
+            const from = Math.floor(auditWindowStart.getTime() / 1000);
+            const endOfTargetDay = Math.floor(auditWindowEnd.getTime() / 1000);
             const to = from + 259200;
 
             const fopKeysToAudit = Object.keys(monoClients)
@@ -203,11 +205,15 @@ export class ReconciliationService {
                                 const diff = Math.abs(actual - expectedAfterFee) < 0.5 ? 0 : (actual - termExp);
 
                                 if (termExp > 0 || actual > 0) {
+                                    let details = (candidates.length > 1 ? `(${candidates.length} пл.)` : '') + (fee > 0 ? ' (ком. 1.3%)' : '');
+                                    if (actual === 0 && termExp > 0) details += ' ⚠️ MONO PAYOUT NOT FOUND';
+                                    else if (actual > 0 && Math.abs(actual - ddsTotal) > 1) details += ' ⚠️ NOT IN DDS';
+
                                     fopMatches.push({
                                         location: `${locCfg.name} (${cityLabel(locCfg)})`,
                                         type: 'Terminal', expected: termExp, actual, diff,
                                         status: Math.abs(diff) > 0.5 ? (actual === 0 ? 'MISSING' : 'MISMATCH') : 'OK',
-                                        details: (candidates.length > 1 ? `(${candidates.length} пл.)` : '') + (fee > 0 ? ' (ком. 1.3%)' : '') + (actual > 0 && Math.abs(actual - ddsTotal) > 1 ? ' ⚠️ NOT IN DDS' : ''),
+                                        details,
                                         staff: displaySurnames,
                                         staffIds,
                                         comment: inc?.comment
