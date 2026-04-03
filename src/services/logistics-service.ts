@@ -942,15 +942,41 @@ export class LogisticsService {
             // DELIVERED = physically picked up from NP. Don't reset to ARRIVED —
             // just remind the staff to upload photos. The parcel is already on location.
             if (parcel.status === 'DELIVERED') {
-                const tid = parcel.responsibleStaff?.user?.telegramId;
-                if (tid && parcel.contentPhotoIds.length === 0) {
+                const freshParcel = await prisma.parcel.findUnique({
+                    where: { id: parcel.id },
+                    include: { responsibleStaff: { include: { user: true } } }
+                });
+
+                const tid = freshParcel?.responsibleStaff?.user?.telegramId;
+                const shouldSendPostShiftReminder = Boolean(
+                    freshParcel &&
+                    freshParcel.status === 'DELIVERED' &&
+                    freshParcel.contentPhotoIds.length === 0 &&
+                    freshParcel.shiftEndReminderSentAt === null &&
+                    tid
+                );
+
+                if (shouldSendPostShiftReminder) {
                     const kb = new InlineKeyboard()
                         .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
-                    await bot.api.sendMessage(Number(tid),
+
+                    const sent = await bot.api.sendMessage(
+                        Number(tid),
                         `⏰ Зміна закінчилась, але фото посилки <code>${parcel.ttn}</code> ще не завантажено.\nБудь ласка, надішли фото вмісту. 📸`,
                         { parse_mode: 'HTML', reply_markup: kb }
-                    ).catch(err => logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics post-shift photo reminder delivery failed'));
+                    ).then(() => true).catch(err => {
+                        logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics post-shift photo reminder delivery failed');
+                        return false;
+                    });
+
+                    if (sent) {
+                        await prisma.parcel.update({
+                            where: { id: parcel.id },
+                            data: { shiftEndReminderSentAt: new Date() }
+                        });
+                    }
                 }
+
                 continue;
             }
 
