@@ -1,6 +1,8 @@
-import type { Bot } from "grammy";
+import type { Api, Bot } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { sessionRepository } from "../repositories/session-repository.js";
+
+type BotLike = Bot<any> | Api;
 
 /**
  * 🧹 Efficiently deletes messages stored in the session.
@@ -26,7 +28,7 @@ export async function cleanupMessages(ctx: MyContext) {
  * 🧹 Видаляє повідомлення іншого користувача по його Telegram ID,
  * зчитуючи дані з бази даних (сесії).
  */
-export async function cleanupUserSessionMessages(bot: Bot<any>, telegramId: number) {
+export async function cleanupUserSessionMessages(botOrApi: BotLike, telegramId: number) {
     try {
         const key = String(telegramId);
         const sessionRecord = await sessionRepository.findByKey(key);
@@ -43,9 +45,11 @@ export async function cleanupUserSessionMessages(bot: Bot<any>, telegramId: numb
 
         console.log(`🧹 [CLEANUP-EXT] Deleting ${session.messagesToDelete.length} messages for target user ${telegramId}`);
 
+        const api = "api" in botOrApi ? botOrApi.api : botOrApi;
+
         // Delete in parallel to be faster
         await Promise.allSettled(
-            session.messagesToDelete.map((msgId: number) => bot.api.deleteMessage(telegramId, msgId).catch(() => { }))
+            session.messagesToDelete.map((msgId: number) => api.deleteMessage(telegramId, msgId).catch(() => { }))
         );
 
         session.messagesToDelete = [];

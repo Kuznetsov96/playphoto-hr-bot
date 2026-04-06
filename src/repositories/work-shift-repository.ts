@@ -59,6 +59,15 @@ export class WorkShiftRepository {
         });
     }
 
+    async deleteManyForStaffSince(staffId: string, since: Date): Promise<Prisma.BatchPayload> {
+        return prisma.workShift.deleteMany({
+            where: {
+                staffId,
+                date: { gte: since }
+            }
+        });
+    }
+
     async findWithLocationForStaff(staffId: string, since: Date, limit: number = 100) {
         return prisma.workShift.findMany({
             where: {
