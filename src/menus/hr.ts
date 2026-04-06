@@ -238,7 +238,11 @@ hrFinalStepSetupMenu.dynamic(async (ctx, range) => {
         const waiting = getTimeWaiting(cand.user.updatedAt);
         range.text(`📸 ${formatCompactName(cand.fullName)}${waiting}`, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
+            const text = await formatCandidateProfile(ctx as any, cand as any, {
+                includeActionLabel: true,
+                includeHistory: true,
+                viewerRole: "HR"
+            });
             await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
         }).row();
     }
@@ -254,7 +258,11 @@ hrFinalStepActiveMenu.dynamic(async (ctx, range) => {
         const dateStr = cand.firstShiftDate ? cand.firstShiftDate.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' }) : "??";
         range.text(`⌛ ${formatCompactName(cand.fullName)} • ${dateStr}`, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
+            const text = await formatCandidateProfile(ctx as any, cand as any, {
+                includeActionLabel: true,
+                includeHistory: true,
+                viewerRole: "HR"
+            });
             await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
         }).row();
     }

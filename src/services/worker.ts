@@ -1511,16 +1511,11 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
             include: { user: true }
         });
 
-        // 4. STAGING_SETUP (Passed test, didn't choose date)
-        const idleStagingSetup = await prisma.candidate.findMany({
-            where: {
-                status: "STAGING_SETUP",
-                statusChangedAt: { lte: cutoff5Days }
-            },
-            include: { user: true }
-        });
-
-        const allIdle = [...idleAccepted, ...idleNDA, ...idleTest, ...idleStagingSetup];
+        // NOTE:
+        // STAGING_SETUP is intentionally excluded from auto-warning/auto-reject.
+        // Candidates can coordinate an offline-staging date manually with admin
+        // and may remain in this status for more than 7 days by design.
+        const allIdle = [...idleAccepted, ...idleNDA, ...idleTest];
 
         for (const cand of allIdle) {
             try {
@@ -1531,7 +1526,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                 if (referenceDate <= cutoff7Days) {
                     // Day 7: Reject
                     let rejectReason = "на стажування";
-                    if (cand.status === "KNOWLEDGE_TEST" || cand.status === "STAGING_SETUP") rejectReason = "після тестування";
+                    if (cand.status === "KNOWLEDGE_TEST") rejectReason = "після тестування";
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
@@ -1559,7 +1554,6 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                         case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставницею"; break;
                         case "NDA": contextStr = "на ознайомлення з NDA (правилами команди)"; break;
                         case "KNOWLEDGE_TEST": contextStr = "на проходження фінального тесту"; break;
-                        case "STAGING_SETUP": contextStr = "на вибір дати для першого стажування на локації"; break;
                     }
 
                     try {

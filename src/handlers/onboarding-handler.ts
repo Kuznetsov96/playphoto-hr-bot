@@ -25,9 +25,13 @@ const STEPS = {
     FINAL: 'ONB_FINAL'
 };
 
+function hasCompleteOnboardingFullName(candidate: { fullName?: string | null }): boolean {
+    return CandidateSchema.shape.fullName.safeParse(candidate.fullName).success;
+}
+
 // Determines the first onboarding step that hasn't been completed yet
 export function getFirstMissingStep(candidate: any): string {
-    if (!candidate.fullName) return STEPS.FULL_NAME;
+    if (!hasCompleteOnboardingFullName(candidate)) return STEPS.FULL_NAME;
     if (!candidate.birthDate) return STEPS.BIRTH_DATE;
     if (!candidate.phone) return STEPS.PHONE;
     if (!candidate.email) return STEPS.EMAIL;
@@ -43,7 +47,7 @@ export function getFirstMissingStep(candidate: any): string {
 // Returns the missing field labels for smart reminders
 export function getMissingFieldLabels(candidate: any): string[] {
     const missing: string[] = [];
-    if (!candidate.fullName) missing.push("ПІБ");
+    if (!hasCompleteOnboardingFullName(candidate)) missing.push("ПІБ");
     if (!candidate.birthDate) missing.push("дату народження");
     if (!candidate.phone) missing.push("телефон");
     if (!candidate.email) missing.push("email");
