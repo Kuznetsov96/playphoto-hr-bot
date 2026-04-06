@@ -261,8 +261,14 @@ hrHandlers.callbackQuery(/^invite_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match![1]!;
     const { hrService } = await import("../services/hr-service.js");
     try {
-        await hrService.inviteCandidate(ctx.api, candId);
-        await ctx.answerCallbackQuery(`✅ Invitation sent!`);
+        const result = await hrService.inviteCandidate(ctx.api, candId);
+        if (result.ok) {
+            await ctx.answerCallbackQuery(`✅ Invitation sent!`);
+        } else if (result.reason === "bot_blocked") {
+            await ctx.answerCallbackQuery("Candidate blocked the bot.");
+        } else {
+            await ctx.answerCallbackQuery("Invite failed.");
+        }
     } catch (e) {
         logger.error({ err: e }, "Failed to send individual invitation");
         await ctx.answerCallbackQuery("Send error ❌");
