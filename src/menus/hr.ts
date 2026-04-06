@@ -458,8 +458,14 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
     // 2. RECRUITMENT ACTIONS
     if (["SCREENING", "WAITLIST", "WAITLIST_HR"].includes(cStatus)) {
         range.text(cand.notificationSent ? "🔔 Remind" : STAFF_TEXTS["hr-btn-invite-individual"], async (ctx) => {
-            await hrService.inviteCandidate(ctx.api, cand.id);
-            await ctx.answerCallbackQuery("Sent! ✅");
+            const result = await hrService.inviteCandidate(ctx.api, cand.id);
+            if (result.ok) {
+                await ctx.answerCallbackQuery("Sent! ✅");
+            } else if (result.reason === "bot_blocked") {
+                await ctx.answerCallbackQuery("Candidate blocked the bot.");
+            } else {
+                await ctx.answerCallbackQuery("Invite failed.");
+            }
             await ctx.menu.update();
         }).row();
     }
@@ -836,8 +842,8 @@ hrBroadcastConfirmMenu.text("✅ Confirm & Send", async (ctx) => {
     await ctx.answerCallbackQuery("Broadcast started...");
     let sent = 0;
     for (const cand of newCandidates) {
-        const ok = await hrService.inviteCandidate(ctx.api, cand.id);
-        if (ok) sent++;
+        const result = await hrService.inviteCandidate(ctx.api, cand.id);
+        if (result.ok) sent++;
     }
     const failedCount = newCandidates.length - sent;
     const failedNote = failedCount > 0 ? ` (${failedCount} unreachable)` : '';
