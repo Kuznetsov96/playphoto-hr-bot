@@ -382,9 +382,9 @@ export const hrService = {
         return true;
     },
 
-    async inviteCandidate(api: any, candId: string) {
+    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" }> {
         const cand = await this.getCandidateDetails(candId);
-        if (!cand) return false;
+        if (!cand) return { ok: false, reason: "not_found" };
 
         const { extractFirstName } = await import("../utils/string-utils.js");
         const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
@@ -422,7 +422,7 @@ export const hrService = {
                 context: { locationId: cand.locationId, city: cand.city }
             });
 
-            return true;
+            return { ok: true };
         } catch (e: any) {
             logger.warn({ err: e, candId, tid }, "inviteCandidate: failed to send invitation");
             audit({
@@ -441,11 +441,19 @@ export const hrService = {
                     where: { id: cand.user.id },
                     data: { botBlockedAt: new Date() }
                 }).catch(() => {});
+                await candidateRepository.update(candId, {
+                    status: CandidateStatus.BLOCKER,
+                    notificationSent: false,
+                    interviewInvitedAt: null,
+                    hasUnreadMessage: false,
+                    isWaitlisted: false
+                }).catch(() => {});
+                return { ok: false, reason: "bot_blocked" };
             }
             // Don't set notificationSent=true without interviewInvitedAt —
             // otherwise the candidate gets stuck: invite-reminder can't see them,
             // and future broadcasts skip them.
-            return false;
+            return { ok: false, reason: "send_failed" };
         }
     },
 
