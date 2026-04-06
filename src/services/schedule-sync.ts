@@ -292,6 +292,8 @@ export class ScheduleSyncService {
         const staffMap = new Map(allStaff.map(s => [s.userId, s]));
 
         const teamMappingForSchedule: { [key: string]: TeamMember } = {};
+        const todayKyiv = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        todayKyiv.setHours(0, 0, 0, 0);
 
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i];
@@ -320,11 +322,12 @@ export class ScheduleSyncService {
                 continue;
             }
 
-            // Build mapping for schedule sync reuse
-            const memberObj = { fullName, directoryName, telegramId: telegramId.toString(), surnameNameDot, locationName: locName };
-            if (surnameNameDot && surnameNameDot !== "<>") teamMappingForSchedule[surnameNameDot] = memberObj;
-            if (directoryName && directoryName !== "<>") teamMappingForSchedule[directoryName] = memberObj;
-            teamMappingForSchedule[telegramId.toString()] = memberObj;
+            if (isActive) {
+                const memberObj = { fullName, directoryName, telegramId: telegramId.toString(), surnameNameDot, locationName: locName };
+                if (surnameNameDot && surnameNameDot !== "<>") teamMappingForSchedule[surnameNameDot] = memberObj;
+                if (directoryName && directoryName !== "<>") teamMappingForSchedule[directoryName] = memberObj;
+                teamMappingForSchedule[telegramId.toString()] = memberObj;
+            }
 
             let birthDate: Date | null = null;
             if (birthDateStr) {
@@ -416,6 +419,8 @@ export class ScheduleSyncService {
                     // Also ensure they are not blocked if they are working
                     if (isActive) {
                         await (userRepository as any).update(user.id, { isBlocked: false });
+                    } else {
+                        await workShiftRepository.deleteManyForStaffSince(profile.id, todayKyiv);
                     }
 
                     staffUpdated++;
@@ -907,12 +912,13 @@ export class ScheduleSyncService {
         const mapping: { [key: string]: TeamMember } = {};
         if (rows) {
             rows.forEach((row: any) => {
+                const status = String(row[5] || "").trim().toLowerCase();
                 const fullName = String(row[2] || "").trim();
                 const directoryName = String(row[4] || "").trim();
                 const surnameNameDot = String(row[13] || "").trim();
                 const locName = String(row[14] || "").trim();
                 const telegramId = String(row[17] || "").trim();
-                if (telegramId && telegramId.length > 5) {
+                if (status === "працює" && telegramId && telegramId.length > 5) {
                     const member = { fullName, directoryName, telegramId, surnameNameDot, locationName: locName };
                     if (surnameNameDot && surnameNameDot !== "<>" && surnameNameDot !== "n/a") mapping[surnameNameDot] = member;
                     if (directoryName && directoryName !== "<>" && directoryName !== "n/a" && directoryName !== "UNKNOWN_IMPORT") mapping[directoryName] = member;
