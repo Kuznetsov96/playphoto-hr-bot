@@ -82,10 +82,13 @@ export class WorkShiftRepository {
 
     /**
      * Finds the shift closest to a given date for a staff member.
-     * Checks today first, then nearest future, then nearest past.
+     * Checks the same calendar day first, then nearest future, then nearest past.
      */
     async findClosestShiftWithLocation(staffId: string, aroundDate: Date) {
-        // Try today or nearest future shift first
+        const sameDayShift = await this.findShiftWithLocationOnDate(staffId, aroundDate);
+        if (sameDayShift) return sameDayShift;
+
+        // Try nearest future shift next
         const futureShift = await prisma.workShift.findFirst({
             where: { staffId, date: { gte: aroundDate } },
             include: { location: true },
