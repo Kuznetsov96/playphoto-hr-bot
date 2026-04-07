@@ -37,24 +37,38 @@ const LOCATION_SHORTCUTS: Record<string, string> = {
     "Dytyache Horyshche|Хмельницький": "HM",
 };
 
+function stripTrailingCitySuffix(name: string, city: string | null): string {
+    if (!city) return name;
+
+    const suffix = ` (${city})`;
+    return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
+function formatLocationLabel(name: string, city: string | null): string {
+    if (!city) return name;
+    return name.endsWith(`(${city})`) ? name : `${name} (${city})`;
+}
+
 /**
  * Helper to get the best shortcut for a location
  */
 function getLocationShortcut(name: string, city: string | null): string {
+    const normalizedName = stripTrailingCitySuffix(name, city);
+
     // 1. Try composite key match (name|city)
     if (city) {
-        const key = `${name}|${city}`;
+        const key = `${normalizedName}|${city}`;
         if (LOCATION_SHORTCUTS[key]) return LOCATION_SHORTCUTS[key];
     }
 
     // 2. Try matching by name with any city (for unique location names)
     for (const [compositeKey, code] of Object.entries(LOCATION_SHORTCUTS)) {
         const keyName = compositeKey.split('|')[0]!;
-        if (keyName === name) return code;
+        if (keyName === normalizedName) return code;
     }
 
     // 3. Fallback: first 3 letters
-    return name.substring(0, 3);
+    return normalizedName.substring(0, 3);
 }
 
 /**
@@ -105,11 +119,11 @@ export async function buildTicketCard(
     let locationText = "Unknown";
     
     if (locationNameOverride) {
-        locationText = locationCityOverride ? `${locationNameOverride} (${locationCityOverride})` : locationNameOverride;
+        locationText = formatLocationLabel(locationNameOverride, locationCityOverride);
     } else {
         const loc = user.staffProfile?.location || user.candidate?.location;
         if (loc) {
-            locationText = loc.city ? `${loc.name} (${loc.city})` : loc.name;
+            locationText = formatLocationLabel(loc.name, loc.city);
         } else if (fullName.includes("FK")) {
             locationText = fullName.split(' ').pop() || "Unknown";
         }
