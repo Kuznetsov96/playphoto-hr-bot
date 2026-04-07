@@ -13,18 +13,19 @@ export async function updateTicketVisuals(ctx: MyContext, ticketId: number) {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(ticket.user.telegramId));
     if (!user) return;
 
+    let locationName = user.staffProfile?.location?.name || null;
+    let locationCity = user.staffProfile?.location?.city || null;
+    if (user.staffProfile) {
+        const shift = await workShiftRepository.findClosestShiftWithLocation(user.staffProfile.id, new Date());
+        if (shift?.location) {
+            locationName = shift.location.name;
+            locationCity = shift.location.city;
+        }
+    }
+
     // Update Topic Name
     if (ticket.topicId) {
         const { buildTopicTitle } = await import("../utils/ticket-card.js");
-        let locationName = user.staffProfile?.location?.name || null;
-        let locationCity = user.staffProfile?.location?.city || null;
-        if (user.staffProfile) {
-            const shift = await workShiftRepository.findClosestShiftWithLocation(user.staffProfile.id, new Date());
-            if (shift?.location) {
-                locationName = shift.location.name;
-                locationCity = shift.location.city;
-            }
-        }
         const isClarification = ticket.issueText.includes("Уточнення по завданню");
         const adminRole = ticket.assignedAdmin?.adminRole || null;
         const newTitle = buildTopicTitle(ticketId, user.staffProfile?.fullName || "Невідомо", locationName, ticket.status as TicketStatus, ticket.isUrgent, isClarification, locationCity, ticket.assignedAdminId, adminRole);
@@ -40,7 +41,7 @@ export async function updateTicketVisuals(ctx: MyContext, ticketId: number) {
     if (ctx.callbackQuery?.message) {
         const { buildTicketCard, getTicketButtons } = await import("../utils/ticket-card.js");
         const isClarification = ticket.issueText.includes("Уточнення по завданню");
-        const cardText = await buildTicketCard(ticket, user, isClarification);
+        const cardText = await buildTicketCard(ticket, user, isClarification, locationName, locationCity);
         const buttons = getTicketButtons(ticketId, ticket.status as TicketStatus);
 
         // Check if content actually changed to avoid API error
