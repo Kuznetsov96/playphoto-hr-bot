@@ -260,4 +260,57 @@ describe('MentorService', () => {
             expect(candidateRepository.update).not.toHaveBeenCalled();
         });
     });
+
+    describe('onboarding filters', () => {
+        it('should count only candidates with actual scheduled first shifts for mentor onboarding', async () => {
+            await mentorService.getStats();
+
+            expect((prisma as any).candidate.count).toHaveBeenCalledWith({
+                where: expect.objectContaining({
+                    status: CandidateStatus.HIRED,
+                    isMentorLocked: true,
+                    user: {
+                        is: {
+                            staffProfile: {
+                                is: {
+                                    shifts: {
+                                        some: {
+                                            date: expect.any(Object)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+            });
+        });
+
+        it('should fetch onboarding candidates only when they have a staff shift in schedule', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
+
+            await mentorService.getOnboardingCandidates();
+
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                CandidateStatus.HIRED,
+                expect.objectContaining({
+                    status: CandidateStatus.HIRED,
+                    isMentorLocked: true,
+                    user: {
+                        is: {
+                            staffProfile: {
+                                is: {
+                                    shifts: {
+                                        some: {
+                                            date: expect.any(Object)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+            );
+        });
+    });
 });

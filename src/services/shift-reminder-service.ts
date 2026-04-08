@@ -32,7 +32,18 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             where: {
                 status: CandidateStatus.HIRED,
                 isMentorLocked: true,
-                firstShiftDate: { gte: startOfDay, lte: endOfDay }
+                firstShiftDate: { gte: startOfDay, lte: endOfDay },
+                user: {
+                    is: {
+                        staffProfile: {
+                            is: {
+                                shifts: {
+                                    some: { date: { gte: startOfDay, lte: endOfDay } }
+                                }
+                            }
+                        }
+                    }
+                }
             },
             include: { user: true, location: true }
         });
