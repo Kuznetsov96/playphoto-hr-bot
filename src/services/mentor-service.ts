@@ -13,10 +13,30 @@ import { getLocationDetails } from "../utils/location-data-helper.js";
 import { cleanupUserSessionMessages } from "../utils/cleanup.js";
 import { Bot } from "grammy";
 import prisma from "../db/core.js";
-import { CandidateStatus, FunnelStep } from "@prisma/client";
+import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
 
 export class MentorService {
+    private getMentorOnboardingWhere(fromDate?: Date): Prisma.CandidateWhereInput {
+        return {
+            status: CandidateStatus.HIRED,
+            isMentorLocked: true,
+            fullName: { not: null },
+            firstShiftDate: fromDate ? { gte: fromDate } : { not: null },
+            user: {
+                is: {
+                    staffProfile: {
+                        is: {
+                            shifts: {
+                                some: fromDate ? { date: { gte: fromDate } } : {}
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+
     private getMentorWaitlistWhere() {
         return {
             status: { in: [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST] },
@@ -57,8 +77,10 @@ export class MentorService {
             }
         });
 
-        const onboardingCount = await prisma.candidate.count({ 
-            where: { status: CandidateStatus.HIRED, isMentorLocked: true } 
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const onboardingCount = await prisma.candidate.count({
+            where: this.getMentorOnboardingWhere(startOfToday)
         });
 
         return { 
@@ -367,10 +389,16 @@ export class MentorService {
     }
 
     async getOnboardingCandidates() {
-        return await candidateRepository.findByStatusWithUser(CandidateStatus.HIRED, {
-            isMentorLocked: true,
-            fullName: { not: null } // Ensure they are valid
-        }).then(cands => cands.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '')));
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        return await candidateRepository.findByStatusWithUser(CandidateStatus.HIRED, this.getMentorOnboardingWhere(startOfToday))
+            .then(cands => cands.sort((a, b) => {
+                const aTime = a.firstShiftDate ? new Date(a.firstShiftDate).getTime() : Number.MAX_SAFE_INTEGER;
+                const bTime = b.firstShiftDate ? new Date(b.firstShiftDate).getTime() : Number.MAX_SAFE_INTEGER;
+                if (aTime !== bTime) return aTime - bTime;
+                return (a.fullName || '').localeCompare(b.fullName || '');
+            }));
     }
 
     async completeOnboarding(candId: string, success: boolean) {
