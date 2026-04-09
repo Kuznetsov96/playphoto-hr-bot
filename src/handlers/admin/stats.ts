@@ -33,6 +33,11 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
     }
     range.row();
 
+    range.text("🔎 Loss Drilldown", async (ctx) => {
+        ctx.session.statsView = ctx.session.statsView === "losses" ? "overview" : "losses";
+        await refreshStats(ctx);
+    }).row();
+
     // 2. Location selection if city is selected
     if (ctx.session.broadcastCity) {
         const locations = await statsService.getLocationsForCity(ctx.session.broadcastCity);
@@ -72,7 +77,9 @@ async function refreshStats(ctx: MyContext) {
     const locationId = ctx.session.broadcastLocationId;
     const locationName = ctx.session.broadcastLocationName;
 
-    const text = await statsService.buildManagementDashboard(city, locationId, locationName);
+    const text = ctx.session.statsView === "losses"
+        ? await statsService.buildLossDrilldown(city, locationId, locationName)
+        : await statsService.buildManagementDashboard(city, locationId, locationName);
     await ScreenManager.renderScreen(ctx, text, "admin-stats");
 }
 

@@ -120,6 +120,7 @@ export interface SessionData {
     broadcastCity?: string;
     broadcastLocationId?: string;
     broadcastLocationName?: string;
+    statsView?: "overview" | "losses";
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
     taskCreation?: any;
