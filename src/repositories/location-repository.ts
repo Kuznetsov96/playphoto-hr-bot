@@ -12,11 +12,17 @@ export class LocationRepository {
             where: { isHidden: false }
         });
         const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 3', 'Karamel Sambir'];
+        const karpukLocs = ['Volkland', 'Fly Kids'];
         const acquiringLocs = ['Smile Park Lviv', 'Dragon Park', 'Smile Park (Даринок)', 'Smile Park (Darynok)', 'Leoland', 'Leolend', 'Smile Park Київ', 'Smile Park Kharkiv'];
 
         return locations.map(l => {
             const isSmileKyiv = l.name === 'Smile Park Київ' || (l.legacyName === 'Smile Park Київ');
             const isDarynok = l.name.includes('Даринок') || l.name.includes('Darynok');
+            const isKarpukTerminalLocation =
+                (l.name === 'Volkland' && l.city === 'Запоріжжя') ||
+                (l.name === 'Fly Kids' && l.city === 'Рівне') ||
+                (l.legacyName === 'Volkland 1 (Бабурка)' && l.city === 'Запоріжжя') ||
+                (l.legacyName === 'Fly Kids Рівне' && l.city === 'Рівне');
             
             // Priority: DB > Hardcoded
             const hasAcquiring = l.hasAcquiring || acquiringLocs.includes(l.name) || acquiringLocs.includes(l.legacyName || '') || isSmileKyiv || isDarynok;
@@ -25,6 +31,8 @@ export class LocationRepository {
             if (!fopId || fopId === 'KUZNETSOV') { // Kuznetsov is default, check for overrides
                 if (isSmileKyiv || l.name === 'Leoland') {
                     fopId = 'GUPALOVA';
+                } else if (isKarpukTerminalLocation || karpukLocs.includes(l.legacyName || '')) {
+                    fopId = 'KARPUK';
                 } else if (posrednikovaLocs.includes(l.name) || posrednikovaLocs.includes(l.legacyName || '')) {
                     fopId = 'POSREDNIKOVA';
                 }
@@ -56,11 +64,17 @@ export class LocationRepository {
             where: { sheet: { not: null }, isHidden: false }
         });
         const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 3', 'Karamel Sambir'];
+        const karpukLocs = ['Volkland', 'Fly Kids'];
         const acquiringLocs = ['Smile Park Lviv', 'Dragon Park', 'Smile Park (Даринок)', 'Smile Park (Darynok)', 'Leoland', 'Leolend', 'Smile Park Київ', 'Smile Park Kharkiv'];
 
         return locations.map(l => {
             const isSmileKyiv = l.name === 'Smile Park Київ' || (l.legacyName === 'Smile Park Київ');
             const isDarynok = l.name.includes('Даринок') || l.name.includes('Darynok');
+            const isKarpukTerminalLocation =
+                (l.name === 'Volkland' && l.city === 'Запоріжжя') ||
+                (l.name === 'Fly Kids' && l.city === 'Рівне') ||
+                (l.legacyName === 'Volkland 1 (Бабурка)' && l.city === 'Запоріжжя') ||
+                (l.legacyName === 'Fly Kids Рівне' && l.city === 'Рівне');
             
             // Priority: DB > Hardcoded
             const hasAcquiring = l.hasAcquiring || acquiringLocs.includes(l.name) || acquiringLocs.includes(l.legacyName || '') || isSmileKyiv || isDarynok;
@@ -69,6 +83,8 @@ export class LocationRepository {
             if (!fopId || fopId === 'KUZNETSOV') { // Kuznetsov is default, check for overrides
                 if (isSmileKyiv || l.name === 'Leoland') {
                     fopId = 'GUPALOVA';
+                } else if (isKarpukTerminalLocation || karpukLocs.includes(l.legacyName || '')) {
+                    fopId = 'KARPUK';
                 } else if (posrednikovaLocs.includes(l.name) || posrednikovaLocs.includes(l.legacyName || '')) {
                     fopId = 'POSREDNIKOVA';
                 }
