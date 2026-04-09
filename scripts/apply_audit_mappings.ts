@@ -3,6 +3,8 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const mappings = [
+    { name: "Volkland", city: "Запоріжжя", searchId: 8, fopId: "KARPUK" },
+    { name: "Fly Kids", city: "Рівне", searchId: 12, fopId: "KARPUK" },
     { name: "Volkland 3", city: "Запоріжжя", searchId: 16, fopId: "POSREDNIKOVA", terminalId: "POSREDNIKOVA" }, // Adding POSREDNIKOVA terminal match
     { name: "Karamel", city: "Коломия", searchId: 4, fopId: "POSREDNIKOVA" },
     { name: "Karamel", city: "Самбір", searchId: 18, fopId: "POSREDNIKOVA" },
