@@ -650,7 +650,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             }).row();
 
             range.text("🔄 Reset to Setup", async (ctx) => {
-                await candidateRepository.update(cand.id, { status: "STAGING_SETUP" as any, notificationSent: false });
+                await candidateRepository.update(cand.id, { status: "STAGING_SETUP" as any, notificationSent: false, stagingNotifiedAt: null });
                 await ctx.answerCallbackQuery("Reset to setup mode 🛠");
                 await ctx.menu.update();
             }).row();

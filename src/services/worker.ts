@@ -613,6 +613,9 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 11.2 Funnel anomaly detection and alerting
             await processFunnelAnomalies(bot);
 
+            // 11.3 Reliability guardrails for stuck or inconsistent pipeline states
+            await processPipelineHealth(bot);
+
             // 12. NDA Reminders (Every 24h until confirmed)
             await processNDAReminders(bot);
 
@@ -802,6 +805,282 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
     } catch (e) {
         logger.error({ err: e }, "Candidate funnel anomaly detection failed");
     }
+}
+
+async function processPipelineHealth(bot: Bot<MyContext>) {
+    try {
+        const recoveredInterviews = await recoverStaleInterviewCandidates(bot);
+        const repairedRejectedInterviews = await repairRejectedInterviewCompletedStates();
+        await alertPipelineHealth(bot, { recoveredInterviews, repairedRejectedInterviews });
+    } catch (e) {
+        logger.error({ err: e }, "Candidate pipeline health check failed");
+    }
+}
+
+async function recoverStaleInterviewCandidates(bot: Bot<MyContext>) {
+    const now = new Date();
+    const staleCandidates = await prisma.candidate.findMany({
+        where: {
+            status: CandidateStatus.SCREENING,
+            currentStep: FunnelStep.INTERVIEW,
+            interviewSlotId: { not: null }
+        },
+        include: {
+            user: true,
+            interviewSlot: true
+        }
+    });
+
+    const recovered: Array<{ id: string; name: string; slotEndedAt: string }> = [];
+
+    for (const cand of staleCandidates) {
+        const slot = cand.interviewSlot;
+        if (!slot?.isBooked || slot.endTime >= now) continue;
+
+        try {
+            await candidateRepository.update(cand.id, {
+                status: CandidateStatus.INTERVIEW_COMPLETED,
+                interviewCompletedAt: slot.endTime
+            });
+            await interviewRepository.updateSlot(slot.id, { remindedCompletion: true });
+
+            recovered.push({
+                id: cand.id,
+                name: cand.fullName || "Candidate",
+                slotEndedAt: slot.endTime.toISOString(),
+            });
+
+            logBusinessEvent({
+                event: "candidate.interview.stale_state_recovered",
+                candidateId: cand.id,
+                telegramId: cand.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "INTERVIEW_COMPLETED",
+                result: "success",
+                module: "worker",
+                operation: "recoverStaleInterviewCandidates",
+                safeContext: {
+                    previousStatus: cand.status,
+                    previousStep: cand.currentStep,
+                    slotId: slot.id,
+                    slotEndedAt: slot.endTime.toISOString(),
+                },
+            });
+        } catch (err) {
+            logger.error({ err, candidateId: cand.id, slotId: slot.id }, "Failed to recover stale interview candidate");
+        }
+    }
+
+    if (recovered.length > 0 && HR_IDS[0]) {
+        const preview = recovered
+            .slice(0, 5)
+            .map(c => `• ${c.name}`)
+            .join("\n");
+        await bot.api.sendMessage(
+            HR_IDS[0],
+            `⚠️ <b>Recovered stuck interview candidates</b>\n\nMoved <b>${recovered.length}</b> candidate(s) from stale <b>SCREENING/INTERVIEW</b> to <b>INTERVIEW_COMPLETED</b> so HR can decide.\n\n${preview}`,
+            { parse_mode: "HTML" }
+        ).catch(() => {});
+    }
+
+    return recovered;
+}
+
+async function repairRejectedInterviewCompletedStates() {
+    const inconsistentCandidates = await prisma.candidate.findMany({
+        where: {
+            status: CandidateStatus.INTERVIEW_COMPLETED,
+            hrDecision: { in: ["REJECTED", "NOSHOW"] }
+        },
+        include: { user: true }
+    });
+
+    const repaired: Array<{ id: string; name: string; decision: string | null }> = [];
+
+    for (const cand of inconsistentCandidates) {
+        try {
+            await candidateRepository.update(cand.id, {
+                status: CandidateStatus.REJECTED
+            });
+
+            repaired.push({
+                id: cand.id,
+                name: cand.fullName || "Candidate",
+                decision: cand.hrDecision,
+            });
+
+            logBusinessEvent({
+                event: "candidate.interview.completed_rejection_repaired",
+                candidateId: cand.id,
+                telegramId: cand.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "REJECTED",
+                result: "success",
+                module: "worker",
+                operation: "repairRejectedInterviewCompletedStates",
+                safeContext: {
+                    previousStatus: cand.status,
+                    hrDecision: cand.hrDecision,
+                },
+            });
+        } catch (err) {
+            logger.error({ err, candidateId: cand.id }, "Failed to repair rejected interview-completed candidate");
+        }
+    }
+
+    return repaired;
+}
+
+async function alertPipelineHealth(
+    bot: Bot<MyContext>,
+    context: {
+        recoveredInterviews: Array<{ id: string; name: string }>;
+        repairedRejectedInterviews: Array<{ id: string; name: string; decision: string | null }>;
+    }
+) {
+    const now = new Date();
+    const acceptedOlderThan3d = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const mentorOutcomeOverdueCutoff = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    const screeningInviteOverdueCutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const staleWaitlistCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+        stalledAccepted,
+        overdueTrainingScheduled,
+        overdueDiscoveryScheduled,
+        staleScreeningInvites,
+        staleWaitlistHr,
+        blockers,
+    ] = await Promise.all([
+        prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.ACCEPTED,
+                materialsSent: true,
+                discoverySlotId: null,
+                trainingSlotId: null,
+                statusChangedAt: { lte: acceptedOlderThan3d }
+            },
+            select: { id: true, fullName: true, statusChangedAt: true },
+            orderBy: { statusChangedAt: "asc" },
+            take: 10,
+        }),
+        prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.TRAINING_SCHEDULED,
+                trainingSlot: {
+                    is: {
+                        startTime: { lt: mentorOutcomeOverdueCutoff }
+                    }
+                }
+            },
+            select: { id: true, fullName: true, trainingSlot: { select: { startTime: true } } },
+            orderBy: { trainingSlot: { startTime: "asc" } },
+            take: 10,
+        }),
+        prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.DISCOVERY_SCHEDULED,
+                discoverySlot: {
+                    is: {
+                        startTime: { lt: mentorOutcomeOverdueCutoff }
+                    }
+                }
+            },
+            select: { id: true, fullName: true, discoverySlot: { select: { startTime: true } } },
+            orderBy: { discoverySlot: { startTime: "asc" } },
+            take: 10,
+        }),
+        prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.SCREENING,
+                currentStep: FunnelStep.INTERVIEW,
+                interviewInvitedAt: { lte: screeningInviteOverdueCutoff },
+                interviewSlotId: null
+            },
+            select: { id: true, fullName: true, interviewInvitedAt: true },
+            orderBy: { interviewInvitedAt: "asc" },
+            take: 10,
+        }),
+        prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.WAITLIST_HR,
+                statusChangedAt: { lte: staleWaitlistCutoff }
+            },
+            select: { id: true, fullName: true, statusChangedAt: true },
+            orderBy: { statusChangedAt: "asc" },
+            take: 10,
+        }),
+        prisma.candidate.findMany({
+            where: { status: CandidateStatus.BLOCKER },
+            select: { id: true, fullName: true, currentStep: true, statusChangedAt: true },
+            orderBy: { statusChangedAt: "asc" },
+            take: 10,
+        }),
+    ]);
+
+    const messageParts: string[] = [];
+
+    if (context.repairedRejectedInterviews.length > 0) {
+        messageParts.push(
+            `• Repaired <b>${context.repairedRejectedInterviews.length}</b> candidate(s) stuck in <b>INTERVIEW_COMPLETED</b> despite rejection`
+        );
+    }
+    if (stalledAccepted.length > 0) {
+        messageParts.push(
+            `• <b>${stalledAccepted.length}</b> accepted candidate(s) have materials but no discovery/training booking for 3+ days`
+        );
+    }
+    if (overdueTrainingScheduled.length > 0 || overdueDiscoveryScheduled.length > 0) {
+        messageParts.push(
+            `• <b>${overdueTrainingScheduled.length + overdueDiscoveryScheduled.length}</b> mentor session(s) are overdue and still marked scheduled`
+        );
+    }
+    if (staleScreeningInvites.length > 0) {
+        messageParts.push(
+            `• <b>${staleScreeningInvites.length}</b> interview invite candidate(s) are still waiting after 48h with no booked slot`
+        );
+    }
+    if (staleWaitlistHr.length > 0) {
+        messageParts.push(
+            `• <b>${staleWaitlistHr.length}</b> sampled waitlist-HR candidates are older than 7 days`
+        );
+    }
+    if (blockers.length > 0) {
+        messageParts.push(
+            `• <b>${blockers.length}</b> blocker candidate(s) need manual review`
+        );
+    }
+
+    if (messageParts.length === 0 || ADMIN_IDS.length === 0) return;
+
+    const fingerprint = [
+        `repaired:${context.repairedRejectedInterviews.map(c => c.id).join(",")}`,
+        `accepted:${stalledAccepted.map(c => c.id).join(",")}`,
+        `training:${overdueTrainingScheduled.map(c => c.id).join(",")}`,
+        `discovery:${overdueDiscoveryScheduled.map(c => c.id).join(",")}`,
+        `screening:${staleScreeningInvites.map(c => c.id).join(",")}`,
+        `waitlist:${staleWaitlistHr.map(c => c.id).join(",")}`,
+        `blockers:${blockers.map(c => c.id).join(",")}`,
+    ].join("|");
+
+    if (!(await shouldSendFunnelAlert("PIPELINE_HEALTH_ALERT", fingerprint, 6))) return;
+
+    const sampleLines = [
+        ...stalledAccepted.slice(0, 3).map(c => `ACCEPTED: ${c.fullName || c.id}`),
+        ...overdueTrainingScheduled.slice(0, 2).map(c => `TRAINING overdue: ${c.fullName || c.id}`),
+        ...overdueDiscoveryScheduled.slice(0, 2).map(c => `DISCOVERY overdue: ${c.fullName || c.id}`),
+        ...staleScreeningInvites.slice(0, 2).map(c => `INVITE stale: ${c.fullName || c.id}`),
+        ...blockers.slice(0, 2).map(c => `BLOCKER: ${c.fullName || c.id}`),
+    ].slice(0, 8);
+
+    await bot.api.sendMessage(
+        ADMIN_IDS[0]!,
+        `⚠️ <b>Pipeline health check</b>\n\n${messageParts.join("\n")}${sampleLines.length > 0 ? `\n\n${sampleLines.map(line => `• ${line}`).join("\n")}` : ""}`,
+        { parse_mode: "HTML" }
+    ).catch(() => {});
+    await saveFunnelAlertState("PIPELINE_HEALTH_ALERT", fingerprint);
 }
 
 /**
@@ -1328,8 +1607,7 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
             where: {
                 status: CandidateStatus.STAGING_ACTIVE,
                 firstShiftDate: { not: null, lte: oneHourAgo },
-                // notificationSent is true when staging was activated
-                notificationSent: true
+                stagingNotifiedAt: { not: null }
             },
             include: { user: true, location: true }
         });

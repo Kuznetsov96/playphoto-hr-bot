@@ -72,11 +72,12 @@ async function refreshStats(ctx: MyContext) {
     const locationId = ctx.session.broadcastLocationId;
     const locationName = ctx.session.broadcastLocationName;
 
-    const [stats, weeklyNew] = await Promise.all([
+    const [stats, weeklyNew, health] = await Promise.all([
         statsService.getCandidateFunnelStats(city, locationId),
-        statsService.getWeeklyNewCount(city, locationId)
+        statsService.getWeeklyNewCount(city, locationId),
+        statsService.getPipelineHealthReport(city, locationId)
     ]);
-    const text = statsService.formatFunnelDashboard(stats, weeklyNew, city, locationName);
+    const text = statsService.formatFunnelDashboard(stats, weeklyNew, city, locationName, health);
     await ScreenManager.renderScreen(ctx, text, "admin-stats");
 }
 
