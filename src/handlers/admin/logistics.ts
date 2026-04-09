@@ -7,6 +7,7 @@ import { Menu } from "@grammyjs/menu";
 import { menuRegistry } from "../../utils/menu-registry.js";
 import { TEAM_CHATS } from "../../config.js";
 import { audit } from "../../core/audit-logger.js";
+import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../utils/logistics-formatters.js";
 
 export const adminLogisticsHandlers = new Composer<MyContext>();
 
@@ -262,7 +263,23 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_details_(.+)$/, async (
 // View Parcel Photo
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true, responsibleStaff: true } });
+    const parcel = await prisma.parcel.findUnique({
+        where: { id: parcelId },
+        include: {
+            location: true,
+            responsibleStaff: {
+                include: {
+                    user: {
+                        select: {
+                            firstName: true,
+                            lastName: true,
+                            username: true
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     if (parcel && parcel.contentPhotoIds.length > 0) {
         const kb = new InlineKeyboard()
@@ -276,8 +293,8 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
 
         const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
             ttn: parcel.ttn,
-            location: parcel.location?.name || 'Unknown',
-            sender: parcel.responsibleStaff?.fullName || 'Photographer'
+            location: formatLogisticsLocation(parcel.location),
+            sender: formatLogisticsPhotographerName(parcel.responsibleStaff)
         });
 
         const chatId = ctx.chat!.id;
