@@ -980,6 +980,7 @@ export const hrService = {
             status: CandidateStatus.STAGING_ACTIVE,
             currentStep: FunnelStep.FIRST_SHIFT,
             notificationSent: true,
+            stagingNotifiedAt: new Date(),
         });
 
         return { candidateNotified, partnerNotified, candName, partnerName };

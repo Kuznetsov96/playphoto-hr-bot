@@ -93,6 +93,7 @@ model Candidate {
   trainingCompletedAt  DateTime?
   hrDecision           String?
   notificationSent     Boolean         @default(false)
+  stagingNotifiedAt    DateTime?
   interviewInvitedAt   DateTime?
   materialsSent        Boolean         @default(false)
   materialsSentAt      DateTime?
@@ -130,6 +131,7 @@ model Candidate {
   quizScore         Int?
   quizAnswers       String? // JSON string of answers
   statusChangedAt   DateTime? // When status last changed
+  pipelineTouchedAt DateTime        @default(now()) // Any meaningful candidate pipeline action
   applications      Application[]
   interviewSlot     InterviewSlot? @relation(fields: [interviewSlotId], references: [id])
   location          Location?      @relation(fields: [locationId], references: [id])

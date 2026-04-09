@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Candidate"
+ADD COLUMN "stagingNotifiedAt" TIMESTAMP(3),
+ADD COLUMN "pipelineTouchedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

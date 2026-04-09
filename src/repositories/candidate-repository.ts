@@ -76,6 +76,13 @@ export class CandidateRepository {
         return { normalizedData, transition };
     }
 
+    private touchPipeline<T extends Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput>(data: T): T {
+        return {
+            ...data,
+            pipelineTouchedAt: new Date(),
+        };
+    }
+
     async findByTelegramId(telegramId: number, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations | null> {
         return (tx || prisma).candidate.findFirst({
             where: { user: { telegramId: BigInt(telegramId) } },
@@ -264,12 +271,12 @@ export class CandidateRepository {
         if (!oldCandidate) {
             throw new Error(`Candidate ${id} not found`);
         }
-        let normalizedData = data;
-        let transition = buildNextCandidateFunnelState(oldCandidate, data);
+        let normalizedData = this.touchPipeline(data);
+        let transition = buildNextCandidateFunnelState(oldCandidate, normalizedData);
 
         try {
-            const validation = this.validateFunnelPatch(oldCandidate, data);
-            normalizedData = validation.normalizedData as Prisma.CandidateUpdateInput;
+            const validation = this.validateFunnelPatch(oldCandidate, normalizedData);
+            normalizedData = this.touchPipeline(validation.normalizedData as Prisma.CandidateUpdateInput);
             transition = validation.transition;
         } catch (error) {
             if (error instanceof InvalidCandidateTransitionError) {
@@ -514,7 +521,7 @@ export class CandidateRepository {
     }
 
     async updateMany(where: Prisma.CandidateWhereInput, data: Prisma.CandidateUpdateManyMutationInput) {
-        let normalizedData = data;
+        let normalizedData = this.touchPipeline(data);
         const touchesFunnelFields = data.status !== undefined ||
             data.currentStep !== undefined ||
             data.materialsSent !== undefined ||
@@ -542,8 +549,8 @@ export class CandidateRepository {
 
             for (const candidate of candidates) {
                 try {
-                    const validation = this.validateFunnelPatch(candidate, data);
-                    normalizedData = validation.normalizedData as Prisma.CandidateUpdateManyMutationInput;
+                    const validation = this.validateFunnelPatch(candidate, normalizedData);
+                    normalizedData = this.touchPipeline(validation.normalizedData as Prisma.CandidateUpdateManyMutationInput);
                 } catch (error) {
                     if (error instanceof InvalidCandidateTransitionError) {
                         logBusinessEvent({
@@ -611,8 +618,12 @@ export class CandidateRepository {
     }
 
     async upsert(args: Prisma.CandidateUpsertArgs): Promise<CandidateWithRelations> {
+        const createData = this.touchPipeline(args.create as Prisma.CandidateUpdateInput) as typeof args.create;
+        const updateData = this.touchPipeline(args.update as Prisma.CandidateUpdateInput) as typeof args.update;
         return prisma.candidate.upsert({
             ...args,
+            create: createData,
+            update: updateData,
             include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
         }) as unknown as Promise<CandidateWithRelations>;
     }
