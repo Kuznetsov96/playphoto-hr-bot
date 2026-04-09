@@ -607,13 +607,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                 // processStalePipelineAlert disabled: HR/Mentor/Admin see their queues in the bot menus
             }
 
-            // 11.1 NEW: Notify candidates who haven't picked an interview slot (24h after invite)
-            await processInviteReminders(bot);
-
-            // 11.2 NEW: Notify candidates who haven't picked a discovery/training slot (24h after access)
+            // 11.1 NEW: Notify candidates who haven't picked a discovery/training slot (24h after access)
             await processTrainingReminders(bot);
 
-            // 11.3 Funnel anomaly detection and alerting
+            // 11.2 Funnel anomaly detection and alerting
             await processFunnelAnomalies(bot);
 
             // 12. NDA Reminders (Every 24h until confirmed)
