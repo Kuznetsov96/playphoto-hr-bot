@@ -13,6 +13,17 @@ const t = (key: string, args?: any) => {
 
 import prisma from "../db/core.js";
 
+type PipelineHealthReport = {
+    staleScreening: number;
+    staleWaitlistHr: number;
+    stalledAccepted: number;
+    overdueDiscovery: number;
+    overdueTraining: number;
+    blockers: number;
+    staleFinalStep: number;
+    examples: string[];
+};
+
 export const statsService = {
     async getCandidateFunnelStats(city?: string, locationId?: string) {
         return candidateRepository.getFunnelStats(city, locationId);
@@ -41,7 +52,121 @@ export const statsService = {
         });
     },
 
-    formatFunnelDashboard(stats: Record<string, number>, weeklyNew: number, city?: string, locationName?: string): string {
+    async getPipelineHealthReport(city?: string, locationId?: string): Promise<PipelineHealthReport> {
+        const scope: any = locationId ? { locationId } : city ? { city } : {};
+        const now = new Date();
+        const screeningCutoff = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+        const waitlistCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const acceptedCutoff = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+        const mentorOutcomeCutoff = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+        const finalStepCutoff = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+
+        const [
+            staleScreening,
+            staleWaitlistHr,
+            stalledAccepted,
+            overdueDiscovery,
+            overdueTraining,
+            blockers,
+            staleFinalStep,
+            exampleCandidates,
+        ] = await Promise.all([
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: 'SCREENING',
+                    currentStep: 'INTERVIEW',
+                    interviewSlotId: null,
+                    interviewInvitedAt: { lte: screeningCutoff }
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: 'WAITLIST_HR',
+                    pipelineTouchedAt: { lte: waitlistCutoff }
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: 'ACCEPTED',
+                    materialsSent: true,
+                    discoverySlotId: null,
+                    trainingSlotId: null,
+                    pipelineTouchedAt: { lte: acceptedCutoff }
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: 'DISCOVERY_SCHEDULED',
+                    discoverySlot: { is: { startTime: { lt: mentorOutcomeCutoff } } }
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: 'TRAINING_SCHEDULED',
+                    trainingSlot: { is: { startTime: { lt: mentorOutcomeCutoff } } }
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: 'BLOCKER'
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    ...scope,
+                    status: { in: ['NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'STAGING_ACTIVE', 'READY_FOR_HIRE', 'AWAITING_FIRST_SHIFT'] as any },
+                    pipelineTouchedAt: { lte: finalStepCutoff }
+                }
+            }),
+            prisma.candidate.findMany({
+                where: {
+                    ...scope,
+                    OR: [
+                        {
+                            status: 'ACCEPTED',
+                            materialsSent: true,
+                            discoverySlotId: null,
+                            trainingSlotId: null,
+                            pipelineTouchedAt: { lte: acceptedCutoff }
+                        },
+                        {
+                            status: 'TRAINING_SCHEDULED',
+                            trainingSlot: { is: { startTime: { lt: mentorOutcomeCutoff } } }
+                        },
+                        {
+                            status: 'DISCOVERY_SCHEDULED',
+                            discoverySlot: { is: { startTime: { lt: mentorOutcomeCutoff } } }
+                        },
+                        {
+                            status: 'BLOCKER'
+                        }
+                    ]
+                },
+                select: { fullName: true, status: true },
+                take: 5,
+                orderBy: { pipelineTouchedAt: 'asc' }
+            })
+        ]);
+
+        return {
+            staleScreening,
+            staleWaitlistHr,
+            stalledAccepted,
+            overdueDiscovery,
+            overdueTraining,
+            blockers,
+            staleFinalStep,
+            examples: exampleCandidates.map(c => `${c.fullName || 'Candidate'} (${c.status})`)
+        };
+    },
+
+    formatFunnelDashboard(stats: Record<string, number>, weeklyNew: number, city?: string, locationName?: string, health?: PipelineHealthReport): string {
         const total = stats['TOTAL'] ?? 0;
 
         const screening = stats['SCREENING'] ?? 0;
@@ -93,11 +218,22 @@ export const statsService = {
             `<b>3. HEALTH CHECK</b>\n` +
             `⏳ Decision Pending: <b>${decisionPending}</b> ${decisionPending > 5 ? '⚠️' : ''}\n` +
             `📦 Waitlist: <b>${waitlist}</b>\n` +
-            `💍 Manual Review: <b>${manualReview}</b>\n\n` +
+            `💍 Manual Review: <b>${manualReview}</b>\n` +
+            (health ? (
+                `🚨 Stale Screening Invites: <b>${health.staleScreening}</b>\n` +
+                `🕰️ Old Waitlist HR: <b>${health.staleWaitlistHr}</b>\n` +
+                `🎓 Accepted No Booking: <b>${health.stalledAccepted}</b>\n` +
+                `🏁 Overdue Mentor Results: <b>${health.overdueDiscovery + health.overdueTraining}</b>\n` +
+                `🧱 Blockers: <b>${health.blockers}</b>\n` +
+                `📋 Stale Final Step: <b>${health.staleFinalStep}</b>\n\n`
+            ) : `\n`) +
             `<b>4. CURRENT FLOW</b>\n` +
             `📅 Scheduled: <b>${interviewScheduled}</b>\n` +
             `🎓 In Training: <b>${onTraining}</b>\n` +
             `📸 Staging: <b>${inStaging}</b>\n\n` +
-            `❌ Rejected: ${rejected}`;
+            `❌ Rejected: ${rejected}` +
+            (health && health.examples.length > 0
+                ? `\n\n<b>Sample Risk Cases</b>\n${health.examples.map(example => `• ${example}`).join('\n')}`
+                : '');
     }
 };

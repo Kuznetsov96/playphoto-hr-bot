@@ -56,11 +56,12 @@ adminOpsMenu.dynamic(async (ctx, range) => {
             const city = ctx.session.broadcastCity;
             const locationId = ctx.session.broadcastLocationId;
             const locationName = ctx.session.broadcastLocationName;
-            const [stats, weeklyNew] = await Promise.all([
+            const [stats, weeklyNew, health] = await Promise.all([
                 statsService.getCandidateFunnelStats(city, locationId),
-                statsService.getWeeklyNewCount(city, locationId)
+                statsService.getWeeklyNewCount(city, locationId),
+                statsService.getPipelineHealthReport(city, locationId)
             ]);
-            const text = statsService.formatFunnelDashboard(stats, weeklyNew, city, locationName);
+            const text = statsService.formatFunnelDashboard(stats, weeklyNew, city, locationName, health);
             await ScreenManager.renderScreen(ctx, text, "admin-stats", { pushToStack: true });
         }).row();
     }
@@ -182,7 +183,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
     const isReadyForStaging = !!(cand.firstShiftDate && cand.locationId && cand.firstShiftPartnerId);
     const isStagingStatus = cand.status === CandidateStatus.OFFLINE_STAGING || cand.status === CandidateStatus.AWAITING_FIRST_SHIFT;
 
-    if (isSuper && isReadyForStaging && (cand.status === CandidateStatus.TRAINING_COMPLETED || cand.status === CandidateStatus.OFFLINE_STAGING) && !cand.notificationSent) {
+    if (isSuper && isReadyForStaging && (cand.status === CandidateStatus.TRAINING_COMPLETED || cand.status === CandidateStatus.OFFLINE_STAGING) && !cand.stagingNotifiedAt) {
         range.text("🚀 Confirm & Notify Staging", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
             const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
@@ -200,7 +201,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
-    if (isMentor && cand.status === CandidateStatus.OFFLINE_STAGING && cand.notificationSent) {
+    if (isMentor && cand.status === CandidateStatus.OFFLINE_STAGING && cand.stagingNotifiedAt) {
         range.text("✅ Pass Staging", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
             const res = await hrService.completeOfflineStaging(cand.id, true);
@@ -562,7 +563,8 @@ adminRecruitmentHandlers.callbackQuery(/^staging_(.+)_date_(.+)$/, async (ctx: M
         firstShiftDate: date,
         status: keepStatus_d as any,
         currentStep: FunnelStep.FIRST_SHIFT,
-        notificationSent: false
+        notificationSent: false,
+        stagingNotifiedAt: null
     };
     // Auto-set default time if not already set
     if (!currentCand_d?.firstShiftTime) {
@@ -596,7 +598,8 @@ adminRecruitmentHandlers.on("message:text", async (ctx, next) => {
             firstShiftTime: ctx.message.text,
             status: keepStatus_t as any,
             currentStep: FunnelStep.FIRST_SHIFT,
-            notificationSent: false
+            notificationSent: false,
+            stagingNotifiedAt: null
         });
         ctx.session.step = "idle";
 
