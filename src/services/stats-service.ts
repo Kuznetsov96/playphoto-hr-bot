@@ -90,6 +90,12 @@ type DashboardData = {
     actions: string[];
 };
 
+type LossDrilldownReport = {
+    byStage: Array<{ stage: string; count: number; share: number }>;
+    byLocation: Array<{ city: string; location: string; count: number; share: number }>;
+    byReason: Array<{ reason: string; count: number; share: number }>;
+};
+
 const RESERVE_STATUSES = new Set<CandidateStatus>([
     CandidateStatus.WAITLIST,
     CandidateStatus.WAITLIST_HR,
@@ -777,6 +783,86 @@ export const statsService = {
     async buildManagementDashboard(city?: string, locationId?: string, locationName?: string): Promise<string> {
         const data = await this.getManagementDashboardData(city, locationId);
         return this.formatManagementDashboard(data, city, locationName);
+    },
+
+    async getLossDrilldownReport(city?: string, locationId?: string): Promise<LossDrilldownReport> {
+        const scope = buildScope(city, locationId);
+        const rejected = await prisma.candidate.findMany({
+            where: {
+                ...scope,
+                status: CandidateStatus.REJECTED,
+            },
+            select: {
+                lossStage: true,
+                lossReason: true,
+                city: true,
+                location: {
+                    select: {
+                        name: true,
+                    }
+                }
+            }
+        });
+
+        const byStage = new Map<string, number>();
+        const byReason = new Map<string, number>();
+        const byLocation = new Map<string, { city: string; location: string; count: number }>();
+
+        for (const candidate of rejected) {
+            const stage = candidate.lossStage || "UNKNOWN";
+            const reason = candidate.lossReason || "UNKNOWN";
+            const locationName = candidate.location?.name || "Unknown location";
+            const cityName = candidate.city || "Unknown city";
+
+            byStage.set(stage, (byStage.get(stage) || 0) + 1);
+            byReason.set(reason, (byReason.get(reason) || 0) + 1);
+
+            const locationKey = `${cityName}::${locationName}`;
+            const locationEntry = byLocation.get(locationKey) || { city: cityName, location: locationName, count: 0 };
+            locationEntry.count++;
+            byLocation.set(locationKey, locationEntry);
+        }
+
+        const total = rejected.length || 1;
+        return {
+            byStage: Array.from(byStage.entries())
+                .map(([stage, count]) => ({ stage, count, share: pct(count, total) }))
+                .sort((a, b) => b.count - a.count),
+            byLocation: Array.from(byLocation.values())
+                .map((entry) => ({ ...entry, share: pct(entry.count, total) }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 10),
+            byReason: Array.from(byReason.entries())
+                .map(([reason, count]) => ({ reason, count, share: pct(count, total) }))
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 10),
+        };
+    },
+
+    async buildLossDrilldown(city?: string, locationId?: string, locationName?: string): Promise<string> {
+        const report = await this.getLossDrilldownReport(city, locationId);
+        let locationLabel = "🌍 <b>All Cities</b>";
+        if (locationName) {
+            locationLabel = `📍 City: <b>${city}</b>\n🏠 Location: <b>${locationName}</b>`;
+        } else if (city) {
+            locationLabel = `📍 City: <b>${city}</b>`;
+        }
+
+        const stageLines = report.byStage.length > 0
+            ? report.byStage.map((item) => `• ${item.stage}: <b>${item.count}</b> (${item.share}%)`).join("\n")
+            : "• No rejected candidates";
+        const reasonLines = report.byReason.length > 0
+            ? report.byReason.map((item) => `• ${item.reason}: <b>${item.count}</b> (${item.share}%)`).join("\n")
+            : "• No rejected candidates";
+        const locationLines = report.byLocation.length > 0
+            ? report.byLocation.map((item) => `• ${item.city} / ${item.location}: <b>${item.count}</b> (${item.share}%)`).join("\n")
+            : "• No rejected candidates";
+
+        return `<b>🔎 Loss Drilldown</b>\n${locationLabel}\n` +
+            `───────────────────\n\n` +
+            `<b>Losses By Stage</b>\n${stageLines}\n\n` +
+            `<b>Top Loss Reasons</b>\n${reasonLines}\n\n` +
+            `<b>Losses By Location</b>\n${locationLines}`;
     },
 
     formatFunnelDashboard(stats: Record<string, number>, weeklyNew: number, city?: string, locationName?: string, health?: PipelineHealthReport): string {
