@@ -98,6 +98,9 @@ model Candidate {
   materialsSent        Boolean         @default(false)
   materialsSentAt      DateTime?
   candidateDecision    String?
+  lossStage            String?
+  lossReason           String?
+  lostAt               DateTime?
   hrScore              Int?
   mentorScore          Int?
   hrComment            String?
