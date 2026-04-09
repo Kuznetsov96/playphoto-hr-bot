@@ -1,0 +1,4 @@
+ALTER TABLE "Candidate"
+ADD COLUMN "lossStage" TEXT,
+ADD COLUMN "lossReason" TEXT,
+ADD COLUMN "lostAt" TIMESTAMP(3);

@@ -49,6 +49,121 @@ export type CandidateWithRelations = Candidate & {
 };
 
 export class CandidateRepository {
+    private readScalarValue<T>(value: T | { set?: T } | undefined): T | undefined {
+        if (value === undefined) return undefined;
+        if (value && typeof value === "object" && "set" in (value as { set?: T })) {
+            return (value as { set?: T }).set;
+        }
+        return value as T;
+    }
+
+    private deriveLossStageFromStatus(status: CandidateStatus, step: FunnelStep): string {
+        if (
+            status === CandidateStatus.SCREENING ||
+            status === CandidateStatus.MANUAL_REVIEW ||
+            status === CandidateStatus.WAITLIST ||
+            status === CandidateStatus.WAITLIST_HR ||
+            status === CandidateStatus.WAITLIST_MENTOR
+        ) {
+            if (step === FunnelStep.INTERVIEW) return "INTERVIEW_BOOKING";
+            return "SCREENING";
+        }
+        if (
+            status === CandidateStatus.INTERVIEW_SCHEDULED ||
+            status === CandidateStatus.INTERVIEW_COMPLETED ||
+            status === CandidateStatus.DECISION_PENDING
+        ) {
+            return "INTERVIEW";
+        }
+        if (
+            status === CandidateStatus.ACCEPTED ||
+            status === CandidateStatus.DISCOVERY_SCHEDULED ||
+            status === CandidateStatus.DISCOVERY_COMPLETED
+        ) {
+            return "MENTOR_INTRO";
+        }
+        if (
+            status === CandidateStatus.TRAINING_SCHEDULED ||
+            status === CandidateStatus.TRAINING_COMPLETED
+        ) {
+            return "TRAINING";
+        }
+        if (
+            status === CandidateStatus.NDA ||
+            status === CandidateStatus.KNOWLEDGE_TEST ||
+            status === CandidateStatus.STAGING_SETUP ||
+            status === CandidateStatus.STAGING_ACTIVE ||
+            status === CandidateStatus.OFFLINE_STAGING ||
+            status === CandidateStatus.READY_FOR_HIRE ||
+            status === CandidateStatus.AWAITING_FIRST_SHIFT ||
+            status === CandidateStatus.BLOCKER
+        ) {
+            return "FINAL_PREP";
+        }
+        if (status === CandidateStatus.HIRED || step === FunnelStep.FIRST_SHIFT) {
+            return "ONBOARDING";
+        }
+        return "UNKNOWN";
+    }
+
+    private deriveLossReason(
+        oldCandidate: CandidateFunnelSnapshot,
+        data: Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput
+    ): string {
+        const hrDecision = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).hrDecision as any);
+        const candidateDecision = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).candidateDecision as any);
+
+        if (hrDecision === "NOSHOW") return "INTERVIEW_NO_SHOW";
+        if (hrDecision === "REJECTED_SYSTEM_UNDERAGE") return "UNDERAGE";
+        if (hrDecision === "AGE_LIMIT") return "AGE_LIMIT";
+        if (candidateDecision?.includes("Бот заблоковано")) return "BOT_BLOCKED";
+        if (candidateDecision?.includes("відмовилась від участі")) return "CANDIDATE_WITHDREW";
+        if (candidateDecision?.includes("не актуально")) return "CANDIDATE_DECLINED";
+        if (candidateDecision?.includes("скасувала заявку")) return "CANDIDATE_CANCELLED";
+
+        const stage = this.deriveLossStageFromStatus(oldCandidate.status, oldCandidate.currentStep);
+        switch (stage) {
+            case "SCREENING": return "SCREENING_REJECTED";
+            case "INTERVIEW_BOOKING": return "INTERVIEW_BOOKING_DROPOFF";
+            case "INTERVIEW": return hrDecision === "REJECTED" ? "INTERVIEW_REJECTED" : "INTERVIEW_DROPOFF";
+            case "MENTOR_INTRO": return "MENTOR_STAGE_REJECTED";
+            case "TRAINING": return "TRAINING_FAILED";
+            case "FINAL_PREP": return "FINAL_STEP_DROPOFF";
+            case "ONBOARDING": return "ONBOARDING_FAILED";
+            default: return "REJECTED";
+        }
+    }
+
+    private enrichLossTracking<T extends Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput>(
+        oldCandidate: CandidateFunnelSnapshot,
+        data: T
+    ): T {
+        const nextStatus = this.readScalarValue<CandidateStatus | null>((data as Prisma.CandidateUpdateInput).status as any);
+        if (nextStatus === CandidateStatus.REJECTED) {
+            const currentLossStage = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).lossStage as any);
+            const currentLossReason = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).lossReason as any);
+            const currentLostAt = this.readScalarValue<Date | null>((data as Prisma.CandidateUpdateInput).lostAt as any);
+
+            return {
+                ...data,
+                lossStage: currentLossStage ?? this.deriveLossStageFromStatus(oldCandidate.status, oldCandidate.currentStep),
+                lossReason: currentLossReason ?? this.deriveLossReason(oldCandidate, data),
+                lostAt: currentLostAt ?? new Date(),
+            };
+        }
+
+        if (nextStatus) {
+            return {
+                ...data,
+                lossStage: null,
+                lossReason: null,
+                lostAt: null,
+            };
+        }
+
+        return data;
+    }
+
     private async getFunnelSnapshot(client: Prisma.TransactionClient | typeof prisma, id: string): Promise<CandidateFunnelSnapshot | null> {
         return client.candidate.findUnique({
             where: { id },
@@ -276,7 +391,9 @@ export class CandidateRepository {
 
         try {
             const validation = this.validateFunnelPatch(oldCandidate, normalizedData);
-            normalizedData = this.touchPipeline(validation.normalizedData as Prisma.CandidateUpdateInput);
+            normalizedData = this.touchPipeline(
+                this.enrichLossTracking(oldCandidate, validation.normalizedData as Prisma.CandidateUpdateInput)
+            );
             transition = validation.transition;
         } catch (error) {
             if (error instanceof InvalidCandidateTransitionError) {
@@ -399,6 +516,10 @@ export class CandidateRepository {
             data: {
                 status: CandidateStatus.WAITLIST_HR,
                 hrDecision: null,
+                candidateDecision: null,
+                lossStage: null,
+                lossReason: null,
+                lostAt: null,
                 notificationSent: false,
                 currentStep: FunnelStep.INTERVIEW,
                 isWaitlisted: true,
@@ -550,7 +671,9 @@ export class CandidateRepository {
             for (const candidate of candidates) {
                 try {
                     const validation = this.validateFunnelPatch(candidate, normalizedData);
-                    normalizedData = this.touchPipeline(validation.normalizedData as Prisma.CandidateUpdateManyMutationInput);
+                    normalizedData = this.touchPipeline(
+                        this.enrichLossTracking(candidate, validation.normalizedData as Prisma.CandidateUpdateManyMutationInput)
+                    );
                 } catch (error) {
                     if (error instanceof InvalidCandidateTransitionError) {
                         logBusinessEvent({
