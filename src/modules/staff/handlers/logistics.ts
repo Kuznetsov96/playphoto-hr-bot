@@ -7,6 +7,7 @@ import logger from "../../../core/logger.js";
 import { audit } from "../../../core/audit-logger.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
+import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../../utils/logistics-formatters.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
@@ -106,7 +107,20 @@ function resetParcelPhotoDraft(ctx: MyContext) {
 async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photoFileIds: string[]) {
     const parcel = await prisma.parcel.findUnique({
         where: { id: parcelId },
-        include: { location: true, responsibleStaff: true }
+        include: {
+            location: true,
+            responsibleStaff: {
+                include: {
+                    user: {
+                        select: {
+                            firstName: true,
+                            lastName: true,
+                            username: true
+                        }
+                    }
+                }
+            }
+        }
     });
 
     if (!parcel) {
@@ -119,8 +133,8 @@ async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photo
 
     const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
         ttn: parcel.ttn,
-        location: parcel.location?.name || 'Unknown',
-        sender: parcel.responsibleStaff?.fullName || 'Photographer'
+        location: formatLogisticsLocation(parcel.location),
+        sender: formatLogisticsPhotographerName(parcel.responsibleStaff)
     });
 
     const threadOptions: Record<string, unknown> = {};
