@@ -8,6 +8,7 @@ export class AccessService {
     public chatId: number;
     public staticJoinLink = "https://t.me/+FuFRMGsvMktkNGFi";
     private api: any; // Raw grammY API instance
+    private revokeInFlight = new Map<string, Promise<void>>();
 
     constructor() {
         this.chatId = TEAM_CHATS.CHANNEL;
@@ -81,38 +82,57 @@ export class AccessService {
      * Removes user from the channel.
      */
     async revokeAccess(telegramId: bigint, reason: string = "Unauthorized") {
+        const key = telegramId.toString();
+        const inFlight = this.revokeInFlight.get(key);
+        if (inFlight) {
+            await inFlight;
+            return;
+        }
+
+        const revokePromise = (async () => {
+            try {
+                securityAudit({
+                    event: "security.channel_access.revoked",
+                    result: "started",
+                    actorType: "system",
+                    telegramId,
+                    entityType: "channel_access",
+                    context: { reason, chatId: this.chatId }
+                });
+                const api = this.getSafeApi();
+                await api.banChatMember(this.chatId, Number(telegramId));
+                await api.unbanChatMember(this.chatId, Number(telegramId));
+                securityAudit({
+                    event: "security.channel_access.revoked",
+                    result: "success",
+                    actorType: "system",
+                    telegramId,
+                    entityType: "channel_access",
+                    context: { reason, chatId: this.chatId }
+                });
+            } catch (e: any) {
+                if (e.description?.includes("user is not a member")) return;
+                securityAudit({
+                    event: "security.channel_access.revoked",
+                    result: "failed",
+                    actorType: "system",
+                    telegramId,
+                    entityType: "channel_access",
+                    error: e.message,
+                    context: { reason, chatId: this.chatId }
+                });
+                logger.error({ err: e, telegramId }, "Failed to revoke channel access");
+            }
+        })();
+
+        this.revokeInFlight.set(key, revokePromise);
+
         try {
-            securityAudit({
-                event: "security.channel_access.revoked",
-                result: "started",
-                actorType: "system",
-                telegramId,
-                entityType: "channel_access",
-                context: { reason, chatId: this.chatId }
-            });
-            const api = this.getSafeApi();
-            await api.banChatMember(this.chatId, Number(telegramId));
-            await api.unbanChatMember(this.chatId, Number(telegramId));
-            securityAudit({
-                event: "security.channel_access.revoked",
-                result: "success",
-                actorType: "system",
-                telegramId,
-                entityType: "channel_access",
-                context: { reason, chatId: this.chatId }
-            });
-        } catch (e: any) {
-            if (e.description?.includes("user is not a member")) return;
-            securityAudit({
-                event: "security.channel_access.revoked",
-                result: "failed",
-                actorType: "system",
-                telegramId,
-                entityType: "channel_access",
-                error: e.message,
-                context: { reason, chatId: this.chatId }
-            });
-            logger.error({ err: e, telegramId }, "Failed to revoke channel access");
+            await revokePromise;
+        } finally {
+            if (this.revokeInFlight.get(key) === revokePromise) {
+                this.revokeInFlight.delete(key);
+            }
         }
     }
 
