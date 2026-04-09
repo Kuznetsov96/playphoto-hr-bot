@@ -21,7 +21,8 @@ export class ScreenManager {
         'selectedOnboardingDate',
         'candidatePage',
         'broadcastCity',
-        'broadcastLocationId'
+        'broadcastLocationId',
+        'statsView'
     ];
 
     /**
