@@ -271,6 +271,74 @@ describe("statsService.formatManagementDashboard", () => {
 });
 
 describe("statsService.getManagementDashboardData", () => {
+    it("counts HR-approved funnel candidates only from the active pipeline", async () => {
+        const health = {
+            staleScreening: 0,
+            staleWaitlistHr: 0,
+            stalledAccepted: 0,
+            overdueDiscovery: 0,
+            overdueTraining: 0,
+            blockers: 0,
+            staleFinalStep: 0,
+            examples: [],
+        };
+        vi.spyOn(statsService, "getPipelineHealthReport").mockResolvedValueOnce(health);
+
+        const location = {
+            id: "loc-khm",
+            name: "Dytyache Horyshche",
+            city: "Хмельницький",
+            neededCount: 3,
+            isHidden: false,
+        };
+        vi.mocked(prisma.location.findMany).mockResolvedValueOnce([location] as any);
+
+        const validUser = { createdAt: new Date("2026-04-01T00:00:00.000Z"), botBlockedAt: null };
+        const baseCandidate = {
+            fullName: "Candidate",
+            currentStep: FunnelStep.INTERVIEW,
+            isWaitlisted: false,
+            isOtherCity: false,
+            gender: "female",
+            birthDate: new Date("2003-01-01T00:00:00.000Z"),
+            candidateDecision: null,
+            lossStage: null,
+            lossReason: null,
+            lostAt: null,
+            statusChangedAt: null,
+            pipelineTouchedAt: new Date("2026-04-01T00:00:00.000Z"),
+            locationId: location.id,
+            user: validUser,
+        };
+
+        vi.mocked(prisma.candidate.findMany).mockResolvedValueOnce([
+            {
+                ...baseCandidate,
+                status: CandidateStatus.ACCEPTED,
+                hrDecision: "ACCEPTED",
+            },
+            {
+                ...baseCandidate,
+                status: CandidateStatus.REJECTED,
+                hrDecision: "ACCEPTED",
+                lossStage: "TRAINING",
+            },
+            {
+                ...baseCandidate,
+                status: CandidateStatus.SCREENING,
+                hrDecision: null,
+            },
+        ] as any);
+
+        const data = await statsService.getManagementDashboardData("Хмельницький");
+
+        expect(data.validTotal).toBe(3);
+        expect(data.activeValidPool).toBe(2);
+        expect(data.funnel.validBase).toBe(2);
+        expect(data.funnel.hrApproved).toBe(1);
+        expect(data.funnel.interviewTrack).toBe(2);
+    });
+
     it("does not count stale isWaitlisted flags as reserve or active pool", async () => {
         const health = {
             staleScreening: 0,
