@@ -8,7 +8,7 @@ import { FunnelStep } from "@prisma/client";
 import { InlineKeyboard, Composer } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
-import { formatCandidateProfile } from "../utils/profile-formatter.js";
+import { formatCandidateProfile, formatMessagePreview } from "../utils/profile-formatter.js";
 import { formatCompactName, shortenName } from "../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
 import { ScreenManager } from "../utils/screen-manager.js";
@@ -36,6 +36,12 @@ const getMentorCandidateProfileText = async (ctx: MyContext, candId: string) => 
         historyScope: "MENTOR",
         historySince
     });
+};
+
+const getInboxMessageSnippet = (candidate: any) => {
+    const latest = candidate.messages?.[0];
+    if (!latest) return "";
+    return formatMessagePreview(latest.content, Boolean(latest.photoId), 32);
 };
 
 export const updateCalendarDashboard = async (ctx: MyContext) => {
@@ -243,10 +249,12 @@ mentorMessagesMenu.dynamic(async (ctx, range) => {
         range.text("No new messages. ✨", (ctx) => ctx.answerCallbackQuery("All read!")).row();
     } else {
         for (const cand of candidates) {
-            const lastMsg = (cand as any).messages?.[0]?.content || "Media message";
-            const snippet = lastMsg.length > 20 ? lastMsg.substring(0, 17) + "..." : lastMsg;
+            const snippet = getInboxMessageSnippet(cand);
+            const label = snippet
+                ? `💬 ${formatCompactName(cand.fullName)} • ${snippet}`
+                : `💬 ${formatCompactName(cand.fullName)}`;
 
-            range.text(`💬 ${cand.fullName}: "${snippet}"`, async (ctx) => {
+            range.text(label, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
                 await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });

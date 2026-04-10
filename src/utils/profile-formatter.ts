@@ -33,6 +33,16 @@ const CITY_TO_EN: Record<string, string> = {
 const FINAL_STEP_STATUSES = ["NDA", "KNOWLEDGE_TEST", "STAGING_SETUP", "STAGING_ACTIVE", "READY_FOR_HIRE"];
 const OLD_STAGING_STATUSES = ["OFFLINE_STAGING", "AWAITING_FIRST_SHIFT", "HIRED"];
 
+const HIDDEN_HR_TECHNICAL_STATUSES = ["WAITLIST", "WAITLIST_HR"];
+
+export function formatMessagePreview(rawContent: string | null | undefined, hasMedia: boolean, maxLength = 260): string {
+    const fallback = hasMedia ? "📎 Media message" : "Message without text";
+    const normalized = (rawContent || "").replace(/\s+/g, " ").trim();
+    if (normalized === "[Media]") return "📎 Media message";
+    const content = normalized || fallback;
+    return content.length > maxLength ? `${content.substring(0, Math.max(0, maxLength - 3))}...` : content;
+}
+
 export async function formatCandidateProfile(
     ctx: any,
     candidate: any,
@@ -90,8 +100,11 @@ export async function formatCandidateProfile(
             text += `\n🗓 <b>${slotTime}</b>\n`;
         } else if (!candidate.hrDecision && !["MANUAL_REVIEW", "SCREENING"].includes(status)) {
             if (options.viewerRole !== "MENTOR") {
-                const statusLabel = t(`status-${status}`);
-                text += `📊 <code>${statusLabel}</code>\n`;
+                const shouldShowStatus = !HIDDEN_HR_TECHNICAL_STATUSES.includes(status);
+                if (shouldShowStatus) {
+                    const statusLabel = t(`status-${status}`);
+                    text += `📊 <code>${statusLabel}</code>\n`;
+                }
             }
         }
     }
@@ -236,18 +249,16 @@ export async function formatCandidateProfile(
                 history = history.filter(msg => msg.createdAt >= since);
             }
         }
-        const last7 = history.slice(0, 7).reverse();
+        const last5 = history.slice(0, 5).reverse();
 
-        if (last7.length > 0) {
-            text += `\n📜 <b>History Preview:</b>\n`;
-            for (const msg of last7) {
+        if (last5.length > 0) {
+            text += `\n📜 <b>Recent messages:</b>\n`;
+            for (const msg of last5) {
                 const time = msg.createdAt.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                 const icon = msg.sender === "USER" ? "📥" : "📤";
                 const decryptedContent = cryptoUtility.decrypt(msg.content);
-                const content = decryptedContent && decryptedContent.length > 60
-                    ? decryptedContent.substring(0, 57) + "..."
-                    : decryptedContent;
-                text += `${icon} <i>${time}:</i> ${escapeHtml(content || "[Media]")}\n`;
+                const content = formatMessagePreview(decryptedContent, Boolean(msg.photoId));
+                text += `${icon} <i>${time}:</i> ${escapeHtml(content)}\n`;
             }
         }
     }
