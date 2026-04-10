@@ -13,6 +13,16 @@ import logger from "../core/logger.js";
 
 export const hrHandlers = new Composer<MyContext>();
 
+async function buildInterviewSlotsCreatedKeyboard() {
+    const stats = await hrService.getHubStats();
+    const kb = new InlineKeyboard();
+    if ((stats.noSlotCount || 0) > 0) {
+        kb.text(`🔔 Notify Needs Slot (${stats.noSlotCount})`, "hr_notify_waitlist").row();
+    }
+    kb.text(STAFF_TEXTS["hr-btn-back-to-calendar"], "hr_main_calendar");
+    return kb;
+}
+
 hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     await ctx.answerCallbackQuery();
@@ -178,11 +188,7 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             try {
                 // Now using 20 minutes as default from InterviewService update
                 const { createdCount } = await interviewService.createSessionWithSlots(start, end);
-                const { hrService } = await import("../services/hr-service.js");
-                const stats = await hrService.getHubStats();
-                const kb = new InlineKeyboard();
-                if (stats.waitlistCount > 0) kb.text(`🔔 Notify Waitlist (${stats.waitlistCount})`, "hr_notify_waitlist").row();
-                kb.text(STAFF_TEXTS["hr-btn-back-to-calendar"], "hr_main_calendar");
+                const kb = await buildInterviewSlotsCreatedKeyboard();
                 await ctx.reply(STAFF_TEXTS["hr-success-created-slots"]({ count: createdCount, date: start.toLocaleDateString('uk-UA') }), { reply_markup: kb });
                 ctx.session.step = "idle";
             } catch (e: any) {
@@ -202,7 +208,7 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
 
             try {
                 await interviewService.createSingleSlot(start);
-                const kb = new InlineKeyboard().text(STAFF_TEXTS["hr-btn-back-to-calendar"], "hr_main_calendar");
+                const kb = await buildInterviewSlotsCreatedKeyboard();
                 await ctx.reply(`✅ Slot for ${start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })} created and added to calendar!`, { reply_markup: kb });
                 ctx.session.step = "idle";
             } catch (e: any) {
@@ -254,6 +260,18 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
         }
     }
     await next();
+});
+
+// --- NOTIFY CANDIDATES WHO NEED INTERVIEW SLOTS ---
+hrHandlers.callbackQuery("hr_notify_waitlist", async (ctx) => {
+    await ctx.answerCallbackQuery("Sending slot invites...");
+    try {
+        const count = await hrService.notifyWaitlist(ctx.api);
+        await ctx.reply(`✅ Sent interview slot invite(s): ${count}`);
+    } catch (e) {
+        logger.error({ err: e }, "Failed to notify candidates who need interview slots");
+        await ctx.reply("❌ Failed to send slot invites.");
+    }
 });
 
 // --- INDIVIDUAL INVITATION ---

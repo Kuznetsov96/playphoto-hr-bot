@@ -14,6 +14,13 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
 import { audit } from "../core/audit-logger.js";
 
+export const HR_INTERVIEW_WAITLIST_REASONS = {
+    NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
+    NO_DATE_FITS: "NO_DATE_FITS"
+} as const;
+
+export type HrInterviewWaitlistReason = typeof HR_INTERVIEW_WAITLIST_REASONS[keyof typeof HR_INTERVIEW_WAITLIST_REASONS];
+
 function isUnknownCandidateStatusError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("not found in enum 'CandidateStatus'");
@@ -124,7 +131,13 @@ export const hrService = {
                     currentStep: { in: [FunnelStep.INITIAL_TEST, FunnelStep.INTERVIEW] }
                 }
             }),
-            candidateRepository.countByStatusAndSlot(CandidateStatus.WAITLIST, null, { currentStep: FunnelStep.INTERVIEW }),
+            prisma.candidate.count({
+                where: {
+                    status: { in: [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST] },
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.INTERVIEW
+                }
+            }),
             this.getFinalStepStats()
         ]);
 
@@ -409,6 +422,8 @@ export const hrService = {
             await candidateRepository.update(candId, {
                 notificationSent: true,
                 status: CandidateStatus.SCREENING,
+                isWaitlisted: false,
+                interviewWaitlistReason: null,
                 interviewInvitedAt: new Date()
             });
 
@@ -527,7 +542,7 @@ export const hrService = {
     },
 
     async getWaitlistCities() {
-        const candidates = await this.getWaitlistCandidates();
+        const candidates = await this.getWaitlistLocationFull();
         const activeCities = await locationRepository.findAllCities(true);
         const cities = new Set<string>();
         candidates.forEach(c => {
@@ -539,7 +554,7 @@ export const hrService = {
     },
 
     async getWaitlistLocationsByCity(city: string) {
-        const candidates = await this.getWaitlistCandidates();
+        const candidates = await this.getWaitlistLocationFull();
         const cityCands = candidates.filter(c => c.city === city);
         const locations: Record<string, { id: string | null, name: string, count: number }> = {};
 
@@ -554,7 +569,7 @@ export const hrService = {
     },
 
     async getWaitlistCandidatesByLocationPaginated(city: string, locationId: string | null, page: number, pageSize: number = 5) {
-        const candidates = await this.getWaitlistCandidates();
+        const candidates = await this.getWaitlistLocationFull();
         const filtered = candidates.filter(c =>
             c.city === city &&
             (locationId === null ? c.locationId === null : c.locationId === locationId)
@@ -577,12 +592,24 @@ export const hrService = {
     },
 
     // Тип 2: Отримали запрошення, але не знайшли зручного слоту
-    async getWaitlistNoSlot() {
-        return candidateRepository.findByStatusWithUser(
-            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], {
+    async getWaitlistNoSlot(reason?: HrInterviewWaitlistReason | null) {
+        const where: Prisma.CandidateWhereInput = {
             isWaitlisted: true,
             currentStep: FunnelStep.INTERVIEW
-        });
+        };
+        if (reason === null) {
+            where.OR = [
+                { interviewWaitlistReason: null },
+                { NOT: { interviewWaitlistReason: { in: Object.values(HR_INTERVIEW_WAITLIST_REASONS) } } }
+            ];
+        } else if (reason !== undefined) {
+            where.interviewWaitlistReason = reason;
+        }
+
+        return candidateRepository.findByStatusWithUser(
+            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+            where
+        );
     },
 
     async getWaitlistLocations() {
@@ -1005,7 +1032,9 @@ export const hrService = {
                 await candidateRepository.update(cand.id, {
                     status: CandidateStatus.SCREENING,
                     isWaitlisted: false,
-                    notificationSent: true
+                    notificationSent: true,
+                    interviewWaitlistReason: null,
+                    interviewInvitedAt: new Date()
                 });
                 successCount++;
             } catch (e: any) {

@@ -142,12 +142,13 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
   "mentor-btn-manual-book": `🗓️ Schedule Manually`,
   "mentor-btn-resend-materials": `♻️ Resend Base`,
   "mentor-btn-remind-booking": `🔔 Remind Booking`,
-  "hr-help-waitlist": `⏳ <b>Waitlist</b>
-Candidates who passed initial screening but <b>did not choose a slot</b>.
-👉 Add new slots and then remind them to book!`,
+  "hr-help-waitlist": `⏳ <b>Candidate Pools</b>
+🗓️ <b>Needs Interview Slot</b> — candidates who could not book an interview time.
+📍 <b>Location Reserve</b> — candidates saved for a location that is currently full.
+👉 Add interview slots, then notify the Needs Interview Slot pool.`,
   "hr-label-waitlist-empty": `Everyone is scheduled! 🎉`,
-  "hr-label-waitlist-location-full-header": `📍 Waiting for location spots`,
-  "hr-label-waitlist-no-slot-header": `📅 No suitable slots found`,
+  "hr-label-waitlist-location-full-header": `📍 Location reserve`,
+  "hr-label-waitlist-no-slot-header": `📅 Needs interview slot`,
   "hr-btn-assign-time": `🗓️ Schedule`,
   "hr-label-no-offline-staging": `No one in offline staging. 🌸`,
   "hr-btn-passed": `✅ Pass`,

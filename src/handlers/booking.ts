@@ -16,6 +16,9 @@ import { ScreenManager } from "../utils/screen-manager.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
+const INTERVIEW_WAITLIST_REASON_NO_SLOTS = "NO_SLOTS_AVAILABLE";
+const INTERVIEW_WAITLIST_REASON_NO_DATE_FITS = "NO_DATE_FITS";
+
 export function buildMentorReschedulePatch(status: CandidateStatus) {
     const isDiscovery = status === CandidateStatus.DISCOVERY_SCHEDULED;
 
@@ -285,6 +288,8 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
         if (candidate) {
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.WAITLIST_HR,
+                isWaitlisted: true,
+                currentStep: FunnelStep.INTERVIEW,
                 candidateDecision: null,
                 notificationSent: false,
                 interviewSlot: { disconnect: true },
@@ -306,6 +311,16 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
 
         const slots = await interviewRepository.findActiveSlots();
 
+        if (slots.length === 0) {
+            if (candidate) {
+                await candidateRepository.update(candidate.id, {
+                    interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
+                });
+            }
+            await ctx.editMessageText(`Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`);
+            return;
+        }
+
         const keyboard = new InlineKeyboard();
         slots.slice(0, 20).forEach((s: any, index: number) => {
             const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -313,6 +328,7 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
             keyboard.text(`${dateStr} ${timeStr}`, `book_slot_${s.id}`);
             if ((index + 1) % 2 === 0) keyboard.row();
         });
+        keyboard.row().text("🙋‍♀️ Мені не підходить жодна дата", "no_slots_fit").row();
 
         await ctx.editMessageText("Добре, давай оберемо інший зручний час: 🗓️✨", { reply_markup: keyboard });
 
@@ -335,11 +351,16 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
         // Auto-move to WAITLIST_HR so HR can see them
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
-            { status: CandidateStatus.WAITLIST_HR, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
+            {
+                status: CandidateStatus.WAITLIST_HR,
+                isWaitlisted: true,
+                currentStep: FunnelStep.INTERVIEW,
+                interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
+            }
         );
 
         const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
-        const kb = new InlineKeyboard().text("🔔 Повідомити мене", "no_slots_fit");
+        const kb = new InlineKeyboard().text("🔔 Повідомити мене", "no_slots_available_ack");
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (candidate?.gender !== "male") {
             kb.text("👩‍💼 Написати HR", "contact_hr");
@@ -395,6 +416,10 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     trackMessage(ctx, msg.message_id);
 });
 
+bookingHandlers.callbackQuery("no_slots_available_ack", async (ctx) => {
+    await ctx.answerCallbackQuery("Домовились, повідомимо, щойно з'являться нові вікна ✨");
+});
+
 // 6. Немає вільних слотів / не підходять
 bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -403,7 +428,12 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        { status: CandidateStatus.WAITLIST_HR, isWaitlisted: true, currentStep: FunnelStep.INTERVIEW }
+        {
+            status: CandidateStatus.WAITLIST_HR,
+            isWaitlisted: true,
+            currentStep: FunnelStep.INTERVIEW,
+            interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_DATE_FITS
+        }
     );
 
     await ctx.editMessageText(`Домовились! Як тільки з'являться нові вікна — ти дізнаєшся про це першою. ✨`);

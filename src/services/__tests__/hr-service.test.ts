@@ -3,7 +3,7 @@ import { hrService } from '../hr-service.js';
 import { candidateRepository } from '../../repositories/candidate-repository.js';
 import { interviewRepository } from '../../repositories/interview-repository.js';
 import { locationRepository } from '../../repositories/location-repository.js';
-import { CandidateStatus } from '@prisma/client';
+import { CandidateStatus, FunnelStep } from '@prisma/client';
 
 // Mock Prisma
 vi.mock('../../db/core.js', () => ({
@@ -87,6 +87,11 @@ describe('hrService', () => {
             vi.mocked(candidateRepository.countByStatus).mockResolvedValue(1);
             vi.mocked(candidateRepository.countUnreadByScope).mockResolvedValue(4);
             vi.mocked(candidateRepository.countByOfflineStagingStep).mockResolvedValue(2);
+            const prisma = (await import('../../db/core.js')).default;
+            vi.mocked(prisma.candidate.count)
+                .mockResolvedValueOnce(8) // HR waitlist total
+                .mockResolvedValueOnce(5) // No date fits
+                .mockResolvedValue(1); // Final step stages
 
             const stats = await hrService.getHubStats();
 
@@ -95,6 +100,26 @@ describe('hrService', () => {
             expect(stats.hiredWeek).toBe(2);
             // inboxTotal = tattooCount(1) + unreadCount(4) + noSlotCount(5) + finalStepStats.total(6) = 16
             expect(stats.inboxTotal).toBe(16);
+        });
+
+        it('should count no-slot waitlist candidates using the same filter as the No Date Fits list', async () => {
+            vi.mocked(candidateRepository.countByStatusAndSlot).mockResolvedValue(0);
+            vi.mocked(interviewRepository.countBookedInRange).mockResolvedValue(0);
+            vi.mocked(candidateRepository.countHiredAfter).mockResolvedValue(0);
+            vi.mocked(candidateRepository.countByStatus).mockResolvedValue(0);
+            vi.mocked(candidateRepository.countUnreadByScope).mockResolvedValue(0);
+            const prisma = (await import('../../db/core.js')).default;
+            vi.mocked(prisma.candidate.count).mockResolvedValue(0);
+
+            await hrService.getHubStats();
+
+            expect(prisma.candidate.count).toHaveBeenCalledWith({
+                where: {
+                    status: { in: [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST] },
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.INTERVIEW
+                }
+            });
         });
     });
 
@@ -155,6 +180,80 @@ describe('hrService', () => {
             expect(result).toHaveLength(1);
             expect(result[0].city).toBe('Kyiv');
             expect(result[0].candidateCount).toBe(1);
+        });
+    });
+
+    describe('waitlist pools', () => {
+        it('should build location reserve cities from location-full candidates only', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
+                { id: 'cand1', city: 'Kyiv' },
+                { id: 'cand2', city: 'Lviv' },
+                { id: 'cand3', city: 'Inactive City' }
+            ] as any);
+            vi.mocked(locationRepository.findAllCities).mockResolvedValue(['Kyiv', 'Lviv']);
+
+            const cities = await hrService.getWaitlistCities();
+
+            expect(cities).toEqual(['Kyiv', 'Lviv']);
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                {
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.INITIAL_TEST
+                }
+            );
+        });
+    });
+
+    describe('notifyWaitlist', () => {
+        it('should invite candidates who need interview slots and make them visible to invite reminders', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
+                {
+                    id: 'cand1',
+                    fullName: 'Test Candidate',
+                    user: { telegramId: 123 }
+                }
+            ] as any);
+            vi.mocked(candidateRepository.update).mockResolvedValue({} as any);
+            const api = {
+                sendMessage: vi.fn().mockResolvedValue({})
+            };
+
+            const count = await hrService.notifyWaitlist(api);
+
+            expect(count).toBe(1);
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                {
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.INTERVIEW
+                }
+            );
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
+                status: CandidateStatus.SCREENING,
+                isWaitlisted: false,
+                notificationSent: true,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: expect.any(Date)
+            });
+        });
+
+        it('should filter legacy no-slot candidates without losing unknown reasons', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
+
+            await hrService.getWaitlistNoSlot(null);
+
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                {
+                    isWaitlisted: true,
+                    currentStep: FunnelStep.INTERVIEW,
+                    OR: [
+                        { interviewWaitlistReason: null },
+                        { NOT: { interviewWaitlistReason: { in: ['NO_SLOTS_AVAILABLE', 'NO_DATE_FITS'] } } }
+                    ]
+                }
+            );
         });
     });
 
