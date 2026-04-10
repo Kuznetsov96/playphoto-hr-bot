@@ -8,7 +8,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { staffService } from "../../modules/staff/services/index.js";
-import { escapeHtml } from "./utils.js";
+import { escapeHtml, formatLocationName } from "./utils.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
@@ -241,8 +241,11 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
                 createdTopicId = existingTopic.topicId;
             } else {
                 const surname = displayName.split(' ')[0] || displayName;
+                const formattedLocation = location
+                    ? formatLocationName(location.name, location.city)
+                    : '';
                 let locationPart = '';
-                if (location) locationPart = ` | ${location.name} (${location.city})`;
+                if (formattedLocation) locationPart = ` | ${formattedLocation}`;
 
                 const isOnboarding = candidate?.status === 'STAGING_ACTIVE' || candidate?.status === 'DISCOVERY_SCHEDULED' || candidate?.status === 'TRAINING_SCHEDULED' || candidate?.status === 'TRAINING_COMPLETED';
                 const prefix = isOnboarding ? '🎓 ONBOARDING' : '📤';
@@ -251,7 +254,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
                 createdTopicId = topic.message_thread_id;
 
                 let locationText = '';
-                if (location) locationText = `📍 ${location.name} (${location.city})`;
+                if (formattedLocation) locationText = `📍 ${formattedLocation}`;
 
                 const infoCard =
                     `👤 <b>${displayName}</b>\n` +
