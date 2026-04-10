@@ -1,3 +1,4 @@
+import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../db/core.js", () => ({
@@ -8,6 +9,7 @@ vi.mock("../../db/core.js", () => ({
 }));
 
 import { statsService } from "../stats-service.js";
+import prisma from "../../db/core.js";
 
 describe("statsService.formatManagementDashboard", () => {
     it("renders management-focused sections including mentor funnel stage", () => {
@@ -135,5 +137,86 @@ describe("statsService.formatManagementDashboard", () => {
 
         expect(text).toContain("Критичних SLA-відхилень зараз немає");
         expect(text).toContain("Немає активних локацій");
+    });
+});
+
+describe("statsService.getManagementDashboardData", () => {
+    it("does not count stale isWaitlisted flags as reserve or active pool", async () => {
+        const health = {
+            staleScreening: 0,
+            staleWaitlistHr: 0,
+            stalledAccepted: 0,
+            overdueDiscovery: 0,
+            overdueTraining: 0,
+            blockers: 0,
+            staleFinalStep: 0,
+            examples: [],
+        };
+        vi.spyOn(statsService, "getPipelineHealthReport").mockResolvedValueOnce(health);
+
+        const location = {
+            id: "loc-khm",
+            name: "Dytyache Horyshche",
+            city: "Хмельницький",
+            neededCount: 3,
+            isHidden: false,
+        };
+        vi.mocked(prisma.location.findMany).mockResolvedValueOnce([location] as any);
+
+        const validUser = { createdAt: new Date("2026-04-01T00:00:00.000Z"), botBlockedAt: null };
+        const birthDate = new Date("2003-01-01T00:00:00.000Z");
+        const baseCandidate = {
+            fullName: "Candidate",
+            currentStep: FunnelStep.INTERVIEW,
+            isOtherCity: false,
+            gender: "female",
+            birthDate,
+            hrDecision: null,
+            candidateDecision: null,
+            lossStage: null,
+            lossReason: null,
+            lostAt: null,
+            statusChangedAt: null,
+            pipelineTouchedAt: new Date("2026-04-01T00:00:00.000Z"),
+            locationId: location.id,
+            user: validUser,
+        };
+
+        vi.mocked(prisma.candidate.findMany).mockResolvedValueOnce([
+            {
+                ...baseCandidate,
+                status: CandidateStatus.SCREENING,
+                isWaitlisted: true,
+            },
+            {
+                ...baseCandidate,
+                status: CandidateStatus.REJECTED,
+                isWaitlisted: true,
+            },
+            {
+                ...baseCandidate,
+                status: CandidateStatus.WAITLIST_HR,
+                isWaitlisted: false,
+            },
+            {
+                ...baseCandidate,
+                status: CandidateStatus.WAITLIST_HR,
+                isWaitlisted: true,
+            },
+            {
+                ...baseCandidate,
+                status: CandidateStatus.SCREENING,
+                isWaitlisted: false,
+            },
+        ] as any);
+
+        const data = await statsService.getManagementDashboardData("Хмельницький");
+
+        expect(data.activeValidPool).toBe(1);
+        expect(data.reserveValidPool).toBe(1);
+        expect(data.locations[0]).toMatchObject({
+            active: 1,
+            reserve: 1,
+        });
     });
 });

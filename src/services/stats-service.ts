@@ -260,12 +260,13 @@ function isBusinessValid(candidate: DashboardCandidate): boolean {
 }
 
 function isReserveCandidate(candidate: DashboardCandidate): boolean {
-    return candidate.isWaitlisted || RESERVE_STATUSES.has(candidate.status);
+    return candidate.isWaitlisted && RESERVE_STATUSES.has(candidate.status);
 }
 
 function isActiveValidCandidate(candidate: DashboardCandidate): boolean {
     return isBusinessValid(candidate) &&
         ACTIVE_VALID_STATUSES.has(candidate.status) &&
+        !candidate.isWaitlisted &&
         !isReserveCandidate(candidate);
 }
 
