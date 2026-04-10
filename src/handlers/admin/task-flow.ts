@@ -214,13 +214,11 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
 
         const kb = new InlineKeyboard();
         if (staffId) kb.text("👤 Back to Profile", `view_staff_${staffId}`).row();
-        kb.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities").row()
-          .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
+        kb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
         await ScreenManager.renderScreen(ctx, deliveryStatus, kb);
     } catch (e: any) {
         const errKb = new InlineKeyboard()
-            .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
             .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, `❌ Error: ${e.message}`, errKb);
     }

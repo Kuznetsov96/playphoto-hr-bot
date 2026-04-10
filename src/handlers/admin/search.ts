@@ -152,7 +152,7 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
                 const staff = await staffRepository.findByUserId(user.id);
                 if (staff) kb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
             }
-            kb.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities");
+            kb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
             await ScreenManager.renderScreen(ctx, "✅ Response sent successfully!", kb);
             ctx.session.step = "idle";
@@ -326,14 +326,14 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
             replyMarkup.text("👤 Back to Profile", `view_candidate_${candidate.id}`).row();
         }
 
-        replyMarkup.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities");
+        replyMarkup.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, replyText, replyMarkup);
     } catch (e: any) {
         logger.error({ err: e, userId: user.id, telegramId: user.telegramId }, "Admin message delivery failed");
         const errKb = new InlineKeyboard();
         if (staff) errKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
         else if (candidate) errKb.text("👤 Back to Profile", `view_candidate_${candidate.id}`).row();
-        errKb.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities");
+        errKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
         await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-msg-err-delivery"], errKb);
     }
