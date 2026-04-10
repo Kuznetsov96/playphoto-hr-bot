@@ -260,7 +260,9 @@ protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx
 
     const text = await formatCandidateProfile(ctx as any, candidate as any, {
         includeActionLabel: true,
-        actionLabel: ADMIN_TEXTS["support-panel-action"]
+        actionLabel: ADMIN_TEXTS["support-panel-action"],
+        includeHistory: true,
+        viewerRole: "HR"
     });
 
     if (candidate.tattooPhotoId) {

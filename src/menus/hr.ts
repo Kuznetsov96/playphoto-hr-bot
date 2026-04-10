@@ -8,7 +8,7 @@ import { InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 import { cleanupUserSessionMessages, trackUserMessage } from "../utils/cleanup.js";
-import { formatCandidateProfile } from "../utils/profile-formatter.js";
+import { formatCandidateProfile, formatMessagePreview } from "../utils/profile-formatter.js";
 import { getPriorityLabel, getCityCode, getShortLocationName } from "../utils/location-helpers.js";
 import { extractFirstName, formatCompactName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -151,6 +151,12 @@ const getTimeWaiting = (date: Date | null) => {
     if (diffDays > 0) return ` (${diffDays}d)`;
     if (diffHours > 0) return ` (${diffHours}h)`;
     return " (<1h)";
+};
+
+const getInboxMessageSnippet = (candidate: any) => {
+    const latest = candidate.messages?.[0];
+    if (!latest) return "";
+    return formatMessagePreview(latest.content, Boolean(latest.photoId), 32);
 };
 
 hrFinalStepMenu.dynamic(async (ctx, range) => {
@@ -824,7 +830,9 @@ hrInboxMessagesMenu.dynamic(async (ctx, range) => {
     const items = candidates.slice((page - 1) * pageSize, page * pageSize);
 
     for (const cand of items) {
-        range.text(`💬 ${formatCompactName(cand.fullName)}`, async (ctx) => {
+        const snippet = getInboxMessageSnippet(cand);
+        const label = snippet ? `💬 ${formatCompactName(cand.fullName)} • ${snippet}` : `💬 ${formatCompactName(cand.fullName)}`;
+        range.text(label, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;
             ctx.session.viewingFromInbox = true; // Flag for showing 'Mark as Read'
             delete ctx.session.selectedSlotId;
