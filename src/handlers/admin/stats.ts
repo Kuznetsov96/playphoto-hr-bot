@@ -8,30 +8,16 @@ import { normalizeCity } from "./utils.js";
 export const adminStatsMenu = new Menu<MyContext>("admin-stats");
 
 adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
-    const cities = await statsService.getOfficialCities();
-    
-    // 1. City selection buttons (2 per row)
     const isAllSelected = !ctx.session.broadcastCity;
-    range.text(isAllSelected ? "🌍 🔘 All" : "🌍 All", async (ctx) => {
-        delete ctx.session.broadcastCity;
-        delete ctx.session.broadcastLocationId;
-        delete ctx.session.broadcastLocationName;
-        await refreshStats(ctx);
+    const cityLabel = ctx.session.broadcastCity ? normalizeCity(ctx.session.broadcastCity) : "All Cities";
+    range.text(isAllSelected ? "🌍 🔘 All Cities" : `📍 ${cityLabel}`, async (ctx) => {
+        await ctx.answerCallbackQuery("Use Change City to adjust this filter");
     });
 
-    let cityCount = 1;
-    for (const city of cities) {
-        if (cityCount % 2 === 0) range.row();
-        const isSelected = ctx.session.broadcastCity === city && !ctx.session.broadcastLocationId;
-        range.text(isSelected ? `🔘 ${city}` : city, async (ctx) => {
-            ctx.session.broadcastCity = city;
-            delete ctx.session.broadcastLocationId;
-            delete ctx.session.broadcastLocationName;
-            await refreshStats(ctx);
-        });
-        cityCount++;
-    }
-    range.row();
+    range.text("🏙️ Change City", async (ctx) => {
+        await ctx.answerCallbackQuery();
+        await ScreenManager.renderScreen(ctx, "🏙️ <b>Select Stats City</b>", "admin-stats-city");
+    }).row();
 
     range.text("🔎 Loss Drilldown", async (ctx) => {
         ctx.session.statsView = ctx.session.statsView === "losses" ? "overview" : "losses";
@@ -83,8 +69,35 @@ async function refreshStats(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, text, "admin-stats");
 }
 
-// Keep the old menu ID for compatibility during bootstrap but redirect it
+// Keep the old menu ID for compatibility and use it as the compact city picker.
 export const adminStatsCityMenu = new Menu<MyContext>("admin-stats-city");
-adminStatsCityMenu.text("Redirecting...", async (ctx) => {
-    await ScreenManager.renderScreen(ctx, "Loading stats...", "admin-stats");
+adminStatsCityMenu.dynamic(async (_ctx, range: MenuRange<MyContext>) => {
+    const cities = await statsService.getOfficialCities();
+
+    range.text((ctx) => !ctx.session.broadcastCity ? "🌍 🔘 All Cities" : "🌍 All Cities", async (ctx) => {
+        delete ctx.session.broadcastCity;
+        delete ctx.session.broadcastLocationId;
+        delete ctx.session.broadcastLocationName;
+        await refreshStats(ctx);
+    }).row();
+
+    let cityCount = 0;
+    for (const city of cities) {
+        if (cityCount > 0 && cityCount % 2 === 0) range.row();
+        const label = normalizeCity(city);
+        range.text((ctx) => {
+            const isSelected = ctx.session.broadcastCity === city && !ctx.session.broadcastLocationId;
+            return isSelected ? `🔘 ${label}` : label;
+        }, async (ctx) => {
+            ctx.session.broadcastCity = city;
+            delete ctx.session.broadcastLocationId;
+            delete ctx.session.broadcastLocationName;
+            await refreshStats(ctx);
+        });
+        cityCount++;
+    }
+
+    range.row().text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
+        await refreshStats(ctx);
+    });
 });
