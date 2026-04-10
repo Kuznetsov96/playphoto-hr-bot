@@ -592,34 +592,36 @@ export const statsService = {
                 validTotal++;
                 if (createdThisWeek) validWeek++;
 
-                if (isActiveValidCandidate(candidate)) {
+                const isActiveValid = isActiveValidCandidate(candidate);
+
+                if (isActiveValid) {
                     activeValidPool++;
                     if (locationStats) locationStats.active++;
+
+                    if (hasReachedInterview(candidate)) {
+                        interviewTrack++;
+                    }
+
+                    if (candidate.hrDecision === "ACCEPTED" || HR_APPROVED_STATUSES.has(candidate.status)) {
+                        hrApproved++;
+                    }
+
+                    if (MENTOR_TRACK_STATUSES.has(candidate.status)) {
+                        mentorTrack++;
+                    }
+
+                    if (TRAINING_TRACK_STATUSES.has(candidate.status)) {
+                        trainingTrack++;
+                    }
+
+                    if (FINAL_PREP_STATUSES.has(candidate.status)) {
+                        finalPrep++;
+                    }
                 }
 
                 if (isReserve) {
                     reserveValidPool++;
                     if (locationStats) locationStats.reserve++;
-                }
-
-                if (hasReachedInterview(candidate)) {
-                    interviewTrack++;
-                }
-
-                if (candidate.hrDecision === "ACCEPTED" || HR_APPROVED_STATUSES.has(candidate.status)) {
-                    hrApproved++;
-                }
-
-                if (MENTOR_TRACK_STATUSES.has(candidate.status)) {
-                    mentorTrack++;
-                }
-
-                if (TRAINING_TRACK_STATUSES.has(candidate.status)) {
-                    trainingTrack++;
-                }
-
-                if (FINAL_PREP_STATUSES.has(candidate.status)) {
-                    finalPrep++;
                 }
             }
 
@@ -713,7 +715,7 @@ export const statsService = {
             hiresWeek,
             losses,
             funnel: {
-                validBase: validTotal,
+                validBase: activeValidPool,
                 interviewTrack,
                 hrApproved,
                 mentorTrack,
@@ -779,7 +781,7 @@ export const statsService = {
             `• No-demand / other city: <b>${data.invalidByReason.noDemand}</b>\n` +
             `• Incomplete screening: <b>${data.invalidByReason.incomplete}</b>\n\n` +
             `<b>Funnel</b>\n` +
-            `• Valid base: <b>${data.funnel.validBase}</b>\n` +
+            `• Active pipeline: <b>${data.funnel.validBase}</b>\n` +
             `${formatRateLine("Interview track", data.funnel.interviewTrack, data.funnel.validBase)}\n` +
             `${formatRateLine("HR approved", data.funnel.hrApproved, data.funnel.interviewTrack)}\n` +
             `${formatRateLine("Mentor intro", data.funnel.mentorTrack, data.funnel.hrApproved)}\n` +
