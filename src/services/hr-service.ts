@@ -141,7 +141,7 @@ export const hrService = {
             this.getFinalStepStats()
         ]);
 
-        const inboxTotal = tattooCount + unreadCount + (noSlotCount || 0) + finalStepStats.total;
+        const inboxTotal = tattooCount + unreadCount + (noSlotCount || 0);
 
         return {
             newCandidates,

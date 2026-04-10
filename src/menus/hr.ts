@@ -135,16 +135,6 @@ hrInboxMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu", { pushToStack: true });
     }).row();
 
-    // ONLY FOR MAIN ADMIN (SUPER_ADMIN ONLY)
-    const userRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
-    const isSuperAdmin = userRole === 'SUPER_ADMIN';
-
-    if (isSuperAdmin) {
-        range.text(STAFF_TEXTS["hr-menu-final-setup"]({ count: stats.finalStepStats.total }), async (ctx) => {
-            await ScreenManager.renderScreen(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu", { pushToStack: true });
-        }).row();
-    }
-
     range.text(STAFF_TEXTS["hr-menu-back-home"], async (ctx) => {
         await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
     });
