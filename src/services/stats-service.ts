@@ -1,6 +1,7 @@
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 
 import prisma from "../db/core.js";
+import { normalizeCity } from "../handlers/admin/utils.js";
 
 const MIN_CANDIDATE_AGE = 17;
 const MAX_CANDIDATE_AGE = 26;
@@ -671,7 +672,7 @@ export const statsService = {
             actions.push("Підсилити handoff у mentor track: accepted/discovery/training зависають довше SLA.");
         }
         if (topDeficitLocations.length > 0) {
-            actions.push(`Закрити дефіцит по локаціях: ${topDeficitLocations.map((location) => `${location.city} / ${location.name}`).join(", ")}.`);
+            actions.push(`Закрити дефіцит по локаціях: ${topDeficitLocations.map((location) => `${normalizeCity(location.city)} / ${location.name}`).join(", ")}.`);
         }
         if (reserveValidPool > activeValidPool && reserveValidPool >= 10) {
             actions.push("Переглянути логіку waitlist: резерв уже більший за активний робочий пул.");
@@ -710,9 +711,9 @@ export const statsService = {
     formatManagementDashboard(data: DashboardData, city?: string, locationName?: string): string {
         let locationLabel = "🌍 <b>All Cities</b>";
         if (locationName) {
-            locationLabel = `📍 City: <b>${city}</b>\n🏠 Location: <b>${locationName}</b>`;
+            locationLabel = `📍 City: <b>${city ? normalizeCity(city) : city}</b>\n🏠 Location: <b>${locationName}</b>`;
         } else if (city) {
-            locationLabel = `📍 City: <b>${city}</b>`;
+            locationLabel = `📍 City: <b>${normalizeCity(city)}</b>`;
         }
 
         const invalidRateWeek = pct(data.invalidWeek, data.rawWeek);
@@ -733,7 +734,7 @@ export const statsService = {
             .slice(0, locationName ? 1 : 4)
             .map((location) => {
                 const status = location.gap > 0 ? "🔴 Deficit" : location.needed === 0 && location.reserve > 0 ? "⏸️ Reserve" : "🟢 OK";
-                return `• ${location.city} / ${location.name}: need <b>${location.needed}</b> | active <b>${location.active}</b> | reserve <b>${location.reserve}</b> | hires 7d <b>${location.hiredWeek}</b> | ${status}`;
+                return `• ${normalizeCity(location.city)} / ${location.name}: need <b>${location.needed}</b> | active <b>${location.active}</b> | reserve <b>${location.reserve}</b> | hires 7d <b>${location.hiredWeek}</b> | ${status}`;
             });
 
         const actionLines = data.actions.slice(0, 4).map((action) => `• ${action}`);
@@ -844,9 +845,9 @@ export const statsService = {
         const report = await this.getLossDrilldownReport(city, locationId);
         let locationLabel = "🌍 <b>All Cities</b>";
         if (locationName) {
-            locationLabel = `📍 City: <b>${city}</b>\n🏠 Location: <b>${locationName}</b>`;
+            locationLabel = `📍 City: <b>${city ? normalizeCity(city) : city}</b>\n🏠 Location: <b>${locationName}</b>`;
         } else if (city) {
-            locationLabel = `📍 City: <b>${city}</b>`;
+            locationLabel = `📍 City: <b>${normalizeCity(city)}</b>`;
         }
 
         const stageLines = report.byStage.length > 0
@@ -856,7 +857,7 @@ export const statsService = {
             ? report.byReason.map((item) => `• ${item.reason}: <b>${item.count}</b> (${item.share}%)`).join("\n")
             : "• No rejected candidates";
         const locationLines = report.byLocation.length > 0
-            ? report.byLocation.map((item) => `• ${item.city} / ${item.location}: <b>${item.count}</b> (${item.share}%)`).join("\n")
+            ? report.byLocation.map((item) => `• ${normalizeCity(item.city)} / ${item.location}: <b>${item.count}</b> (${item.share}%)`).join("\n")
             : "• No rejected candidates";
 
         return `<b>🔎 Loss Drilldown</b>\n${locationLabel}\n` +
@@ -879,9 +880,9 @@ export const statsService = {
 
         let locationLabel = "🌍 <b>All Cities</b>";
         if (locationName) {
-            locationLabel = `📍 City: <b>${city}</b>\n🏠 Location: <b>${locationName}</b>`;
+            locationLabel = `📍 City: <b>${city ? normalizeCity(city) : city}</b>\n🏠 Location: <b>${locationName}</b>`;
         } else if (city) {
-            locationLabel = `📍 City: <b>${city}</b>`;
+            locationLabel = `📍 City: <b>${normalizeCity(city)}</b>`;
         }
 
         return `<b>📊 HR Funnel Dashboard</b>\n${locationLabel}\n` +
