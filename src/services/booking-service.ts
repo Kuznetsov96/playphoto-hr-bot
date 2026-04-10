@@ -113,7 +113,8 @@ export class BookingService {
             // 4. Update Candidate with Meet Link
             await candidateRepository.update(candidate.id, {
                 googleMeetLink: googleEvent.meetLink || null,
-                interviewSlot: { connect: { id: updatedSlot.id } }
+                interviewSlot: { connect: { id: updatedSlot.id } },
+                interviewWaitlistReason: null
             }, tx);
 
             // Update slot with event ID if needed
