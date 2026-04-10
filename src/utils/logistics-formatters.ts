@@ -1,4 +1,4 @@
-import { formatLocationName } from "../handlers/admin/utils.js";
+import { escapeHtml, formatLocationName } from "../handlers/admin/utils.js";
 
 type StaffWithUser = {
     fullName?: string | null;
@@ -17,17 +17,21 @@ type LocationLike = {
 export function formatLogisticsPhotographerName(staff: StaffWithUser): string {
     const fullName = staff?.fullName?.trim();
     const username = staff?.user?.username?.trim();
-    // Insert a zero-width space after "@" so Telegram doesn't turn it into an active mention.
-    const usernameSuffix = username ? ` (@\u200B${username})` : "";
+    const usernameSuffix = username ? ` (<a href="https://t.me/${escapeHtml(username)}">@${escapeHtml(username)}</a>)` : "";
 
-    if (fullName) return `${fullName}${usernameSuffix}`;
+    if (fullName) return `${escapeHtml(shortenPhotographerName(fullName))}${usernameSuffix}`;
 
     const firstName = staff?.user?.firstName?.trim();
     const lastName = staff?.user?.lastName?.trim();
-    if (firstName && lastName) return `${lastName} ${firstName}${usernameSuffix}`;
-    if (firstName) return `${firstName}${usernameSuffix}`;
+    if (firstName && lastName) return `${escapeHtml(`${lastName} ${firstName}`)}${usernameSuffix}`;
+    if (firstName) return `${escapeHtml(firstName)}${usernameSuffix}`;
 
     return "Unknown";
+}
+
+function shortenPhotographerName(fullName: string): string {
+    const parts = fullName.split(/\s+/).filter(Boolean);
+    return parts.length > 2 ? parts.slice(0, 2).join(" ") : fullName;
 }
 
 export function formatLogisticsLocation(location: LocationLike): string {
