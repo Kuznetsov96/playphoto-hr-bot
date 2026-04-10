@@ -4,6 +4,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { escapeHtml } from "./admin/utils.js";
 
 export const supportHandlers = new Composer<MyContext>();
 
@@ -67,6 +68,43 @@ supportHandlers.callbackQuery("end_support_chat", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
+function getCandidateSupportPayload(ctx: MyContext) {
+    const message = ctx.message;
+    const text = message?.text || message?.caption || "";
+    const media =
+        message?.photo?.[message.photo.length - 1]?.file_id ||
+        message?.video_note?.file_id ||
+        message?.voice?.file_id ||
+        message?.video?.file_id ||
+        null;
+
+    let mediaLabel = "";
+    if (message?.photo) mediaLabel = "📷 Photo";
+    else if (message?.video_note) mediaLabel = "⭕ Video note";
+    else if (message?.voice) mediaLabel = "🎙 Voice message";
+    else if (message?.video) mediaLabel = "🎥 Video";
+
+    const content = mediaLabel && text ? `${mediaLabel}: ${text}` : (mediaLabel || text);
+
+    return {
+        content: content || "Message without text",
+        media
+    };
+}
+
+async function copyCandidateMediaToAdmin(ctx: MyContext, adminId: string | number, replyMarkup?: InlineKeyboard) {
+    const message = ctx.message;
+    if (!message?.message_id || !(message.photo || message.video_note || message.voice || message.video)) return;
+
+    try {
+        await ctx.api.copyMessage(Number(adminId), message.chat.id, message.message_id, {
+            reply_markup: replyMarkup
+        } as any);
+    } catch (e) {
+        logger.warn({ err: e, adminId }, "Failed to copy candidate media message to admin");
+    }
+}
+
 export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
     const telegramId = ctx.from?.id;
     if (!telegramId) return false;
@@ -105,7 +143,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         }
     }
 
-    if (!ctx.message?.text && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.video) return false;
+    if (!ctx.message?.text && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.video && !ctx.message?.video_note) return false;
 
     try {
         const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
@@ -138,7 +176,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
         // Setup-stage candidates → always DM main admin directly, skip support tickets
         if (isSetupStage) {
-            const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+            const payload = getCandidateSupportPayload(ctx);
+            const msgText = payload.content;
             logBusinessEvent({
                 event: "candidate.support.message_sent",
                 correlationId: ctx.correlationId,
@@ -153,10 +192,10 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             });
             const adminMsgText =
                 `💬 <b>Message from Candidate (Admin/Setup)</b>\n` +
-                `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
-                `📍 City: ${candidate.city || "—"}\n` +
-                `📊 Status: <b>${candidate.status}</b>\n\n` +
-                `<b>Text:</b> ${msgText}`;
+                `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
+                `📍 City: ${escapeHtml(candidate.city || "—")}\n` +
+                `📊 Status: <b>${escapeHtml(candidate.status)}</b>\n\n` +
+                `<b>Text:</b> ${escapeHtml(msgText)}`;
 
             const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
 
@@ -167,6 +206,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                         parse_mode: "HTML",
                         reply_markup: adminKb
                     });
+                    await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
                     delivered = true;
                 } catch (e) {
                     logger.warn({ err: e, adminId }, "Failed to deliver setup-stage message to admin");
@@ -186,7 +226,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     candidate: { connect: { id: candidate.id } },
                     sender: "USER",
                     scope: "HR",
-                    content: msgText
+                    content: msgText,
+                    photoId: payload.media
                 });
                 await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, { category: "Admin (Setup)" });
                 await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
@@ -203,7 +244,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         // Mentor-owned flow (training/discovery + mentor onboarding) → DM mentors directly
         // and keep this dialog out of generic support tickets/topics.
         if (isMentorOwnedFlow) {
-            const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+            const payload = getCandidateSupportPayload(ctx);
+            const msgText = payload.content;
             logBusinessEvent({
                 event: "candidate.support.message_sent",
                 correlationId: ctx.correlationId,
@@ -227,10 +269,10 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             const adminMsgText =
                 `💬 <b>Message from Candidate (${categoryLabel})</b>\n` +
-                `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
-                `📍 City: ${candidate.city || "—"}\n` +
-                `📊 Status: <b>${candidate.status}</b>\n\n` +
-                `<b>Text:</b> ${msgText}`;
+                `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
+                `📍 City: ${escapeHtml(candidate.city || "—")}\n` +
+                `📊 Status: <b>${escapeHtml(candidate.status)}</b>\n\n` +
+                `<b>Text:</b> ${escapeHtml(msgText)}`;
 
             const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
 
@@ -241,6 +283,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                         parse_mode: "HTML",
                         reply_markup: adminKb
                     });
+                    await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
                     delivered = true;
                 } catch (e) {
                     logger.warn({ err: e, adminId }, "Failed to deliver mentor-stage message to mentor");
@@ -259,7 +302,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     candidate: { connect: { id: candidate.id } },
                     sender: "USER",
                     scope: "MENTOR",
-                    content: msgText
+                    content: msgText,
+                    photoId: payload.media
                 });
 
                 await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, { category: categoryLabel });
@@ -317,7 +361,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             return true;
         }
 
-        const msgText = ctx.message?.text || ctx.message?.caption || "[Media]";
+        const payload = getCandidateSupportPayload(ctx);
+        const msgText = payload.content;
 
         // --- Route by stage to responsible person ---
         let categoryLabel = "HR";
@@ -344,9 +389,9 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
         const adminMsgText = 
             `💬 <b>Message from Candidate (${categoryLabel})</b>\n` +
-            `👤 <b>${candidate.fullName || "Candidate"}</b> (@${candidate.user.username || "no_user"})\n` +
-            `📍 City: ${candidate.city || "—"}\n\n` +
-            `<b>Text:</b> ${msgText}`;
+            `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
+            `📍 City: ${escapeHtml(candidate.city || "—")}\n\n` +
+            `<b>Text:</b> ${escapeHtml(msgText)}`;
 
         const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
 
@@ -357,6 +402,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     parse_mode: "HTML",
                     reply_markup: adminKb
                 });
+                await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
                 delivered = true;
             } catch (e) {}
         }
@@ -373,7 +419,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 candidate: { connect: { id: candidate.id } },
                 sender: "USER",
                 scope: categoryLabel === "Mentor" ? "MENTOR" : "HR",
-                content: msgText
+                content: msgText,
+                photoId: payload.media
             });
 
             await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, { category: categoryLabel });
