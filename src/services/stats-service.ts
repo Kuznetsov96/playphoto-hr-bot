@@ -1,7 +1,7 @@
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 
 import prisma from "../db/core.js";
-import { normalizeCity } from "../handlers/admin/utils.js";
+import { formatLocationName, normalizeCity } from "../handlers/admin/utils.js";
 
 const MIN_CANDIDATE_AGE = 17;
 const MAX_CANDIDATE_AGE = 26;
@@ -275,6 +275,25 @@ function formatRateLine(label: string, count: number, base: number): string {
     return `• ${label}: <b>${count}</b> (${pct(count, base)}%)`;
 }
 
+function formatStatsLocationName(rawName: string, city?: string | null): string {
+    const trimmedName = rawName.trim();
+    if (!city) return trimmedName;
+
+    const formatted = formatLocationName(trimmedName, city);
+    const citySuffix = ` (${normalizeCity(city)})`;
+    return formatted.endsWith(citySuffix)
+        ? formatted.slice(0, -citySuffix.length).trim()
+        : formatted;
+}
+
+function formatStatsLocationLabel(city?: string, locationName?: string): string {
+    if (locationName) {
+        return `📍 City: <b>${city ? normalizeCity(city) : "—"}</b>\n🏠 Location: <b>${formatStatsLocationName(locationName, city)}</b>`;
+    }
+    if (city) return `📍 City: <b>${normalizeCity(city)}</b>`;
+    return "🌍 <b>All Cities</b>";
+}
+
 function buildScope(city?: string, locationId?: string) {
     if (locationId) return { locationId };
     if (city) return { city };
@@ -295,7 +314,7 @@ export const statsService = {
     async getLocationsForCity(city: string) {
         return prisma.location.findMany({
             where: { city, isHidden: false },
-            select: { id: true, name: true },
+            select: { id: true, name: true, city: true },
             orderBy: { name: "asc" }
         });
     },
@@ -709,12 +728,7 @@ export const statsService = {
     },
 
     formatManagementDashboard(data: DashboardData, city?: string, locationName?: string): string {
-        let locationLabel = "🌍 <b>All Cities</b>";
-        if (locationName) {
-            locationLabel = `📍 City: <b>${city ? normalizeCity(city) : city}</b>\n🏠 Location: <b>${locationName}</b>`;
-        } else if (city) {
-            locationLabel = `📍 City: <b>${normalizeCity(city)}</b>`;
-        }
+        const locationLabel = formatStatsLocationLabel(city, locationName);
 
         const invalidRateWeek = pct(data.invalidWeek, data.rawWeek);
         const validRateWeek = pct(data.validWeek, data.rawWeek);
@@ -734,7 +748,7 @@ export const statsService = {
             .slice(0, locationName ? 1 : 4)
             .map((location) => {
                 const status = location.gap > 0 ? "🔴 Deficit" : location.needed === 0 && location.reserve > 0 ? "⏸️ Reserve" : "🟢 OK";
-                return `• ${normalizeCity(location.city)} / ${location.name}: need <b>${location.needed}</b> | active <b>${location.active}</b> | reserve <b>${location.reserve}</b> | hires 7d <b>${location.hiredWeek}</b> | ${status}`;
+                return `• ${normalizeCity(location.city)} / ${formatStatsLocationName(location.name, location.city)}: need <b>${location.needed}</b> | active <b>${location.active}</b> | reserve <b>${location.reserve}</b> | hires 7d <b>${location.hiredWeek}</b> | ${status}`;
             });
 
         const actionLines = data.actions.slice(0, 4).map((action) => `• ${action}`);
@@ -784,7 +798,13 @@ export const statsService = {
 
     async buildManagementDashboard(city?: string, locationId?: string, locationName?: string): Promise<string> {
         const data = await this.getManagementDashboardData(city, locationId);
-        return this.formatManagementDashboard(data, city, locationName);
+        const location = locationId
+            ? await prisma.location.findUnique({
+                where: { id: locationId },
+                select: { name: true, city: true }
+            })
+            : null;
+        return this.formatManagementDashboard(data, location?.city || city, location?.name || locationName);
     },
 
     async getLossDrilldownReport(city?: string, locationId?: string): Promise<LossDrilldownReport> {
@@ -843,12 +863,13 @@ export const statsService = {
 
     async buildLossDrilldown(city?: string, locationId?: string, locationName?: string): Promise<string> {
         const report = await this.getLossDrilldownReport(city, locationId);
-        let locationLabel = "🌍 <b>All Cities</b>";
-        if (locationName) {
-            locationLabel = `📍 City: <b>${city ? normalizeCity(city) : city}</b>\n🏠 Location: <b>${locationName}</b>`;
-        } else if (city) {
-            locationLabel = `📍 City: <b>${normalizeCity(city)}</b>`;
-        }
+        const location = locationId
+            ? await prisma.location.findUnique({
+                where: { id: locationId },
+                select: { name: true, city: true }
+            })
+            : null;
+        const locationLabel = formatStatsLocationLabel(location?.city || city, location?.name || locationName);
 
         const stageLines = report.byStage.length > 0
             ? report.byStage.map((item) => `• ${item.stage}: <b>${item.count}</b> (${item.share}%)`).join("\n")
@@ -857,7 +878,7 @@ export const statsService = {
             ? report.byReason.map((item) => `• ${item.reason}: <b>${item.count}</b> (${item.share}%)`).join("\n")
             : "• No rejected candidates";
         const locationLines = report.byLocation.length > 0
-            ? report.byLocation.map((item) => `• ${normalizeCity(item.city)} / ${item.location}: <b>${item.count}</b> (${item.share}%)`).join("\n")
+            ? report.byLocation.map((item) => `• ${normalizeCity(item.city)} / ${formatStatsLocationName(item.location, item.city)}: <b>${item.count}</b> (${item.share}%)`).join("\n")
             : "• No rejected candidates";
 
         return `<b>🔎 Loss Drilldown</b>\n${locationLabel}\n` +
@@ -878,12 +899,7 @@ export const statsService = {
             (stats[CandidateStatus.READY_FOR_HIRE] ?? 0) +
             (stats[CandidateStatus.AWAITING_FIRST_SHIFT] ?? 0);
 
-        let locationLabel = "🌍 <b>All Cities</b>";
-        if (locationName) {
-            locationLabel = `📍 City: <b>${city ? normalizeCity(city) : city}</b>\n🏠 Location: <b>${locationName}</b>`;
-        } else if (city) {
-            locationLabel = `📍 City: <b>${normalizeCity(city)}</b>`;
-        }
+        const locationLabel = formatStatsLocationLabel(city, locationName);
 
         return `<b>📊 HR Funnel Dashboard</b>\n${locationLabel}\n` +
             `───────────────────\n\n` +

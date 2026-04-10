@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../db/core.js", () => ({
     default: {
-        location: { findMany: vi.fn() },
+        location: { findMany: vi.fn(), findUnique: vi.fn() },
         candidate: { findMany: vi.fn(), count: vi.fn() }
     }
 }));
@@ -204,6 +204,69 @@ describe("statsService.formatManagementDashboard", () => {
         expect(text).toContain("City: <b>Kyiv</b>");
         expect(text).toContain("Kyiv / Smile Park");
         expect(text).not.toContain("City: <b>Київ</b>");
+    });
+
+    it("uses the selected location city instead of stale session city", async () => {
+        const dashboardData = {
+            rawTotal: 0,
+            rawWeek: 0,
+            validTotal: 0,
+            validWeek: 0,
+            invalidTotal: 0,
+            invalidWeek: 0,
+            invalidByReason: {
+                bot: 0,
+                male: 0,
+                age: 0,
+                noDemand: 0,
+                incomplete: 0,
+            },
+            activeValidPool: 0,
+            reserveValidPool: 0,
+            hiresWeek: 0,
+            losses: {
+                screening: 0,
+                interview: 0,
+                mentorIntro: 0,
+                training: 0,
+                finalPrep: 0,
+                onboarding: 0,
+            },
+            funnel: {
+                validBase: 0,
+                interviewTrack: 0,
+                hrApproved: 0,
+                mentorTrack: 0,
+                trainingTrack: 0,
+                finalPrep: 0,
+                hired: 0,
+            },
+            health: {
+                staleScreening: 0,
+                staleWaitlistHr: 0,
+                stalledAccepted: 0,
+                overdueDiscovery: 0,
+                overdueTraining: 0,
+                blockers: 0,
+                staleFinalStep: 0,
+                examples: [],
+            },
+            locations: [],
+            actions: ["Критичних відхилень не виявлено."],
+        } as any;
+        const getDataSpy = vi.spyOn(statsService, "getManagementDashboardData").mockResolvedValueOnce(dashboardData);
+        vi.mocked(prisma.location.findUnique).mockResolvedValueOnce({ name: "Fly Kids", city: "Київ" } as any);
+
+        try {
+            const text = await statsService.buildManagementDashboard("Хмельницький", "loc-kyiv", "Fly Kids (Київ)");
+
+            expect(text).toContain("City: <b>Kyiv</b>");
+            expect(text).toContain("Location: <b>Fly Kids</b>");
+            expect(text).not.toContain("City: <b>Khmelnytskyi</b>");
+            expect(text).not.toContain("Fly Kids (Київ)");
+        } finally {
+            getDataSpy.mockRestore();
+        }
     });
 });
 
