@@ -3,9 +3,17 @@ import { Menu, MenuRange } from "@grammyjs/menu";
 import type { MyContext } from "../../types/context.js";
 import { statsService } from "../../services/stats-service.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
-import { normalizeCity } from "./utils.js";
+import { formatLocationName, normalizeCity } from "./utils.js";
 
 export const adminStatsMenu = new Menu<MyContext>("admin-stats");
+
+function formatStatsLocationButton(name: string, city: string): string {
+    const formatted = formatLocationName(name, city);
+    const citySuffix = ` (${normalizeCity(city)})`;
+    return formatted.endsWith(citySuffix)
+        ? formatted.slice(0, -citySuffix.length).trim()
+        : formatted;
+}
 
 adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
     const isAllSelected = !ctx.session.broadcastCity;
@@ -38,9 +46,10 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
             for (const loc of locations) {
                 if (locCount % 2 === 0) range.row();
                 const isSelected = ctx.session.broadcastLocationId === loc.id;
-                range.text(isSelected ? `🔘 ${loc.name}` : loc.name, async (ctx) => {
+                const locLabel = formatStatsLocationButton(loc.name, loc.city);
+                range.text(isSelected ? `🔘 ${locLabel}` : locLabel, async (ctx) => {
                     ctx.session.broadcastLocationId = loc.id;
-                    ctx.session.broadcastLocationName = loc.name;
+                    ctx.session.broadcastLocationName = locLabel;
                     await refreshStats(ctx);
                 });
                 locCount++;
