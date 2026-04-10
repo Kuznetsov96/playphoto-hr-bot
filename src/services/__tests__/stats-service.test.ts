@@ -138,6 +138,73 @@ describe("statsService.formatManagementDashboard", () => {
         expect(text).toContain("Критичних SLA-відхилень зараз немає");
         expect(text).toContain("Немає активних локацій");
     });
+
+    it("renders Ukrainian city names in English for the HR stats UI", () => {
+        const text = statsService.formatManagementDashboard({
+            rawTotal: 5,
+            rawWeek: 1,
+            validTotal: 5,
+            validWeek: 1,
+            invalidTotal: 0,
+            invalidWeek: 0,
+            invalidByReason: {
+                bot: 0,
+                male: 0,
+                age: 0,
+                noDemand: 0,
+                incomplete: 0,
+            },
+            activeValidPool: 1,
+            reserveValidPool: 0,
+            hiresWeek: 0,
+            losses: {
+                screening: 0,
+                interview: 0,
+                mentorIntro: 0,
+                training: 0,
+                finalPrep: 0,
+                onboarding: 0,
+            },
+            funnel: {
+                validBase: 5,
+                interviewTrack: 1,
+                hrApproved: 1,
+                mentorTrack: 0,
+                trainingTrack: 0,
+                finalPrep: 0,
+                hired: 0,
+            },
+            health: {
+                staleScreening: 0,
+                staleWaitlistHr: 0,
+                stalledAccepted: 0,
+                overdueDiscovery: 0,
+                overdueTraining: 0,
+                blockers: 0,
+                staleFinalStep: 0,
+                examples: [],
+            },
+            locations: [
+                {
+                    id: "loc-kyiv",
+                    name: "Smile Park",
+                    city: "Київ",
+                    needed: 1,
+                    active: 1,
+                    reserve: 0,
+                    hiredWeek: 0,
+                    gap: 0,
+                }
+            ],
+            actions: [
+                "Критичних відхилень не виявлено. Сфокусуйтесь на підтриманні швидкості обробки та локаційного балансу."
+            ],
+        } as any, "Київ");
+
+        expect(text).toContain("City: <b>Kyiv</b>");
+        expect(text).toContain("Kyiv / Smile Park");
+        expect(text).not.toContain("City: <b>Київ</b>");
+    });
 });
 
 describe("statsService.getManagementDashboardData", () => {
