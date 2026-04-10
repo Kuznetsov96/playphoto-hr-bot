@@ -1,7 +1,7 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../types/context.js";
-import { hrService } from "../services/hr-service.js";
+import { HR_INTERVIEW_WAITLIST_REASONS, type HrInterviewWaitlistReason, hrService } from "../services/hr-service.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { InlineKeyboard } from "grammy";
@@ -43,6 +43,8 @@ export const hrWaitlistProfilesMenu = new Menu<MyContext>("hr-waitlist-profiles"
 menuRegistry.register(hrWaitlistProfilesMenu);
 export const hrNoSlotQuickMenu = new Menu<MyContext>("hr-no-slot-quick");
 menuRegistry.register(hrNoSlotQuickMenu);
+export const hrNoSlotProfilesMenu = new Menu<MyContext>("hr-no-slot-profiles");
+menuRegistry.register(hrNoSlotProfilesMenu);
 export const hrCandidateUnifiedMenu = new Menu<MyContext>("hr-candidate-unified");
 menuRegistry.register(hrCandidateUnifiedMenu);
 export const hrChangeLocationUnifiedMenu = new Menu<MyContext>("hr-change-location-unified");
@@ -126,11 +128,11 @@ hrInboxMenu.dynamic(async (ctx, range) => {
     }).row();
 
     const waitlistLabel = (stats.noSlotCount || 0) > 0
-        ? `⏳ Waitlist: ${stats.waitlistCount} (🔴 ${stats.noSlotCount})`
-        : `⏳ Waitlist: ${stats.waitlistCount}`;
+        ? `⏳ Candidate Pools: ${stats.waitlistCount} (🗓️ ${stats.noSlotCount})`
+        : `⏳ Candidate Pools: ${stats.waitlistCount}`;
     range.text(waitlistLabel, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "⏳ <b>Waitlist</b>", "hr-waitlist-menu", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu", { pushToStack: true });
     }).row();
 
     // ONLY FOR MAIN ADMIN (SUPER_ADMIN ONLY)
@@ -310,16 +312,32 @@ hrFinalStepScheduleMenu.dynamic(async (ctx, range) => {
     });
 });
 
-// --- WAITLIST ---
+// --- CANDIDATE POOLS ---
+const NO_SLOT_REASON_LABELS: Record<string, string> = {
+    [HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE]: "🚫 No Slots Available",
+    [HR_INTERVIEW_WAITLIST_REASONS.NO_DATE_FITS]: "🗓️ No Date Fits"
+};
+
+const getNoSlotReasonLabel = (reason: string | null | undefined) => {
+    if (reason === null) return "❔ Reason Unknown";
+    return NO_SLOT_REASON_LABELS[reason || ""] || "❔ Reason Unknown";
+};
+
+const normalizeNoSlotReason = (reason: string | null | undefined): HrInterviewWaitlistReason | null => {
+    if (reason === HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE) return reason;
+    if (reason === HR_INTERVIEW_WAITLIST_REASONS.NO_DATE_FITS) return reason;
+    return null;
+};
+
 hrWaitlistMenu.dynamic(async (ctx, range) => {
     const stats = await hrService.getHubStats();
-    range.text(`🗓️ No Date Fits (${stats.noSlotCount || 0})`, async (ctx) => {
+    range.text(`🗓️ Needs Interview Slot (${stats.noSlotCount || 0})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "🗓️ <b>No Date Fits</b>", "hr-no-slot-quick", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "🗓️ <b>Needs Interview Slot</b>", "hr-no-slot-quick", { pushToStack: true });
     }).row();
-    range.text(`📍 Location Full (${(stats.waitlistCount || 0) - (stats.noSlotCount || 0)})`, async (ctx) => {
+    range.text(`📍 Location Reserve (${(stats.waitlistCount || 0) - (stats.noSlotCount || 0)})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "🏙️ <b>Waitlist Cities</b>", "hr-waitlist-city", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "📍 <b>Location Reserve</b>", "hr-waitlist-city", { pushToStack: true });
     }).row();
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "hr-inbox");
@@ -331,17 +349,56 @@ hrNoSlotQuickMenu.dynamic(async (ctx, range) => {
     if (candidates.length === 0) {
         range.text("All caught up! ✨", (ctx) => { }).row();
     } else {
+        range.text(`🔔 Notify Needs Slot (${candidates.length})`, async (ctx) => {
+            const count = await hrService.notifyWaitlist(ctx.api);
+            await ctx.answerCallbackQuery(`Sent ${count} slot invite(s).`);
+            await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
+        }).row();
+        const reasonCounts = new Map<string | null, number>();
+        for (const cand of candidates) {
+            const reason = normalizeNoSlotReason((cand as any).interviewWaitlistReason);
+            reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+        }
+
+        const reasonOrder: Array<HrInterviewWaitlistReason | null> = [
+            HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE,
+            HR_INTERVIEW_WAITLIST_REASONS.NO_DATE_FITS,
+            null
+        ];
+
+        for (const reason of reasonOrder) {
+            const count = reasonCounts.get(reason) || 0;
+            if (count === 0) continue;
+            range.text(`${getNoSlotReasonLabel(reason)} (${count})`, async (ctx) => {
+                ctx.session.selectedNoSlotReason = reason;
+                ctx.session.candidatePage = 1;
+                await ScreenManager.renderScreen(ctx, `${getNoSlotReasonLabel(reason)} <b>Candidates</b>`, "hr-no-slot-profiles", { pushToStack: true });
+            }).row();
+        }
+    }
+    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
+        await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
+    });
+});
+
+hrNoSlotProfilesMenu.dynamic(async (ctx, range) => {
+    const reason = ctx.session.selectedNoSlotReason as HrInterviewWaitlistReason | null | undefined;
+    const candidates = await hrService.getWaitlistNoSlot(reason);
+    if (candidates.length === 0) {
+        range.text("All caught up! ✨", (ctx) => { }).row();
+    } else {
         for (const cand of candidates) {
             range.text(`🗓️ ${formatCompactName(cand.fullName)}`, async (ctx) => {
                 ctx.session.candidateData = { id: cand.id } as any;
                 delete ctx.session.selectedSlotId; // Not from dashboard
-                const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true, actionLabel: "Needs a slot!" });
+                const actionLabel = getNoSlotReasonLabel(normalizeNoSlotReason((cand as any).interviewWaitlistReason));
+                const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true, actionLabel });
                 await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
             }).row();
         }
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "⏳ <b>Waitlist</b>", "hr-waitlist-menu");
+        await ScreenManager.goBack(ctx, "🗓️ <b>Needs Interview Slot</b>", "hr-no-slot-quick");
     });
 });
 
@@ -350,11 +407,11 @@ hrWaitlistCityMenu.dynamic(async (ctx, range) => {
     for (const city of cities) {
         range.text(`🏙️ ${city}`, async (ctx) => {
             ctx.session.broadcastCity = city;
-            await ScreenManager.renderScreen(ctx, "📍 <b>Waitlist Locations</b>", "hr-waitlist-loc", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, "📍 <b>Reserve Locations</b>", "hr-waitlist-loc", { pushToStack: true });
         }).row();
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "⏳ <b>Waitlist</b>", "hr-waitlist-menu");
+        await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
     });
 });
 
@@ -366,11 +423,11 @@ hrWaitlistLocMenu.dynamic(async (ctx, range) => {
         range.text(`📍 ${loc.name} (${loc.count})`, async (ctx) => {
             ctx.session.broadcastLocationId = loc.id || "";
             ctx.session.candidatePage = 1;
-            await ScreenManager.renderScreen(ctx, "👤 <b>Waitlist Profiles</b>", "hr-waitlist-profiles", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, "👤 <b>Reserve Profiles</b>", "hr-waitlist-profiles", { pushToStack: true });
         }).row();
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🏙️ <b>Waitlist Cities</b>", "hr-waitlist-city");
+        await ScreenManager.goBack(ctx, "📍 <b>Location Reserve</b>", "hr-waitlist-city");
     });
 });
 
@@ -391,7 +448,7 @@ hrWaitlistProfilesMenu.dynamic(async (ctx, range) => {
     if (page > 1) range.text("⬅️ Previous", (ctx) => { ctx.session.candidatePage = page - 1; ctx.menu.update(); });
     if (page < totalPages) range.text("Next ➡️", (ctx) => { ctx.session.candidatePage = page + 1; ctx.menu.update(); });
     range.row().text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📍 <b>Waitlist Locations</b>", "hr-waitlist-loc");
+        await ScreenManager.goBack(ctx, "📍 <b>Reserve Locations</b>", "hr-waitlist-loc");
     });
 });
 
@@ -1027,6 +1084,7 @@ hrCandidateUnifiedMenu.register(hrStagingConfirmMenu);
 
 hrInboxMenu.register(hrWaitlistMenu);
 hrWaitlistMenu.register(hrNoSlotQuickMenu);
+hrNoSlotQuickMenu.register(hrNoSlotProfilesMenu);
 hrWaitlistMenu.register(hrWaitlistCityMenu);
 hrWaitlistCityMenu.register(hrWaitlistLocMenu);
 hrWaitlistLocMenu.register(hrWaitlistProfilesMenu);

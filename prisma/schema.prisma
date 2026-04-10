@@ -95,6 +95,7 @@ model Candidate {
   notificationSent     Boolean         @default(false)
   stagingNotifiedAt    DateTime?
   interviewInvitedAt   DateTime?
+  interviewWaitlistReason String?
   materialsSent        Boolean         @default(false)
   materialsSentAt      DateTime?
   candidateDecision    String?
