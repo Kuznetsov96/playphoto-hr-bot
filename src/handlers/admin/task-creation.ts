@@ -370,14 +370,12 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
         }
 
         const kb = new InlineKeyboard()
-            .text("⬅️ To Dashboard", `task_dash_${createdTaskDate}`)
-            .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities").row()
+            .text("⬅️ To Dashboard", `task_dash_${createdTaskDate}`).row()
             .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, successText, kb);
     } catch (error) {
         logger.error({ err: error }, "Error creating task");
         const errKb = new InlineKeyboard()
-            .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
             .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, "❌ Error creating tasks. Please try again.", errKb);
     }
