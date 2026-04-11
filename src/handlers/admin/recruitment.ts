@@ -19,6 +19,7 @@ import { createKyivDate } from "../../utils/bot-utils.js";
 import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import { buildSignedCallback } from "../../utils/signed-callback.js";
 
 
 export const adminRecruitmentHandlers = new Composer<MyContext>();
@@ -221,7 +222,7 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         range.text("🔔 Ping NDA", async (ctx) => {
             const { NDA_LINK } = await import("../../config.js");
             const firstName = extractFirstName(cand.fullName || "");
-            const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
+            const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
 
             try {
                 await ctx.api.sendMessage(Number(cand.user.telegramId),

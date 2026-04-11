@@ -7,6 +7,7 @@ import logger from "../../../core/logger.js";
 import { extractFirstName } from "../../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../../utils/location-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
+import { readCallbackPayload } from "../../../utils/signed-callback.js";
 
 const MIN_CANDIDATE_AGE = 17;
 const MAX_CANDIDATE_AGE = 26;
@@ -559,13 +560,18 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[finalKey]);
 }
 
-candidateHandlers.callbackQuery(/^cancel_staging_(.+)$/, async (ctx) => {
+candidateHandlers.on("callback_query:data", async (ctx, next) => {
     const { candidateRepository } = ctx.di;
-    const candId = ctx.match![1]!;
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cstg", legacyPrefix: "cancel_staging_" });
+    if (!candId) return next();
     await ctx.answerCallbackQuery();
     try {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return;
+        if (Number(cand.user.telegramId) !== ctx.from?.id) {
+            await ctx.answerCallbackQuery("Ця дія недоступна.");
+            return;
+        }
 
         // Guard: only allow cancellation for candidates still in setup/active phase
         if (cand.status !== CandidateStatus.STAGING_SETUP && cand.status !== CandidateStatus.STAGING_ACTIVE) {

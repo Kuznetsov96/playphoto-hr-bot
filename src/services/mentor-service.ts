@@ -15,6 +15,7 @@ import { Bot } from "grammy";
 import prisma from "../db/core.js";
 import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
+import { buildSignedCallback } from "../utils/signed-callback.js";
 
 export class MentorService {
     private getMentorOnboardingWhere(fromDate?: Date): Prisma.CandidateWhereInput {
@@ -344,7 +345,7 @@ export class MentorService {
                               `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
                               `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
 
-            const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
+            const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
             if (cand.user) {
                 try {
                     await api.sendMessage(Number(cand.user.telegramId),

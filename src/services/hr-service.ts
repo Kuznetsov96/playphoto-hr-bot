@@ -13,6 +13,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
 import { audit } from "../core/audit-logger.js";
+import { buildSignedCallback } from "../utils/signed-callback.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -211,7 +212,7 @@ export const hrService = {
         if (!cand) return;
         const { NDA_LINK } = await import("../config.js");
         const firstName = extractFirstName(cand.fullName || "");
-        const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
+        const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
         try {
             await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), { parse_mode: "HTML", reply_markup: kb });
         } catch (e: any) {
@@ -972,7 +973,7 @@ export const hrService = {
             if (partnerUsername) kb.url("💬 Написати напарнику", `https://t.me/${partnerUsername}`).row();
             else if (partnerUser?.telegramId) kb.url("💬 Написати напарнику", `tg://user?id=${partnerUser.telegramId}`).row();
 
-            kb.text("❌ Не зможу прийти", `cancel_staging_${candId}`).row();
+            kb.text("❌ Не зможу прийти", buildSignedCallback("cstg", candId)).row();
             kb.text("👨‍💼 Написати Адміну", "contact_hr");
 
             await api.sendMessage(Number(candRecord.user.telegramId), candMsg, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });

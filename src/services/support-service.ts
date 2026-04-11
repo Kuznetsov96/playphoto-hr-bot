@@ -165,9 +165,22 @@ export class SupportService {
         return ticket;
     }
 
-    async toggleUrgent(ticketId: number) {
+    async toggleUrgent(ticketId: number, actorTelegramId?: number) {
         const ticket = await supportRepository.findTicketById(ticketId);
         if (!ticket) throw new Error("Ticket not found");
+
+        if (!actorTelegramId || !getAdminRoleByTelegramId(BigInt(actorTelegramId))) {
+            logger.warn({ actorTelegramId, ticketId }, "⛔ Unauthorized ticket urgent toggle attempt");
+            logSecurityEvent({
+                event: "security.support.ticket_urgent_denied",
+                telegramId: actorTelegramId,
+                actorType: "staff",
+                result: "failed",
+                module: "support",
+                safeContext: { ticketId }
+            });
+            throw new Error("Недостатньо прав для цієї дії");
+        }
 
         const newUrgent = !ticket.isUrgent;
         await supportRepository.updateTicket(ticketId, { isUrgent: newUrgent });
