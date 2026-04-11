@@ -20,6 +20,14 @@ const EXPENSE_CATEGORIES = [
     "Налоги"
 ];
 
+const DDS_EXPENSE_CATEGORY_MAP: Record<string, string> = {
+    "Налоги": "Налоги ФОП"
+};
+
+function getDdsExpenseCategory(category: string): string {
+    return DDS_EXPENSE_CATEGORY_MAP[category] || category;
+}
+
 const ROLE_FOP_MAP: Record<string, string> = {
     'CO_FOUNDER': 'Счёт ФОП Гупалова',
     'SUPPORT': 'Счёт ФОП Посредникова',
@@ -89,6 +97,7 @@ expenseHandlers.on("message:text", async (ctx, next) => {
         const fopName = (ctx.session.candidateData as any).expenseFop;
         const amount = (ctx.session.candidateData as any).expenseAmount;
         const category = (ctx.session.candidateData as any).expenseCategory;
+        const ddsCategory = getDdsExpenseCategory(category);
         const locationName = (ctx.session.candidateData as any).expenseLocation;
 
         const dateStr = new Date().toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
@@ -98,7 +107,7 @@ expenseHandlers.on("message:text", async (ctx, next) => {
             `📅 Date: ${dateStr}\n` +
             `💳 Account: <b>${fopName}</b>\n` +
             `💰 Amount: <b>${finalAmount} UAH</b>\n` +
-            `📂 Category: ${category}\n` +
+            `📂 Category: ${ddsCategory}\n` +
             `📍 Location: ${locationName}\n` +
             `📝 Comment: ${comment}`;
 
@@ -183,6 +192,7 @@ expenseHandlers.callbackQuery("exp_confirm_save", async (ctx) => {
     const fopName = (ctx.session.candidateData as any).expenseFop;
     const amount = (ctx.session.candidateData as any).expenseAmount;
     const category = (ctx.session.candidateData as any).expenseCategory;
+    const ddsCategory = getDdsExpenseCategory(category);
     const locationName = (ctx.session.candidateData as any).expenseLocation;
     const comment = (ctx.session.candidateData as any).expenseComment;
 
@@ -201,7 +211,7 @@ expenseHandlers.callbackQuery("exp_confirm_save", async (ctx) => {
             date: dateStr,
             amount: finalAmount,
             fop: fopName,
-            category: category,
+            category: ddsCategory,
             comment: comment,
             location: locationName
         });
