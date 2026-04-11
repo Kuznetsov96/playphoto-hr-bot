@@ -145,9 +145,16 @@ export class BookingService {
         });
     }
 
-    async cancelInterviewSlot(slotId: string) {
+    async cancelInterviewSlot(slotId: string, actorTelegramId?: number) {
         const slot = await interviewRepository.findSlotWithCandidate(slotId);
         if (!slot) return;
+
+        if (actorTelegramId !== undefined) {
+            const ownerTelegramId = slot.candidate?.user?.telegramId;
+            if (!ownerTelegramId || Number(ownerTelegramId) !== actorTelegramId) {
+                throw new Error("FORBIDDEN_SLOT_ACCESS");
+            }
+        }
 
         if (slot.googleEventId) {
             await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
@@ -186,9 +193,16 @@ export class BookingService {
         });
     }
 
-    async cancelTrainingSlot(slotId: string) {
+    async cancelTrainingSlot(slotId: string, actorTelegramId?: number) {
         const slot = await trainingRepository.findSlotWithCandidate(slotId);
         if (!slot) return;
+
+        if (actorTelegramId !== undefined) {
+            const ownerTelegramId = slot.candidate?.user?.telegramId ?? slot.candidateDiscovery?.user?.telegramId;
+            if (!ownerTelegramId || Number(ownerTelegramId) !== actorTelegramId) {
+                throw new Error("FORBIDDEN_SLOT_ACCESS");
+            }
+        }
 
         if (slot.googleEventId) {
             await googleCalendar.deleteEvent(slot.googleEventId).catch(() => { });
@@ -254,9 +268,9 @@ export class BookingService {
         });
     }
 
-    async cancelDiscoverySlot(slotId: string) {
+    async cancelDiscoverySlot(slotId: string, actorTelegramId?: number) {
         // Alias to cancelTrainingSlot since it now handles both candidate and candidateDiscovery
-        return this.cancelTrainingSlot(slotId);
+        return this.cancelTrainingSlot(slotId, actorTelegramId);
     }
 
 

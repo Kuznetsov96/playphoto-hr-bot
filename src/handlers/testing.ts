@@ -5,6 +5,7 @@ import { ADMIN_IDS, MENTOR_IDS } from "../config.js";
 import { z } from "zod";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { readCallbackPayload } from "../utils/signed-callback.js";
 
 const NDASchema = z.object({
     fullName: z.string().min(5, "ПІБ має бути не менше 5 символів").max(100),
@@ -118,12 +119,17 @@ testingHandlers.callbackQuery(/^test_2_(bad|good)_(.+)$/, async (ctx) => {
 
 // --- NDA READING (Before Staging) ---
 
-testingHandlers.callbackQuery(/^confirm_nda_(.+)$/, async (ctx: MyContext) => {
-    const candId = ctx.match![1]!;
-    if (!candId) return ctx.answerCallbackQuery("Помилка: ID не знайдено.");
+testingHandlers.on("callback_query:data", async (ctx: MyContext, next) => {
+    const data = ctx.callbackQuery?.data;
+    if (!data) return next();
+    const candId = readCallbackPayload(data, { code: "cnda", legacyPrefix: "confirm_nda_" });
+    if (!candId) return next();
 
     const cand = await candidateRepository.findById(candId);
     if (!cand) return ctx.answerCallbackQuery("Кандидат не знайдений. ❌");
+    if (Number(cand.user.telegramId) !== ctx.from?.id) {
+        return ctx.answerCallbackQuery("Ця дія недоступна.");
+    }
 
     // Idempotency: skip if already confirmed
     if (cand.ndaConfirmedAt || cand.status !== "NDA") {

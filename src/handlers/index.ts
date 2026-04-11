@@ -23,6 +23,7 @@ import { extractFirstName } from "../utils/string-utils.js";
 import { slotBuilderHandlers } from "./slot-builder.js";
 import { leadsHandlers } from "./leads.js";
 import { blockShield } from "../middleware/block-shield.js";
+import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -106,13 +107,18 @@ handlers.use(quizHandlers);
 handlers.use(accessHandlers); // ✅ NEW: Handle join requests & membership sync
 
 // Handle NDA resend from Status Card
-handlers.callbackQuery(/^send_nda_(.+)$/, async (ctx) => {
-    const candId = ctx.match![1]!;
+handlers.on("callback_query:data", async (ctx, next) => {
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "snda", legacyPrefix: "send_nda_" });
+    if (!candId) return next();
     await ctx.answerCallbackQuery("Відправляю NDA... 📋");
     
     const { candidateRepository } = await import("../repositories/candidate-repository.js");
     const cand = await candidateRepository.findById(candId);
     if (!cand) return;
+    if (Number(cand.user.telegramId) !== ctx.from?.id) {
+        await ctx.answerCallbackQuery("Ця дія недоступна.");
+        return;
+    }
 
     const firstName = extractFirstName(cand.fullName || "");
     const { NDA_LINK } = await import("../config.js");
@@ -127,16 +133,22 @@ handlers.callbackQuery(/^send_nda_(.+)$/, async (ctx) => {
         `Прочитай його уважно і натисни кнопку нижче, коли будеш готова продовжувати! ✨`,
         {
             parse_mode: "HTML",
-            reply_markup: new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`)
+            reply_markup: new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id))
         }
     );
 });
 
 // Handle NDA confirmation
-handlers.callbackQuery(/^confirm_nda_(.+)$/, async (ctx) => {
-    const candId = ctx.match![1]!;
+handlers.on("callback_query:data", async (ctx, next) => {
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cnda", legacyPrefix: "confirm_nda_" });
+    if (!candId) return next();
     const { candidateRepository } = await import("../repositories/candidate-repository.js");
     const { CandidateStatus } = await import("@prisma/client");
+    const cand = await candidateRepository.findById(candId);
+    if (!cand || Number(cand.user.telegramId) !== ctx.from?.id) {
+        await ctx.answerCallbackQuery("Ця дія недоступна.");
+        return;
+    }
     await candidateRepository.update(candId, { 
         ndaConfirmedAt: new Date(),
         status: CandidateStatus.KNOWLEDGE_TEST

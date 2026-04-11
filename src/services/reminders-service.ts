@@ -5,6 +5,7 @@ import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { buildSignedCallback } from "../utils/signed-callback.js";
 
 export const remindersService = {
     async processNDAReminders(botApi: any) {
@@ -37,7 +38,7 @@ export const remindersService = {
             for (const cand of candidates) {
                 try {
                     const firstName = extractFirstName(cand.fullName || "");
-                    const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", `confirm_nda_${cand.id}`);
+                    const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
                     
                     await botApi.sendMessage(Number(cand.user.telegramId),
                         CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK),
