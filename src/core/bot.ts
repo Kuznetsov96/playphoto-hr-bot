@@ -29,7 +29,16 @@ bot.api.config.use(autoRetry());
 bot.api.config.use(chatLogTransformer);
 
 // --- SESSION ---
-bot.use(sequentialize((ctx) => ctx.chat?.id.toString()));
+bot.use(sequentialize((ctx) => {
+    const userId = ctx.from?.id;
+    const chatId = ctx.chat?.id;
+
+    if (userId !== undefined && chatId !== undefined) {
+        return `${chatId}:${userId}`;
+    }
+
+    return (chatId ?? userId)?.toString() ?? "global";
+}));
 bot.use(lazySession());
 
 // --- MIDDLEWARE ---

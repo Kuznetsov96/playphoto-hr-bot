@@ -35,15 +35,7 @@ export function readCallbackPayload(
     data: string,
     options: {
         code: string;
-        legacyPrefix?: string;
     }
 ): string | null {
-    const signedPayload = readSignedCallback(data, options.code);
-    if (signedPayload !== null) return signedPayload;
-
-    if (options.legacyPrefix && data.startsWith(options.legacyPrefix)) {
-        return data.slice(options.legacyPrefix.length) || null;
-    }
-
-    return null;
+    return readSignedCallback(data, options.code);
 }

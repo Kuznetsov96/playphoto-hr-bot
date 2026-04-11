@@ -17,8 +17,7 @@ describe("signed callback integrity", () => {
 
     it("falls back to legacy payloads during migration", () => {
         expect(readCallbackPayload("confirm_nda_candidate-123", {
-            code: "cnda",
-            legacyPrefix: "confirm_nda_"
-        })).toBe("candidate-123");
+            code: "cnda"
+        })).toBeNull();
     });
 });
