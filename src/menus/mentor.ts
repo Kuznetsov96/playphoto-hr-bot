@@ -44,6 +44,17 @@ const getInboxMessageSnippet = (candidate: any) => {
     return formatMessagePreview(latest.content, Boolean(latest.photoId), 32);
 };
 
+const renderManualTrainingPicker = async (ctx: MyContext, candId: string, fullName?: string | null) => {
+    delete ctx.session.adminFlow;
+    ctx.session.selectedCandidateId = candId;
+    await ScreenManager.renderScreen(
+        ctx,
+        `🗓 <b>Assign Online Internship</b>\n\nPlease select the date for ${fullName || "Candidate"}:`,
+        "mentor-manual-date",
+        { pushToStack: true }
+    );
+};
+
 export const updateCalendarDashboard = async (ctx: MyContext) => {
     const today = new Date();
     const dateStr = formatDate(today);
@@ -227,6 +238,12 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
                 await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
             }).row();
+
+            if (cand.status === "DISCOVERY_COMPLETED") {
+                range.text("🗓 Assign Internship", async (ctx) => {
+                    await renderManualTrainingPicker(ctx, cand.id, cand.fullName);
+                }).row();
+            }
         }
 
         if (stats.newAcceptedCount > 0) {
@@ -277,8 +294,7 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
 
     if (cand.status === "DISCOVERY_COMPLETED") {
         range.text("🗓 Assign Online Internship", async (ctx) => {
-            delete ctx.session.adminFlow;
-            await ScreenManager.renderScreen(ctx, `🗓 <b>Assign Online Internship</b>\n\nPlease select the date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
+            await renderManualTrainingPicker(ctx, cand.id, cand.fullName);
         }).row();
     }
     else if (cand.status === "DISCOVERY_SCHEDULED") {
