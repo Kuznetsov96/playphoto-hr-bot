@@ -562,7 +562,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
 
 candidateHandlers.on("callback_query:data", async (ctx, next) => {
     const { candidateRepository } = ctx.di;
-    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cstg", legacyPrefix: "cancel_staging_" });
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cstg" });
     if (!candId) return next();
     await ctx.answerCallbackQuery();
     try {

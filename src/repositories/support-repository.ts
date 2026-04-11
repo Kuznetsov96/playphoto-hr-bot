@@ -40,6 +40,48 @@ export class SupportRepository {
         });
     }
 
+    async assignTicketIfOpen(id: number, adminUserId: string) {
+        const result = await prisma.supportTicket.updateMany({
+            where: {
+                id,
+                status: { in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS] }
+            },
+            data: {
+                status: TicketStatus.IN_PROGRESS,
+                assignedAdminId: adminUserId
+            }
+        });
+
+        if (result.count === 0) return null;
+        return this.findTicketById(id);
+    }
+
+    async updateUrgentIfOpen(id: number, isUrgent: boolean) {
+        const result = await prisma.supportTicket.updateMany({
+            where: {
+                id,
+                status: { in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS] }
+            },
+            data: { isUrgent }
+        });
+
+        if (result.count === 0) return null;
+        return this.findTicketById(id);
+    }
+
+    async closeTicketIfOpen(id: number) {
+        const result = await prisma.supportTicket.updateMany({
+            where: {
+                id,
+                status: { in: [TicketStatus.OPEN, TicketStatus.IN_PROGRESS] }
+            },
+            data: { status: TicketStatus.CLOSED }
+        });
+
+        if (result.count === 0) return null;
+        return this.findTicketById(id);
+    }
+
     async touchTicket(id: number) {
         return prisma.supportTicket.update({
             where: { id },

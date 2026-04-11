@@ -72,7 +72,7 @@ export class SupportService {
     }
 
     async closeTicket(id: number) {
-        return supportRepository.updateTicket(id, { status: "CLOSED" });
+        return supportRepository.closeTicketIfOpen(id);
     }
 
     async getTicketSummary(id: number): Promise<string> {
@@ -146,10 +146,10 @@ export class SupportService {
         const adminUser = await userRepository.findByTelegramId(BigInt(adminTelegramId));
         if (!adminUser) throw new Error("Admin user not found in DB");
 
-        await supportRepository.updateTicket(ticketId, {
-            status: "IN_PROGRESS",
-            assignedAdminId: adminUser.id // Use CUID, not Telegram ID
-        });
+        const updated = await supportRepository.assignTicketIfOpen(ticketId, adminUser.id);
+        if (!updated) {
+            throw new Error("Ticket already processed by another admin");
+        }
 
         logAuditEvent({
             event: "support.ticket.assigned",
@@ -183,7 +183,10 @@ export class SupportService {
         }
 
         const newUrgent = !ticket.isUrgent;
-        await supportRepository.updateTicket(ticketId, { isUrgent: newUrgent });
+        const updated = await supportRepository.updateUrgentIfOpen(ticketId, newUrgent);
+        if (!updated) {
+            throw new Error("Ticket already closed");
+        }
 
         logAuditEvent({
             event: "support.ticket.urgent_toggled",
@@ -219,10 +222,10 @@ export class SupportService {
         const targetAdmin = await userRepository.findByTelegramId(targetAdminId);
         if (!targetAdmin) throw new Error("Target admin not found");
 
-        await supportRepository.updateTicket(ticketId, {
-            assignedAdminId: targetAdmin.id,
-            status: "IN_PROGRESS"
-        });
+        const updated = await supportRepository.assignTicketIfOpen(ticketId, targetAdmin.id);
+        if (!updated) {
+            throw new Error("Ticket already processed by another admin");
+        }
 
         logAuditEvent({
             event: "support.ticket.transferred",

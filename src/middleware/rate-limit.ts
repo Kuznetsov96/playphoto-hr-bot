@@ -7,6 +7,8 @@ import {
 } from "../config.js";
 
 let candidateLimit: any = null;
+let staffLimit: any = null;
+let adminLimit: any = null;
 
 function getCandidateRateLimit(redis: any) {
     if (!candidateLimit) {
@@ -26,6 +28,42 @@ function getCandidateRateLimit(redis: any) {
     return candidateLimit;
 }
 
+function getStaffRateLimit(redis: any) {
+    if (!staffLimit) {
+        staffLimit = limit<MyContext, any>({
+            timeFrame: 60 * 1000,
+            limit: 90,
+            storageClient: redis,
+            keyGenerator: (ctx) => `staff:${ctx.from?.id.toString()}`,
+            onLimitExceeded: async (ctx) => {
+                logger.warn(`⚠️ [LIMIT] Staff ${ctx.from?.id} exceeded limit`);
+                try {
+                    await ctx.reply("⚠️ Забагато дій за короткий час. Зачекай кілька секунд і спробуй ще раз.");
+                } catch (e) { }
+            }
+        });
+    }
+    return staffLimit;
+}
+
+function getAdminRateLimit(redis: any) {
+    if (!adminLimit) {
+        adminLimit = limit<MyContext, any>({
+            timeFrame: 60 * 1000,
+            limit: 180,
+            storageClient: redis,
+            keyGenerator: (ctx) => `admin:${ctx.from?.id.toString()}`,
+            onLimitExceeded: async (ctx) => {
+                logger.warn(`⚠️ [LIMIT] Admin ${ctx.from?.id} exceeded limit`);
+                try {
+                    await ctx.answerCallbackQuery({ text: "Too many actions. Slow down a bit.", show_alert: true });
+                } catch (e) { }
+            }
+        });
+    }
+    return adminLimit;
+}
+
 /**
  * Global router middleware factory to apply specific limits based on user role.
  * Taking dependencies as arguments to break circular cycles with DI container.
@@ -36,24 +74,29 @@ export function createRateLimitMiddleware(redis: any, userRepositoryResolver: ()
         const chatId = ctx.chat?.id;
         if (!userId) return next();
 
-        // Bypass for System Team Chats (HUB, SUPPORT, CHANNEL)
+        // Keep system chat traffic available, but still protect privileged users from floods in DMs.
         if (chatId) {
             const systemChatIds = Object.values(TEAM_CHATS);
             if (systemChatIds.includes(chatId)) {
-                return next();
+                return getAdminRateLimit(redis)(ctx, next);
             }
         }
 
-        // Bypass for Admins, Mentors, Support, HR, Co-Founders, and Finance
+        // Apply a higher limit for privileged roles instead of a full bypass.
         if (
             ADMIN_IDS.includes(userId) ||
+            CO_FOUNDER_IDS.includes(userId)
+        ) {
+            return getAdminRateLimit(redis)(ctx, next);
+        }
+
+        if (
             MENTOR_IDS.includes(userId) ||
             SUPPORT_IDS.includes(userId) ||
             HR_IDS.includes(userId) ||
-            CO_FOUNDER_IDS.includes(userId) ||
             FINANCE_IDS.includes(userId)
         ) {
-            return next();
+            return getStaffRateLimit(redis)(ctx, next);
         }
 
         // Defer resolution of userRepository until middleware is executed
@@ -62,7 +105,7 @@ export function createRateLimitMiddleware(redis: any, userRepositoryResolver: ()
         const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(userId));
 
         if (user?.staffProfile?.isActive) {
-            return next();
+            return getStaffRateLimit(redis)(ctx, next);
         }
 
         // Default to candidate limit

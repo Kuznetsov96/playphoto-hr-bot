@@ -1,6 +1,6 @@
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
-import { ADMIN_IDS, MENTOR_IDS, CO_FOUNDER_IDS } from "../config.js";
+import { ADMIN_IDS, MENTOR_IDS, CO_FOUNDER_IDS, ALLOW_DEV_COMMANDS } from "../config.js";
 import { hrHubMenu } from "../menus/hr.js";
 import { mentorHubMenu } from "../menus/mentor.js";
 import { adminMenu } from "./admin/index.js";
@@ -543,6 +543,7 @@ commandHandlers.command("reset_me", async (ctx) => {
 // --- DEV TOOLS ---
 commandHandlers.command("set_step", async (ctx) => {
     try { await ctx.deleteMessage().catch(() => { }); } catch (e) { }
+    if (!ALLOW_DEV_COMMANDS) return;
     const userId = ctx.from?.id;
     if (!userId) return;
 
@@ -614,6 +615,7 @@ commandHandlers.command("set_step", async (ctx) => {
 
 commandHandlers.command("pass_test", async (ctx) => {
     try { await ctx.deleteMessage(); } catch (e) { }
+    if (!ALLOW_DEV_COMMANDS) return;
     const userId = ctx.from?.id;
     if (!userId) return;
 

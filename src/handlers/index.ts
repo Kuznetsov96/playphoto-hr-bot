@@ -108,7 +108,7 @@ handlers.use(accessHandlers); // ✅ NEW: Handle join requests & membership sync
 
 // Handle NDA resend from Status Card
 handlers.on("callback_query:data", async (ctx, next) => {
-    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "snda", legacyPrefix: "send_nda_" });
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "snda" });
     if (!candId) return next();
     await ctx.answerCallbackQuery("Відправляю NDA... 📋");
     
@@ -140,7 +140,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
 
 // Handle NDA confirmation
 handlers.on("callback_query:data", async (ctx, next) => {
-    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cnda", legacyPrefix: "confirm_nda_" });
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cnda" });
     if (!candId) return next();
     const { candidateRepository } = await import("../repositories/candidate-repository.js");
     const { CandidateStatus } = await import("@prisma/client");
