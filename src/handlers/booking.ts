@@ -13,6 +13,7 @@ import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
+import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
@@ -165,8 +166,8 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         }
 
         const kb = new InlineKeyboard()
-            .text("🗓️ Змінити час", `reschedule_booking_${result.slot.id}`).row()
-            .text("❌ Скасувати участь", `cancel_booking_${result.slot.id}`);
+            .text("🗓️ Змінити час", buildSignedCallback("rb", result.slot.id)).row()
+            .text("❌ Скасувати участь", buildSignedCallback("cb", result.slot.id));
         if ((result as any).candidate?.gender !== "male") {
             kb.row().text("👩‍💼 Написати HR", "contact_hr");
         }
@@ -218,11 +219,12 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
 // 2. Відмова від участі — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cb", legacyPrefix: "cancel_booking_" });
+    if (!slotId) return;
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, відмовляюсь", `confirm_cancel_booking_${slotId}`).row()
+        .text("🚫 Так, відмовляюсь", buildSignedCallback("ccb", slotId)).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
@@ -234,12 +236,13 @@ bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
 });
 
 // 2.1. Відмова від участі — крок 2: підтверджено → REJECTED
-bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb", legacyPrefix: "confirm_cancel_booking_" });
+    if (!slotId) return next();
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
-        await bookingService.cancelInterviewSlot(slotId);
+        await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
 
         if (candidate) {
             await candidateRepository.update(candidate.id, {
@@ -269,22 +272,27 @@ bookingHandlers.callbackQuery(/^confirm_cancel_booking_(.+)$/, async (ctx) => {
             }
         }
 
-    } catch (e) {
+    } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview cancellation failed");
-        await ctx.answerCallbackQuery("Сталася помилка.");
+        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+        } else {
+            await ctx.answerCallbackQuery("Сталася помилка.");
+        }
     }
 });
 
 // 4. Зміна часу співбесіди — одразу звільняє поточний слот і показує нові
-bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rb", legacyPrefix: "reschedule_booking_" });
+    if (!slotId) return next();
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
 
         // Release current slot first so it appears in the new list
-        await bookingService.cancelInterviewSlot(slotId);
+        await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
         if (candidate) {
             await candidateRepository.update(candidate.id, {
                 status: CandidateStatus.WAITLIST_HR,
@@ -332,9 +340,13 @@ bookingHandlers.callbackQuery(/^reschedule_booking_(.+)$/, async (ctx) => {
 
         await ctx.editMessageText("Добре, давай оберемо інший зручний час: 🗓️✨", { reply_markup: keyboard });
 
-    } catch (e) {
+    } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Interview reschedule failed");
-        await ctx.answerCallbackQuery("Сталася помилка.");
+        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+        } else {
+            await ctx.answerCallbackQuery("Сталася помилка.");
+        }
     }
 });
 
@@ -643,8 +655,8 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         }
 
         const kb = new InlineKeyboard()
-            .text("🗓️ Змінити час", `reschedule_training_${slotId}`).row()
-            .text("❌ Скасувати участь", `cancel_training_${slotId}`).row()
+            .text("🗓️ Змінити час", buildSignedCallback("rt", slotId)).row()
+            .text("❌ Скасувати участь", buildSignedCallback("ct", slotId)).row()
             .text("👩‍🏫 Написати наставниці", "contact_mentor");
 
         await cleanupMessages(ctx);
@@ -718,11 +730,12 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
 
 // 10. Скасування навчання — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ct", legacyPrefix: "cancel_training_" });
+    if (!slotId) return;
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, відмовляюсь", `confirm_cancel_training_${slotId}`).row()
+        .text("🚫 Так, відмовляюсь", buildSignedCallback("cct", slotId)).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
@@ -734,15 +747,16 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
 });
 
 // 10.1. Скасування навчання — крок 2: підтверджено
-bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct", legacyPrefix: "confirm_cancel_training_" });
+    if (!slotId) return next();
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         // Save original status BEFORE update for correct notification
         const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
 
-        await bookingService.cancelTrainingSlot(slotId);
+        await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
 
         if (candidate) {
             await candidateRepository.update(candidate.id, {
@@ -775,9 +789,13 @@ bookingHandlers.callbackQuery(/^confirm_cancel_training_(.+)$/, async (ctx) => {
             }
         }
 
-    } catch (e) {
+    } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Training cancellation failed");
-        await ctx.answerCallbackQuery("Сталася помилка.");
+        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+        } else {
+            await ctx.answerCallbackQuery("Сталася помилка.");
+        }
     }
 });
 
@@ -792,8 +810,9 @@ bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
 });
 
 // 11. Зміна часу навчання — одразу звільняє поточний слот і показує нові
-bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
-    const slotId = ctx.match![1] as string;
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rt", legacyPrefix: "reschedule_training_" });
+    if (!slotId) return next();
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
 
@@ -806,7 +825,7 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
         }
 
         // Release the specifically requested slot as well (context-safe)
-        await bookingService.cancelTrainingSlot(slotId);
+        await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
 
         // Notify Mentor about reschedule
         if (candidate) {
@@ -854,8 +873,12 @@ bookingHandlers.callbackQuery(/^reschedule_training_(.+)$/, async (ctx) => {
 
         await ctx.editMessageText("Добре, давай оберемо інший зручний час для навчання: 🗓️✨", { reply_markup: keyboard });
 
-    } catch (e) {
+    } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Training reschedule failed");
-        await ctx.answerCallbackQuery("Сталася помилка.");
+        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+        } else {
+            await ctx.answerCallbackQuery("Сталася помилка.");
+        }
     }
 });

@@ -7,6 +7,7 @@ import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { locationRepository } from '../repositories/location-repository.js';
 import { logBusinessEvent } from '../core/log-events.js';
+import { buildSignedCallback } from '../utils/signed-callback.js';
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -487,7 +488,7 @@ export class LogisticsService {
         const user = await prisma.user.findUnique({ where: { id: parcel.responsibleStaff.userId } });
         if (!user) return null;
 
-        const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+        const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
         const text =
             `✅ <b>Доручення оформлено.</b>\n\n` +
             `Посилку <code>${parcel.ttn}</code> для <b>${parcel.location?.name || 'локації'}</b> вже можна забирати у Новій Пошті.\n\n` +
@@ -678,12 +679,12 @@ export class LogisticsService {
             } else if (triggerStatus === 'ARRIVED') {
                 text = LOGISTICS_TEXTS_STAFF.arrived(parcel.ttn, parcel.location?.name || '');
                 kb.text(LOGISTICS_TEXTS_STAFF.btn_accept, `parcel_accept_${parcel.id}`)
-                    .text(LOGISTICS_TEXTS_STAFF.btn_reject, `parcel_reject_${parcel.id}`);
+                    .text(LOGISTICS_TEXTS_STAFF.btn_reject, buildSignedCallback("prj", parcel.id));
             } else if (triggerStatus === 'DELIVERED') {
                 text = parcel.deliveryType === 'Address'
                     ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, parcel.location?.name || '')
                     : LOGISTICS_TEXTS_STAFF.delivered_pickup_completed(parcel.ttn, parcel.location?.name || '');
-                kb.text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+                kb.text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
             }
 
             if (text) {
@@ -881,7 +882,7 @@ export class LogisticsService {
                 });
 
                 const kb = new InlineKeyboard()
-                    .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+                    .text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
 
                 const sent = await bot.api.sendMessage(
                     Number(tid),
@@ -958,7 +959,7 @@ export class LogisticsService {
 
                 if (shouldSendPostShiftReminder) {
                     const kb = new InlineKeyboard()
-                        .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+                        .text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
 
                     const sent = await bot.api.sendMessage(
                         Number(tid),
@@ -1047,7 +1048,7 @@ export class LogisticsService {
 
             const kb = new InlineKeyboard()
                 .text(LOGISTICS_TEXTS_STAFF.btn_accept, `parcel_accept_${parcel.id}`)
-                .text(LOGISTICS_TEXTS_STAFF.btn_reject, `parcel_reject_${parcel.id}`);
+                .text(LOGISTICS_TEXTS_STAFF.btn_reject, buildSignedCallback("prj", parcel.id));
 
             await bot.api.sendMessage(
                 Number(tid),
@@ -1090,7 +1091,7 @@ export class LogisticsService {
             if (!tid) continue;
 
             const kb = new InlineKeyboard()
-                .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcel.id}`);
+                .text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
 
             const sent = await bot.api.sendMessage(Number(tid),
                 `⏰ <b>Нагадування:</b> будь ласка, завантаж фото вмісту посилки <code>${parcel.ttn}</code> (${parcel.location?.name || ''}).\n\nНатисни кнопку нижче: 📸`,

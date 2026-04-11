@@ -207,4 +207,32 @@ describe('BookingService', () => {
             });
         });
     });
+
+    describe('slot ownership guards', () => {
+        it('blocks interview slot cancellation for another candidate', async () => {
+            vi.mocked(interviewRepository.findSlotWithCandidate).mockResolvedValue({
+                id: 'slot1',
+                candidate: {
+                    id: 'cand1',
+                    user: { telegramId: BigInt(999999) }
+                }
+            } as any);
+
+            await expect(bookingService.cancelInterviewSlot('slot1', 123456))
+                .rejects.toThrow('FORBIDDEN_SLOT_ACCESS');
+        });
+
+        it('blocks training slot cancellation for another discovery candidate', async () => {
+            vi.mocked(trainingRepository.findSlotWithCandidate).mockResolvedValue({
+                id: 'slot2',
+                candidateDiscovery: {
+                    id: 'disc1',
+                    user: { telegramId: BigInt(999999) }
+                }
+            } as any);
+
+            await expect(bookingService.cancelTrainingSlot('slot2', 123456))
+                .rejects.toThrow('FORBIDDEN_SLOT_ACCESS');
+        });
+    });
 });
