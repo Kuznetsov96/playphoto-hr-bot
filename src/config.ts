@@ -58,6 +58,7 @@ const envSchema = z.object({
     // Security
     APP_ENCRYPTION_KEY: z.string().min(32, "APP_ENCRYPTION_KEY must be at least 32 characters for AES-256").optional(),
     BACKUP_PASSPHRASE: z.string().optional(),
+    ALLOW_DEV_COMMANDS: z.enum(["true", "false"]).default("false"),
 
     // Chats
     SUPPORT_CHAT_ID: z.string().min(1, "SUPPORT_CHAT_ID is missing"),
@@ -112,6 +113,7 @@ export const KNOWLEDGE_BASE_LINK = env.KNOWLEDGE_BASE_LINK || "https://t.me/+hC9
 export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge base channel
 export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
+export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
 

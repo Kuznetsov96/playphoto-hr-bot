@@ -290,7 +290,11 @@ staffSupportHandlers.callbackQuery(/^ticket_force_close_(\d+)$/, async (ctx) => 
     }
 
     // Close in DB
-    await supportService.closeTicket(ticketId);
+    const closedTicket = await supportService.closeTicket(ticketId);
+    if (!closedTicket) {
+        await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-closed"]);
+        return;
+    }
 
     // Try to close topic silently
     if (ticket.topicId) {
@@ -531,7 +535,11 @@ async function closeTicket(ctx: MyContext, ticketId: number, initiator: "USER" |
     }
 
     // Close in DB via Service
-    await supportService.closeTicket(ticketId);
+    const closedTicket = await supportService.closeTicket(ticketId);
+    if (!closedTicket) {
+        await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-closed"]);
+        return;
+    }
 
     audit({ event: "ticket_close", result: "success", actorType: initiator === "ADMIN" ? "admin" : "staff", telegramId: ctx.from?.id, entityType: "ticket", entityId: ticketId, updateId: ctx.update.update_id, context: { closedBy: initiator } });
     logAuditEvent({
