@@ -45,7 +45,8 @@ handlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
     // If it's a known new callback or menu callback, let it pass
-    if (data.startsWith("staff_") || data.startsWith("staff-") || data.startsWith("admin_") || data.startsWith("admin-") ||
+    if (data.startsWith("cb:") ||
+        data.startsWith("staff_") || data.startsWith("staff-") || data.startsWith("admin_") || data.startsWith("admin-") ||
         data.startsWith("hr_") || data.startsWith("hr-") ||
         data.startsWith("mentor_") || data.startsWith("mentor-") ||
         data.startsWith("tas_") || data.startsWith("task_") || data.startsWith("b_") || data.startsWith("ticket_") ||
