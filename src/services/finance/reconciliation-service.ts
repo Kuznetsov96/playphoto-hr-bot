@@ -48,6 +48,47 @@ function cityLabel(locCfg: { city: string; name: string; sheet?: string | null }
     return city;
 }
 
+function formatAuditLocationLabel(locCfg: { city: string; name: string; sheet?: string | null }): string {
+    const cityUa = locCfg.city.replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+    const cityEn = cityLabel(locCfg);
+    const cityUaNorm = normalizeFinanceString(cityUa);
+    const cityEnNorm = normalizeFinanceString(cityEn);
+
+    let name = locCfg.name.trim();
+
+    // Strip duplicate trailing city markers from the raw location name so we keep
+    // a single normalized English city label in the final report output.
+    while (true) {
+        const trimmed = name.trim();
+        const parenMatch = trimmed.match(/\s*\(([^)]+)\)\s*$/u);
+        if (parenMatch) {
+            const parenNorm = normalizeFinanceString(parenMatch[1]);
+            if (parenNorm === cityUaNorm || parenNorm === cityEnNorm) {
+                name = trimmed.slice(0, trimmed.length - parenMatch[0].length).trim();
+                continue;
+            }
+        }
+
+        const nameNorm = normalizeFinanceString(trimmed);
+        if (cityUaNorm && nameNorm.endsWith(cityUaNorm)) {
+            name = trimmed.slice(0, trimmed.length - cityUa.length).trim();
+            continue;
+        }
+        if (cityEnNorm && nameNorm.endsWith(cityEnNorm)) {
+            name = trimmed.slice(0, trimmed.length - cityEn.length).trim();
+            continue;
+        }
+
+        name = trimmed;
+        break;
+    }
+
+    const finalName = name.replace(/\s+/g, ' ').trim();
+    return cityEnNorm && !normalizeFinanceString(finalName).includes(cityEnNorm)
+        ? `${finalName} (${cityEn})`
+        : finalName;
+}
+
 export class ReconciliationService {
     private isAuditRunning = false;
 
@@ -210,7 +251,7 @@ export class ReconciliationService {
                                     else if (actual > 0 && Math.abs(actual - ddsTotal) > 1) details += ' ⚠️ NOT IN DDS';
 
                                     fopMatches.push({
-                                        location: `${locCfg.name} (${cityLabel(locCfg)})`,
+                                        location: formatAuditLocationLabel(locCfg),
                                         type: 'Terminal', expected: termExp, actual, diff,
                                         status: Math.abs(diff) > 0.5 ? (actual === 0 ? 'MISSING' : 'MISMATCH') : 'OK',
                                         details,
@@ -268,7 +309,7 @@ export class ReconciliationService {
 
                                 if (cashExp > 0 || totalCash > 0 || actual > 0) {
                                     fopMatches.push({
-                                        location: `${locCfg.name} (${cityLabel(locCfg)})`,
+                                        location: formatAuditLocationLabel(locCfg),
                                         type: 'Cash',
                                         expected: isEnv ? 0 : (cashExp < 0 ? 0 : cashExp),
                                         actual,
