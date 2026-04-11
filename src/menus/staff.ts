@@ -7,7 +7,32 @@ export const staffRootMenu = new Menu<MyContext>("staff-root");
 menuRegistry.register(staffRootMenu);
 
 // --- MAIN HUB MENU ---
-export const staffHubMenu = new Menu<MyContext>("staff-main");
+// Stable fingerprint prevents false "outdated button" errors when only dynamic
+// counters in labels change between render and callback handling.
+export const staffHubMenu = new Menu<MyContext>("staff-main", {
+    fingerprint: async (ctx) => {
+        const now = new Date();
+        const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        const preferencesVisible = kyivNow.getDate() >= 23 ? "pref" : "nopref";
+
+        const telegramId = ctx.from?.id;
+        if (!telegramId) return `staff-main:${preferencesVisible}:no-user`;
+
+        const { userRepository } = await import("../repositories/user-repository.js");
+        const { workShiftRepository } = await import("../repositories/work-shift-repository.js");
+
+        const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+        if (!user?.staffProfile) return `staff-main:${preferencesVisible}:no-staff`;
+
+        const kyivToday = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        kyivToday.setHours(0, 0, 0, 0);
+
+        const todayShifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivToday, 1);
+        const hasShiftToday = todayShifts.length > 0 && todayShifts[0]?.date.getTime() === kyivToday.getTime();
+
+        return `staff-main:${preferencesVisible}:${hasShiftToday ? "shift" : "no-shift"}`;
+    }
+});
 menuRegistry.register(staffHubMenu);
 
 staffHubMenu.dynamic(async (ctx, range) => {
