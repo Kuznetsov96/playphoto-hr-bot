@@ -115,8 +115,11 @@ export async function formatCandidateProfile(
         const header = isDiscovery ? `🤝 <b>DISCOVERY</b>` : `💻 <b>ONLINE TRAINING</b>`;
         text += `\n${header}\n`;
 
-        if (status === "TRAINING_COMPLETED" || status === "DISCOVERY_COMPLETED") {
+        if (status === "TRAINING_COMPLETED") {
             text += `🎓 Status: <b>Completed</b>\n`;
+        } else if (status === "DISCOVERY_COMPLETED") {
+            text += `🎓 Status: <b>Discovery completed</b>\n`;
+            text += `⏳ Next step: <b>Assign online internship</b>\n`;
         } else {
             const slot = candidate.trainingSlot || candidate.discoverySlot;
             if (slot) {
