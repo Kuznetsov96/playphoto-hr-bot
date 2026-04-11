@@ -131,6 +131,21 @@ async function getAuthorizedParcelForStaff(ctx: MyContext, parcelId: string, opt
     return { user, parcel };
 }
 
+async function claimParcelForPhotoFlow(parcelId: string, staffId: string) {
+    return prisma.parcel.update({
+        where: {
+            id: parcelId,
+            responsibleStaffId: null,
+            status: 'DELIVERED',
+        },
+        data: {
+            responsibleStaffId: staffId,
+            acceptedAt: new Date(),
+        },
+        include: { responsibleStaff: true, location: true }
+    });
+}
+
 async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photoFileIds: string[]) {
     const parcel = await prisma.parcel.findUnique({
         where: { id: parcelId },
@@ -518,8 +533,39 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
     const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "pph" });
     if (!parcelId) return next();
-    const access = await getAuthorizedParcelForStaff(ctx, parcelId);
+    const access = await getAuthorizedParcelForStaff(ctx, parcelId, { allowUnassigned: true });
     if (!access) return;
+    const { user, parcel } = access;
+    const staffProfile = user.staffProfile!;
+
+    if (!parcel.responsibleStaffId && parcel.status === 'DELIVERED') {
+        try {
+            const claimedParcel = await claimParcelForPhotoFlow(parcelId, staffProfile.id);
+            logBusinessEvent({
+                event: "logistics.parcel.photo_flow_claimed_unassigned",
+                actorType: "staff",
+                actorRole: "staff",
+                telegramId: ctx.from?.id,
+                result: "success",
+                module: "staff-logistics-handler",
+                operation: "parcel_photo_callback",
+                safeContext: {
+                    parcelId,
+                    staffId: staffProfile.id,
+                    previousResponsibleStaffId: null,
+                    newResponsibleStaffId: claimedParcel.responsibleStaffId,
+                },
+            });
+        } catch (err: any) {
+            // Another staff member may have claimed it just before this callback.
+            const refreshedAccess = await getAuthorizedParcelForStaff(ctx, parcelId);
+            if (!refreshedAccess) {
+                logger.warn({ err, parcelId, telegramId: ctx.from?.id }, "Failed to claim parcel for photo flow");
+                return;
+            }
+        }
+    }
+
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
     ctx.session.parcelPhotoDraft = {
         parcelId,
