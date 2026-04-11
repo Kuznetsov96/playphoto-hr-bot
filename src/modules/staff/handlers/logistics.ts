@@ -445,7 +445,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
 // 2. Reject Parcel
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
-    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "prj", legacyPrefix: "parcel_reject_" });
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "prj" });
     if (!parcelId) return next();
     const access = await getAuthorizedParcelForStaff(ctx, parcelId, { allowUnassigned: true });
     if (!access) return;
@@ -478,7 +478,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
 
 // 3. Confirm Phone
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
-    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppo", legacyPrefix: "parcel_phone_ok_" });
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppo" });
     if (!parcelId) return next();
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -503,7 +503,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
 
 // 4. Change Phone
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
-    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppc", legacyPrefix: "parcel_phone_change_" });
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppc" });
     if (!parcelId) return next();
     const access = await getAuthorizedParcelForStaff(ctx, parcelId);
     if (!access) return;
@@ -516,7 +516,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
 // 5. Trigger Photo Upload
 // Exclude the "done" and "cancel" callbacks so they reach their dedicated handlers.
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
-    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "pph", legacyPrefix: "parcel_photo_" });
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "pph" });
     if (!parcelId) return next();
     const access = await getAuthorizedParcelForStaff(ctx, parcelId);
     if (!access) return;
@@ -545,7 +545,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
 });
 
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
-    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppd", legacyPrefix: "parcel_photo_done_" });
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppd" });
     if (!parcelId) return next();
     await ctx.answerCallbackQuery("Завершую відправку фото...");
     await finalizeParcelPhotoDraft(ctx, parcelId);
@@ -563,7 +563,7 @@ staffLogisticsHandlers.callbackQuery("parcel_photo_done", async (ctx) => {
 });
 
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
-    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppx", legacyPrefix: "parcel_photo_cancel_" });
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppx" });
     if (!parcelId) return next();
     const draft = ctx.session.parcelPhotoDraft;
 

@@ -219,7 +219,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
 // 2. Відмова від участі — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cb", legacyPrefix: "cancel_booking_" });
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cb" });
     if (!slotId) return;
     await ctx.answerCallbackQuery();
 
@@ -237,7 +237,7 @@ bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
 
 // 2.1. Відмова від участі — крок 2: підтверджено → REJECTED
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb", legacyPrefix: "confirm_cancel_booking_" });
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb" });
     if (!slotId) return next();
 
     try {
@@ -284,7 +284,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
 // 4. Зміна часу співбесіди — одразу звільняє поточний слот і показує нові
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rb", legacyPrefix: "reschedule_booking_" });
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rb" });
     if (!slotId) return next();
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");
@@ -730,7 +730,7 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
 
 // 10. Скасування навчання — крок 1: підтвердження
 bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ct", legacyPrefix: "cancel_training_" });
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ct" });
     if (!slotId) return;
     await ctx.answerCallbackQuery();
 
@@ -748,7 +748,7 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
 
 // 10.1. Скасування навчання — крок 2: підтверджено
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct", legacyPrefix: "confirm_cancel_training_" });
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct" });
     if (!slotId) return next();
 
     try {
@@ -811,7 +811,7 @@ bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
 
 // 11. Зміна часу навчання — одразу звільняє поточний слот і показує нові
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rt", legacyPrefix: "reschedule_training_" });
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rt" });
     if (!slotId) return next();
     try {
         await ctx.answerCallbackQuery("Обирай новий час!");

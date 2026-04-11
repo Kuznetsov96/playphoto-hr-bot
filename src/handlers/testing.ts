@@ -122,7 +122,7 @@ testingHandlers.callbackQuery(/^test_2_(bad|good)_(.+)$/, async (ctx) => {
 testingHandlers.on("callback_query:data", async (ctx: MyContext, next) => {
     const data = ctx.callbackQuery?.data;
     if (!data) return next();
-    const candId = readCallbackPayload(data, { code: "cnda", legacyPrefix: "confirm_nda_" });
+    const candId = readCallbackPayload(data, { code: "cnda" });
     if (!candId) return next();
 
     const cand = await candidateRepository.findById(candId);
