@@ -7,6 +7,7 @@ import { extractFirstName } from "./string-utils.js";
 import { getLocationDetails } from "./location-data-helper.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
+import { buildSignedCallback } from "./signed-callback.js";
 
 /**
  * Apple Style: Compact and readable job details
@@ -102,8 +103,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
             } else text = `🌸 <b>${firstName}</b>, ти записана на співбесіду!`;
-            kb.text("🗓️ Перенести", `reschedule_booking_${candidate.interviewSlotId || 'none'}`).row()
-                .text("❌ Скасувати", `cancel_booking_${candidate.interviewSlotId || 'none'}`);
+            kb.text("🗓️ Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
+                .text("❌ Скасувати", buildSignedCallback("cb", candidate.interviewSlotId || "none"));
             if (canContactStaff) kb.row().text("👩‍💼 Написати HR", "contact_hr");
             break;
         }
@@ -132,8 +133,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             } else text = `🌸 <b>${firstName}</b>, ти записана на ${typeLabel}. Очікуй деталей! ✨`;
             text += jobDetails;
             if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
-            kb.text("🗓️ Перенести", `reschedule_training_${(status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || 'none'}`).row()
-                .text("❌ Скасувати", `cancel_training_${(status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || 'none'}`).row()
+            kb.text("🗓️ Перенести", buildSignedCallback("rt", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
+                .text("❌ Скасувати", buildSignedCallback("ct", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
                 .text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
         }
@@ -148,7 +149,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         case CandidateStatus.NDA:
             if (!candidate.ndaConfirmedAt) {
                 text = CANDIDATE_TEXTS["candidate-training-completed-nda"](firstName) + jobDetails;
-                kb.text("📝 Ознайомитись з NDA", `send_nda_${candidate.id}`).row();
+                kb.text("📝 Ознайомитись з NDA", buildSignedCallback("snda", candidate.id)).row();
             } else {
                 // Should move to KNOWLEDGE_TEST, but fallback just in case
                 text = CANDIDATE_TEXTS["candidate-training-completed-quiz"](firstName) + jobDetails;
@@ -181,7 +182,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 if (candidate.location?.googleMapsLink) text += `\n🗺️ <a href="${candidate.location.googleMapsLink}">На мапі</a>`;
                 if (candidate.firstShiftPartner?.user?.username) kb.url("💬 Написати напарнику", `https://t.me/${candidate.firstShiftPartner.user.username}`).row();
                 kb.text("🗓️ Змінити дату", "start_staging_selection").row();
-                kb.text("❌ Не зможу прийти", `cancel_staging_${candidate.id}`).row();
+                kb.text("❌ Не зможу прийти", buildSignedCallback("cstg", candidate.id)).row();
             } else {
                 text = CANDIDATE_TEXTS["status-card-staging-pending"] + jobDetails;
                 kb.text("🗓️ Обрати дату", "start_staging_selection").row();

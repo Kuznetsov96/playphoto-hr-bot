@@ -8,6 +8,7 @@ import { audit } from "../../../core/audit-logger.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../../utils/logistics-formatters.js";
+import { buildSignedCallback, readCallbackPayload } from "../../../utils/signed-callback.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
@@ -41,13 +42,13 @@ async function editOrReplyText(
 
 function buildParcelPhotoDraftKeyboard(parcelId: string) {
     return new InlineKeyboard()
-        .text(LOGISTICS_TEXTS_STAFF.btn_photo_done, `parcel_photo_done_${parcelId}`)
-        .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, `parcel_photo_cancel_${parcelId}`);
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo_done, buildSignedCallback("ppd", parcelId))
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, buildSignedCallback("ppx", parcelId));
 }
 
 function buildParcelPhotoRestartKeyboard(parcelId: string) {
     return new InlineKeyboard()
-        .text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcelId));
 }
 
 function getDraftParcelId(ctx: MyContext): string | null {
@@ -102,6 +103,32 @@ function resetParcelPhotoDraft(ctx: MyContext) {
     if (ctx.session.step.startsWith('awaiting_parcel_photo_')) {
         ctx.session.step = 'idle';
     }
+}
+
+async function getAuthorizedParcelForStaff(ctx: MyContext, parcelId: string, options?: { allowUnassigned?: boolean }) {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return null;
+
+    const user = await prisma.user.findUnique({
+        where: { telegramId: BigInt(telegramId) },
+        include: { staffProfile: true }
+    });
+    if (!user?.staffProfile) return null;
+
+    const parcel = await prisma.parcel.findUnique({
+        where: { id: parcelId },
+        include: { responsibleStaff: true, location: true }
+    });
+    if (!parcel) return null;
+
+    const ownsParcel = parcel.responsibleStaffId === user.staffProfile.id;
+    const canUseUnassigned = Boolean(options?.allowUnassigned && !parcel.responsibleStaffId);
+    if (!ownsParcel && !canUseUnassigned) {
+        await ctx.answerCallbackQuery("Ця посилка закріплена за іншою фотографинею.").catch(() => { });
+        return null;
+    }
+
+    return { user, parcel };
 }
 
 async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photoFileIds: string[]) {
@@ -204,6 +231,8 @@ async function sendParcelPhotosToSupport(ctx: MyContext, parcelId: string, photo
 }
 
 async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
+    const access = await getAuthorizedParcelForStaff(ctx, parcelId);
+    if (!access) return;
     const draft = ctx.session.parcelPhotoDraft;
     if (!draft || draft.parcelId !== parcelId || draft.fileIds.length === 0) {
         logBusinessEvent({
@@ -361,7 +390,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
         }
 
         if (parcel.status === 'DELIVERED') {
-            const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, `parcel_photo_${parcelId}`);
+            const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcelId));
             const locationName = parcel.location?.name || 'локації';
             const text = parcel.deliveryType === 'Address'
                 ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, locationName)
@@ -395,9 +424,9 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
         const kb = new InlineKeyboard();
         if (isValid) {
-            kb.text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, `parcel_phone_ok_${parcelId}`).row();
+            kb.text(LOGISTICS_TEXTS_STAFF.btn_confirm_phone, buildSignedCallback("ppo", parcelId)).row();
         }
-        kb.text(LOGISTICS_TEXTS_STAFF.btn_change_phone, `parcel_phone_change_${parcelId}`);
+        kb.text(LOGISTICS_TEXTS_STAFF.btn_change_phone, buildSignedCallback("ppc", parcelId));
 
         const askText = isValid
             ? LOGISTICS_TEXTS_STAFF.ask_phone(`+${phoneToUse}`)
@@ -415,10 +444,12 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 });
 
 // 2. Reject Parcel
-staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
-    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
-    if (!parcel) return;
+staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "prj", legacyPrefix: "parcel_reject_" });
+    if (!parcelId) return next();
+    const access = await getAuthorizedParcelForStaff(ctx, parcelId, { allowUnassigned: true });
+    if (!access) return;
+    const { parcel } = access;
 
     const newRejectionCount = parcel.rejectionCount + 1;
     await prisma.parcel.update({
@@ -446,20 +477,17 @@ staffLogisticsHandlers.callbackQuery(/^parcel_reject_(.+)$/, async (ctx) => {
 });
 
 // 3. Confirm Phone
-staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
+staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppo", legacyPrefix: "parcel_phone_ok_" });
+    if (!parcelId) return next();
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
-
-    const user = await prisma.user.findUnique({
-        where: { telegramId: BigInt(telegramId) },
-        include: { staffProfile: true }
-    });
+    const access = await getAuthorizedParcelForStaff(ctx, parcelId);
+    if (!access) return;
+    const { user, parcel } = access;
 
     let phoneToUse = (user?.staffProfile?.npPhone || user?.staffProfile?.phone || '').replace(/\D/g, '');
     if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) phoneToUse = '38' + phoneToUse;
-
-    const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
         const { logisticsService } = await import("../../../services/logistics-service.js");
         await logisticsService.requestManualProxy(parcelId, {
@@ -474,8 +502,11 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_ok_(.+)$/, async (ctx) => {
 });
 
 // 4. Change Phone
-staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
+staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppc", legacyPrefix: "parcel_phone_change_" });
+    if (!parcelId) return next();
+    const access = await getAuthorizedParcelForStaff(ctx, parcelId);
+    if (!access) return;
     ctx.session.step = `awaiting_np_phone_${parcelId}`;
     audit({ event: "parcel_phone_change", result: "started", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
     await editOrReplyText(ctx, "Будь ласка, введи номер телефону для оформлення доручення (у форматі 380...):");
@@ -484,8 +515,11 @@ staffLogisticsHandlers.callbackQuery(/^parcel_phone_change_(.+)$/, async (ctx) =
 
 // 5. Trigger Photo Upload
 // Exclude the "done" and "cancel" callbacks so they reach their dedicated handlers.
-staffLogisticsHandlers.callbackQuery(/^parcel_photo_(?!done(?:_|$)|cancel(?:_|$))(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
+staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "pph", legacyPrefix: "parcel_photo_" });
+    if (!parcelId) return next();
+    const access = await getAuthorizedParcelForStaff(ctx, parcelId);
+    if (!access) return;
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
     ctx.session.parcelPhotoDraft = {
         parcelId,
@@ -510,8 +544,9 @@ staffLogisticsHandlers.callbackQuery(/^parcel_photo_(?!done(?:_|$)|cancel(?:_|$)
     await ctx.answerCallbackQuery();
 });
 
-staffLogisticsHandlers.callbackQuery(/^parcel_photo_done_(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
+staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppd", legacyPrefix: "parcel_photo_done_" });
+    if (!parcelId) return next();
     await ctx.answerCallbackQuery("Завершую відправку фото...");
     await finalizeParcelPhotoDraft(ctx, parcelId);
 });
@@ -527,8 +562,9 @@ staffLogisticsHandlers.callbackQuery("parcel_photo_done", async (ctx) => {
     await finalizeParcelPhotoDraft(ctx, parcelId);
 });
 
-staffLogisticsHandlers.callbackQuery(/^parcel_photo_cancel_(.+)$/, async (ctx) => {
-    const parcelId = ctx.match[1] as string;
+staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
+    const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "ppx", legacyPrefix: "parcel_photo_cancel_" });
+    if (!parcelId) return next();
     const draft = ctx.session.parcelPhotoDraft;
 
     if (!draft || draft.parcelId !== parcelId) {

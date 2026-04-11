@@ -97,8 +97,10 @@ export function lazySession(): Middleware<MyContext> {
         const userId = ctx.from?.id;
         const chatId = ctx.chat?.id;
 
-        // We use chat ID as session key if available, fallback to user ID
-        const rawKey = chatId ?? userId;
+        // Scope session to both chat and actor to avoid shared state inside group chats/topics.
+        const rawKey = userId !== undefined && chatId !== undefined
+            ? `${chatId}:${userId}`
+            : (chatId ?? userId)?.toString();
         if (!rawKey) {
             // No session possible for this update
             return next();
@@ -151,7 +153,9 @@ export function lazySession(): Middleware<MyContext> {
 }
 
 export async function clearSession(ctx: MyContext) {
-    const rawKey = ctx.chat?.id ?? ctx.from?.id;
+    const rawKey = ctx.from?.id !== undefined && ctx.chat?.id !== undefined
+        ? `${ctx.chat.id}:${ctx.from.id}`
+        : (ctx.chat?.id ?? ctx.from?.id)?.toString();
     if (!rawKey) return;
     const redisKey = `session:${rawKey}`;
 

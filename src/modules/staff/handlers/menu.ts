@@ -10,6 +10,7 @@ import { truncateText } from "../../../utils/task-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { escapeHtml } from "../../../handlers/admin/utils.js";
 import logger from "../../../core/logger.js";
+import { buildSignedCallback } from "../../../utils/signed-callback.js";
 
 export const staffHandlers = new Composer<MyContext>();
 
@@ -273,9 +274,9 @@ export async function showStaffLogistics(ctx: MyContext) {
 
         if (parcel.status === 'ARRIVED') {
             kb.text(`✅ Забрати #${index + 1}`, `parcel_accept_${parcel.id}`)
-                .text(`❌ Відмовитись`, `parcel_reject_${parcel.id}`).row();
+                .text(`❌ Відмовитись`, buildSignedCallback("prj", parcel.id)).row();
         } else if (parcel.status === 'DELIVERED') {
-            kb.text(`📸 Додати фото вмісту #${index + 1}`, `parcel_photo_${parcel.id}`).row();
+            kb.text(`📸 Додати фото вмісту #${index + 1}`, buildSignedCallback("pph", parcel.id)).row();
         }
     });
 

@@ -19,6 +19,7 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { sessionRepository } from "../repositories/session-repository.js";
 import { isImpossibleMentorState } from "./funnel-anomaly-detector.js";
+import { buildSignedCallback } from "../utils/signed-callback.js";
 
 
 /**
@@ -1394,7 +1395,7 @@ async function processNDAReminders(bot: Bot<MyContext>) {
                 const { NDA_LINK } = await import("../config.js");
                 const kb = new InlineKeyboard();
                 if (NDA_LINK) kb.url("📋 Прочитати NDA", NDA_LINK).row();
-                kb.text("✅ Я все прочитала та згодна", `confirm_nda_${cand.id}`);
+                kb.text("✅ Я все прочитала та згодна", buildSignedCallback("cnda", cand.id));
 
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), {
                     parse_mode: "HTML",

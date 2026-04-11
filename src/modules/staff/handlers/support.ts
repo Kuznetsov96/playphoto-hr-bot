@@ -17,11 +17,40 @@ import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { audit } from "../../../core/audit-logger.js";
 import { logAuditEvent, logBusinessEvent } from "../../../core/log-events.js";
+import { getAdminRoleByTelegramId } from "../../../config/roles.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
 
 export const staffSupportHandlers = new Composer<MyContext>();
+const adminSupportCallbacks = new Composer<MyContext>();
+
+adminSupportCallbacks
+    .filter((ctx) =>
+        ctx.has("callback_query:data") && (
+            /^admin_close_ticket_\d+$/.test(ctx.callbackQuery.data) ||
+            /^ticket_assign_\d+$/.test(ctx.callbackQuery.data) ||
+            /^ticket_reply_close_\d+$/.test(ctx.callbackQuery.data) ||
+            /^ticket_urgent_\d+$/.test(ctx.callbackQuery.data) ||
+            /^ticket_close_\d+$/.test(ctx.callbackQuery.data) ||
+            /^close_topic_\d+$/.test(ctx.callbackQuery.data) ||
+            /^ticket_force_close_\d+$/.test(ctx.callbackQuery.data) ||
+            /^onboard_pass_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
+            /^onboard_fail_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
+            /^ticket_transfer_\d+_\d+$/.test(ctx.callbackQuery.data)
+        )
+    )
+    .use(async (ctx, next) => {
+        const telegramId = ctx.from?.id;
+        if (!telegramId || !getAdminRoleByTelegramId(BigInt(telegramId))) {
+            await ctx.answerCallbackQuery({ text: "Недостатньо прав для цієї дії", show_alert: true }).catch(() => { });
+            return;
+        }
+
+        await next();
+    });
+
+staffSupportHandlers.use(adminSupportCallbacks);
 
 // 1. Start Ticket Creation Flow
 staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
@@ -161,7 +190,7 @@ staffSupportHandlers.callbackQuery(/^ticket_urgent_(\d+)$/, async (ctx) => {
 
     try {
         const { supportService } = await import("../../../services/support-service.js");
-        const { newUrgent } = await supportService.toggleUrgent(ticketId);
+        const { newUrgent } = await supportService.toggleUrgent(ticketId, ctx.from?.id);
 
         audit({ event: "ticket_urgent_toggle", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "ticket", entityId: ticketId, updateId: ctx.update.update_id, context: { isUrgent: newUrgent } });
         logAuditEvent({
@@ -486,6 +515,19 @@ async function closeTicket(ctx: MyContext, ticketId: number, initiator: "USER" |
             await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
         }
         return;
+    }
+
+    if (initiator === "USER") {
+        if (Number(ticket.user.telegramId) !== ctx.from?.id) {
+            await ctx.answerCallbackQuery("Ця дія недоступна.");
+            return;
+        }
+    } else {
+        const telegramId = ctx.from?.id;
+        if (!telegramId || !getAdminRoleByTelegramId(BigInt(telegramId))) {
+            await ctx.answerCallbackQuery("Недостатньо прав для цієї дії");
+            return;
+        }
     }
 
     // Close in DB via Service
@@ -1095,6 +1137,12 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
     // Loop Prevention: Filter role and source
     // 1. Ignore message from bot itself
     if (ctx.from?.id === ctx.me.id) return false;
+
+    const senderRole = ctx.from?.id ? getAdminRoleByTelegramId(BigInt(ctx.from.id)) : null;
+    if (!senderRole) {
+        logger.warn({ telegramId: ctx.from?.id, topicId: ctx.message.message_thread_id }, "Blocked support-group message from non-admin sender");
+        return false;
+    }
 
     const topicId = ctx.message.message_thread_id;
 
