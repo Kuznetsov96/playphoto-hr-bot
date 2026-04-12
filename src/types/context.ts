@@ -13,6 +13,11 @@ export interface StackEntry {
     state?: Partial<SessionData>; // Snapshot of session data for this screen
 }
 
+export interface BroadcastMediaItem {
+    type: 'photo' | 'video';
+    fileId: string;
+}
+
 export interface SessionData {
     step: string;
     navStack: StackEntry[]; // Smart navigation history with state preservation
@@ -76,7 +81,8 @@ export interface SessionData {
         targetValue: any;
         buttonType: string;
         text?: string;
-        media?: { type: 'photo' | 'video', fileId: string };
+        media?: BroadcastMediaItem;
+        mediaItems?: BroadcastMediaItem[];
         selectedLocs: string[];
         menuMessageId?: number;
     };

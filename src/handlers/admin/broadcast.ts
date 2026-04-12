@@ -9,6 +9,7 @@ import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import type { BroadcastMediaItem } from "../../types/context.js";
 
 export const adminBroadcastHandlers = new Composer<MyContext>();
 
@@ -29,7 +30,7 @@ export async function startStatelessBroadcast(ctx: MyContext) {
         step: 'SELECT_TARGET',
         selectedLocs: []
     } as any;
-    
+
     await renderTargetSelection(ctx);
 }
 
@@ -105,7 +106,7 @@ export async function renderCitySelection(ctx: MyContext) {
     if (selected.size > 0) {
         kb.text(`➡️ Continue (${selected.size})`, "br_confirm_cities").row();
     }
-    
+
     kb.text(selected.size === allCities.length ? "⬜ Unselect All" : "✅ Select All", "br_toggle_all_cities");
     kb.text("⬅️ Back", "br_back_to_main").row();
 
@@ -115,11 +116,11 @@ export async function renderCitySelection(ctx: MyContext) {
 adminBroadcastHandlers.callbackQuery(/^br_toggle_city_(.+)$/, async (ctx) => {
     const city = ctx.match![1]!;
     if (!ctx.session.broadcastData) return;
-    
+
     const selected = new Set(ctx.session.broadcastData.targetValue as string[] || []);
     if (selected.has(city)) selected.delete(city);
     else selected.add(city);
-    
+
     ctx.session.broadcastData.targetValue = Array.from(selected);
     await renderCitySelection(ctx);
     await ctx.answerCallbackQuery();
@@ -129,28 +130,28 @@ adminBroadcastHandlers.callbackQuery("br_toggle_all_cities", async (ctx) => {
     if (!ctx.session.broadcastData) return;
     const rawCities = await locationRepository.findAllCities();
     const allCities = Array.from(new Set(rawCities.map(normalizeCity)));
-    
+
     const selected = new Set(ctx.session.broadcastData.targetValue as string[] || []);
     if (selected.size === allCities.length) {
         ctx.session.broadcastData.targetValue = [];
     } else {
         ctx.session.broadcastData.targetValue = allCities;
     }
-    
+
     await renderCitySelection(ctx);
     await ctx.answerCallbackQuery();
 });
 
 adminBroadcastHandlers.callbackQuery("br_confirm_cities", async (ctx) => {
     if (!ctx.session.broadcastData) return;
-    
+
     const type = ctx.session.broadcastData.targetType;
     if (type === 'pm_city' || type === 'city_chats') {
         const kb = new InlineKeyboard()
             .text("📢 Everyone in these cities", "br_scope_all").row()
             .text("📍 Choose specific locations", "br_scope_locs").row()
             .text("⬅️ Back", `br_type_${type}`);
-        
+
         const label = type === 'pm_city' ? "everyone" : "all group chats";
         await ScreenManager.renderScreen(ctx, `👥 Cities selected. Send to ${label} or filter by location?`, kb);
     } else {
@@ -182,12 +183,12 @@ async function renderLocationSelection(ctx: MyContext) {
     const cities = data.targetValue as string[];
     const allLocs = await locationRepository.findAllActive();
     let filteredLocs = allLocs.filter(l => cities.includes(normalizeCity(l.city)));
-    
+
     // For group chats, only show locations that actually have a chat ID configured
     if (data.targetType === 'city_chat_location') {
         filteredLocs = filteredLocs.filter(l => l.telegramChatId);
     }
-    
+
     const selected = new Set(data.selectedLocs || []);
 
     const kb = new InlineKeyboard();
@@ -208,11 +209,11 @@ async function renderLocationSelection(ctx: MyContext) {
 adminBroadcastHandlers.callbackQuery(/^br_toggle_loc_(.+)$/, async (ctx) => {
     const locId = ctx.match![1]!;
     if (!ctx.session.broadcastData) return;
-    
+
     const selected = new Set(ctx.session.broadcastData.selectedLocs || []);
     if (selected.has(locId)) selected.delete(locId);
     else selected.add(locId);
-    
+
     ctx.session.broadcastData.selectedLocs = Array.from(selected);
     await renderLocationSelection(ctx);
     await ctx.answerCallbackQuery();
@@ -233,11 +234,52 @@ async function renderContentPrompt(ctx: MyContext) {
     const targetLabel = formatTargetLabel(data.targetType!);
     const text = `📢 <b>Broadcast Content</b>\nTarget: <b>${targetLabel}</b>\nButtons: <code>${data.buttonType || 'default'}</code>\n\n` +
         `👇 <b>Please send the message now.</b>\n` +
-        `It can be text, photo or video with a caption.\n\n` +
+        `It can be text, one video, or one/multiple photos with a caption.\n` +
+        `For photo collections, send all photos and then tap Continue.\n\n` +
         `<i>Formatting (bold, links, etc.) will be preserved.</i>`;
 
     const kb = new InlineKeyboard().text("⬅️ Back", "br_confirm_buttons").text("❌ Cancel", "br_cancel");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
+}
+
+async function renderMediaCollectionPrompt(ctx: MyContext) {
+    const data = ctx.session.broadcastData;
+    if (!data) return;
+
+    const mediaItems = data.mediaItems || [];
+    const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
+    const hasCaption = Boolean(data.text);
+
+    const text = `🖼 <b>Photos added to broadcast</b>\n\n` +
+        `Photos queued: <b>${photoCount}</b>\n` +
+        `Caption captured: <b>${hasCaption ? 'yes' : 'no'}</b>\n\n` +
+        `Send more photos if needed, then tap Continue.`;
+
+    const kb = new InlineKeyboard()
+        .text(`➡️ Continue (${photoCount})`, "br_media_continue").row()
+        .text("🗑 Clear Photos", "br_media_reset").row()
+        .text("⬅️ Back", "br_confirm_buttons")
+        .text("❌ Cancel", "br_cancel");
+
+    await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
+}
+
+function getBroadcastMediaItems(data: NonNullable<MyContext['session']['broadcastData']>): BroadcastMediaItem[] {
+    if (data.mediaItems?.length) return data.mediaItems;
+    if (data.media) return [data.media];
+    return [];
+}
+
+function getMediaSummary(mediaItems: BroadcastMediaItem[]): string {
+    if (mediaItems.length === 0) return '';
+
+    if (mediaItems.length === 1) {
+        return mediaItems[0]!.type === 'video'
+            ? '🎬 <b>Attachment:</b> 1 video'
+            : '🖼 <b>Attachment:</b> 1 photo';
+    }
+
+    return `🖼 <b>Attachments:</b> ${mediaItems.length} photos`;
 }
 
 adminBroadcastHandlers.callbackQuery("br_confirm_buttons", async (ctx) => {
@@ -258,36 +300,98 @@ export async function handleBroadcastContent(ctx: MyContext) {
     const message = ctx.message;
     if (!message) return false;
 
-    let media: { type: 'photo' | 'video', fileId: string } | undefined;
+    const data = ctx.session.broadcastData;
+    let media: BroadcastMediaItem | undefined;
     if (message.photo) media = { type: 'photo', fileId: message.photo[message.photo.length - 1]!.file_id };
     else if (message.video) media = { type: 'video', fileId: message.video.file_id };
 
     const textHtml = msgToHtml(message.text || message.caption || "", message.entities || message.caption_entities || []);
-    
+
     if (!textHtml && !media) {
         await ctx.reply("❌ Please send some content (text or media).");
         return true;
     }
 
-    ctx.session.broadcastData.text = textHtml;
-    if (media) ctx.session.broadcastData.media = media;
-    ctx.session.broadcastData.step = 'CONFIRMATION';
+    if (textHtml) {
+        data.text = textHtml;
+    }
 
-    try { await ctx.deleteMessage(); } catch {}
+    if (media?.type === 'video') {
+        if ((data.mediaItems || []).length > 0) {
+            await ctx.reply("❌ Videos cannot be combined with a photo set. Clear photos or restart the broadcast.");
+            return true;
+        }
+
+        data.media = media;
+        delete data.mediaItems;
+        data.step = 'CONFIRMATION';
+
+        try { await ctx.deleteMessage(); } catch { }
+        await renderReview(ctx);
+        return true;
+    }
+
+    if (media?.type === 'photo') {
+        if (data.media?.type === 'video') {
+            await ctx.reply("❌ Photos cannot be added after a video. Restart the broadcast to change media type.");
+            return true;
+        }
+
+        const mediaItems = getBroadcastMediaItems(data).filter((item) => item.type === 'photo');
+        mediaItems.push(media);
+        data.mediaItems = mediaItems;
+        delete data.media;
+
+        try { await ctx.deleteMessage(); } catch { }
+        await renderMediaCollectionPrompt(ctx);
+        return true;
+    }
+
+    data.step = 'CONFIRMATION';
+
+    try { await ctx.deleteMessage(); } catch { }
 
     await renderReview(ctx);
     return true;
 }
 
+adminBroadcastHandlers.callbackQuery("br_media_reset", async (ctx) => {
+    const data = ctx.session.broadcastData;
+    if (!data) return ctx.answerCallbackQuery("Session expired.");
+
+    delete data.media;
+    delete data.mediaItems;
+    delete data.text;
+    await renderContentPrompt(ctx);
+    await ctx.answerCallbackQuery("Photos cleared.");
+});
+
+adminBroadcastHandlers.callbackQuery("br_media_continue", async (ctx) => {
+    const data = ctx.session.broadcastData;
+    if (!data) return ctx.answerCallbackQuery("Session expired.");
+
+    const mediaItems = getBroadcastMediaItems(data);
+    if (mediaItems.length === 0) {
+        await ctx.answerCallbackQuery("Add at least one photo first.");
+        return;
+    }
+
+    data.step = 'CONFIRMATION';
+    await renderReview(ctx);
+    await ctx.answerCallbackQuery();
+});
+
 async function renderReview(ctx: MyContext) {
     const data = ctx.session.broadcastData;
     if (!data) return;
 
-    const stats = await broadcastService.getBroadcastTargetStats({ 
-        type: data.targetType as any, 
-        value: data.targetValue || [] 
+    const stats = await broadcastService.getBroadcastTargetStats({
+        type: data.targetType as any,
+        value: data.targetValue || []
     });
-    const preview = getBroadcastPreview(data.text || "", data.targetType as any, stats, false, false, data.buttonType || 'default');
+    const mediaItems = getBroadcastMediaItems(data);
+    const mediaSummary = getMediaSummary(mediaItems);
+    const preview = getBroadcastPreview(data.text || "", data.targetType as any, stats, false, false, data.buttonType || 'default', mediaSummary);
     const kb = getBroadcastKb(false, false, stats);
 
     kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
@@ -299,10 +403,14 @@ async function renderReview(ctx: MyContext) {
         confirmChatId: ctx.chat!.id,
         buttonType: data.buttonType as any
     };
-    if (data.media) ctx.session.broadcastDraft.media = data.media;
+    if (mediaItems.length === 1) ctx.session.broadcastDraft.media = mediaItems[0];
+    if (mediaItems.length > 1) ctx.session.broadcastDraft.media = mediaItems;
     (ctx.session as any).broadcastValue = data.targetValue;
 
-    if (data.media?.type === 'photo') {
+    if (mediaItems.length > 1) {
+        const msg = await ctx.replyWithPhoto(mediaItems[0]!.fileId, { caption: preview, parse_mode: "HTML", reply_markup: kb });
+        data.menuMessageId = msg.message_id;
+    } else if (data.media?.type === 'photo') {
         const msg = await ctx.replyWithPhoto(data.media.fileId, { caption: preview, parse_mode: "HTML", reply_markup: kb });
         data.menuMessageId = msg.message_id;
     } else if (data.media?.type === 'video') {
@@ -347,7 +455,7 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
             range.text(`${date} | ${b.targetSummary || 'Broadcast'}`, async (ctx) => {
                 if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
                 ctx.session.candidateData.city = b.id.toString();
-                
+
                 const stats = await broadcastService.getStats(b.id);
                 const statsText = `📊 <b>Broadcast Statistics (ID: ${b.id})</b>\n\n` +
                     `🌐 Total chats: <b>${stats.totalChats}</b>\n` +
@@ -355,7 +463,7 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
                     `❌ Declined: <b>${stats.declined}</b>\n` +
                     `⏳ Pending: <b>${stats.pending}</b>\n\n` +
                     `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`;
-                
+
                 await ScreenManager.renderScreen(ctx, statsText, "admin-broadcast-manage", { pushToStack: true });
             }).row();
         });
@@ -363,16 +471,16 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
     range.text("🗄️ Archive", async (ctx) => {
         await ScreenManager.renderScreen(ctx, "🗄️ <b>Archive</b>", "admin-broadcast-archive", { pushToStack: true });
     }).row()
-    .text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
-    });
+        .text("⬅️ Back", async (ctx) => {
+            await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
+        });
 });
 
 adminBroadcastHubMenu.dynamic(async (ctx, range) => {
     range.text("📢 New Broadcast", async (ctx) => {
         if (ctx.session) {
-            try { 
-                delete ctx.session.broadcastDraft; 
+            try {
+                delete ctx.session.broadcastDraft;
                 delete ctx.session.broadcastData;
             } catch (e) { }
             ctx.session.broadcastTestConfirmed = false;
@@ -395,7 +503,7 @@ adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
         range.text(`✅ ${date} | ${b.messageText?.substring(0, 15) || '[Media]'}`, async (ctx) => {
             if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
             ctx.session.candidateData.city = b.id.toString();
-            
+
             const stats = await broadcastService.getStats(b.id);
             const statsText = `📊 <b>Broadcast Statistics (ID: ${b.id})</b>\n\n` +
                 `🌐 Total chats: <b>${stats.totalChats}</b>\n` +
@@ -415,7 +523,7 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
     const bId = Number(ctx.session.candidateData?.city);
     if (!bId) return;
 
-    range.text("🔄 Refresh Stats", async (ctx) => { 
+    range.text("🔄 Refresh Stats", async (ctx) => {
         const freshStats = await broadcastService.getStats(bId);
         const freshText = `📊 <b>Broadcast Statistics (ID: ${bId})</b>\n\n` +
             `🌐 Total chats: <b>${freshStats.totalChats}</b>\n` +
@@ -423,9 +531,9 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
             `❌ Declined: <b>${freshStats.declined}</b>\n` +
             `⏳ Pending: <b>${freshStats.pending}</b>\n\n` +
             `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`;
-        
+
         await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
-        }).row()
+    }).row()
         .text("🗑️ Delete", async (ctx) => {
             await broadcastService.deleteBroadcast(ctx, bId);
             await ctx.answerCallbackQuery("✅ Deleted.");
@@ -434,7 +542,7 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
         .text("⬅️ Back", async (ctx) => {
             await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
         });
-        });
+});
 
 adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
     const draft = ctx.session.broadcastDraft;
@@ -455,7 +563,8 @@ adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
 
         // Update review screen to show test sent
         const stats = draft.targetStats;
-        const preview = getBroadcastPreview(draft.textHtml, draft.targetType, stats, true, true, draft.buttonType || 'default');
+        const mediaSummary = getMediaSummary(Array.isArray(draft.media) ? draft.media : (draft.media ? [draft.media] : []));
+        const preview = getBroadcastPreview(draft.textHtml, draft.targetType, stats, true, true, draft.buttonType || 'default', mediaSummary);
         const kb = getBroadcastKb(true, true, stats);
         kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
 
@@ -478,19 +587,20 @@ adminBroadcastHandlers.callbackQuery("b_send", async (ctx: MyContext) => {
     try {
         const pingOptions = draft.buttonType ? { buttonType: draft.buttonType } : undefined;
         const count = await broadcastService.createBroadcast(
-            ctx.api, 
-            ctx.from!.id, 
-            draft.textHtml, 
-            { type: draft.targetType as any, value: (ctx.session as any).broadcastValue }, 
-            draft.media, 
+            ctx.api,
+            ctx.from!.id,
+            draft.textHtml,
+            { type: draft.targetType as any, value: (ctx.session as any).broadcastValue },
+            draft.media,
             ctx.me.username,
             pingOptions
         );
 
         audit({ event: "broadcast_send", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, context: { targetType: draft.targetType, count } });
 
-        const successText = `✅ Broadcast sent to ${count} targets!`;
-        const kb = new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities");
+        const mediaSummary = getMediaSummary(Array.isArray(draft.media) ? draft.media : (draft.media ? [draft.media] : []));
+        const successText = `✅ Broadcast queued for ${count} target${count === 1 ? '' : 's'}!${mediaSummary ? `\n\n${mediaSummary}` : ''}`;
+        const kb = new InlineKeyboard().text("🏠 Main Menu", "admin_main_menu");
 
         if (draft.media) {
             await ctx.editMessageCaption({ caption: successText, reply_markup: kb }).catch(() => { });
