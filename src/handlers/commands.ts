@@ -116,10 +116,10 @@ commandHandlers.command("start", async (ctx) => {
         ctx.session.step = "idle";
 
         // Clear bot-blocked flag (user unblocked bot and pressed /start)
-        await prisma.user.updateMany({
+        const clearedBlockedUsers = await prisma.user.updateMany({
             where: { telegramId: BigInt(userId), botBlockedAt: { not: null } },
             data: { botBlockedAt: null }
-        }).catch(() => { });
+        }).catch(() => ({ count: 0 }));
 
         // 0. Handle Deep-links (Broadcast Query & Source Tracking)
         if (payload?.startsWith("bcq_")) {
@@ -243,6 +243,22 @@ commandHandlers.command("start", async (ctx) => {
         const candidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
 
         if (candidate) {
+            if (candidate.status === CandidateStatus.BLOCKER && clearedBlockedUsers.count > 0) {
+                logBusinessEvent({
+                    event: "candidate.recovery.started",
+                    telegramId: userId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    result: "success",
+                    module: "commands",
+                    operation: "start",
+                    updateId: ctx.update.update_id,
+                    userId: user?.id,
+                    candidateId: candidate.id,
+                    stage: candidate.status,
+                    safeContext: { source: "bot_unblocked_and_started" },
+                });
+            }
             logBusinessEvent({
                 event: "user.start_routed",
                 telegramId: userId,

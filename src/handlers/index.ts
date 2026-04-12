@@ -52,7 +52,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         data.startsWith("tas_") || data.startsWith("task_") || data.startsWith("b_") || data.startsWith("ticket_") ||
         data.startsWith("broadcast_") || data.startsWith("pref_") || data.startsWith("onb_") ||
         data.startsWith("gender_") || data.startsWith("city_") || data.startsWith("loc_") || data.startsWith("src_") ||
-        data.startsWith("close_topic_") || data.startsWith("close_ticket_") || data.startsWith("contact_hr") || data.startsWith("contact_mentor") ||
+        data.startsWith("close_topic_") || data.startsWith("close_ticket_") || data.startsWith("contact_hr") || data.startsWith("contact_mentor") || data.startsWith("contact_recovery") || data.startsWith("recovery_reopen_") ||
         data.startsWith("end_support_chat") || data.startsWith("view_staff_") ||
         data.startsWith("view_candidate_") || data.startsWith("approve_") || data.startsWith("reject_") ||
         data.startsWith("parcel_") ||
@@ -74,7 +74,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         if (user?.staffProfile?.isActive) {
             logger.debug({ telegramId, data }, "Staff shield intercepted stale callback");
             await ctx.answerCallbackQuery("⚠️ This button is outdated. Updating menu... ✨");
-            
+
             // Apple Style: Auto-cleanup of stale context
             try {
                 await ctx.deleteMessage();
@@ -112,7 +112,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
     const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "snda" });
     if (!candId) return next();
     await ctx.answerCallbackQuery("Відправляю NDA... 📋");
-    
+
     const { candidateRepository } = await import("../repositories/candidate-repository.js");
     const cand = await candidateRepository.findById(candId);
     if (!cand) return;
@@ -124,7 +124,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
     const firstName = extractFirstName(cand.fullName || "");
     const { NDA_LINK } = await import("../config.js");
     const { InlineKeyboard } = await import("grammy");
-    
+
     // Update ndaSentAt to reset reminder timer if they re-request
     await candidateRepository.update(candId, { ndaSentAt: new Date() });
 
@@ -150,7 +150,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         await ctx.answerCallbackQuery("Ця дія недоступна.");
         return;
     }
-    await candidateRepository.update(candId, { 
+    await candidateRepository.update(candId, {
         ndaConfirmedAt: new Date(),
         status: CandidateStatus.KNOWLEDGE_TEST
     });
@@ -172,9 +172,9 @@ handlers.callbackQuery(/^broadcast_confirm_ok_(.+)$/, async (ctx) => {
 handlers.callbackQuery(/^broadcast_confirm_decline_(.+)$/, async (ctx) => {
     const broadcastId = parseInt(ctx.match![1]!);
     if (isNaN(broadcastId)) return ctx.answerCallbackQuery("Invalid ID");
-    
+
     await broadcastService.confirmDecline(ctx, broadcastId);
-    
+
     // Set session step to wait for reason
     ctx.session.step = "broadcast_decline_reason";
     ctx.session.broadcastId = broadcastId;
@@ -227,7 +227,7 @@ handlers.use(async (ctx, next) => {
     // Only route non-admin staff to staffModule.
     const { getUserAdminRole } = await import("../middleware/role-check.js");
     const adminRole = await getUserAdminRole(BigInt(telegramId));
-    
+
     if (adminRole) {
         // --- ADMIN CONTEXT ---
         const adminApp = new Composer<MyContext>();
@@ -235,7 +235,7 @@ handlers.use(async (ctx, next) => {
         adminApp.use(hrHandlers);
         adminApp.use(adminHandlers);
         adminApp.use(mentorHandlers);
-        
+
         await adminApp.middleware()(ctx, next);
         return;
     }
@@ -245,7 +245,7 @@ handlers.use(async (ctx, next) => {
 
     if (user?.staffProfile) {
         // --- STAFF CONTEXT ---
-        
+
         // Shield: Block deactivated staff from accessing any staff features
         if (!user.staffProfile.isActive) {
             if (ctx.chat?.type === "private") {
@@ -261,7 +261,7 @@ handlers.use(async (ctx, next) => {
 
         const staffApp = new Composer<MyContext>();
         // Mentors who are NOT lead-mentors (not in adminRole) still need mentorHandlers
-        staffApp.use(mentorHandlers); 
+        staffApp.use(mentorHandlers);
         staffApp.use(staffLogisticsHandlers);
         staffApp.use(staffModule);
         await staffApp.middleware()(ctx, next);
@@ -282,7 +282,7 @@ handlers.use(async (ctx, next) => {
 
         // 3. Module Logic & Catch-all
         guestApp.use(candidateModule);
-        
+
         await guestApp.middleware()(ctx, next);
     }
 });

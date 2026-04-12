@@ -16,6 +16,7 @@ import { locationRepository } from "../repositories/location-repository.js";
 import { ADMIN_IDS, CO_FOUNDER_IDS } from "../config.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
+import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 
 function getBirthdayRecipients(): number[] {
     const ids = [...ADMIN_IDS, ...CO_FOUNDER_IDS];
@@ -61,8 +62,9 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             const isExactly17 = age === 17;
             const wasUnderage = c.hrDecision === "REJECTED_SYSTEM_UNDERAGE";
             const isFemale = c.gender === "female";
+            const canReactivateUnderageCandidate = isExactly17 && wasUnderage && isFemale;
 
-            if (isExactly17 && wasUnderage && isFemale) {
+            if (canReactivateUnderageCandidate) {
                 await candidateRepository.update(c.id, {
                     status: "WAITLIST_HR",
                     hrDecision: null,
@@ -102,20 +104,24 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                 },
             });
         } catch (e) {
-            logger.error({ err: e, candidateId: c.id }, "Failed to send birthday greeting to candidate");
-            logBusinessEvent({
-                event: "candidate.birthday_greeting_sent",
-                level: "warn",
-                candidateId: c.id,
-                telegramId: c.user?.telegramId,
-                actorType: "system",
-                actorRole: "system",
-                result: "failed",
-                reasonCode: "BIRTHDAY_MESSAGE_SEND_FAILED",
-                module: "birthday-service",
-                operation: "greetCandidateBirthdays",
-                error: e,
-            });
+            if (isBotBlocked(e)) {
+                await handleBlockedCandidate(bot.api, c.id, c.fullName || "Candidate");
+            } else {
+                logger.error({ err: e, candidateId: c.id }, "Failed to send birthday greeting to candidate");
+                logBusinessEvent({
+                    event: "candidate.birthday_greeting_sent",
+                    level: "warn",
+                    candidateId: c.id,
+                    telegramId: c.user?.telegramId,
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    reasonCode: "BIRTHDAY_MESSAGE_SEND_FAILED",
+                    module: "birthday-service",
+                    operation: "greetCandidateBirthdays",
+                    error: e,
+                });
+            }
         }
     }
 

@@ -3,7 +3,7 @@ import { STAFF_TEXTS } from "../../../constants/staff-texts.js";
 import logger from "../../../core/logger.js";
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../../types/context.js";
-import { SUPPORT_CHAT_ID, TEAM_CHATS } from "../../../config.js";
+import { RECOVERY_CHAT_ID, SUPPORT_CHAT_ID, TEAM_CHATS } from "../../../config.js";
 import { userRepository } from "../../../repositories/user-repository.js";
 import { supportRepository } from "../../../repositories/support-repository.js";
 import { staffRepository } from "../../../repositories/staff-repository.js";
@@ -34,6 +34,7 @@ adminSupportCallbacks
             /^ticket_urgent_\d+$/.test(ctx.callbackQuery.data) ||
             /^ticket_close_\d+$/.test(ctx.callbackQuery.data) ||
             /^close_topic_\d+$/.test(ctx.callbackQuery.data) ||
+            /^recovery_reopen_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
             /^ticket_force_close_\d+$/.test(ctx.callbackQuery.data) ||
             /^onboard_pass_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
             /^onboard_fail_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
@@ -255,7 +256,7 @@ staffSupportHandlers.callbackQuery(/^close_topic_(\d+)$/, async (ctx) => {
         }
 
         // Unified UI Closure
-        await finalizeTopicUIClosure(ctx, String(SUPPORT_CHAT_ID), topicId, newTitle);
+        await finalizeTopicUIClosure(ctx, String(outgoingTopic.chatId), topicId, newTitle);
         logBusinessEvent({
             event: "support.outgoing_topic.closed",
             actorType: "admin",
@@ -275,6 +276,40 @@ staffSupportHandlers.callbackQuery(/^close_topic_(\d+)$/, async (ctx) => {
     } catch (e: any) {
         logger.error({ err: e, topicId }, "Support outgoing topic close failed");
         await ctx.answerCallbackQuery(`❌ Error: ${e.message}`);
+    }
+});
+
+staffSupportHandlers.callbackQuery(/^recovery_reopen_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
+    const candidateId = ctx.match[1]!;
+    const topicId = Number(ctx.match[2]);
+
+    try {
+        const candidate = await candidateRepository.reopenRecoveryCandidate(candidateId);
+
+        await ctx.api.sendMessage(Number(candidate.user.telegramId),
+            "✅ <b>Анкету повернуто в чергу HR.</b>\n\nМи знову розглядаємо твій профіль. Коли буде наступний крок, напишемо тобі тут.",
+            { parse_mode: "HTML" }
+        ).catch(() => { });
+
+        await ctx.reply(
+            `✅ Candidate moved to <b>WAITLIST_HR</b>.`,
+            { parse_mode: "HTML", message_thread_id: topicId }
+        );
+
+        if (ctx.callbackQuery.message) {
+            await ctx.editMessageReplyMarkup({
+                reply_markup: new InlineKeyboard().text("Close Recovery", `close_topic_${topicId}`)
+            }).catch(() => { });
+        }
+
+        await ctx.answerCallbackQuery("Candidate reopened to WAITLIST_HR");
+    } catch (e: any) {
+        await ctx.answerCallbackQuery({
+            text: e.message === "CANDIDATE_NOT_RECOVERY_ELIGIBLE"
+                ? "This candidate cannot be reopened from recovery"
+                : `Error: ${e.message}`,
+            show_alert: true,
+        }).catch(() => { });
     }
 });
 
@@ -315,7 +350,7 @@ staffSupportHandlers.callbackQuery(/^ticket_force_close_(\d+)$/, async (ctx) => 
 staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     const ticketId = Number(ctx.match[2]);
-    
+
     // Auth check: allow if they are in the support group
     const { hrService } = await import("../../../services/hr-service.js");
     const { CANDIDATE_TEXTS } = await import("../../../constants/candidate-texts.js");
@@ -325,14 +360,14 @@ staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
         const res = await hrService.completeOfflineStaging(candId, true);
         if (res) {
             const firstName = extractFirstName(res.candidate.fullName || "");
-            
+
             // Send warm welcome per user request
             await ctx.api.sendMessage(
-                Number(res.candidate.user.telegramId), 
+                Number(res.candidate.user.telegramId),
                 `🌸 <b>${firstName}</b>, вітаємо з успішним проходженням першої зміни!\n\nТи чудово впоралась! 🎉 Бажаємо плідного шляху та багато крутих кадрів разом з PlayPhoto! ✨`,
                 { parse_mode: "HTML" }
             );
-            
+
             await ctx.answerCallbackQuery("Кандидат успішно пройшов стажування! ✅");
             logAuditEvent({
                 event: "admin.candidate.offline_staging_marked_passed_from_support",
@@ -347,7 +382,7 @@ staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
                 updateId: ctx.update.update_id,
                 safeContext: { ticketId },
             });
-            
+
             // Close the onboarding topic
             await closeTicket(ctx, ticketId, "ADMIN");
         }
@@ -360,7 +395,7 @@ staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
 staffSupportHandlers.callbackQuery(/^onboard_fail_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     const ticketId = Number(ctx.match[2]);
-    
+
     const { hrService } = await import("../../../services/hr-service.js");
     const { candidateRepository } = await import("../../../repositories/candidate-repository.js");
     const { extractFirstName } = await import("../../../utils/string-utils.js");
@@ -368,7 +403,7 @@ staffSupportHandlers.callbackQuery(/^onboard_fail_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
     try {
         const cand = await candidateRepository.findById(candId);
         await hrService.completeOfflineStaging(candId, false);
-        
+
         // Send warm comforting message to Failed Candidate per user request
         if (cand && cand.user) {
             const firstName = extractFirstName(cand.fullName || "");
@@ -393,7 +428,7 @@ staffSupportHandlers.callbackQuery(/^onboard_fail_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
             updateId: ctx.update.update_id,
             safeContext: { ticketId },
         });
-        
+
         // Close the onboarding topic
         await closeTicket(ctx, ticketId, "ADMIN");
     } catch (e: any) {
@@ -810,7 +845,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
 
             // Create Topic in Support Chat
             const { buildTopicTitle, buildTicketCard, getTicketButtons } = await import("../../../utils/ticket-card.js");
-            
+
             let locationName = user.staffProfile.location?.name || null;
             let locationCity = user.staffProfile.location?.city || null;
             const closestShift = await workShiftRepository.findClosestShiftWithLocation(user.staffProfile.id, new Date());
@@ -1065,14 +1100,14 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
 
                     // Touch updatedAt to track activity
                     if (activeTicket) {
-                        await supportRepository.updateTicket(activeTicket.id, { updatedAt: new Date() }).catch(() => {});
+                        await supportRepository.updateTicket(activeTicket.id, { updatedAt: new Date() }).catch(() => { });
                     } else if (activeOutgoingTopic) {
                         await prisma.outgoingTopic.update({
                             where: { id: activeOutgoingTopic.id },
                             data: { updatedAt: new Date() }
-                        }).catch(() => {});
+                        }).catch(() => { });
                     }
-                    
+
                     // Log to Timeline (Message from Staff)
                     const { timelineRepository } = await import("../../../repositories/timeline-repository.js");
                     await timelineRepository.createEvent(user.id, 'MESSAGE', 'USER', ctx.message.text || ctx.message.caption || "[Media Message]", {
@@ -1139,7 +1174,8 @@ export async function handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): P
  * Handles messages in the Support Group (Admins replying to Staff)
  */
 async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): Promise<boolean> {
-    if (ctx.chat?.id !== Number(TEAM_CHATS.SUPPORT)) return false;
+    const allowedTopicChats = [Number(TEAM_CHATS.SUPPORT), Number(RECOVERY_CHAT_ID)];
+    if (!allowedTopicChats.includes(Number(ctx.chat?.id))) return false;
     if (!ctx.message?.message_thread_id) return false; // Must be in a topic
 
     // Loop Prevention: Filter role and source
@@ -1228,7 +1264,7 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         await ctx.copyMessage(telegramId);
 
         // Touch updatedAt to track activity
-        await supportRepository.updateTicket(ticket.id, { updatedAt: new Date() }).catch(() => {});
+        await supportRepository.updateTicket(ticket.id, { updatedAt: new Date() }).catch(() => { });
 
         // --- NEW: Handle Auto-Assign on Reply ---
         if (ticket.status === TicketStatus.OPEN && ctx.from) {
