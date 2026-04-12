@@ -62,6 +62,7 @@ const envSchema = z.object({
 
     // Chats
     SUPPORT_CHAT_ID: z.string().min(1, "SUPPORT_CHAT_ID is missing"),
+    RECOVERY_CHAT_ID: z.string().default("-1003873088973"),
     LEADS_CHAT_ID: z.string().optional(),
     TEAM_HUB_CHAT_ID: z.string().min(1, "TEAM_HUB_CHAT_ID is missing"),
     TEAM_CHANNEL_ID: z.string().min(1, "TEAM_CHANNEL_ID is missing"),
@@ -116,7 +117,7 @@ export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
-export const RECOVERY_CHAT_ID = -1003873088973;
+export const RECOVERY_CHAT_ID = parseInt(env.RECOVERY_CHAT_ID);
 
 // Spreadsheets
 export const SPREADSHEET_ID_TECH_CASH = env.SPREADSHEET_ID_TECH_CASH;
