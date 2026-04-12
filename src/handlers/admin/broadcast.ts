@@ -282,6 +282,29 @@ function getMediaSummary(mediaItems: BroadcastMediaItem[]): string {
     return `🖼 <b>Attachments:</b> ${mediaItems.length} photos`;
 }
 
+function getMediaSuccessSummary(mediaItems: BroadcastMediaItem[]): string {
+    if (mediaItems.length === 0) return '';
+
+    if (mediaItems.length === 1) {
+        return mediaItems[0]!.type === 'video'
+            ? '🎬 Attachment: 1 video'
+            : '🖼 Attachment: 1 photo';
+    }
+
+    const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
+    const videoCount = mediaItems.filter((item) => item.type === 'video').length;
+
+    if (photoCount > 0 && videoCount === 0) {
+        return `🖼 Attachments: ${photoCount} photos`;
+    }
+
+    if (videoCount > 0 && photoCount === 0) {
+        return `🎬 Attachments: ${videoCount} videos`;
+    }
+
+    return `📎 Attachments: ${mediaItems.length} files`;
+}
+
 adminBroadcastHandlers.callbackQuery("br_confirm_buttons", async (ctx) => {
     await renderButtonSelection(ctx);
     await ctx.answerCallbackQuery();
@@ -598,18 +621,13 @@ adminBroadcastHandlers.callbackQuery("b_send", async (ctx: MyContext) => {
 
         audit({ event: "broadcast_send", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, context: { targetType: draft.targetType, count } });
 
-        const mediaSummary = getMediaSummary(Array.isArray(draft.media) ? draft.media : (draft.media ? [draft.media] : []));
+        const mediaSummary = getMediaSuccessSummary(Array.isArray(draft.media) ? draft.media : (draft.media ? [draft.media] : []));
         const successText = `✅ Broadcast queued for ${count} target${count === 1 ? '' : 's'}!${mediaSummary ? `\n\n${mediaSummary}` : ''}`;
         const kb = new InlineKeyboard().text("🏠 Main Menu", "admin_main_menu");
 
-        if (draft.media) {
-            await ctx.editMessageCaption({ caption: successText, reply_markup: kb }).catch(() => { });
-        } else {
-            await ctx.editMessageText(successText, { reply_markup: kb }).catch(() => { });
-        }
-
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
+        await ScreenManager.renderScreen(ctx, successText, kb, { forceNew: true });
     } catch (e: any) {
         audit({ event: "broadcast_send", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, error: e.message });
         logger.error({ err: e }, "Broadcast send failed");
