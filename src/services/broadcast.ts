@@ -10,6 +10,7 @@ import { pendingReplyRepository, type PendingReplyWithRelations } from "../repos
 import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import fs from "fs";
 import type { BroadcastMediaItem } from "../types/context.js";
 
@@ -334,54 +335,84 @@ export const broadcastService = {
         }
     },
 
-    async confirmRead(ctx: MyContext, broadcastId: number) {
+    async confirmRead(ctx: MyContext, broadcastId: number): Promise<"confirmed" | "already_confirmed" | "already_declined" | "not_pending"> {
         const userId = ctx.from?.id;
         const chatId = ctx.chat?.id;
-        if (!userId || !chatId) return;
+        if (!userId || !chatId) return "not_pending";
 
         const tracked = await trackedMessageRepository.findFirst({
             broadcastId: broadcastId,
             chatId: BigInt(chatId)
         });
 
-        if (!tracked) return;
+        if (!tracked) {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-not-found"]);
+            return "not_pending";
+        }
 
         const pending = await pendingReplyRepository.findFirst({
             trackedMessageId: tracked.id,
             userId: BigInt(userId)
         });
 
-        if (pending) {
-            await pendingReplyRepository.update(pending.id, { status: "confirmed", respondedAt: new Date() });
-            await ctx.answerCallbackQuery("✅ Thank you! Confirmed.");
-        } else {
-            await ctx.answerCallbackQuery("✅ Recorded.");
+        if (!pending) {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-no-pending-confirm"]);
+            return "not_pending";
         }
+
+        if (pending.status === "confirmed") {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-already-confirmed"]);
+            return "already_confirmed";
+        }
+
+        if (pending.status === "declined") {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-already-declined"]);
+            return "already_declined";
+        }
+
+        await pendingReplyRepository.update(pending.id, { status: "confirmed", respondedAt: new Date() });
+        await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-confirmed"]);
+        return "confirmed";
     },
 
-    async confirmDecline(ctx: MyContext, broadcastId: number) {
+    async confirmDecline(ctx: MyContext, broadcastId: number): Promise<"declined" | "already_declined" | "already_confirmed" | "not_pending"> {
         const userId = ctx.from?.id;
         const chatId = ctx.chat?.id;
-        if (!userId || !chatId) return;
+        if (!userId || !chatId) return "not_pending";
 
         const tracked = await trackedMessageRepository.findFirst({
             broadcastId: broadcastId,
             chatId: BigInt(chatId)
         });
 
-        if (!tracked) return;
+        if (!tracked) {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-not-found"]);
+            return "not_pending";
+        }
 
         const pending = await pendingReplyRepository.findFirst({
             trackedMessageId: tracked.id,
             userId: BigInt(userId)
         });
 
-        if (pending) {
-            await pendingReplyRepository.update(pending.id, { status: "declined", respondedAt: new Date() });
-            await ctx.answerCallbackQuery("Understood.");
-        } else {
-            await ctx.answerCallbackQuery("Recorded.");
+        if (!pending) {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-no-pending-decline"]);
+            return "not_pending";
         }
+
+        if (pending.status === "declined") {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-already-declined"]);
+            return "already_declined";
+        }
+
+        if (pending.status === "confirmed") {
+            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-already-confirmed"]);
+            return "already_confirmed";
+        }
+
+        await pendingReplyRepository.update(pending.id, { status: "declined", respondedAt: new Date() });
+        await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-open-decline-form"]);
+        return "declined";
     },
 
     async confirmDeclineByUser(broadcastId: number, userId: number | bigint) {
