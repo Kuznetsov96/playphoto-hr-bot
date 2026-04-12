@@ -4,6 +4,8 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { HR_IDS } from "../config.js";
 import logger from "../core/logger.js";
 
+export const BLOCKED_CANDIDATE_DECISION = "Бот заблоковано / контакт призупинено";
+
 export function isBotBlocked(err: any): boolean {
     const desc = err?.description || err?.message || "";
     return desc.includes("bot was blocked") ||
@@ -17,19 +19,20 @@ export async function handleBlockedCandidate(
     candidateId: string,
     candidateName: string,
 ) {
-    await candidateRepository.update(candidateId, {
-        status: CandidateStatus.REJECTED,
-        candidateDecision: "Бот заблоковано / акаунт видалено"
-    });
+    const candidate = await candidateRepository.findById(candidateId);
+    if (!candidate) return;
 
-    // Free up any booked slots so they become available for others
-    await candidateRepository.deleteRelatedData(candidateId);
+    if (candidate.status === CandidateStatus.BLOCKER && candidate.user?.botBlockedAt) {
+        return;
+    }
+
+    await candidateRepository.archiveBlockedCandidate(candidateId, BLOCKED_CANDIDATE_DECISION);
 
     const hrId = HR_IDS[0];
     if (hrId) {
-        const text = `⚠️ <b>Bot Blocked</b>\n👤 <b>${candidateName}</b> — статус REJECTED автоматично.`;
-        await api.sendMessage(hrId, text, { parse_mode: "HTML" }).catch(() => {});
+        const text = `⚠️ <b>Bot Blocked</b>\n👤 <b>${candidateName}</b> — статус <b>BLOCKER</b> автоматично. Контакт зупинено, профіль збережено.`;
+        await api.sendMessage(hrId, text, { parse_mode: "HTML" }).catch(() => { });
     }
 
-    logger.info({ candidateId }, "🚫 Candidate auto-rejected: bot blocked/account deleted.");
+    logger.info({ candidateId }, "🚫 Candidate archived as BLOCKER after bot block.");
 }

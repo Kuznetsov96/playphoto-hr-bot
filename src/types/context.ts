@@ -85,7 +85,8 @@ export interface SessionData {
         step?: string;
         replyingToUserId?: string;
         ticketFilter?: string;
-        preferredTarget?: "HR" | "MENTOR";
+        preferredTarget?: "HR" | "MENTOR" | "RECOVERY";
+        entryReason?: "RETURNED_AFTER_BOT_BLOCK";
     };
 
     parcelPhotoDraft?: {

@@ -6,6 +6,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
+import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 
 export const remindersService = {
     async processNDAReminders(botApi: any) {
@@ -17,11 +18,11 @@ export const remindersService = {
             module: "reminders-service",
             operation: "processNDAReminders",
         });
-        
+
         try {
             // Find candidates who got NDA more than 12 hours ago and haven't confirmed or been reminded yet
             const candidates = await candidateRepository.findAwaitingNDAReminder(12);
-            
+
             if (candidates.length === 0) {
                 logBusinessEvent({
                     event: "candidate.nda_legacy_reminder_scan.completed",
@@ -39,7 +40,7 @@ export const remindersService = {
                 try {
                     const firstName = extractFirstName(cand.fullName || "");
                     const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
-                    
+
                     await botApi.sendMessage(Number(cand.user.telegramId),
                         CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK),
                         { parse_mode: "HTML", reply_markup: kb }
@@ -59,21 +60,25 @@ export const remindersService = {
                         operation: "processNDAReminders",
                     });
                 } catch (e) {
-                    logger.error({ err: e, candidateId: cand.id }, "Legacy NDA reminder delivery failed");
-                    logBusinessEvent({
-                        event: "candidate.nda_legacy_reminder_sent",
-                        level: "warn",
-                        candidateId: cand.id,
-                        telegramId: cand.user?.telegramId,
-                        actorType: "system",
-                        actorRole: "system",
-                        stage: "NDA",
-                        result: "failed",
-                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
-                        module: "reminders-service",
-                        operation: "processNDAReminders",
-                        error: e,
-                    });
+                    if (isBotBlocked(e)) {
+                        await handleBlockedCandidate(botApi, cand.id, cand.fullName || "Candidate");
+                    } else {
+                        logger.error({ err: e, candidateId: cand.id }, "Legacy NDA reminder delivery failed");
+                        logBusinessEvent({
+                            event: "candidate.nda_legacy_reminder_sent",
+                            level: "warn",
+                            candidateId: cand.id,
+                            telegramId: cand.user?.telegramId,
+                            actorType: "system",
+                            actorRole: "system",
+                            stage: "NDA",
+                            result: "failed",
+                            reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                            module: "reminders-service",
+                            operation: "processNDAReminders",
+                            error: e,
+                        });
+                    }
                 }
             }
             logBusinessEvent({

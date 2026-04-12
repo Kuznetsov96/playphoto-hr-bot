@@ -86,31 +86,35 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 },
                             });
                         } catch (sendErr: any) {
-                            logger.error({ err: sendErr, candidateId: cand.id }, "Candidate offer notification delivery failed");
-                            logBusinessEvent({
-                                event: "candidate.offer.notification_sent",
-                                level: "error",
-                                candidateId: cand.id,
-                                telegramId: cand.user.telegramId,
-                                actorType: "system",
-                                actorRole: "system",
-                                stage: "OFFER_DECISION",
-                                result: "failed",
-                                reasonCode: "TELEGRAM_DELIVERY_FAILED",
-                                module: "worker",
-                                operation: "processDecisionNotifications",
-                                safeContext: {
-                                    decision,
-                                },
-                                error: sendErr,
-                            });
-                            // Notify HR about delivery failure
-                            if (HR_IDS.length > 0) {
-                                await bot.api.sendMessage(
-                                    HR_IDS[0]!,
-                                    ADMIN_TEXTS["admin-notif-delivery-failed"]({ name: cand.fullName || "Candidate", error: sendErr.message }),
-                                    { parse_mode: "HTML" }
-                                ).catch(() => { });
+                            if (isBotBlocked(sendErr)) {
+                                await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                            } else {
+                                logger.error({ err: sendErr, candidateId: cand.id }, "Candidate offer notification delivery failed");
+                                logBusinessEvent({
+                                    event: "candidate.offer.notification_sent",
+                                    level: "error",
+                                    candidateId: cand.id,
+                                    telegramId: cand.user.telegramId,
+                                    actorType: "system",
+                                    actorRole: "system",
+                                    stage: "OFFER_DECISION",
+                                    result: "failed",
+                                    reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                                    module: "worker",
+                                    operation: "processDecisionNotifications",
+                                    safeContext: {
+                                        decision,
+                                    },
+                                    error: sendErr,
+                                });
+                                // Notify HR about delivery failure
+                                if (HR_IDS.length > 0) {
+                                    await bot.api.sendMessage(
+                                        HR_IDS[0]!,
+                                        ADMIN_TEXTS["admin-notif-delivery-failed"]({ name: cand.fullName || "Candidate", error: sendErr.message }),
+                                        { parse_mode: "HTML" }
+                                    ).catch(() => { });
+                                }
                             }
                         }
                     } else if (decision === "REJECTED") {
@@ -138,24 +142,28 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 },
                             });
                         } catch (sendErr) {
-                            logger.error({ err: sendErr, candidateId: cand.id }, "Candidate rejection notification delivery failed");
-                            logBusinessEvent({
-                                event: "candidate.rejection.notification_sent",
-                                level: "error",
-                                candidateId: cand.id,
-                                telegramId: cand.user.telegramId,
-                                actorType: "system",
-                                actorRole: "system",
-                                stage: "REJECTED",
-                                result: "failed",
-                                reasonCode: "TELEGRAM_DELIVERY_FAILED",
-                                module: "worker",
-                                operation: "processDecisionNotifications",
-                                safeContext: {
-                                    decision,
-                                },
-                                error: sendErr,
-                            });
+                            if (isBotBlocked(sendErr)) {
+                                await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                            } else {
+                                logger.error({ err: sendErr, candidateId: cand.id }, "Candidate rejection notification delivery failed");
+                                logBusinessEvent({
+                                    event: "candidate.rejection.notification_sent",
+                                    level: "error",
+                                    candidateId: cand.id,
+                                    telegramId: cand.user.telegramId,
+                                    actorType: "system",
+                                    actorRole: "system",
+                                    stage: "REJECTED",
+                                    result: "failed",
+                                    reasonCode: "TELEGRAM_DELIVERY_FAILED",
+                                    module: "worker",
+                                    operation: "processDecisionNotifications",
+                                    safeContext: {
+                                        decision,
+                                    },
+                                    error: sendErr,
+                                });
+                            }
                         }
                     }
                 } catch (e) {
@@ -487,11 +495,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     }
 
                     const kb = new InlineKeyboard().text("👤 Profile", `view_candidate_${cand.id}`);
-                    
+
                     for (const mentorId of MENTORS) {
                         await bot.api.sendMessage(mentorId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
                     }
-                    
+
                     await trainingRepository.updateSlot(slot.id, { reminded5mMentor: true });
                 } catch (e) { }
             }
@@ -758,7 +766,7 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
                     ADMIN_IDS[0]!,
                     `⚠️ <b>Funnel anomaly detected</b>\n\nFound <b>${impossibleMentorStates.length}</b> candidate records in mentor/final stages without HR/interview evidence.\n\n${preview}`,
                     { parse_mode: "HTML" }
-                ).catch(() => {});
+                ).catch(() => { });
                 await saveFunnelAlertState("FUNNEL_IMPOSSIBLE_MENTOR_STATE", fingerprint);
             }
         }
@@ -799,7 +807,7 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
                     ADMIN_IDS[0]!,
                     `⚠️ <b>Funnel spike detected</b>\n\n<b>${recentSuspiciousMaterials}</b> candidates received mentor materials in the last 15 minutes without recorded interview completion or HR approval.`,
                     { parse_mode: "HTML" }
-                ).catch(() => {});
+                ).catch(() => { });
                 await saveFunnelAlertState("FUNNEL_SUSPICIOUS_MATERIALS_SPIKE", fingerprint);
             }
         }
@@ -881,7 +889,7 @@ async function recoverStaleInterviewCandidates(bot: Bot<MyContext>) {
             HR_IDS[0],
             `⚠️ <b>Recovered stuck interview candidates</b>\n\nMoved <b>${recovered.length}</b> candidate(s) from stale <b>SCREENING/INTERVIEW</b> to <b>INTERVIEW_COMPLETED</b> so HR can decide.\n\n${preview}`,
             { parse_mode: "HTML" }
-        ).catch(() => {});
+        ).catch(() => { });
     }
 
     return recovered;
@@ -1700,7 +1708,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                         if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     }
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
 
     } catch (e) {
