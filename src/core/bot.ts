@@ -10,7 +10,7 @@ import { sequentialize } from "@grammyjs/runner";
 import logger from "./logger.js";
 import { di } from "./container.js";
 import { accessService } from "../services/access-service.js";
-import { sanitizeCallbackData, sanitizeTextForLogs } from "./log-sanitizer.js";
+import { sanitizeCallbackData } from "./log-sanitizer.js";
 
 import type { MyContext } from "../types/context.js";
 
@@ -66,7 +66,6 @@ bot.use(async (ctx, next) => {
         callback_action: callbackAction,
         has_text: Boolean(ctx.message?.text),
         has_media: Boolean(ctx.message?.photo || ctx.message?.document || ctx.message?.video || ctx.message?.voice),
-        text_preview: sanitizeTextForLogs(ctx.message?.text || ctx.message?.caption),
     });
 
     await next();
