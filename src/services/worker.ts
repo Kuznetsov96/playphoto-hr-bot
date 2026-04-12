@@ -1450,8 +1450,6 @@ async function processNDAReminders(bot: Bot<MyContext>) {
     }
 }
 
-/**
-
 function getPostStagingReminderAt(firstShiftDate: Date | null, firstShiftTime?: string | null): Date | null {
     if (!firstShiftDate) return null;
 
