@@ -53,7 +53,7 @@ adminMenu.dynamic(async (ctx, range) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-finance"], "admin-finance", { pushToStack: true });
         });
     }
-    
+
     if (hasPermission(userRole as any, 'SUPPORT_CHAT')) {
         range.text(ADMIN_TEXTS["admin-main-system"], async (ctx) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system", { pushToStack: true });
@@ -88,12 +88,12 @@ adminHandlers.use(adminLogisticsHandlers);
 
 adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
-    
+
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
         const replyText = ctx.message?.text || ctx.message?.caption || "";
-        
-        await ctx.deleteMessage().catch(() => {});
+
+        await ctx.deleteMessage().catch(() => { });
 
         try {
             const { InlineKeyboard } = await import("grammy");
@@ -117,7 +117,7 @@ adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx,
         } catch (e: any) {
             await ScreenManager.renderScreen(ctx, `❌ Send Error: ${e.message}`, "admin-main");
         }
-        
+
         delete ctx.session.supportData.step;
         delete ctx.session.supportData.replyingToUserId;
         return;
@@ -130,11 +130,12 @@ adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx,
 
 const adminProtected = new Composer<MyContext>();
 const protectedAdminCallbacks = adminProtected.filter(c => c.has("callback_query:data") && (
-    c.callbackQuery.data.startsWith("admin_") || 
-    c.callbackQuery.data.startsWith("admin-") || 
-    c.callbackQuery.data.startsWith("b_") || 
-    c.callbackQuery.data.startsWith("view_") || 
-    c.callbackQuery.data.startsWith("close_topic_") || 
+    c.callbackQuery.data.startsWith("admin_") ||
+    c.callbackQuery.data.startsWith("admin-") ||
+    c.callbackQuery.data.startsWith("b_") ||
+    c.callbackQuery.data.startsWith("view_") ||
+    c.callbackQuery.data.startsWith("close_topic_") ||
+    c.callbackQuery.data.startsWith("recovery_reopen_") ||
     c.callbackQuery.data.startsWith("forward_to_kuznetsov_") ||
     c.callbackQuery.data.startsWith("back_to_") ||
     c.callbackQuery.data.startsWith("ticket_") ||
@@ -266,9 +267,9 @@ protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx
     });
 
     if (candidate.tattooPhotoId) {
-        await ScreenManager.renderScreen(ctx, text, "admin-candidate-details", { 
+        await ScreenManager.renderScreen(ctx, text, "admin-candidate-details", {
             pushToStack: true,
-            photoId: candidate.tattooPhotoId 
+            photoId: candidate.tattooPhotoId
         });
     } else {
         await ScreenManager.renderScreen(ctx, text, "admin-candidate-details", { pushToStack: true });

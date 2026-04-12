@@ -9,6 +9,7 @@ import { PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
 import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
+import { handleBlockedCandidate } from "../utils/bot-blocked.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -60,7 +61,7 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
                     `• Статус → <b>Закінчення роботи</b>\n` +
                     `• Доступ до каналу — знято\n` +
                     `• Таблиця персоналу — оновлено`;
-                await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => {});
+                await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => { });
             }
             return;
         }
@@ -68,12 +69,9 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
         // --- Candidate ---
         if (candidate && ACTIVE_CANDIDATE_STATUSES.includes(candidate.status as CandidateStatus)) {
             const name = candidate.fullName || "Candidate";
-            logger.warn({ telegramId, candidateId: candidate.id, stage: candidate.status }, "Candidate blocked bot; auto-reject started");
+            logger.warn({ telegramId, candidateId: candidate.id, stage: candidate.status }, "Candidate blocked bot; blocker archival started");
 
-            await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.REJECTED,
-                candidateDecision: "Бот заблоковано / акаунт видалено"
-            });
+            await handleBlockedCandidate(bot.api, candidate.id, name);
             logSecurityEvent({
                 event: "security.candidate.bot_blocked",
                 telegramId,
@@ -87,18 +85,9 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
                 operation: "handleBlockedUser",
                 safeContext: {
                     candidateName: name,
-                    action: "auto_rejected",
+                    action: "archived_as_blocker",
                 },
             });
-
-            const hrId = HR_IDS[0];
-            if (hrId) {
-                const text = `⚠️ <b>Bot Blocked</b>\n\n` +
-                    `👤 <b>${name}</b> заблокувала бот.\n` +
-                    `Статус → <b>REJECTED</b> автоматично.`;
-                const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-                await bot.api.sendMessage(hrId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
-            }
             return;
         }
 

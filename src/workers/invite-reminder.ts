@@ -4,6 +4,7 @@ import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 
 const prisma = new PrismaClient();
 
@@ -61,7 +62,11 @@ export async function processInviteReminders(bot: any) {
 
                 try {
                     await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_48H_RESET, { parse_mode: "HTML" });
-                } catch (e) { }
+                } catch (e: any) {
+                    if (isBotBlocked(e)) {
+                        await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                    }
+                }
                 resetCount += 1;
 
             }
@@ -84,7 +89,11 @@ export async function processInviteReminders(bot: any) {
                                 .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
                                 .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
                         });
-                    } catch (e) { }
+                    } catch (e: any) {
+                        if (isBotBlocked(e)) {
+                            await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                        }
+                    }
                     pingCount += 1;
                 }
             }
