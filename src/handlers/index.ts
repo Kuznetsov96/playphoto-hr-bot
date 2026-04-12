@@ -162,7 +162,16 @@ handlers.on("callback_query:data", async (ctx, next) => {
 handlers.callbackQuery(/^broadcast_confirm_ok_(.+)$/, async (ctx) => {
     const broadcastId = parseInt(ctx.match![1]!);
     if (isNaN(broadcastId)) return ctx.answerCallbackQuery("Invalid ID");
-    await broadcastService.confirmRead(ctx, broadcastId);
+    const result = await broadcastService.confirmRead(ctx, broadcastId);
+
+    if (result !== "confirmed") {
+        return;
+    }
+
+    if (ctx.chat?.type !== "private") {
+        return;
+    }
+
     try {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
         await ctx.reply(STAFF_TEXTS["broadcast-ans-success"]);
@@ -173,7 +182,11 @@ handlers.callbackQuery(/^broadcast_confirm_decline_(.+)$/, async (ctx) => {
     const broadcastId = parseInt(ctx.match![1]!);
     if (isNaN(broadcastId)) return ctx.answerCallbackQuery("Invalid ID");
 
-    await broadcastService.confirmDecline(ctx, broadcastId);
+    const result = await broadcastService.confirmDecline(ctx, broadcastId);
+
+    if (result !== "declined") {
+        return;
+    }
 
     // Set session step to wait for reason
     ctx.session.step = "broadcast_decline_reason";

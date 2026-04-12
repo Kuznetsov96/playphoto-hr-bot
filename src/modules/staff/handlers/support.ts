@@ -854,13 +854,14 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                 locationCity = closestShift.location.city;
             }
 
-            const topicTitle = buildTopicTitle(ticket.id, user.staffProfile.fullName, locationName, TicketStatus.OPEN, true, false, locationCity);
+            const topicTitle = `📣 ${buildTopicTitle(ticket.id, user.staffProfile.fullName, locationName, TicketStatus.OPEN, false, false, locationCity)}`;
             const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
             const topicId = topic.message_thread_id;
 
             await supportRepository.updateTicket(ticket.id, { topicId });
 
-            const cardText = await buildTicketCard(ticket, user, false, locationName, locationCity);
+            const baseCardText = await buildTicketCard(ticket, user, false, locationName, locationCity);
+            const cardText = `📣 <b>BROADCAST OBJECTION</b>\n📝 <b>Broadcast #${broadcastId}</b>\n\n${baseCardText}`;
             const buttons = getTicketButtons(ticket.id, ticket.status);
 
             await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, cardText, {
