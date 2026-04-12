@@ -139,7 +139,7 @@ export class CandidateRepository {
         data: T
     ): T {
         const nextStatus = this.readScalarValue<CandidateStatus | null>((data as Prisma.CandidateUpdateInput).status as any);
-        if (nextStatus === CandidateStatus.REJECTED) {
+        if (nextStatus === CandidateStatus.REJECTED || nextStatus === CandidateStatus.BLOCKER) {
             const currentLossStage = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).lossStage as any);
             const currentLossReason = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).lossReason as any);
             const currentLostAt = this.readScalarValue<Date | null>((data as Prisma.CandidateUpdateInput).lostAt as any);
@@ -451,11 +451,11 @@ export class CandidateRepository {
             const changes: Record<string, { from: unknown; to: unknown }> = {};
             if ((normalizedData as any).status !== undefined && oldCandidate.status !== candidate.status) {
                 changes.status = { from: oldCandidate.status, to: candidate.status };
-                
+
                 // --- AUTOMATIC TIMELINE TRACKING ---
                 import("../services/timeline-service.js").then(({ timelineService }) => {
-                    timelineService.trackStatusChange(candidate, oldCandidate.status, candidate.status, 'SYSTEM').catch(() => {});
-                }).catch(() => {});
+                    timelineService.trackStatusChange(candidate, oldCandidate.status, candidate.status, 'SYSTEM').catch(() => { });
+                }).catch(() => { });
             }
             if (oldCandidate.interviewSlotId !== candidate.interviewSlotId) {
                 changes.interviewSlotId = { from: oldCandidate.interviewSlotId, to: candidate.interviewSlotId };
@@ -573,6 +573,93 @@ export class CandidateRepository {
                 fromStep: oldCandidate.currentStep,
                 toStep: candidate.currentStep,
                 previousDecision: oldCandidate.hrDecision,
+            },
+        });
+
+        if (candidate.user?.telegramId) {
+            import("../services/access-service.js").then(({ accessService }) => {
+                accessService.syncUserAccess(candidate.user.telegramId).catch(() => { });
+            }).catch(() => { });
+        }
+
+        return candidate;
+    }
+
+    async reopenRecoveryCandidate(id: string, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
+        const client = tx || prisma;
+        const oldCandidate = await this.findById(id, tx);
+
+        if (!oldCandidate) {
+            throw new Error(`Candidate ${id} not found`);
+        }
+
+        const isRecoveryRejected = oldCandidate.status === CandidateStatus.REJECTED && oldCandidate.candidateDecision?.includes("Бот заблоковано");
+        const isRecoveryBlocker = oldCandidate.status === CandidateStatus.BLOCKER;
+
+        if (!isRecoveryRejected && !isRecoveryBlocker) {
+            throw new Error("CANDIDATE_NOT_RECOVERY_ELIGIBLE");
+        }
+
+        const candidate = await client.candidate.update({
+            where: { id },
+            data: {
+                status: CandidateStatus.WAITLIST_HR,
+                hrDecision: null,
+                candidateDecision: null,
+                lossStage: null,
+                lossReason: null,
+                lostAt: null,
+                notificationSent: false,
+                currentStep: FunnelStep.INTERVIEW,
+                isWaitlisted: true,
+                statusChangedAt: new Date(),
+            },
+            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+        }) as unknown as CandidateWithRelations;
+
+        logger.info({
+            event: "candidate.reopened_from_recovery",
+            candidateId: id,
+            name: candidate.fullName,
+            changes: {
+                status: { from: oldCandidate.status, to: candidate.status },
+                candidateDecision: { from: oldCandidate.candidateDecision, to: candidate.candidateDecision },
+            }
+        }, "📋 Candidate reopened from recovery");
+
+        logBusinessEvent({
+            event: "candidate.transition.reopened_recovery",
+            candidateId: id,
+            telegramId: candidate.user?.telegramId,
+            actorType: "system",
+            actorRole: "system",
+            stage: candidate.status,
+            result: "success",
+            module: "candidate-repository",
+            operation: "reopenRecoveryCandidate",
+            safeContext: {
+                fromStatus: oldCandidate.status,
+                toStatus: candidate.status,
+                fromStep: oldCandidate.currentStep,
+                toStep: candidate.currentStep,
+            },
+        });
+
+        logAuditEvent({
+            event: "candidate.reopened_from_recovery",
+            candidateId: id,
+            telegramId: candidate.user?.telegramId,
+            actorType: "system",
+            actorRole: "system",
+            stage: candidate.status,
+            result: "success",
+            module: "candidate-repository",
+            operation: "reopenRecoveryCandidate",
+            safeContext: {
+                fromStatus: oldCandidate.status,
+                toStatus: candidate.status,
+                fromStep: oldCandidate.currentStep,
+                toStep: candidate.currentStep,
             },
         });
 
@@ -757,6 +844,59 @@ export class CandidateRepository {
 
     async deleteMany(where: Prisma.CandidateWhereInput) {
         return prisma.candidate.deleteMany({ where });
+    }
+
+    async archiveBlockedCandidate(candidateId: string, candidateDecision: string) {
+        return prisma.$transaction(async (tx) => {
+            const candidate = await tx.candidate.findUnique({
+                where: { id: candidateId },
+                select: {
+                    id: true,
+                    userId: true,
+                    interviewSlotId: true,
+                    discoverySlotId: true,
+                    trainingSlotId: true,
+                }
+            });
+
+            if (!candidate) {
+                throw new Error(`Candidate ${candidateId} not found`);
+            }
+
+            await tx.user.update({
+                where: { id: candidate.userId },
+                data: { botBlockedAt: new Date() }
+            });
+
+            if (candidate.interviewSlotId) {
+                await tx.interviewSlot.update({
+                    where: { id: candidate.interviewSlotId },
+                    data: { isBooked: false, candidateId: null, lastReminderMsgId: null }
+                });
+            }
+
+            const trainingSlotIds = [candidate.discoverySlotId, candidate.trainingSlotId].filter(Boolean) as string[];
+            for (const slotId of trainingSlotIds) {
+                await tx.trainingSlot.update({
+                    where: { id: slotId },
+                    data: { isBooked: false, candidateId: null, lastReminderMsgId: null }
+                });
+            }
+
+            return this.update(candidateId, {
+                status: CandidateStatus.BLOCKER,
+                candidateDecision,
+                notificationSent: false,
+                hasUnreadMessage: false,
+                isWaitlisted: false,
+                interviewInvitedAt: null,
+                googleMeetLink: null,
+                trainingMeetLink: null,
+                interviewSlot: { disconnect: true },
+                discoverySlot: { disconnect: true },
+                trainingSlot: { disconnect: true },
+            }, tx);
+        });
     }
 
     async deleteRelatedData(candidateId: string) {

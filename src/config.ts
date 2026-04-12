@@ -116,6 +116,7 @@ export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
+export const RECOVERY_CHAT_ID = -1003873088973;
 
 // Spreadsheets
 export const SPREADSHEET_ID_TECH_CASH = env.SPREADSHEET_ID_TECH_CASH;
@@ -184,7 +185,8 @@ export const TEAM_CHATS = {
     HUB: parseInt(env.TEAM_HUB_CHAT_ID),
     SUPPORT: parseInt(env.SUPPORT_CHAT_ID),
     CHANNEL: parseInt(env.TEAM_CHANNEL_ID),
-    LOGISTICS: env.LOGISTICS_TOPIC_ID ? parseInt(env.LOGISTICS_TOPIC_ID) : undefined
+    LOGISTICS: env.LOGISTICS_TOPIC_ID ? parseInt(env.LOGISTICS_TOPIC_ID) : undefined,
+    RECOVERY: RECOVERY_CHAT_ID
 };
 
 /** Map of Ukrainian city names (from sheet headers) → DB city values (Ukrainian) */

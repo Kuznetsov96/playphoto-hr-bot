@@ -9,6 +9,32 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
 import { buildSignedCallback } from "./signed-callback.js";
 
+function getCandidateAge(birthDate?: Date | string | null): number | null {
+    if (!birthDate) return null;
+
+    const parsedBirthDate = birthDate instanceof Date ? birthDate : new Date(birthDate);
+    if (Number.isNaN(parsedBirthDate.getTime())) return null;
+
+    const today = new Date();
+    let age = today.getFullYear() - parsedBirthDate.getFullYear();
+    const monthDelta = today.getMonth() - parsedBirthDate.getMonth();
+
+    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < parsedBirthDate.getDate())) {
+        age -= 1;
+    }
+
+    return age;
+}
+
+function hasBlockedDeliveryReason(candidate: any): boolean {
+    return candidate.status === CandidateStatus.BLOCKER || candidate.candidateDecision?.includes("Бот заблоковано") === true;
+}
+
+function isRecoveryEligibleCandidate(candidate: any): boolean {
+    const age = getCandidateAge(candidate.birthDate);
+    return candidate.gender === "female" && age !== null && age >= 17 && age <= 26 && hasBlockedDeliveryReason(candidate);
+}
+
 /**
  * Apple Style: Compact and readable job details
  */
@@ -32,6 +58,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
     let text = "";
     const kb = new InlineKeyboard();
     const canContactStaff = candidate.gender !== "male";
+    const canUseRecovery = isRecoveryEligibleCandidate(candidate);
 
     const fullName = candidate.fullName || ctx.from?.first_name || "Кандидатко";
     const firstName = extractFirstName(fullName);
@@ -197,10 +224,18 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
         case CandidateStatus.REJECTED:
             text = CANDIDATE_TEXTS["candidate-rejected"];
+            if (canUseRecovery) {
+                text += "\n\nРаніше ми не могли доставити тобі повідомлення в боті, тому цей кейс винесено в окремий recovery-розгляд. Якщо хочеш повернутись на зв'язок із командою, напиши нам.";
+                kb.text("💌 Написати нам", "contact_recovery");
+            }
             break;
 
         case CandidateStatus.BLOCKER:
-            text = `Привіт, ${firstName}! 👋\n\nРаді, що ти повернулась. Наразі твоя анкета заблокована. Бажаємо успіхів! ✨`;
+            text = `👋 <b>Зв'язок із ботом відновлено.</b>\n\nРаніше система зафіксувала, що повідомлення тобі не доставлялися, тому ми зупинили подальші сповіщення, щоб не турбувати тебе.`;
+            if (canUseRecovery) {
+                text += "\n\nЯкщо хочеш відновити контакт із командою або поставити запитання, натисни кнопку нижче.";
+                kb.text("💌 Написати нам", "contact_recovery");
+            }
             break;
 
         default:
