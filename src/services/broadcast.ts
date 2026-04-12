@@ -11,6 +11,7 @@ import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
 import fs from "fs";
+import type { BroadcastMediaItem } from "../types/context.js";
 
 interface BroadcastStats {
     totalChats: number;
@@ -24,35 +25,86 @@ export interface BroadcastTarget {
     value?: string | string[];
 }
 
+type BroadcastMediaInput = BroadcastMediaItem | BroadcastMediaItem[];
+
+function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
+    const kb = new InlineKeyboard();
+
+    if (buttonType === 'preferences') {
+        kb.text("🗓 Заповнити графік", "pref_fill").row();
+        kb.text("🚫 Не буду заповнювати", "pref_opt_out");
+        return kb;
+    }
+
+    if (buttonType === 'default') {
+        const okAction = broadcastId ? `broadcast_confirm_ok_${broadcastId}` : "test_confirm_ok";
+        kb.text("✅ Ознайомлена", okAction);
+
+        if (broadcastId && isGroup && botUsername) {
+            kb.url("❌ Не згодна", `https://t.me/${botUsername}?start=bcq_${broadcastId}`);
+        } else {
+            const declineAction = broadcastId ? `broadcast_confirm_decline_${broadcastId}` : "test_confirm_decline";
+            kb.text("❌ Не згодна", declineAction);
+        }
+    }
+
+    return kb;
+}
+
+function getBroadcastFollowUpText(buttonType: 'default' | 'preferences' | 'none') {
+    if (buttonType === 'preferences') {
+        return "👇 Обери одну з кнопок нижче, щоб зафіксувати відповідь.";
+    }
+
+    if (buttonType === 'default') {
+        return "👇 Підтверди ознайомлення або повідом про заперечення кнопкою нижче.";
+    }
+
+    return "";
+}
+
+async function sendBroadcastPayload(api: any, chatId: number, text: string, media: BroadcastMediaInput | undefined, extra: any, buttonType: 'default' | 'preferences' | 'none') {
+    if (Array.isArray(media) && media.length > 1) {
+        const mediaGroup = media.map((item, index) => ({
+            type: item.type,
+            media: item.fileId,
+            ...(index === 0 ? { caption: text, parse_mode: "HTML" as const } : {})
+        }));
+
+        await api.sendMediaGroup(chatId, mediaGroup);
+
+        if (buttonType !== 'none') {
+            return await api.sendMessage(chatId, getBroadcastFollowUpText(buttonType), extra);
+        }
+
+        return null;
+    }
+
+    const singleMedia = Array.isArray(media) ? media[0] : media;
+    if (singleMedia?.type === 'photo') {
+        return await api.sendPhoto(chatId, singleMedia.fileId, { caption: text, ...extra });
+    }
+
+    if (singleMedia?.type === 'video') {
+        return await api.sendVideo(chatId, singleMedia.fileId, { caption: text, ...extra });
+    }
+
+    return await api.sendMessage(chatId, text, extra);
+}
+
 export const broadcastService = {
     async getBroadcastTargetStats(target: BroadcastTarget): Promise<{ chats: number, users: number }> {
         const { chats, users } = await this.resolveTargets(target);
         return { chats: chats.length, users: users.length };
     },
 
-    async sendTestBroadcast(api: any, chatId: number, text: string, media?: { type: 'photo' | 'video', fileId: string }, buttonType: 'default' | 'preferences' | 'none' = 'default') {
-        const kb = new InlineKeyboard();
-        
-        if (buttonType === 'preferences') {
-            kb.text("🗓 Заповнити графік", "pref_fill").row();
-            kb.text("🚫 Не буду заповнювати", "pref_opt_out");
-        } else if (buttonType === 'default') {
-            kb.text("✅ Ознайомлена", `test_confirm_ok`);
-            kb.text("❌ Не згодна", `test_confirm_decline`);
-        }
-
+    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default') {
         const extra: any = { parse_mode: "HTML" };
         if (buttonType !== 'none') {
-            extra.reply_markup = kb;
+            extra.reply_markup = buildBroadcastKeyboard(buttonType);
         }
 
-        if (media?.type === 'photo') {
-            return await api.sendPhoto(chatId, media.fileId, { caption: text, ...extra });
-        } else if (media?.type === 'video') {
-            return await api.sendVideo(chatId, media.fileId, { caption: text, ...extra });
-        } else {
-            return await api.sendMessage(chatId, text, extra);
-        }
+        return await sendBroadcastPayload(api, chatId, text, media, extra, buttonType);
     },
 
     async resolveTargets(target: BroadcastTarget) {
@@ -107,7 +159,7 @@ export const broadcastService = {
         };
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: { type: 'photo' | 'video', fileId: string }, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none' }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none' }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -179,42 +231,19 @@ export const broadcastService = {
         const buttonType = pingOptions?.buttonType || 'default';
 
         const send = async (chatId: number | bigint, isGroup: boolean) => {
-            const kb = new InlineKeyboard();
-            
-            if (buttonType === 'none') {
-                // No buttons
-            } else if (buttonType === 'preferences') {
-                kb.text("🗓 Заповнити графік", "pref_fill").row();
-                kb.text("🚫 Не буду заповнювати", "pref_opt_out");
-            } else {
-                kb.text("✅ Ознайомлена", `broadcast_confirm_ok_${broadcastId}`);
-
-                if (isGroup && botUsername) {
-                    kb.url("❌ Не згодна", `https://t.me/${botUsername}?start=bcq_${broadcastId}`);
-                } else {
-                    kb.text("❌ Не згодна", `broadcast_confirm_decline_${broadcastId}`);
-                }
-            }
-
             const numericChatId = Number(chatId);
             const extra: any = { parse_mode: "HTML" };
             if (buttonType !== 'none') {
-                extra.reply_markup = kb;
+                extra.reply_markup = buildBroadcastKeyboard(buttonType, broadcastId, botUsername, isGroup);
             }
 
-            if (media?.type === 'photo') {
-                return await botApi.sendPhoto(numericChatId, media.fileId, { caption: messageText, ...extra });
-            } else if (media?.type === 'video') {
-                return await botApi.sendVideo(numericChatId, media.fileId, { caption: messageText, ...extra });
-            } else {
-                return await botApi.sendMessage(numericChatId, messageText, extra);
-            }
+            return await sendBroadcastPayload(botApi, numericChatId, messageText, media, extra, buttonType);
         };
 
         for (const chatId of chats) {
             try {
                 const sentMsg = await send(chatId, true);
-                if (buttonType !== 'none') {
+                if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(chatId),
@@ -249,7 +278,7 @@ export const broadcastService = {
                 }
 
                 const sentMsg = await send(userId, false);
-                if (buttonType !== 'none') {
+                if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(userId),
@@ -305,7 +334,7 @@ export const broadcastService = {
         }
     },
 
-  async confirmRead(ctx: MyContext, broadcastId: number) {
+    async confirmRead(ctx: MyContext, broadcastId: number) {
         const userId = ctx.from?.id;
         const chatId = ctx.chat?.id;
         if (!userId || !chatId) return;
@@ -353,6 +382,19 @@ export const broadcastService = {
         } else {
             await ctx.answerCallbackQuery("Recorded.");
         }
+    },
+
+    async confirmDeclineByUser(broadcastId: number, userId: number | bigint) {
+        const normalizedUserId = BigInt(userId);
+
+        await pendingReplyRepository.updateMany(
+            {
+                userId: normalizedUserId,
+                status: "pending",
+                trackedMessage: { broadcastId }
+            },
+            { status: "declined", respondedAt: new Date() }
+        );
     },
 
     async getStats(broadcastId: number): Promise<BroadcastStats> {
@@ -411,7 +453,7 @@ export const broadcastService = {
 
     async getFullStatusReport(broadcastId: number) {
         const tracked = await trackedMessageRepository.findManyWithReplies(broadcastId);
-        
+
         const confirmed: string[] = [];
         const declined: string[] = [];
         const pending: string[] = [];
