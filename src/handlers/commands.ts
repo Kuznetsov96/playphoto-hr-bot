@@ -18,6 +18,7 @@ import { startScreening } from "../modules/candidate/handlers/index.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
+import { broadcastService } from "../services/broadcast.js";
 
 import { accessService } from "../services/access-service.js";
 
@@ -125,6 +126,8 @@ commandHandlers.command("start", async (ctx) => {
         if (payload?.startsWith("bcq_")) {
             const broadcastId = parseInt(payload.replace("bcq_", ""));
             if (!isNaN(broadcastId)) {
+                await broadcastService.confirmDeclineByUser(broadcastId, userId);
+
                 await ctx.reply("🐾 Зрозуміла! Ти вказала, що маєш запитання щодо останнього повідомлення — зараз у всьому розберемось.");
 
                 const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
@@ -134,7 +137,8 @@ commandHandlers.command("start", async (ctx) => {
                     const { supportRepository } = await import("../repositories/support-repository.js");
                     const activeTicket = await supportRepository.findActiveTicketByUser(user.id);
                     if (!activeTicket) {
-                        ctx.session.step = "create_ticket";
+                        ctx.session.step = "broadcast_decline_reason";
+                        ctx.session.broadcastId = broadcastId;
                     }
                 }
 
