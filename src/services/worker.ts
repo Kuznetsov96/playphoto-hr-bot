@@ -20,6 +20,7 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { sessionRepository } from "../repositories/session-repository.js";
 import { isImpossibleMentorState } from "./funnel-anomaly-detector.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
+import { createKyivDate } from "../utils/bot-utils.js";
 
 
 /**
@@ -1449,31 +1450,68 @@ async function processNDAReminders(bot: Bot<MyContext>) {
     }
 }
 
-/**
+function getPostStagingReminderAt(firstShiftDate: Date | null, firstShiftTime?: string | null): Date | null {
+    if (!firstShiftDate) return null;
+
+    const normalizedWindow = (firstShiftTime || "15:00-17:00").replace(/\s+/g, "");
+    const match = normalizedWindow.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+
+    const [, , , endHourRaw, endMinuteRaw] = match;
+    const endHour = Number(endHourRaw);
+    const endMinute = Number(endMinuteRaw);
+
+    if (Number.isNaN(endHour) || Number.isNaN(endMinute) || endHour > 23 || endMinute > 59) {
+        return null;
+    }
+
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Kyiv",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(firstShiftDate);
+
+    const year = Number(parts.find((part) => part.type === "year")?.value);
+    const month = Number(parts.find((part) => part.type === "month")?.value);
+    const day = Number(parts.find((part) => part.type === "day")?.value);
+
+    if ([year, month, day].some((value) => Number.isNaN(value))) {
+        return null;
+    }
+
+    const reminderAt = createKyivDate(year, month - 1, day, endHour, endMinute);
+    reminderAt.setTime(reminderAt.getTime() + 60 * 60 * 1000);
+    return reminderAt;
+}
 
 /**
- * Post-Staging Reminder: 1 hour after staging end time, remind admin to mark Pass/Fail.
- * Runs every 5 min. Uses STAGING_ACTIVE + firstShiftDate to detect completed stagings.
+ * Post-Staging Reminder: 1 hour after the staging time window ends, remind admin to mark Pass/Fail.
+ * Runs every 5 min. Uses STAGING_ACTIVE + firstShiftDate/firstShiftTime to detect completed stagings.
  * Reminder throttling is stored in session state, not User.updatedAt.
  */
 async function processPostStagingReminder(bot: Bot<MyContext>) {
     try {
         const now = new Date();
-        const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
-        // Find candidates in STAGING_ACTIVE whose staging date has passed 1+ hour ago
+        // Find candidates in STAGING_ACTIVE that already have staging details assigned.
         const candidates = await prisma.candidate.findMany({
             where: {
                 status: CandidateStatus.STAGING_ACTIVE,
-                firstShiftDate: { not: null, lte: oneHourAgo },
+                firstShiftDate: { not: null },
                 stagingNotifiedAt: { not: null }
             },
             include: { user: true, location: true }
         });
 
         for (const cand of candidates) {
+            const reminderAt = getPostStagingReminderAt(cand.firstShiftDate, cand.firstShiftTime);
+            if (!reminderAt || reminderAt.getTime() > now.getTime()) {
+                continue;
+            }
+
             const reminderKey = `candidate:post-staging-reminder:${cand.id}`;
-            const stagingDateKey = cand.firstShiftDate?.toISOString() || "unknown";
+            const stagingDateKey = `${cand.firstShiftDate?.toISOString() || "unknown"}|${cand.firstShiftTime || "15:00-17:00"}`;
             const reminderState = await sessionRepository.findByKey(reminderKey);
             if (reminderState?.value) {
                 try {
