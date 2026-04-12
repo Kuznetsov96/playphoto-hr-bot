@@ -1454,6 +1454,7 @@ async function processNDAReminders(bot: Bot<MyContext>) {
 /**
  * Post-Staging Reminder: 1 hour after staging end time, remind admin to mark Pass/Fail.
  * Runs every 5 min. Uses STAGING_ACTIVE + firstShiftDate to detect completed stagings.
+ * Reminder throttling is stored in session state, not User.updatedAt.
  */
 async function processPostStagingReminder(bot: Bot<MyContext>) {
     try {
@@ -1471,9 +1472,20 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
         });
 
         for (const cand of candidates) {
-            // Throttle: only send once per 23h using user.updatedAt
-            const userUpdate = new Date(cand.user.updatedAt);
-            if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
+            const reminderKey = `candidate:post-staging-reminder:${cand.id}`;
+            const stagingDateKey = cand.firstShiftDate?.toISOString() || "unknown";
+            const reminderState = await sessionRepository.findByKey(reminderKey);
+            if (reminderState?.value) {
+                try {
+                    const parsed = JSON.parse(reminderState.value) as { stagingDateKey?: string, remindedAt?: string };
+                    const remindedAt = parsed.remindedAt ? new Date(parsed.remindedAt) : null;
+                    if (parsed.stagingDateKey === stagingDateKey && remindedAt && now.getTime() - remindedAt.getTime() < 23 * 60 * 60 * 1000) {
+                        continue;
+                    }
+                } catch {
+                    logger.warn({ candidateId: cand.id, reminderKey }, "Invalid post-staging reminder state; continuing with send attempt");
+                }
+            }
 
             try {
                 const name = cand.fullName || "Candidate";
@@ -1485,11 +1497,27 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
                 const kb = new InlineKeyboard()
                     .text("👤 View & Decide", `view_candidate_${cand.id}`);
 
-                if (HR_IDS[0]) {
-                    await bot.api.sendMessage(HR_IDS[0], text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
+                const recipientIds = [ADMIN_IDS[0]].filter((id): id is number => typeof id === "number" && !Number.isNaN(id));
+                let deliveredCount = 0;
+
+                for (const recipientId of recipientIds) {
+                    try {
+                        await bot.api.sendMessage(recipientId, text, { parse_mode: "HTML", reply_markup: kb });
+                        deliveredCount++;
+                    } catch (sendError) {
+                        logger.warn({ err: sendError, candidateId: cand.id, recipientId }, "Candidate post-staging admin reminder delivery failed for recipient");
+                    }
                 }
 
-                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
+                if (deliveredCount === 0) {
+                    throw new Error("Post-staging reminder was not delivered to any recipient");
+                }
+
+                await sessionRepository.upsert(reminderKey, JSON.stringify({
+                    stagingDateKey,
+                    remindedAt: now.toISOString(),
+                }));
+
                 logBusinessEvent({
                     event: "candidate.staging.admin_reminder_sent",
                     candidateId: cand.id,
@@ -1500,6 +1528,7 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
                     result: "success",
                     module: "worker",
                     operation: "processPostStagingReminder",
+                    safeContext: { deliveredCount, recipients: recipientIds },
                 });
             } catch (e) {
                 logger.warn({ err: e, candidateId: cand.id }, "Candidate post-staging admin reminder delivery failed");
