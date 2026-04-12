@@ -109,7 +109,7 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
     ctx.session.supportData = {
         ...(ctx.session.supportData || {}),
         preferredTarget,
-        entryReason: preferredTarget === "RECOVERY" ? "RETURNED_AFTER_BOT_BLOCK" : undefined,
+        ...(preferredTarget === "RECOVERY" ? { entryReason: "RETURNED_AFTER_BOT_BLOCK" as const } : {}),
     };
     await ctx.answerCallbackQuery();
     logBusinessEvent({
