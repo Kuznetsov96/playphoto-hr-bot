@@ -23,18 +23,7 @@ export class MentorService {
             status: CandidateStatus.HIRED,
             isMentorLocked: true,
             fullName: { not: null },
-            firstShiftDate: fromDate ? { gte: fromDate } : { not: null },
-            user: {
-                is: {
-                    staffProfile: {
-                        is: {
-                            shifts: {
-                                some: fromDate ? { date: { gte: fromDate } } : {}
-                            }
-                        }
-                    }
-                }
-            }
+            firstShiftDate: fromDate ? { gte: fromDate } : { not: null }
         };
     }
 
@@ -53,7 +42,7 @@ export class MentorService {
             hrDecision: "ACCEPTED",
             notificationSent: true
         });
-        
+
         const newAcceptedCount = accepted.filter(c => !c.materialsSent).length;
         const awaitingBookingCount = accepted.filter(c => c.materialsSent && !c.discoverySlotId).length;
         const readyForTrainingCount = await candidateRepository.countByStatus(CandidateStatus.DISCOVERY_COMPLETED);
@@ -63,7 +52,7 @@ export class MentorService {
         const today = new Date();
         const start = new Date(today.setHours(0, 0, 0, 0));
         const end = new Date(today.setHours(23, 59, 59, 999));
-        
+
         const trainingToday = await trainingRepository.countBookedSlotsByDateRange(start, end);
 
         // Overdue meetings: booked slots in the past, still in SCHEDULED status
@@ -78,30 +67,28 @@ export class MentorService {
             }
         });
 
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
         const onboardingCount = await prisma.candidate.count({
-            where: this.getMentorOnboardingWhere(startOfToday)
+            where: this.getMentorOnboardingWhere()
         });
 
-        return { 
-            actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount, 
+        return {
+            actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount,
             calendarCount: trainingToday + overdue,
             trainingToday,
             overdue,
-            onboardingCount, 
-            newAcceptedCount, 
+            onboardingCount,
+            newAcceptedCount,
             awaitingBookingCount,
-            readyForTrainingCount, 
-            waitlistCount, 
-            unreadMessagesCount 
+            readyForTrainingCount,
+            waitlistCount,
+            unreadMessagesCount
         };
     }
 
     async getHubText() {
         const stats = await this.getStats();
         const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
-        
+
         let calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday}`;
         if (stats.overdue > 0) {
             calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday} <a href="">(⚠️ ${stats.overdue} pending)</a>`;
@@ -125,7 +112,7 @@ export class MentorService {
 
         const age = cand.birthDate ? new Date().getFullYear() - new Date(cand.birthDate).getFullYear() : '?';
         const locName = cand.location?.name || 'Not selected';
-        
+
         const statusMap: Record<string, string> = {
             "ACCEPTED": cand.materialsSent ? "📩 Materials sent" : "🆕 New",
             "WAITLIST": "⏳ Waitlist",
@@ -144,11 +131,11 @@ export class MentorService {
             return {
                 cand,
                 text: `👤 <b>${cand.fullName}</b>\n` +
-                      `🎂 Age: ${age}\n` +
-                      `🏙️ City: ${cand.city}\n` +
-                      `📍 Location: ${locName}\n` +
-                      `⚠️ <b>User record missing in database</b>\n` +
-                      `🏷️ Status: <b>${statusMap[cand.status] || cand.status}</b>`
+                    `🎂 Age: ${age}\n` +
+                    `🏙️ City: ${cand.city}\n` +
+                    `📍 Location: ${locName}\n` +
+                    `⚠️ <b>User record missing in database</b>\n` +
+                    `🏷️ Status: <b>${statusMap[cand.status] || cand.status}</b>`
             };
         }
 
@@ -187,13 +174,13 @@ export class MentorService {
             notificationSent: true
         });
         const discoveryDone = await candidateRepository.findByStatusWithUser(CandidateStatus.DISCOVERY_COMPLETED, { isWaitlisted: false });
-        
+
         // Кандидати, які потребують дії:
         // 1. Нові (немає матеріалів)
         // 2. Ті, що отримали матеріали, але не записались (!discoverySlotId)
         // 3. Ті, що пройшли Discovery (DISCOVERY_COMPLETED)
         const waitingForAction = accepted.filter(c => !c.discoverySlotId);
-        
+
         return [...waitingForAction, ...discoveryDone];
     }
 
@@ -266,7 +253,7 @@ export class MentorService {
             try {
                 const text = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для нашої зустрічі. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
                 const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
-                
+
                 if (cand.user) {
                     await api.sendMessage(Number(cand.user.telegramId), text, { reply_markup: kb });
 
@@ -308,7 +295,7 @@ export class MentorService {
             await candidateRepository.update(candId, { status: "REJECTED" });
             const msgKey = result === 'failed' ? "mentor-discovery-failed" : "mentor-discovery-no-show";
             if (cand.user) {
-                await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS[msgKey]).catch(() => {});
+                await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS[msgKey]).catch(() => { });
             }
         }
 
@@ -341,9 +328,9 @@ export class MentorService {
             const firstName = extractFirstName(cand.fullName || "");
             const staticInfo = getLocationDetails(cand.location?.name);
             const jobDetails = `\n\n📍 <b>${cand.location?.name || cand.city}</b>\n` +
-                              `🏠 ${staticInfo?.address || cand.location?.address || ""}\n` +
-                              `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
-                              `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
+                `🏠 ${staticInfo?.address || cand.location?.address || ""}\n` +
+                `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
+                `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
 
             const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
             if (cand.user) {
@@ -362,7 +349,7 @@ export class MentorService {
                             api.sendMessage(mainAdmin,
                                 `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
                                 { parse_mode: "HTML" }
-                            ).catch(() => {});
+                            ).catch(() => { });
                         }
                     }
                 }
@@ -370,7 +357,7 @@ export class MentorService {
 
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
-            await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["mentor-training-failed"]).catch(() => {});
+            await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["mentor-training-failed"]).catch(() => { });
         }
 
         audit({
@@ -390,10 +377,7 @@ export class MentorService {
     }
 
     async getOnboardingCandidates() {
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-
-        return await candidateRepository.findByStatusWithUser(CandidateStatus.HIRED, this.getMentorOnboardingWhere(startOfToday))
+        return await candidateRepository.findByStatusWithUser(CandidateStatus.HIRED, this.getMentorOnboardingWhere())
             .then(cands => cands.sort((a, b) => {
                 const aTime = a.firstShiftDate ? new Date(a.firstShiftDate).getTime() : Number.MAX_SAFE_INTEGER;
                 const bTime = b.firstShiftDate ? new Date(b.firstShiftDate).getTime() : Number.MAX_SAFE_INTEGER;
@@ -407,9 +391,9 @@ export class MentorService {
         if (!cand) return null;
 
         if (success) {
-            await candidateRepository.update(candId, { 
+            await candidateRepository.update(candId, {
                 status: "HIRED",
-                isMentorLocked: false 
+                isMentorLocked: false
             });
             if (cand.locationId) {
                 try { await locationRepository.update(cand.locationId, { neededCount: { decrement: 1 } }); } catch (e) { }
@@ -441,7 +425,7 @@ export class MentorService {
             const day = parseInt(parts[0]!);
             const month = parseInt(parts[1]!);
             const year = parseInt(parts[2]!) || new Date().getFullYear();
-            
+
             // Apple Style: Explicitly define the start and end of the day in Kyiv time
             const start = createKyivDate(year, month - 1, day, 0, 0);
             const end = createKyivDate(year, month - 1, day, 23, 59);
@@ -488,7 +472,7 @@ export class MentorService {
         });
 
         // Only block if there's an active booking
-        const isStrictlyOccupied = overlap && overlap.slots.some(s => 
+        const isStrictlyOccupied = overlap && overlap.slots.some(s =>
             s.isBooked && s.candidate && !["HIRED", "REJECTED"].includes(s.candidate.status)
         );
 
@@ -504,7 +488,7 @@ export class MentorService {
                     { endTime: { gt: new Date(start.getTime() + 1000) } }
                 ]
             }
-        }).catch(() => {});
+        }).catch(() => { });
 
         const totalDurationMinutes = (end.getTime() - start.getTime()) / 60000;
         const slots: { start: Date, end: Date }[] = [];
@@ -547,10 +531,10 @@ export class MentorService {
 
         const [_, day, month, year, startH, startM] = match.map(Number);
         const start = createKyivDate(year || new Date().getFullYear(), month! - 1, day!, startH!, startM!);
-        
+
         // Apple Style: Unified 30-minute block (20m meeting + 10m break)
-        const end = new Date(start.getTime() + 20 * 60 * 1000); 
-        const blockEnd = new Date(start.getTime() + 30 * 60 * 1000); 
+        const end = new Date(start.getTime() + 20 * 60 * 1000);
+        const blockEnd = new Date(start.getTime() + 30 * 60 * 1000);
 
         const overlap = await prisma.trainingSession.findFirst({
             where: {
@@ -563,7 +547,7 @@ export class MentorService {
         });
 
         // Only block if there's an active booking
-        const isStrictlyOccupied = overlap && overlap.slots.some(s => 
+        const isStrictlyOccupied = overlap && overlap.slots.some(s =>
             s.isBooked && s.candidate && !["HIRED", "REJECTED"].includes(s.candidate.status)
         );
 
@@ -579,7 +563,7 @@ export class MentorService {
                     { endTime: { gt: start } }
                 ]
             }
-        }).catch(() => {});
+        }).catch(() => { });
 
         // Cancel old training slot if candidate already has one (reschedule safety net)
         const cand = await candidateRepository.findById(candId);
@@ -605,7 +589,7 @@ export class MentorService {
         const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
         const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
         const channelLink = await accessService.createInviteLink((await candidateRepository.findById(candId))?.user.telegramId!) || "https://t.me/+FuFRMGsvMktkNGFi";
-        
+
         return {
             success: true,
             message: `✅ Scheduled for ${dateStr} ${timeStr}`,
@@ -651,7 +635,7 @@ export class MentorService {
                     { endTime: { gt: start } }
                 ]
             }
-        }).catch(() => {});
+        }).catch(() => { });
 
         // Cancel old discovery slot if candidate already has one (reschedule safety net)
         const cand = await candidateRepository.findById(candId);
@@ -711,13 +695,13 @@ export class MentorService {
     }
 
     async getBroadcastCandidates(city: string) {
-        return await candidateRepository.findByCityAndStatus(city, "ACCEPTED", false).then(cands => 
+        return await candidateRepository.findByCityAndStatus(city, "ACCEPTED", false).then(cands =>
             cands.filter(c => !c.materialsSent)
         );
     }
 
     async getBroadcastCities() {
-        const candidates = await candidateRepository.findByStatus("ACCEPTED", false).then(cands => 
+        const candidates = await candidateRepository.findByStatus("ACCEPTED", false).then(cands =>
             cands.filter(c => !c.materialsSent)
         );
         const cityCounts: Record<string, number> = {};
