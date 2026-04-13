@@ -484,6 +484,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     });
                     // Touch updatedAt
                     if (activeTicket) await supportRepository.touchTicket(activeTicket.id).catch(() => { });
+                    if (activeOutgoingTopic) await supportRepository.touchOutgoingTopic(activeOutgoingTopic.id).catch(() => { });
                     // Log to Timeline
                     const { timelineRepository } = await import("../repositories/timeline-repository.js");
                     await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', ctx.message?.text || ctx.message?.caption || "[Media]", {

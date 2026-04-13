@@ -29,6 +29,7 @@ import { createKyivDate } from "../utils/bot-utils.js";
  */
 export async function startWorker(bot: Bot<MyContext>) {
     let iteration = 0;
+    let lastAutoCloseSweepAt = 0;
     setInterval(async () => {
         iteration++;
         try {
@@ -592,8 +593,10 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 8. Task Automations
             await processTaskAutomations(bot);
 
-            // Cleanup tasks (Run every 1 hour = 240 * 15s)
-            if (iteration % 240 === 0) {
+            // Run stale-item cleanup hourly and immediately after worker startup.
+            if (nowTime - lastAutoCloseSweepAt >= 60 * 60 * 1000) {
+                lastAutoCloseSweepAt = nowTime;
+
                 // 9. Auto-close stale tasks (48h after workDate)
                 await processAutoCloseTasks();
 
