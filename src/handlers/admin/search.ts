@@ -8,7 +8,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { staffService } from "../../modules/staff/services/index.js";
-import { escapeHtml, formatLocationName } from "./utils.js";
+import { formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
@@ -16,7 +16,7 @@ export const adminSearchHandlers = new Composer<MyContext>();
 
 export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     // MUST answer the callback query first to prevent Telegram loading spinner
-    await ctx.answerCallbackQuery().catch(() => {});
+    await ctx.answerCallbackQuery().catch(() => { });
 
     ctx.session.adminFlow = 'SEARCH';
     delete ctx.session.taskData;
@@ -108,16 +108,19 @@ adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => 
     }
 });
 
-adminSearchHandlers.on("message:text", async (ctx, next) => {
+adminSearchHandlers.on(["message:text", "message:photo", "message:video", "message:document"], async (ctx, next) => {
     const step = ctx.session.step || "";
+    const isDirectReplyStep = step.startsWith("admin_reply_direct_");
+    const isDirectMessageStep = step.startsWith("admin_msg_");
+    const isSearchStep = step === "admin_search_cand" || step === "admin_search_staff";
 
-    if (step.startsWith("admin_reply_direct_") || step.startsWith("admin_msg_") || step === "admin_search_cand" || step === "admin_search_staff") {
+    if (isDirectReplyStep || isDirectMessageStep || isSearchStep) {
         await ctx.deleteMessage().catch(() => { });
     }
 
-    if (step.startsWith("admin_reply_direct_")) {
+    if (isDirectReplyStep) {
         const targetTgId = step.replace("admin_reply_direct_", "");
-        const messageText = ctx.message!.text!;
+        const messageText = getAdminOutboundText(ctx.message) || "[Media Message]";
 
         try {
             const user = await userRepository.findByTelegramId(BigInt(targetTgId));
@@ -127,11 +130,15 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
             const candidate = await candidateRepository.findByUserId(user.id);
 
             // 2. Deliver to User — reply button only for candidates
-            const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
+            let outboundReplyMarkup: InlineKeyboard | undefined;
             if (candidate && candidate.gender !== "male") {
-                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+                outboundReplyMarkup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
             }
-            await ctx.api.sendMessage(Number(targetTgId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${messageText}`, msgOptions);
+            await sendAdminOutboundMessage(
+                ctx,
+                Number(targetTgId),
+                outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
+            );
 
             // 3. Log to Timeline
             const { timelineRepository } = await import("../../repositories/timeline-repository.js");
@@ -163,15 +170,18 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
         return;
     }
 
-    if (step.startsWith("admin_msg_")) {
+    if (isDirectMessageStep) {
         const userId = step.replace("admin_msg_", "");
-        const text = ctx.message.text;
         ctx.session.step = "idle";
-        await handleAdminMessageSend(ctx, userId, text);
+        await handleAdminMessageSend(ctx, userId);
         return;
     }
 
     if (step === "admin_search_cand") {
+        if (!ctx.message.text) {
+            await ScreenManager.renderScreen(ctx, "Enter text to search for a candidate.", new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-home"], "admin_main_back"));
+            return;
+        }
         const query = ctx.message.text.trim();
         ctx.session.step = "idle";
 
@@ -192,6 +202,10 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
     }
 
     if (step === "admin_search_staff") {
+        if (!ctx.message.text) {
+            await ScreenManager.renderScreen(ctx, "Enter text to search for a staff member.", new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-home"], "admin_main_back"));
+            return;
+        }
         const query = ctx.message.text.trim();
         ctx.session.step = "idle";
 
@@ -214,9 +228,11 @@ adminSearchHandlers.on("message:text", async (ctx, next) => {
     await next();
 });
 
-async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTextStr: string) {
+async function handleAdminMessageSend(ctx: MyContext, userId: string) {
     const user = await userRepository.findById(userId);
     if (!user) return ctx.reply(ADMIN_TEXTS["admin-history-user-not-found"]);
+
+    const messageTextStr = getAdminOutboundText(ctx.message) || "[Media Message]";
 
     const candidate = await candidateRepository.findByUserId(userId);
     const staff = await staffRepository.findByUserId(userId);
@@ -279,11 +295,9 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
                     userId: user.id,
                 });
             }
-
-            const escapedText = escapeHtml(messageTextStr);
-            await ctx.api.sendMessage(SUPPORT_CHAT_ID, escapedText, {
-                message_thread_id: createdTopicId,
-                parse_mode: "HTML"
+            await sendAdminOutboundMessage(ctx, SUPPORT_CHAT_ID, {
+                messageThreadId: createdTopicId,
+                prefixText: false,
             });
         } catch (e: any) {
             logger.error({ err: e, topicId: createdTopicId, supportChatId: SUPPORT_CHAT_ID }, "Admin conversation topic bootstrap failed");
@@ -291,11 +305,15 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
     }
 
     try {
-        const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
+        let outboundReplyMarkup: InlineKeyboard | undefined;
         if (candidate && candidate.gender !== "male") {
-            msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+            outboundReplyMarkup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
         }
-        await ctx.api.sendMessage(Number(user.telegramId), `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(messageTextStr)}`, msgOptions);
+        await sendAdminOutboundMessage(
+            ctx,
+            Number(user.telegramId),
+            outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
+        );
 
         const { timelineRepository } = await import("../../repositories/timeline-repository.js");
         await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', messageTextStr, {
@@ -305,7 +323,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string, messageTex
         });
 
         let replyText = ADMIN_TEXTS["admin-msg-success"];
-        let replyMarkup = new InlineKeyboard();
+        const replyMarkup = new InlineKeyboard();
 
         if (SUPPORT_CHAT_ID && createdTopicId) {
             try {

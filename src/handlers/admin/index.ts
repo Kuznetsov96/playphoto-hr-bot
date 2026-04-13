@@ -24,6 +24,7 @@ import tasksHandlers from "./tasks.js";
 import taskCreationHandlers from "./task-creation.js";
 import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
+import { getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 
 export { startAdminStaffSearch, startAdminSearch, startAdminMessageFlow };
 
@@ -86,12 +87,12 @@ adminHandlers.use(adminSystemHandlers);
 adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
 
-adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx, next) => {
+adminHandlers.on(["message:text", "message:photo", "message:video", "message:document"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
-        const replyText = ctx.message?.text || ctx.message?.caption || "";
+        const replyText = getAdminOutboundText(ctx.message) || "[Media Reply]";
 
         await ctx.deleteMessage().catch(() => { });
 
@@ -103,12 +104,16 @@ adminHandlers.on(["message:text", "message:photo", "message:video"], async (ctx,
             const candidate = user ? await candidateRepository.findByUserId(user.id) : null;
             const isCandidate = !!candidate;
 
-            const msgOptions: { parse_mode: "HTML"; reply_markup?: InstanceType<typeof InlineKeyboard> } = { parse_mode: "HTML" };
+            let outboundReplyMarkup: InstanceType<typeof InlineKeyboard> | undefined;
             if (candidate && candidate.gender !== "male") {
-                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+                outboundReplyMarkup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
             }
 
-            await ctx.api.sendMessage(targetId, `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${replyText}`, msgOptions);
+            await sendAdminOutboundMessage(
+                ctx,
+                targetId,
+                outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
+            );
             await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent.", "admin-main");
             if (user) {
                 const { timelineRepository } = await import("../../repositories/timeline-repository.js");
