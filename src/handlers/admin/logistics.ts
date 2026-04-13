@@ -11,6 +11,10 @@ import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../
 
 export const adminLogisticsHandlers = new Composer<MyContext>();
 
+function buildParcelSetLocationCallback(parcelId: string, locationId: string): string {
+    return `apsl_${parcelId}_${locationId}`;
+}
+
 // --- Logistics Admin Menu ---
 export const adminLogisticsMenu = new Menu<MyContext>("admin-logistics");
 menuRegistry.register(adminLogisticsMenu);
@@ -212,7 +216,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
 
     const kb = new InlineKeyboard();
     locations.forEach(loc => {
-        kb.text(loc.name, `admin_parcel_set_loc_${parcelId}_${loc.id}`).row();
+        kb.text(loc.name, buildParcelSetLocationCallback(parcelId, loc.id)).row();
     });
     kb.text("⬅️ Cancel", `admin_parcel_view_details_${parcelId}`);
 
@@ -221,7 +225,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
 });
 
 // Set Location Action — also learns npAddressRef for future auto-mapping
-adminLogisticsHandlers.callbackQuery(/^admin_parcel_set_loc_(.+)_(.+)$/, async (ctx) => {
+adminLogisticsHandlers.callbackQuery(/^apsl_([^_]+)_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const locId = ctx.match[2] as string;
 
