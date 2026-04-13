@@ -262,31 +262,19 @@ describe('MentorService', () => {
     });
 
     describe('onboarding filters', () => {
-        it('should count only candidates with actual scheduled first shifts for mentor onboarding', async () => {
+        it('should count unresolved onboarding candidates with a planned first shift date', async () => {
             await mentorService.getStats();
 
             expect((prisma as any).candidate.count).toHaveBeenCalledWith({
                 where: expect.objectContaining({
                     status: CandidateStatus.HIRED,
                     isMentorLocked: true,
-                    user: {
-                        is: {
-                            staffProfile: {
-                                is: {
-                                    shifts: {
-                                        some: {
-                                            date: expect.any(Object)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    firstShiftDate: { not: null }
                 })
             });
         });
 
-        it('should fetch onboarding candidates only when they have a staff shift in schedule', async () => {
+        it('should fetch unresolved onboarding candidates even without created work shifts', async () => {
             vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
 
             await mentorService.getOnboardingCandidates();
@@ -296,19 +284,7 @@ describe('MentorService', () => {
                 expect.objectContaining({
                     status: CandidateStatus.HIRED,
                     isMentorLocked: true,
-                    user: {
-                        is: {
-                            staffProfile: {
-                                is: {
-                                    shifts: {
-                                        some: {
-                                            date: expect.any(Object)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    firstShiftDate: { not: null }
                 })
             );
         });
