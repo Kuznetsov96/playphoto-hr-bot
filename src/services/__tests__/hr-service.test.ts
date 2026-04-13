@@ -17,6 +17,12 @@ vi.mock('../../db/core.js', () => ({
         candidate: {
             count: vi.fn().mockResolvedValue(1), // Default for Final Step stages (5 stages * 1 = 5 total)
             findMany: vi.fn().mockResolvedValue([])
+        },
+        staffProfile: {
+            findUnique: vi.fn().mockResolvedValue(null)
+        },
+        workShift: {
+            findFirst: vi.fn().mockResolvedValue(null)
         }
     }
 }));
@@ -65,6 +71,14 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
 vi.mock('../access-service.js', () => ({
     accessService: {
         syncUserAccess: vi.fn().mockResolvedValue({})
+    }
+}));
+
+vi.mock('../schedule-sync.js', () => ({
+    scheduleSyncService: {
+        syncTeam: vi.fn().mockResolvedValue({ teamMapping: {} }),
+        syncSchedule: vi.fn().mockResolvedValue({ success: true }),
+        updateFirstShiftDateInSheet: vi.fn().mockResolvedValue(undefined)
     }
 }));
 
@@ -276,6 +290,60 @@ describe('hrService', () => {
             expect(bookingService.cancelInterviewSlot).toHaveBeenCalledWith('slot1');
             expect(candidateRepository.reopenNoShowCandidate).toHaveBeenCalledWith('cand1');
             expect(candidateRepository.update).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('confirmFinalSchedule', () => {
+        it('should sync first shift date, time, and location from schedule when hiring', async () => {
+            const firstShiftDate = new Date('2026-04-14T00:00:00.000Z');
+            const candidateBeforeHire = {
+                id: 'cand1',
+                userId: 'user1',
+                fullName: 'Гудим Анна Любомирівна',
+                locationId: 'old-location',
+                user: { id: 'user1', telegramId: 768450703n }
+            } as any;
+            const candidateAfterSync = {
+                ...candidateBeforeHire,
+                status: CandidateStatus.HIRED,
+                locationId: 'drive-city-id',
+                firstShiftDate,
+                firstShiftTime: '15:00-21:00'
+            } as any;
+
+            vi.mocked(candidateRepository.findById)
+                .mockResolvedValueOnce(candidateBeforeHire)
+                .mockResolvedValueOnce(candidateBeforeHire);
+            vi.mocked(candidateRepository.update)
+                .mockResolvedValueOnce(candidateBeforeHire)
+                .mockResolvedValueOnce(candidateAfterSync);
+
+            const prisma = (await import('../../db/core.js')).default;
+            vi.mocked(prisma.staffProfile.findUnique).mockResolvedValue({ id: 'staff1', userId: 'user1' } as any);
+            vi.mocked(prisma.workShift.findFirst).mockResolvedValue({
+                staffId: 'staff1',
+                locationId: 'drive-city-id',
+                date: firstShiftDate,
+                location: {
+                    id: 'drive-city-id',
+                    schedule: 'Пн-Пт — 15:00-21:00'
+                }
+            } as any);
+
+            const { scheduleSyncService } = await import('../schedule-sync.js');
+
+            const result = await hrService.confirmFinalSchedule('cand1');
+
+            expect(scheduleSyncService.syncTeam).toHaveBeenCalled();
+            expect(scheduleSyncService.syncSchedule).toHaveBeenCalledWith('Актуальний розклад', {});
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(1, 'cand1', { status: CandidateStatus.HIRED });
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(2, 'cand1', {
+                firstShiftDate,
+                firstShiftTime: '15:00-21:00',
+                location: { connect: { id: 'drive-city-id' } }
+            });
+            expect(scheduleSyncService.updateFirstShiftDateInSheet).toHaveBeenCalledWith('768450703', firstShiftDate);
+            expect(result?.candidate).toEqual(candidateAfterSync);
         });
     });
 });

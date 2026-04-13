@@ -17,7 +17,7 @@ export class SupportRepository {
     async findTicketById(id: number) {
         return prisma.supportTicket.findUnique({
             where: { id },
-            include: { 
+            include: {
                 user: { include: { staffProfile: true } },
                 assignedAdmin: true
             }
@@ -158,6 +158,13 @@ export class SupportRepository {
         return prisma.outgoingTopic.findFirst({
             where: { topicId, isClosed: false },
             include: { user: true }
+        });
+    }
+
+    async touchOutgoingTopic(id: number) {
+        return prisma.outgoingTopic.update({
+            where: { id },
+            data: { updatedAt: new Date() }
         });
     }
 }
