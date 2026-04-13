@@ -10,7 +10,7 @@ export const NP_PERSONAL_FILTER = {
 
 export const NP_LOCATIONS_MAP = [
     { name: 'Leoland', city: 'Львів', npPoints: ['80', '33826'] },
-    { name: 'Drive City', city: 'Львів', npPoints: ['26740'] },
+    { name: 'Drive City', city: 'Львів', npPoints: ['26740', '6'] },
     { name: 'Dragon Park', city: 'Львів', npPoints: ['34023'] },
     { name: 'Fly Kids (Львів)', city: 'Львів', npPoints: ['25'] },
     { name: 'Smile Park (Львів)', city: 'Львів', npPoints: ['36716'] },

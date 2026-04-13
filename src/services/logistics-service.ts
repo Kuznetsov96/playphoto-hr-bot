@@ -5,7 +5,6 @@ import { ParcelStatus } from '@prisma/client';
 import { Bot, InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
-import { locationRepository } from '../repositories/location-repository.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 
@@ -268,10 +267,9 @@ export class LogisticsService {
 
         // 2. Warehouse number match via static NP_LOCATIONS_MAP
         if (warehouseNumber) {
-            const mapEntry = NP_LOCATIONS_MAP.find(e => e.npPoints.includes(warehouseNumber));
-            if (mapEntry) {
-                const byName = await locationRepository.findByName(mapEntry.name);
-                if (byName && (!mapEntry.city || byName.city === mapEntry.city)) return byName;
+            const warehouseMatch = await this.findLocationByWarehouseMapping(warehouseNumber, city);
+            if (warehouseMatch) {
+                return warehouseMatch;
             }
         }
 
@@ -298,6 +296,48 @@ export class LogisticsService {
                 where: { city, isHidden: false }
             });
             if (cityLocations.length === 1) return cityLocations[0];
+        }
+
+        return null;
+    }
+
+    private normalizeCityName(city: string | null): string | null {
+        if (!city) return null;
+
+        return city
+            .toLowerCase()
+            .replace(/^м\.\s*/i, '')
+            .replace(/^місто\s+/i, '')
+            .split(',')[0]!
+            .trim();
+    }
+
+    private async findLocationByWarehouseMapping(warehouseNumber: string, city: string | null) {
+        const normalizedCity = this.normalizeCityName(city);
+        const matchingEntries = NP_LOCATIONS_MAP.filter((entry) => {
+            if (!entry.npPoints.includes(warehouseNumber)) return false;
+            if (!normalizedCity || !entry.city) return true;
+            return this.normalizeCityName(entry.city) === normalizedCity;
+        });
+
+        if (matchingEntries.length === 0) return null;
+        if (!normalizedCity && matchingEntries.length > 1) return null;
+
+        for (const entry of matchingEntries) {
+            const byName = await prisma.location.findFirst({
+                where: {
+                    isHidden: false,
+                    ...(entry.city ? { city: entry.city } : {}),
+                    OR: [
+                        { name: { equals: entry.name } },
+                        { legacyName: { equals: entry.name } },
+                        { name: { contains: entry.name } },
+                        { legacyName: { contains: entry.name } },
+                    ]
+                }
+            });
+
+            if (byName) return byName;
         }
 
         return null;
