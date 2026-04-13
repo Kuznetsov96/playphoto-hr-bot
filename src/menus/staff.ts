@@ -2,6 +2,21 @@ import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../types/context.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 
+async function shouldShowPreferencesButton() {
+    const now = new Date();
+    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+    if (kyivNow.getDate() < 23) return false;
+
+    const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
+    const { systemStateRepository } = await import("../repositories/system-state-repository.js");
+    const isPublished = await systemStateRepository.isSchedulePublishedForMonth(
+        nextMonth.getFullYear(),
+        nextMonth.getMonth() + 1
+    );
+
+    return !isPublished;
+}
+
 // --- ROOT MENU ---
 export const staffRootMenu = new Menu<MyContext>("staff-root");
 menuRegistry.register(staffRootMenu);
@@ -12,8 +27,7 @@ menuRegistry.register(staffRootMenu);
 export const staffHubMenu = new Menu<MyContext>("staff-main", {
     fingerprint: async (ctx) => {
         const now = new Date();
-        const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-        const preferencesVisible = kyivNow.getDate() >= 23 ? "pref" : "nopref";
+        const preferencesVisible = await shouldShowPreferencesButton() ? "pref" : "nopref";
 
         const telegramId = ctx.from?.id;
         if (!telegramId) return `staff-main:${preferencesVisible}:no-user`;
@@ -45,7 +59,7 @@ staffHubMenu.dynamic(async (ctx, range) => {
     // 2. Preferences (Schedule requests) - only visible 23rd to end of month
     const now = new Date();
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-    if (kyivNow.getDate() >= 23) {
+    if (await shouldShowPreferencesButton()) {
         const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
         const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
         range.text(`🗓 Побажання (${monthName})`, async (ctx) => {

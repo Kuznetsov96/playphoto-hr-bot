@@ -4,6 +4,7 @@ import fs from "fs";
 import type { Location } from "@prisma/client";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
+import { systemStateRepository } from "../repositories/system-state-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
@@ -531,6 +532,14 @@ export class ScheduleSyncService {
             if (date && !isNaN(date.getTime())) dateMap[idx] = date;
         });
         if (Object.keys(dateMap).length === 0) return { success: false, message: "No dates" };
+
+        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
+        const containsNextMonthSchedule = Object.values(dateMap).some((date) =>
+            date.getFullYear() === nextMonthDate.getFullYear() &&
+            date.getMonth() === nextMonthDate.getMonth()
+        );
+
         const datesToClear = Object.values(dateMap);
         const minDate = new Date(Math.min(...datesToClear.map(d => d.getTime())));
         const maxDate = new Date(Math.max(...datesToClear.map(d => d.getTime())));
@@ -641,6 +650,13 @@ export class ScheduleSyncService {
                 shiftsAfter: syncCount,
             },
         });
+
+        if (containsNextMonthSchedule) {
+            await systemStateRepository.markSchedulePublishedForMonth(
+                nextMonthDate.getFullYear(),
+                nextMonthDate.getMonth() + 1
+            );
+        }
 
         return {
             success: true,

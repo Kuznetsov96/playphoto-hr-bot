@@ -558,12 +558,18 @@ model ChatLog {
   text        String?
   mediaFileId String?
   createdAt   DateTime @default(now())
-
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([telegramId])
   @@index([userId])
   @@index([createdAt])
+}
+
+model SystemState {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ExternalToken {
