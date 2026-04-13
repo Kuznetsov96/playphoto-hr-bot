@@ -1,3 +1,6 @@
+import { InlineKeyboard } from "grammy";
+import type { MyContext } from "../../types/context.js";
+
 export const CITY_MAP: Record<string, string> = {
     // English targets
     "Lviv": "Lviv",
@@ -79,6 +82,59 @@ export function escapeHtml(text: string): string {
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
+}
+
+export function getAdminOutboundText(message: MyContext["message"] | undefined): string {
+    return message?.text || message?.caption || "";
+}
+
+export async function sendAdminOutboundMessage(
+    ctx: MyContext,
+    targetChatId: number,
+    options?: {
+        messageThreadId?: number;
+        replyMarkup?: InstanceType<typeof InlineKeyboard>;
+        prefixText?: boolean;
+    }
+) {
+    const message = ctx.message;
+    if (!message?.message_id || !ctx.chat?.id) {
+        throw new Error("Admin outbound message is missing source chat context");
+    }
+
+    const text = getAdminOutboundText(message);
+    const hasMedia = Boolean(
+        message.photo || message.video || message.document || message.voice || message.video_note || message.audio || message.animation
+    );
+
+    if (hasMedia) {
+        const copyOptions: Record<string, unknown> = {};
+        if (options?.messageThreadId !== undefined) {
+            copyOptions.message_thread_id = options.messageThreadId;
+        }
+        if (options?.replyMarkup) {
+            copyOptions.reply_markup = options.replyMarkup;
+        }
+
+        await ctx.api.copyMessage(targetChatId, ctx.chat.id, message.message_id, copyOptions as any);
+        return;
+    }
+
+    const htmlText = options?.prefixText === false
+        ? escapeHtml(text)
+        : `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(text)}`;
+
+    const sendOptions: Record<string, unknown> = {
+        parse_mode: "HTML",
+    };
+    if (options?.messageThreadId !== undefined) {
+        sendOptions.message_thread_id = options.messageThreadId;
+    }
+    if (options?.replyMarkup) {
+        sendOptions.reply_markup = options.replyMarkup;
+    }
+
+    await ctx.api.sendMessage(targetChatId, htmlText, sendOptions as any);
 }
 
 export function msgToHtml(text: string, entities: any[] = []): string {
