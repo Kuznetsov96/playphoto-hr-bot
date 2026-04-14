@@ -7,6 +7,7 @@ import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 
 export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
     const now = new Date();
@@ -27,12 +28,11 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             return;
         }
 
-        // Pre-fetch onboarding candidates (HIRED + isMentorLocked) with firstShiftDate = today
+        // Pre-fetch onboarding candidates from the real work schedule.
         const onboardingCandidates = await prisma.candidate.findMany({
             where: {
                 status: CandidateStatus.HIRED,
                 isMentorLocked: true,
-                firstShiftDate: { gte: startOfDay, lte: endOfDay },
                 user: {
                     is: {
                         staffProfile: {
@@ -45,7 +45,23 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                     }
                 }
             },
-            include: { user: true, location: true }
+            include: {
+                user: {
+                    include: {
+                        staffProfile: {
+                            include: {
+                                shifts: {
+                                    where: { date: { gte: startOfDay, lte: endOfDay } },
+                                    orderBy: { date: "asc" },
+                                    take: 1,
+                                    include: { location: true }
+                                }
+                            }
+                        }
+                    }
+                },
+                location: true
+            }
         });
         const onboardingByUserId = new Map(onboardingCandidates.map(c => [c.userId, c]));
 
@@ -63,15 +79,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
 
                 if (isFirstShift) {
                     // First shift — special onboarding message
-                    const locSchedule = shift.location.schedule;
-                    let shiftTime = "";
-                    if (locSchedule) {
-                        const isWeekend = [0, 6].includes(shift.date.getDay());
-                        const match = isWeekend
-                            ? locSchedule.match(/Сб-Нд\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i)
-                            : locSchedule.match(/Пн-Пт\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i);
-                        if (match) shiftTime = match[1]!;
-                    }
+                    const shiftTime = getShiftTimeFromLocationSchedule(shift.location.schedule, shift.date) || "";
 
                     let text = `🌟 <b>Сьогодні твій перший робочий день!</b>\n\n` +
                         `Ти вже частина команди PlayPhoto, і ми дуже раді, що ти з нами. 📸\n\n` +
@@ -130,8 +138,11 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
         if (onboardingCandidates.length > 0) {
             const { MENTOR_IDS } = await import("../config.js");
             for (const cand of onboardingCandidates) {
-                const locName = cand.location?.name || cand.city || "—";
-                const shiftTime = cand.firstShiftTime || "";
+                const shift = cand.user.staffProfile?.shifts?.[0];
+                if (!shift) continue;
+
+                const locName = shift.location?.name || cand.location?.name || cand.city || "—";
+                const shiftTime = getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "";
 
                 let text = `🎓 <b>Onboarding Today</b>\n\n` +
                     `👤 ${cand.fullName}\n` +

@@ -16,15 +16,85 @@ import prisma from "../db/core.js";
 import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
+import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 
 export class MentorService {
-    private getMentorOnboardingWhere(fromDate?: Date): Prisma.CandidateWhereInput {
+    private getKyivStartOfToday() {
+        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        kyivNow.setHours(0, 0, 0, 0);
+        return kyivNow;
+    }
+
+    private getMentorOnboardingWhere(fromDate: Date, candId?: string): Prisma.CandidateWhereInput {
         return {
+            ...(candId ? { id: candId } : {}),
             status: CandidateStatus.HIRED,
             isMentorLocked: true,
             fullName: { not: null },
-            firstShiftDate: fromDate ? { gte: fromDate } : { not: null }
+            user: {
+                is: {
+                    staffProfile: {
+                        is: {
+                            shifts: {
+                                some: {
+                                    date: { gte: fromDate }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         };
+    }
+
+    private async findMentorOnboardingCandidates(fromDate: Date = this.getKyivStartOfToday(), candId?: string) {
+        const rows = await prisma.candidate.findMany({
+            where: this.getMentorOnboardingWhere(fromDate, candId),
+            include: {
+                user: {
+                    include: {
+                        staffProfile: {
+                            include: {
+                                shifts: {
+                                    where: { date: { gte: fromDate } },
+                                    orderBy: { date: "asc" },
+                                    take: 1,
+                                    include: { location: true }
+                                }
+                            }
+                        }
+                    }
+                },
+                location: true,
+                firstShiftPartner: { include: { user: true } },
+                discoverySlot: true,
+                trainingSlot: true,
+                interviewSlot: true,
+                messages: true
+            }
+        });
+
+        return rows
+            .flatMap((cand) => {
+                const nextShift = cand.user.staffProfile?.shifts?.[0];
+                if (!nextShift) return [];
+
+                const shiftLocation = nextShift.location || cand.location;
+                const shiftTime = getShiftTimeFromLocationSchedule(shiftLocation?.schedule, nextShift.date) || cand.firstShiftTime;
+
+                return [{
+                    ...cand,
+                    location: shiftLocation,
+                    firstShiftDate: nextShift.date,
+                    firstShiftTime: shiftTime
+                }];
+            })
+            .sort((a, b) => {
+                const aTime = new Date(a.firstShiftDate).getTime();
+                const bTime = new Date(b.firstShiftDate).getTime();
+                if (aTime !== bTime) return aTime - bTime;
+                return (a.fullName || '').localeCompare(b.fullName || '');
+            });
     }
 
     private getMentorWaitlistWhere() {
@@ -67,9 +137,7 @@ export class MentorService {
             }
         });
 
-        const onboardingCount = await prisma.candidate.count({
-            where: this.getMentorOnboardingWhere()
-        });
+        const onboardingCount = (await this.findMentorOnboardingCandidates()).length;
 
         return {
             actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount,
@@ -104,6 +172,12 @@ export class MentorService {
         return await prisma.candidate.count({
             where: this.getMentorWaitlistWhere()
         });
+    }
+
+    async getCandidateForMentorProfile(candId: string) {
+        const onboardingCandidate = (await this.findMentorOnboardingCandidates(this.getKyivStartOfToday(), candId))[0];
+        if (onboardingCandidate) return onboardingCandidate;
+        return candidateRepository.findById(candId);
     }
 
     async getCandidateDetails(candId: string) {
@@ -377,13 +451,7 @@ export class MentorService {
     }
 
     async getOnboardingCandidates() {
-        return await candidateRepository.findByStatusWithUser(CandidateStatus.HIRED, this.getMentorOnboardingWhere())
-            .then(cands => cands.sort((a, b) => {
-                const aTime = a.firstShiftDate ? new Date(a.firstShiftDate).getTime() : Number.MAX_SAFE_INTEGER;
-                const bTime = b.firstShiftDate ? new Date(b.firstShiftDate).getTime() : Number.MAX_SAFE_INTEGER;
-                if (aTime !== bTime) return aTime - bTime;
-                return (a.fullName || '').localeCompare(b.fullName || '');
-            }));
+        return await this.findMentorOnboardingCandidates();
     }
 
     async completeOnboarding(candId: string, success: boolean) {

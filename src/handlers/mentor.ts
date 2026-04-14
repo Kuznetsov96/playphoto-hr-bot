@@ -132,7 +132,7 @@ mentorHandlers.callbackQuery(/^mentor_onboarding_details_(.+)$/, async (ctx) => 
     const candId = ctx.match![1]!;
     await ctx.answerCallbackQuery();
     ctx.session.selectedCandidateId = candId;
-    const cand = await candidateRepository.findById(candId);
+    const cand = await mentorService.getCandidateForMentorProfile(candId);
     if (!cand) return;
     const { formatCandidateProfile } = await import("../utils/profile-formatter.js");
     const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true, viewerRole: "MENTOR" });
