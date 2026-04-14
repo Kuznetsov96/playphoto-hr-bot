@@ -9,6 +9,13 @@ import { logBusinessEvent } from "../../../core/log-events.js";
 import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../../utils/logistics-formatters.js";
 import { buildSignedCallback, readCallbackPayload } from "../../../utils/signed-callback.js";
+import {
+    getManualProxyConfirmationText,
+    getParcelRejectConfirmationText,
+    isDuplicateParcelAccept,
+    isDuplicateParcelReject,
+    shouldEscalateRejectedParcel,
+} from "./logistics-rejection.js";
 
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
@@ -38,6 +45,12 @@ async function editOrReplyText(
     }
 
     await ctx.reply(text, options);
+}
+
+async function clearCallbackKeyboard(ctx: MyContext) {
+    if (!ctx.callbackQuery?.message || ('photo' in ctx.callbackQuery.message)) return;
+
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => { });
 }
 
 function buildParcelPhotoDraftKeyboard(parcelId: string) {
@@ -382,6 +395,9 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             return;
         }
 
+        await ctx.answerCallbackQuery({ text: "Фіксую, що ти забираєш посилку…" }).catch(() => { });
+        await clearCallbackKeyboard(ctx);
+
         audit({ event: "parcel_accept", result: "started", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
         const user = await prisma.user.findUnique({
@@ -412,24 +428,36 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
                 : LOGISTICS_TEXTS_STAFF.delivered_pickup_completed(parcel.ttn, locationName);
 
             await editOrReplyText(ctx, text, kb);
-            await ctx.answerCallbackQuery("Посилку вже видано. Додай фото вмісту.");
             return;
         }
 
         if (parcel.responsibleStaffId && parcel.responsibleStaffId !== user.staffProfile.id) {
             await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.already_taken(parcel.responsibleStaff?.fullName || 'another photographer'));
-            await ctx.answerCallbackQuery("Цю посилку вже взяли.");
             return;
         }
 
-        await prisma.parcel.update({
-            where: { id: parcelId },
-            data: {
-                responsibleStaffId: user.staffProfile.id,
-                status: 'PICKUP_IN_PROGRESS',
-                acceptedAt: new Date()
-            }
-        });
+        const now = new Date();
+        let alreadyAcceptedByThisStaff = parcel.responsibleStaffId === user.staffProfile.id;
+        if (!alreadyAcceptedByThisStaff) {
+            const claimed = await prisma.parcel.updateMany({
+                where: {
+                    id: parcelId,
+                    responsibleStaffId: null,
+                    status: { not: 'DELIVERED' },
+                },
+                data: {
+                    responsibleStaffId: user.staffProfile.id,
+                    status: 'PICKUP_IN_PROGRESS',
+                    acceptedAt: now
+                }
+            });
+
+            alreadyAcceptedByThisStaff = claimed.count === 0;
+        }
+
+        if (alreadyAcceptedByThisStaff && isDuplicateParcelAccept(parcel.acceptedAt, now)) {
+            await editOrReplyText(ctx, "✅ <b>Посилку вже закріплено за тобою.</b>\n\nПовторно натискати не потрібно. Перевір номер телефону нижче, щоб продовжити оформлення.");
+        }
 
         let phoneToUse = (user.staffProfile.npPhone || user.staffProfile.phone || '').replace(/\D/g, '');
         if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) {
@@ -448,7 +476,6 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             : `⚠️ <b>Номер телефону відсутній або некоректний.</b>\nДля створення повноцінного доручення Нової Пошти потрібен правильний номер (380...).\n\nБудь ласка, оберіть «Змінити номер» і введіть його.`;
 
         await editOrReplyText(ctx, askText, kb);
-        await ctx.answerCallbackQuery("Прийнято.");
 
         audit({ event: "parcel_accept", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, actorId: user.staffProfile.id });
     } catch (err: any) {
@@ -462,33 +489,51 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
     const parcelId = readCallbackPayload(ctx.callbackQuery.data, { code: "prj" });
     if (!parcelId) return next();
+    await ctx.answerCallbackQuery({ text: "Фіксую відмову…" }).catch(() => { });
+    await clearCallbackKeyboard(ctx);
     const access = await getAuthorizedParcelForStaff(ctx, parcelId, { allowUnassigned: true });
     if (!access) return;
     const { parcel } = access;
 
-    const newRejectionCount = parcel.rejectionCount + 1;
-    await prisma.parcel.update({
-        where: { id: parcelId },
-        data: {
-            rejectionCount: newRejectionCount,
-            lastRejectionAt: new Date()
+    const now = new Date();
+    const alreadyProcessed = isDuplicateParcelReject(parcel.lastRejectionAt, now);
+    let newRejectionCount = parcel.rejectionCount;
+
+    if (!alreadyProcessed) {
+        const updateResult = await prisma.parcel.updateMany({
+            where: {
+                id: parcelId,
+                rejectionCount: parcel.rejectionCount,
+                lastRejectionAt: parcel.lastRejectionAt,
+            },
+            data: {
+                rejectionCount: { increment: 1 },
+                lastRejectionAt: now,
+            }
+        });
+
+        if (updateResult.count > 0) {
+            newRejectionCount = parcel.rejectionCount + 1;
+
+            const { logisticsService } = await import("../../../services/logistics-service.js");
+            await logisticsService.notifyTomorrowShiftAboutLeftover(parcelId).catch(err => {
+                logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics next-shift leftover notification after reject failed");
+            });
+
+            if (shouldEscalateRejectedParcel(parcel.rejectionCount, newRejectionCount)) {
+                await logisticsService.notifySupport(parcelId, 'REJECTED');
+            }
+
+            audit({ event: "parcel_reject", result: "success", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { rejectionCount: newRejectionCount } });
         }
-    });
-
-    const { logisticsService } = await import("../../../services/logistics-service.js");
-    await logisticsService.notifyTomorrowShiftAboutLeftover(parcelId).catch(err => {
-        logger.error({ err, parcelId, telegramId: ctx.from?.id }, "Logistics next-shift leftover notification after reject failed");
-    });
-
-    if (newRejectionCount >= 2) {
-        await logisticsService.notifySupport(parcelId, 'REJECTED');
     }
 
-    audit({ event: "parcel_reject", result: "success", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { rejectionCount: newRejectionCount } });
+    if (newRejectionCount === parcel.rejectionCount) {
+        audit({ event: "parcel_reject", result: "duplicate", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { rejectionCount: parcel.rejectionCount } });
+    }
 
-    const text = `Окей, дякую! 📦\nЦя посилка залишається у списку локації, її зможе забрати інша фотографиня. ✨`;
+    const text = getParcelRejectConfirmationText(newRejectionCount === parcel.rejectionCount);
     await editOrReplyText(ctx, text);
-    await ctx.answerCallbackQuery();
 });
 
 // 3. Confirm Phone
@@ -497,6 +542,8 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
     if (!parcelId) return next();
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
+    await ctx.answerCallbackQuery({ text: "Передаю номер сапорту…" }).catch(() => { });
+    await clearCallbackKeyboard(ctx);
     const access = await getAuthorizedParcelForStaff(ctx, parcelId);
     if (!access) return;
     const { user, parcel } = access;
@@ -505,15 +552,18 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
     if (phoneToUse.length === 10 && phoneToUse.startsWith('0')) phoneToUse = '38' + phoneToUse;
     if (parcel && phoneToUse.length === 12 && phoneToUse.startsWith('380')) {
         const { logisticsService } = await import("../../../services/logistics-service.js");
-        await logisticsService.requestManualProxy(parcelId, {
+        const result = await logisticsService.requestManualProxy(parcelId, {
             telegramId,
             requestedPhone: phoneToUse,
         });
+
+        audit({ event: "parcel_phone_confirm", result: result?.duplicate ? "duplicate" : "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+        await editOrReplyText(ctx, getManualProxyConfirmationText(Boolean(result?.duplicate)));
+        return;
     }
 
-    audit({ event: "parcel_phone_confirm", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
-    await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.manual_proxy_requested);
-    await ctx.answerCallbackQuery("Передано сапорту.");
+    audit({ event: "parcel_phone_confirm", result: "failed", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, error: "INVALID_PHONE" });
+    await editOrReplyText(ctx, "⚠️ Не вдалося використати цей номер для доручення. Обери «Інший номер» і введи коректний телефон у форматі 380...");
 });
 
 // 4. Change Phone
@@ -678,13 +728,14 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
             if (parcel) {
                 const { logisticsService } = await import("../../../services/logistics-service.js");
-                await logisticsService.requestManualProxy(parcelId, {
+                const result = await logisticsService.requestManualProxy(parcelId, {
                     telegramId,
                     requestedPhone: phone,
                 });
+                await ctx.reply(getManualProxyConfirmationText(Boolean(result?.duplicate)));
+            } else {
+                await ctx.reply(getManualProxyConfirmationText(false));
             }
-
-            await ctx.reply(LOGISTICS_TEXTS_STAFF.manual_proxy_requested);
         } else {
             await ctx.reply("⚠️ Некоректний формат.\nБудь ласка, введіть номер телефону в форматі 380... (наприклад: 380991234567).");
         }
