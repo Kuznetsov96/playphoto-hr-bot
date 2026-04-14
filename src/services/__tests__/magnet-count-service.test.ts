@@ -112,4 +112,71 @@ describe("MagnetCountService", () => {
         expect(result.total).toBe(31);
         expect(result.confidence).toBe("medium");
     });
+
+    it("clamps a single inflated stack when the other main stacks align", async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ result: { file_path: "photos/test.jpg" } }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({
+                    output_text: JSON.stringify({
+                        total: 42,
+                        confidence: "medium",
+                        stacks: [
+                            { index: 1, estimatedCount: 12, confidence: "medium" },
+                            { index: 2, estimatedCount: 17, confidence: "medium" },
+                            { index: 3, estimatedCount: 12, confidence: "medium" },
+                            { index: 4, estimatedCount: 1, confidence: "medium" },
+                        ],
+                        notes: "The stacks are transparent and somewhat ambiguous.",
+                        needsManualReview: false,
+                    }),
+                }),
+            });
+
+        vi.stubGlobal("fetch", fetchMock);
+
+        const { MagnetCountService } = await import("../magnet-count-service.js");
+        const service = new MagnetCountService();
+        const result = await service.countFromTelegramPhoto("file-id");
+
+        expect(result.stacks.map((stack) => stack.estimatedCount)).toEqual([12, 12, 12, 1]);
+        expect(result.total).toBe(37);
+        expect(result.confidence).toBe("low");
+        expect(result.needsManualReview).toBe(true);
+        expect(result.notes).toContain("Adjusted an outlier stack");
+    });
+
+    it("uses an image-derived major stack heuristic to reduce seam overcounting", async () => {
+        const { normalizeMagnetCountResult } = await import("../magnet-count-service.js");
+
+        const result = normalizeMagnetCountResult({
+            total: 37,
+            confidence: "medium",
+            stacks: [
+                { index: 1, estimatedCount: 12, confidence: "medium" },
+                { index: 2, estimatedCount: 12, confidence: "medium" },
+                { index: 3, estimatedCount: 12, confidence: "medium" },
+                { index: 4, estimatedCount: 1, confidence: "medium" },
+            ],
+            notes: "Transparent stacks with visible seams.",
+            needsManualReview: false,
+        }, {
+            majorStackCount: 10,
+            notes: ["Image heuristic estimated the major stack height at about 10 magnets."],
+        });
+
+        expect(result.stacks.map((stack) => stack.estimatedCount)).toEqual([10, 10, 10, 1]);
+        expect(result.total).toBe(31);
+        expect(result.confidence).toBe("low");
+        expect(result.needsManualReview).toBe(true);
+        expect(result.notes).toContain("Applied the image-derived major-stack height heuristic");
+    });
 });
