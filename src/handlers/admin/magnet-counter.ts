@@ -15,20 +15,18 @@ export const adminMagnetCounterHandlers = new Composer<MyContext>();
 function getMagnetCounterKeyboard(hasResult = false) {
     const kb = new InlineKeyboard();
     if (hasResult) {
-        kb.text("✅ Підтвердити", "admin_magnet_counter_confirm")
-            .text("✏️ Виправити", "admin_magnet_counter_correct").row();
+        kb.text("✅ Confirm", "admin_magnet_counter_confirm")
+            .text("✏️ Correct", "admin_magnet_counter_correct").row();
     }
 
-    kb.text("🧲 Нове фото", "admin_magnet_counter_start").row()
+    kb.text("🧲 New Photo", "admin_magnet_counter_start").row()
         .text("⬅️ Back", "admin_system_back");
 
     return kb;
 }
 
 function formatConfidence(confidence: "high" | "medium" | "low") {
-    if (confidence === "high") return "висока";
-    if (confidence === "medium") return "середня";
-    return "низька";
+    return confidence;
 }
 
 function buildResultText(result: {
@@ -38,30 +36,30 @@ function buildResultText(result: {
     notes?: string | undefined;
     correctedTotal?: number | undefined;
 }) {
-    const lines = ["🧲 <b>Підрахунок магнітів</b>", ""];
+    const lines = ["🧲 <b>Magnet Count</b>", ""];
 
     const stackCounts = result.stackCounts || [];
     if (stackCounts.length > 0) {
         stackCounts.forEach((count, index) => {
-            lines.push(`Стопка ${index + 1}: <b>${count}</b>`);
+            lines.push(`Stack ${index + 1}: <b>${count}</b>`);
         });
         lines.push("");
     }
 
     if (typeof result.total === "number") {
-        lines.push(`Разом: <b>${result.total}</b>`);
+        lines.push(`Total: <b>${result.total}</b>`);
     }
 
     if (result.confidence) {
-        lines.push(`Впевненість: <b>${formatConfidence(result.confidence)}</b>`);
+        lines.push(`Confidence: <b>${formatConfidence(result.confidence)}</b>`);
     }
 
     if (result.notes) {
-        lines.push(`Коментар моделі: <i>${result.notes}</i>`);
+        lines.push(`Model note: <i>${result.notes}</i>`);
     }
 
     if (typeof result.correctedTotal === "number") {
-        lines.push(`Ручне коригування: <b>${result.correctedTotal}</b>`);
+        lines.push(`Manual correction: <b>${result.correctedTotal}</b>`);
     }
 
     return lines.join("\n");
@@ -89,7 +87,7 @@ async function getAdminUserId(ctx: MyContext) {
 
 adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ctx) => {
     if (!await ensureRole(ctx)) {
-        await ctx.answerCallbackQuery({ text: "Недостатньо прав", show_alert: true });
+        await ctx.answerCallbackQuery({ text: "Access denied", show_alert: true });
         return;
     }
 
@@ -99,7 +97,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
     await ctx.answerCallbackQuery();
     await ScreenManager.renderScreen(
         ctx,
-        "🧲 <b>Порахувати магніти</b>\n\nНадішли одне фото стопок магнітів. Я поверну підрахунок по стопках, загальну кількість і рівень впевненості.",
+        "🧲 <b>Count Magnets</b>\n\nSend one photo of the magnet stacks. I will return stack-by-stack counts, the total count, and the confidence level.",
         getMagnetCounterKeyboard(false),
         { pushToStack: true }
     );
@@ -108,7 +106,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
 adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (ctx) => {
     const result = ctx.session.supportData?.magnetCount;
     if (!result || typeof result.estimateTotal !== "number") {
-        await ctx.answerCallbackQuery("Немає активного результату.");
+        await ctx.answerCallbackQuery("No active result.");
         return;
     }
 
@@ -124,7 +122,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
     }
 
     ctx.session.step = "idle";
-    await ctx.answerCallbackQuery("Підрахунок підтверджено.");
+    await ctx.answerCallbackQuery("Count confirmed.");
     await ScreenManager.renderScreen(
         ctx,
         buildResultText({
@@ -142,7 +140,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
 adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_correct", async (ctx) => {
     const result = ctx.session.supportData?.magnetCount;
     if (!result || typeof result.estimateTotal !== "number") {
-        await ctx.answerCallbackQuery("Спочатку завантаж фото.");
+        await ctx.answerCallbackQuery("Upload a photo first.");
         return;
     }
 
@@ -150,7 +148,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_correct", async (
     await ctx.answerCallbackQuery();
     await ScreenManager.renderScreen(
         ctx,
-        `✏️ <b>Виправлення підрахунку</b>\n\nМодель оцінила: <b>${result.estimateTotal}</b>\nНадішли правильну загальну кількість одним числом.`,
+        `✏️ <b>Correct Count</b>\n\nModel estimate: <b>${result.estimateTotal}</b>\nSend the correct total as a single number.`,
         new InlineKeyboard().text("⬅️ Back", "admin_magnet_counter_start"),
         { pushToStack: true }
     );
@@ -168,7 +166,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
     if (ctx.session.step === "support_magnet_count_correct_total") {
         const raw = ctx.message?.text?.trim();
         if (!raw || !/^\d+$/.test(raw)) {
-            await ctx.reply("Надішли тільки число, наприклад `53`.", { parse_mode: "Markdown" });
+            await ctx.reply("Send numbers only, for example `53`.", { parse_mode: "Markdown" });
             return true;
         }
 
@@ -228,7 +226,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
     }
 
     if (!ctx.message?.photo?.length) {
-        await ctx.reply("Для підрахунку потрібне фото. Надішли одне фото стопок магнітів.");
+        await ctx.reply("A photo is required for counting. Send one photo of the magnet stacks.");
         return true;
     }
 
@@ -236,7 +234,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
         ctx.session.step = "idle";
         await ScreenManager.renderScreen(
             ctx,
-            "⚠️ <b>Підрахунок магнітів недоступний</b>\n\nНа сервері ще не налаштований `OPENAI_API_KEY`, тому vision-аналіз зараз вимкнений.",
+            "⚠️ <b>Magnet counting is unavailable</b>\n\n`OPENAI_API_KEY` is not configured on the server yet, so vision analysis is currently disabled.",
             getMagnetCounterKeyboard(false),
             { forceNew: true }
         );
@@ -245,11 +243,11 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
 
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     if (!photo) {
-        await ctx.reply("Не вдалося прочитати фото. Спробуй надіслати його ще раз.");
+        await ctx.reply("I could not read that photo. Please send it again.");
         return true;
     }
 
-    await ctx.reply("🔍 Аналізую фото, це може зайняти кілька секунд...");
+    await ctx.reply("🔍 Analyzing the photo. This may take a few seconds...");
 
     try {
         const result = await magnetCountService.countFromTelegramPhoto(photo.file_id);
@@ -311,7 +309,9 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
                 confidence: result.confidence,
                 stackCounts: result.stacks.map((stack) => stack.estimatedCount),
                 notes: result.notes,
-            }) + (result.needsManualReview ? "\n\n⚠️ Рекомендую перевірити результат вручну." : ""),
+            }) + ((result.confidence === "low" || result.needsManualReview)
+                ? "\n\n⚠️ <b>Low confidence.</b> Please verify the result manually before using it."
+                : ""),
             getMagnetCounterKeyboard(true),
             { forceNew: true }
         );
@@ -322,7 +322,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
         ctx.session.step = "idle";
         await ScreenManager.renderScreen(
             ctx,
-            "❌ <b>Не вдалося порахувати магніти</b>\n\nСпробуй інше фото: без сильних відблисків, щоб було видно весь верх і низ стопок.",
+            "❌ <b>Could not count the magnets</b>\n\nTry another photo with less glare, and make sure the top and bottom of each stack are visible.",
             getMagnetCounterKeyboard(false),
             { forceNew: true }
         );
