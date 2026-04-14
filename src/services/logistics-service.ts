@@ -7,6 +7,7 @@ import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
+import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -483,6 +484,15 @@ export class LogisticsService {
         });
         if (!parcel) return null;
 
+        if (isDuplicateManualProxyRequest(
+            parcel.npTrusteeLastAttemptAt,
+            parcel.npTrusteeError,
+            params.requestedPhone,
+            parcel.recipientPhone,
+        )) {
+            return { parcel, duplicate: true } as const;
+        }
+
         const updated = await prisma.parcel.update({
             where: { id: parcelId },
             data: {
@@ -515,7 +525,7 @@ export class LogisticsService {
         });
 
         await this.notifySupport(parcelId, 'MANUAL_PROXY');
-        return updated;
+        return { parcel: updated, duplicate: false } as const;
     }
 
     async notifyManualProxyReady(parcelId: string) {

@@ -14,11 +14,14 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
+import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
 const INTERVIEW_WAITLIST_REASON_NO_SLOTS = "NO_SLOTS_AVAILABLE";
 const INTERVIEW_WAITLIST_REASON_NO_DATE_FITS = "NO_DATE_FITS";
+const BOOKING_ACTION_DEBOUNCE_MS = 15_000;
+const bookingActionDedupe = new ActionDedupeWindow(BOOKING_ACTION_DEBOUNCE_MS);
 
 export function buildMentorReschedulePatch(status: CandidateStatus) {
     const isDiscovery = status === CandidateStatus.DISCOVERY_SCHEDULED;
@@ -130,6 +133,10 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await next();
 });
 
+function isDuplicateBookingAction(actionKey: string) {
+    return !bookingActionDedupe.tryAcquire(actionKey);
+}
+
 // 1. Бронювання слоту
 bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     const slotId = ctx.match[1] as string;
@@ -239,6 +246,10 @@ bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb" });
     if (!slotId) return next();
+    if (isDuplicateBookingAction(`cancel-interview:${ctx.from.id}:${slotId}`)) {
+        await ctx.answerCallbackQuery("✅ Скасування вже обробляється.");
+        return;
+    }
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
@@ -434,6 +445,10 @@ bookingHandlers.callbackQuery("no_slots_available_ack", async (ctx) => {
 
 // 6. Немає вільних слотів / не підходять
 bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
+    if (isDuplicateBookingAction(`no-slots-fit:${ctx.from.id}`)) {
+        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що жодна дата не підходить.");
+        return;
+    }
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
     logger.debug({ telegramId }, "Interview scheduling no-slots-fit selected");
@@ -469,6 +484,10 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
 
 // 6.5 Відмова кандидата від співбесіди
 bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
+    if (isDuplicateBookingAction(`decline-invite:${ctx.from.id}`)) {
+        await ctx.answerCallbackQuery("✅ Відмову вже зафіксовано.");
+        return;
+    }
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
     logger.debug({ telegramId }, "Interview invite declined by candidate");
@@ -696,6 +715,10 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
 // 9. Training No Slots Fit
 bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
+    if (isDuplicateBookingAction(`training-no-slots-fit:${ctx.from.id}`)) {
+        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що жодна дата не підходить.");
+        return;
+    }
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
     logger.debug({ telegramId }, "Training scheduling no-slots-fit selected");
@@ -750,6 +773,10 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct" });
     if (!slotId) return next();
+    if (isDuplicateBookingAction(`cancel-training:${ctx.from.id}:${slotId}`)) {
+        await ctx.answerCallbackQuery("✅ Скасування вже обробляється.");
+        return;
+    }
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
