@@ -118,7 +118,7 @@ export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 export const OPENAI_API_KEY = env.OPENAI_API_KEY || "";
-export const OPENAI_VISION_MODEL = env.OPENAI_VISION_MODEL || "gpt-4.1-mini";
+export const OPENAI_VISION_MODEL = env.OPENAI_VISION_MODEL || "gpt-5-mini";
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
 export const RECOVERY_CHAT_ID = parseInt(env.RECOVERY_CHAT_ID);
