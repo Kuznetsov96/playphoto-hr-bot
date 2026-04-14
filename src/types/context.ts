@@ -93,6 +93,15 @@ export interface SessionData {
         ticketFilter?: string;
         preferredTarget?: "HR" | "MENTOR" | "RECOVERY";
         entryReason?: "RETURNED_AFTER_BOT_BLOCK";
+        magnetCount?: {
+            recordId?: string;
+            estimateTotal?: number;
+            confidence?: "high" | "medium" | "low";
+            stackCounts?: number[];
+            notes?: string;
+            correctedTotal?: number;
+            analyzedPhotoFileId?: string;
+        };
     };
 
     parcelPhotoDraft?: {

@@ -59,6 +59,8 @@ const envSchema = z.object({
     APP_ENCRYPTION_KEY: z.string().min(32, "APP_ENCRYPTION_KEY must be at least 32 characters for AES-256").optional(),
     BACKUP_PASSPHRASE: z.string().optional(),
     ALLOW_DEV_COMMANDS: z.enum(["true", "false"]).default("false"),
+    OPENAI_API_KEY: z.string().optional(),
+    OPENAI_VISION_MODEL: z.string().optional(),
 
     // Chats
     SUPPORT_CHAT_ID: z.string().min(1, "SUPPORT_CHAT_ID is missing"),
@@ -115,6 +117,8 @@ export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge bas
 export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
+export const OPENAI_API_KEY = env.OPENAI_API_KEY || "";
+export const OPENAI_VISION_MODEL = env.OPENAI_VISION_MODEL || "gpt-4.1-mini";
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
 export const RECOVERY_CHAT_ID = parseInt(env.RECOVERY_CHAT_ID);

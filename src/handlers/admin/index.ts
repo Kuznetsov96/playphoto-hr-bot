@@ -24,6 +24,7 @@ import tasksHandlers from "./tasks.js";
 import taskCreationHandlers from "./task-creation.js";
 import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
+import { adminMagnetCounterHandlers, handleAdminMagnetCounterMessage } from "./magnet-counter.js";
 import { getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 
 export { startAdminStaffSearch, startAdminSearch, startAdminMessageFlow };
@@ -86,9 +87,12 @@ adminHandlers.use(adminRecruitmentHandlers);
 adminHandlers.use(adminSystemHandlers);
 adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
+adminHandlers.use(adminMagnetCounterHandlers);
 
 adminHandlers.on(["message:text", "message:photo", "message:video", "message:document"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
+
+    if (await handleAdminMagnetCounterMessage(ctx)) return;
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
