@@ -28,6 +28,7 @@ model User {
   timelineEvents       UserTimelineEvent[]
   chatLogs             ChatLog[]
   outgoingTopics       OutgoingTopic[]
+  magnetCountRuns      MagnetCountRun[]
   lastSupportMessageId Int?
   isBlocked            Boolean             @default(false)
   botBlockedAt         DateTime?           // Auto-set when bot gets 403, cleared on /start
@@ -472,6 +473,26 @@ model OutgoingTopic {
   @@index([userId])
 }
 
+model MagnetCountRun {
+  id                 String                 @id @default(cuid())
+  adminUserId        String
+  photoFileId        String
+  estimatedTotal     Int
+  finalTotal         Int?
+  confidence         MagnetCountConfidence
+  stackCounts        String?
+  notes              String?
+  model              String?
+  isManuallyCorrected Boolean              @default(false)
+  finalizedAt        DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  adminUser          User                  @relation(fields: [adminUserId], references: [id])
+
+  @@index([adminUserId, createdAt])
+  @@index([createdAt])
+}
+
 enum Role {
   CANDIDATE
   STAFF
@@ -492,6 +513,12 @@ enum TicketStatus {
   OPEN
   IN_PROGRESS
   CLOSED
+}
+
+enum MagnetCountConfidence {
+  high
+  medium
+  low
 }
 
 enum FinanceLogType {
