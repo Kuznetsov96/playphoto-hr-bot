@@ -1,6 +1,7 @@
 import { createCanvas, loadImage } from "canvas";
 import { z } from "zod";
 import { OPENAI_API_KEY, OPENAI_VISION_MODEL, BOT_TOKEN } from "../config.js";
+import logger from "../core/logger.js";
 
 const StackSchema = z.object({
     index: z.number().int().positive(),
@@ -26,6 +27,13 @@ type ImageVariant = {
 type MagnetImageHeuristic = {
     majorStackCount?: number;
     notes: string[];
+};
+
+type LoadedCanvasImage = Awaited<ReturnType<typeof loadImage>>;
+
+type PreparedImageAnalysis = {
+    variants: Array<ImageVariant & { detail: "low" | "high" }>;
+    heuristic: MagnetImageHeuristic;
 };
 
 function extractResponseText(payload: any): string {
@@ -90,29 +98,33 @@ function buildPrompt(variantLabels: string[]) {
     ].join(" ");
 }
 
-async function buildImageVariants(imageBuffer: Buffer): Promise<ImageVariant[]> {
-    const image = await loadImage(imageBuffer);
+function getMagnetCropBounds(image: LoadedCanvasImage) {
     const width = image.width;
     const height = image.height;
 
-    const originalCanvas = createCanvas(width, height);
-    const originalCtx = originalCanvas.getContext("2d");
-    originalCtx.drawImage(image, 0, 0, width, height);
+    return {
+        cropX: Math.round(width * 0.08),
+        cropY: Math.round(height * 0.47),
+        cropWidth: Math.round(width * 0.78),
+        cropHeight: Math.round(height * 0.30),
+    };
+}
 
-    const cropX = Math.round(width * 0.08);
-    const cropY = Math.round(height * 0.47);
-    const cropWidth = Math.round(width * 0.78);
-    const cropHeight = Math.round(height * 0.30);
-
+function buildMagnetCrop(image: LoadedCanvasImage) {
+    const { cropX, cropY, cropWidth, cropHeight } = getMagnetCropBounds(image);
     const croppedCanvas = createCanvas(cropWidth, cropHeight);
     const croppedCtx = croppedCanvas.getContext("2d");
     croppedCtx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
-    const enhancedCanvas = createCanvas(cropWidth, cropHeight);
+    return { canvas: croppedCanvas, width: cropWidth, height: cropHeight };
+}
+
+function buildEnhancedCrop(croppedCanvas: ReturnType<typeof createCanvas>) {
+    const enhancedCanvas = createCanvas(croppedCanvas.width, croppedCanvas.height);
     const enhancedCtx = enhancedCanvas.getContext("2d");
     enhancedCtx.drawImage(croppedCanvas, 0, 0);
 
-    const imageData = enhancedCtx.getImageData(0, 0, cropWidth, cropHeight);
+    const imageData = enhancedCtx.getImageData(0, 0, croppedCanvas.width, croppedCanvas.height);
     const data = imageData.data;
     const contrast = 1.35;
 
@@ -128,27 +140,7 @@ async function buildImageVariants(imageBuffer: Buffer): Promise<ImageVariant[]> 
     }
 
     enhancedCtx.putImageData(imageData, 0, 0);
-
-    return [
-        { label: "Original full photo", buffer: originalCanvas.toBuffer("image/jpeg", { quality: 0.92 }) },
-        { label: "Cropped magnet area", buffer: croppedCanvas.toBuffer("image/jpeg", { quality: 0.92 }) },
-        { label: "Enhanced grayscale crop", buffer: enhancedCanvas.toBuffer("image/jpeg", { quality: 0.92 }) },
-    ];
-}
-
-function buildMagnetCrop(image: Awaited<ReturnType<typeof loadImage>>) {
-    const width = image.width;
-    const height = image.height;
-    const cropX = Math.round(width * 0.08);
-    const cropY = Math.round(height * 0.47);
-    const cropWidth = Math.round(width * 0.78);
-    const cropHeight = Math.round(height * 0.30);
-
-    const croppedCanvas = createCanvas(cropWidth, cropHeight);
-    const croppedCtx = croppedCanvas.getContext("2d");
-    croppedCtx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-
-    return { canvas: croppedCanvas, width: cropWidth, height: cropHeight };
+    return enhancedCanvas;
 }
 
 function toGrayscaleMatrix(buffer: Uint8ClampedArray, width: number, height: number) {
@@ -217,8 +209,7 @@ function estimateLayerCountInWindow(
     return filtered.length + 1;
 }
 
-async function estimateMagnetImageHeuristic(imageBuffer: Buffer): Promise<MagnetImageHeuristic> {
-    const image = await loadImage(imageBuffer);
+function estimateMagnetImageHeuristic(image: LoadedCanvasImage): MagnetImageHeuristic {
     const crop = buildMagnetCrop(image);
     const ctx = crop.canvas.getContext("2d");
     const imageData = ctx.getImageData(0, 0, crop.width, crop.height);
@@ -255,6 +246,26 @@ async function estimateMagnetImageHeuristic(imageBuffer: Buffer): Promise<Magnet
         majorStackCount: median,
         notes: [`Image heuristic estimated the major stack height at about ${median} magnets.`],
     };
+}
+
+async function prepareImageAnalysis(imageBuffer: Buffer): Promise<PreparedImageAnalysis> {
+    const image = await loadImage(imageBuffer);
+    const heuristic = estimateMagnetImageHeuristic(image);
+    const crop = buildMagnetCrop(image);
+    const variants: Array<ImageVariant & { detail: "low" | "high" }> = [
+        { label: "Cropped magnet area", buffer: crop.canvas.toBuffer("image/jpeg", { quality: 0.9 }), detail: "low" },
+    ];
+
+    if (!heuristic.majorStackCount) {
+        const enhancedCanvas = buildEnhancedCrop(crop.canvas);
+        variants.push({
+            label: "Enhanced grayscale crop",
+            buffer: enhancedCanvas.toBuffer("image/jpeg", { quality: 0.88 }),
+            detail: "low",
+        });
+    }
+
+    return { variants, heuristic };
 }
 
 function applyMajorStackHeightHeuristic(
@@ -395,77 +406,114 @@ export class MagnetCountService {
             throw new Error("OPENAI_API_KEY is not configured");
         }
 
+        const startedAt = Date.now();
+        const downloadStartedAt = Date.now();
         const imageBuffer = await downloadTelegramPhoto(fileId);
-        const variants = await buildImageVariants(imageBuffer);
-        const heuristic = await estimateMagnetImageHeuristic(imageBuffer);
+        const downloadedAt = Date.now();
+        const preprocessStartedAt = Date.now();
+        const { variants, heuristic } = await prepareImageAnalysis(imageBuffer);
+        const preprocessedAt = Date.now();
+        const requestStartedAt = Date.now();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20_000);
 
-        const response = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: JSON.stringify({
-                model: OPENAI_VISION_MODEL,
-                input: [
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "input_text",
-                                text: buildPrompt(variants.map((variant) => variant.label)),
-                            },
-                            ...variants.map((variant) => ({
-                                type: "input_image" as const,
-                                image_url: `data:image/jpeg;base64,${variant.buffer.toString("base64")}`,
-                                detail: "high" as const,
-                            }))
-                        ]
-                    }
-                ],
-                text: {
-                    format: {
-                        type: "json_schema",
-                        name: "magnet_count_result",
-                        strict: true,
-                        schema: {
-                            type: "object",
-                            additionalProperties: false,
-                            properties: {
-                                total: { type: "integer", minimum: 0 },
-                                confidence: { type: "string", enum: ["high", "medium", "low"] },
-                                stacks: {
-                                    type: "array",
-                                    items: {
-                                        type: "object",
-                                        additionalProperties: false,
-                                        properties: {
-                                            index: { type: "integer", minimum: 1 },
-                                            estimatedCount: { type: "integer", minimum: 0 },
-                                            confidence: { type: "string", enum: ["high", "medium", "low"] },
-                                        },
-                                        required: ["index", "estimatedCount", "confidence"]
-                                    }
+        try {
+            const response = await fetch("https://api.openai.com/v1/responses", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                },
+                signal: controller.signal,
+                body: JSON.stringify({
+                    model: OPENAI_VISION_MODEL,
+                    input: [
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "input_text",
+                                    text: buildPrompt(variants.map((variant) => variant.label)),
                                 },
-                                notes: { type: "string" },
-                                needsManualReview: { type: "boolean" }
-                            },
-                            required: ["total", "confidence", "stacks", "notes", "needsManualReview"]
+                                ...variants.map((variant) => ({
+                                    type: "input_image" as const,
+                                    image_url: `data:image/jpeg;base64,${variant.buffer.toString("base64")}`,
+                                    detail: variant.detail,
+                                }))
+                            ]
+                        }
+                    ],
+                    text: {
+                        format: {
+                            type: "json_schema",
+                            name: "magnet_count_result",
+                            strict: true,
+                            schema: {
+                                type: "object",
+                                additionalProperties: false,
+                                properties: {
+                                    total: { type: "integer", minimum: 0 },
+                                    confidence: { type: "string", enum: ["high", "medium", "low"] },
+                                    stacks: {
+                                        type: "array",
+                                        items: {
+                                            type: "object",
+                                            additionalProperties: false,
+                                            properties: {
+                                                index: { type: "integer", minimum: 1 },
+                                                estimatedCount: { type: "integer", minimum: 0 },
+                                                confidence: { type: "string", enum: ["high", "medium", "low"] },
+                                            },
+                                            required: ["index", "estimatedCount", "confidence"]
+                                        }
+                                    },
+                                    notes: { type: "string" },
+                                    needsManualReview: { type: "boolean" }
+                                },
+                                required: ["total", "confidence", "stacks", "notes", "needsManualReview"]
+                            }
                         }
                     }
+                })
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => "");
+                throw new Error(`OpenAI vision request failed with ${response.status}: ${errorText}`);
+            }
+
+            const respondedAt = Date.now();
+            const payload = await response.json() as any;
+            const parsedStartedAt = Date.now();
+            const text = extractResponseText(payload);
+            const parsed = MagnetCountSchema.parse(JSON.parse(text));
+            const normalized = normalizeMagnetCountResult(parsed, heuristic);
+            const finishedAt = Date.now();
+
+            logger.info({
+                fileId,
+                model: OPENAI_VISION_MODEL,
+                variantCount: variants.length,
+                variantDetails: variants.map((variant) => ({ label: variant.label, detail: variant.detail })),
+                heuristicDetectedMajorStack: heuristic.majorStackCount ?? null,
+                timingsMs: {
+                    total: finishedAt - startedAt,
+                    telegramDownload: downloadedAt - downloadStartedAt,
+                    preprocess: preprocessedAt - preprocessStartedAt,
+                    openaiRequest: respondedAt - requestStartedAt,
+                    responseParse: finishedAt - parsedStartedAt,
                 }
-            })
-        });
+            }, "Magnet count analysis completed");
 
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => "");
-            throw new Error(`OpenAI vision request failed with ${response.status}: ${errorText}`);
+            return normalized;
+        } catch (error) {
+            if ((error as Error)?.name === "AbortError") {
+                throw new Error("OpenAI vision request timed out after 20s");
+            }
+            throw error;
+        } finally {
+            clearTimeout(timeout);
         }
-
-        const payload = await response.json() as any;
-        const text = extractResponseText(payload);
-        const parsed = MagnetCountSchema.parse(JSON.parse(text));
-        return normalizeMagnetCountResult(parsed, heuristic);
     }
 }
 
