@@ -50,7 +50,7 @@ async function editOrReplyText(
 async function clearCallbackKeyboard(ctx: MyContext) {
     if (!ctx.callbackQuery?.message || ('photo' in ctx.callbackQuery.message)) return;
 
-    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => { });
+    await ctx.editMessageReplyMarkup().catch(() => { });
 }
 
 function buildParcelPhotoDraftKeyboard(parcelId: string) {
@@ -529,7 +529,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
     }
 
     if (newRejectionCount === parcel.rejectionCount) {
-        audit({ event: "parcel_reject", result: "duplicate", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { rejectionCount: parcel.rejectionCount } });
+        audit({ event: "parcel_reject", result: "success", actorType: "staff", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { rejectionCount: parcel.rejectionCount, duplicateTap: true } });
     }
 
     const text = getParcelRejectConfirmationText(newRejectionCount === parcel.rejectionCount);
@@ -557,7 +557,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
             requestedPhone: phoneToUse,
         });
 
-        audit({ event: "parcel_phone_confirm", result: result?.duplicate ? "duplicate" : "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
+        audit({ event: "parcel_phone_confirm", result: "success", actorType: "staff", telegramId, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id, context: { duplicateTap: Boolean(result?.duplicate) } });
         await editOrReplyText(ctx, getManualProxyConfirmationText(Boolean(result?.duplicate)));
         return;
     }
