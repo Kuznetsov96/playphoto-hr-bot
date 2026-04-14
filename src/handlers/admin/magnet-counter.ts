@@ -70,6 +70,22 @@ function buildResultText(result: {
     return lines.join("\n");
 }
 
+function buildConfirmationText(result: {
+    total?: number | undefined;
+    correctedTotal?: number | undefined;
+}) {
+    const finalTotal = typeof result.correctedTotal === "number" ? result.correctedTotal : result.total;
+    return [
+        "✅ <b>Magnet count saved</b>",
+        "",
+        typeof finalTotal === "number"
+            ? `Final total: <b>${finalTotal}</b>`
+            : "The result has been saved.",
+        "",
+        "You can continue from the System menu."
+    ].join("\n");
+}
+
 async function ensureRole(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return false;
@@ -127,18 +143,15 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
     }
 
     ctx.session.step = "idle";
+    delete ctx.session.supportData?.magnetCount;
     await ctx.answerCallbackQuery("Count confirmed.");
     await ScreenManager.renderScreen(
         ctx,
-        buildResultText({
+        buildConfirmationText({
             total: result.estimateTotal,
-            confidence: result.confidence,
-            stackCounts: result.stackCounts,
-            notes: result.notes,
             correctedTotal: result.correctedTotal,
-            requiresManualConfirmation: result.confidence === "low",
         }),
-        getMagnetCounterKeyboard(true),
+        "admin-system",
         { forceNew: true }
     );
 });
