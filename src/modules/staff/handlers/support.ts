@@ -18,9 +18,12 @@ import { ScreenManager } from "../../../utils/screen-manager.js";
 import { audit } from "../../../core/audit-logger.js";
 import { logAuditEvent, logBusinessEvent } from "../../../core/log-events.js";
 import { getAdminRoleByTelegramId } from "../../../config/roles.js";
+import { ActionDedupeWindow } from "../../../utils/action-dedupe.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
+const SUPPORT_ACTION_DEBOUNCE_MS = 15_000;
+const supportActionDedupe = new ActionDedupeWindow(SUPPORT_ACTION_DEBOUNCE_MS);
 
 export const staffSupportHandlers = new Composer<MyContext>();
 const adminSupportCallbacks = new Composer<MyContext>();
@@ -52,6 +55,10 @@ adminSupportCallbacks
     });
 
 staffSupportHandlers.use(adminSupportCallbacks);
+
+function isDuplicateSupportAction(actionKey: string) {
+    return !supportActionDedupe.tryAcquire(actionKey);
+}
 
 // 1. Start Ticket Creation Flow
 staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
@@ -188,6 +195,10 @@ staffSupportHandlers.callbackQuery(/^ticket_reply_close_(\d+)$/, async (ctx) => 
 // 6. Toggle Urgent Flag
 staffSupportHandlers.callbackQuery(/^ticket_urgent_(\d+)$/, async (ctx) => {
     const ticketId = Number(ctx.match[1]);
+    if (isDuplicateSupportAction(`ticket-urgent:${ctx.from?.id}:${ticketId}`)) {
+        await ctx.answerCallbackQuery("Зачекай, прапорець терміновості вже оновлюється.");
+        return;
+    }
 
     try {
         const { supportService } = await import("../../../services/support-service.js");
@@ -350,6 +361,10 @@ staffSupportHandlers.callbackQuery(/^ticket_force_close_(\d+)$/, async (ctx) => 
 staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     const ticketId = Number(ctx.match[2]);
+    if (isDuplicateSupportAction(`onboard-pass:${candId}:${ticketId}`)) {
+        await ctx.answerCallbackQuery("Рішення вже обробляється.");
+        return;
+    }
 
     // Auth check: allow if they are in the support group
     const { hrService } = await import("../../../services/hr-service.js");
@@ -357,6 +372,12 @@ staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
     const { extractFirstName } = await import("../../../utils/string-utils.js");
 
     try {
+        const candidate = await candidateRepository.findById(candId);
+        if (!candidate || candidate.status !== "STAGING_ACTIVE") {
+            await ctx.answerCallbackQuery("Цей онбординг уже оброблено.");
+            return;
+        }
+
         const res = await hrService.completeOfflineStaging(candId, true);
         if (res) {
             const firstName = extractFirstName(res.candidate.fullName || "");
@@ -395,6 +416,10 @@ staffSupportHandlers.callbackQuery(/^onboard_pass_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
 staffSupportHandlers.callbackQuery(/^onboard_fail_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     const ticketId = Number(ctx.match[2]);
+    if (isDuplicateSupportAction(`onboard-fail:${candId}:${ticketId}`)) {
+        await ctx.answerCallbackQuery("Рішення вже обробляється.");
+        return;
+    }
 
     const { hrService } = await import("../../../services/hr-service.js");
     const { candidateRepository } = await import("../../../repositories/candidate-repository.js");
@@ -402,6 +427,10 @@ staffSupportHandlers.callbackQuery(/^onboard_fail_([a-zA-Z0-9_\-]+)_(\d+)$/, asy
 
     try {
         const cand = await candidateRepository.findById(candId);
+        if (!cand || cand.status !== "STAGING_ACTIVE") {
+            await ctx.answerCallbackQuery("Цей онбординг уже оброблено.");
+            return;
+        }
         await hrService.completeOfflineStaging(candId, false);
 
         // Send warm comforting message to Failed Candidate per user request
