@@ -315,6 +315,7 @@ export const broadcastService = {
         const staff = await staffRepository.findActive() as StaffWithRelations[];
         const filteredStaff = staff.filter(s => {
             if (numericChatId === TEAM_CHATS.HUB) return true;
+            if (matchedLoc) return s.locationId === matchedLoc.id;
             if (city) return s.location?.city === city;
             return false;
         });
