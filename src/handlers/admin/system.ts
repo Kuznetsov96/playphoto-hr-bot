@@ -23,6 +23,18 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
     const hasExtendedAccess = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER' || userRole === 'SUPPORT';
 
     if (hasExtendedAccess) {
+        range.text("🧲 Count Magnets", async (ctx: MyContext) => {
+            await ScreenManager.renderScreen(
+                ctx,
+                "🧲 <b>Порахувати магніти</b>\n\nНатисни кнопку нижче, потім надішли фото стопок магнітів.",
+                new InlineKeyboard()
+                    .text("📸 Завантажити фото", "admin_magnet_counter_start")
+                    .row()
+                    .text("⬅️ Back", "admin_system_back"),
+                { pushToStack: true }
+            );
+        }).row();
+
         range.text(ADMIN_TEXTS["admin-sys-broadcast"], async (ctx: MyContext) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-sys-broadcast"], "admin-broadcast-hub", { pushToStack: true });
         }).row();
