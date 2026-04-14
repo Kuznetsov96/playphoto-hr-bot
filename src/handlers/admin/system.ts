@@ -26,9 +26,9 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
         range.text("🧲 Count Magnets", async (ctx: MyContext) => {
             await ScreenManager.renderScreen(
                 ctx,
-                "🧲 <b>Порахувати магніти</b>\n\nНатисни кнопку нижче, потім надішли фото стопок магнітів.",
+                "🧲 <b>Count Magnets</b>\n\nTap the button below, then send a photo of the magnet stacks.",
                 new InlineKeyboard()
-                    .text("📸 Завантажити фото", "admin_magnet_counter_start")
+                    .text("📸 Upload Photo", "admin_magnet_counter_start")
                     .row()
                     .text("⬅️ Back", "admin_system_back"),
                 { pushToStack: true }
