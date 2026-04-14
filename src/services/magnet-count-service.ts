@@ -23,6 +23,11 @@ type ImageVariant = {
     buffer: Buffer;
 };
 
+type MagnetImageHeuristic = {
+    majorStackCount?: number;
+    notes: string[];
+};
+
 function extractResponseText(payload: any): string {
     if (typeof payload?.output_text === "string" && payload.output_text.trim()) {
         return payload.output_text.trim();
@@ -74,10 +79,12 @@ function buildPrompt(variantLabels: string[]) {
         `You are given multiple versions of the same photo: ${labelText}.`,
         "The objects are transparent plastic magnet cases. Internal reflections, horizontal ribbing, and edges inside the plastic are NOT additional magnets.",
         "Count only physical items. Never count reflections, back-wall lines, or inner transparent contours as separate magnets.",
+        "Do not count horizontal line segments. Transparent cases often show extra top and bottom edges, so the number of visible horizontal seams can be 1-2 higher than the number of physical magnets.",
         "Cross-check the variants before deciding.",
         "If the variants disagree, if transparent plastic makes the count ambiguous, or if stacks blend into each other, set confidence='low' and needsManualReview=true.",
         "Use confidence='high' only when the count is unambiguous across all variants. Transparent plastic stacks should almost never be high confidence.",
         "Prefer conservative counts over inflated counts.",
+        "If several main stacks appear to be the same height, keep their counts the same or within 1 unless there is clear visual evidence that one stack is taller.",
         "Return stack-by-stack counts from left to right. Include small isolated single items only if they are clearly separate physical pieces.",
         "Sanity-check the total against the visible stack heights. If the estimate seems too large for the visible stack heights, reduce confidence and choose the more conservative count.",
     ].join(" ");
@@ -129,8 +136,170 @@ async function buildImageVariants(imageBuffer: Buffer): Promise<ImageVariant[]> 
     ];
 }
 
-function normalizeResult(result: MagnetCountResult): MagnetCountResult {
-    const stackTotal = result.stacks.reduce((sum, stack) => sum + stack.estimatedCount, 0);
+function buildMagnetCrop(image: Awaited<ReturnType<typeof loadImage>>) {
+    const width = image.width;
+    const height = image.height;
+    const cropX = Math.round(width * 0.08);
+    const cropY = Math.round(height * 0.47);
+    const cropWidth = Math.round(width * 0.78);
+    const cropHeight = Math.round(height * 0.30);
+
+    const croppedCanvas = createCanvas(cropWidth, cropHeight);
+    const croppedCtx = croppedCanvas.getContext("2d");
+    croppedCtx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+    return { canvas: croppedCanvas, width: cropWidth, height: cropHeight };
+}
+
+function toGrayscaleMatrix(buffer: Uint8ClampedArray, width: number, height: number) {
+    const gray = new Array<number>(width * height);
+
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            const i = (y * width + x) * 4;
+            const r = buffer[i] ?? 0;
+            const g = buffer[i + 1] ?? 0;
+            const b = buffer[i + 2] ?? 0;
+            gray[(y * width) + x] = (r * 0.299) + (g * 0.587) + (b * 0.114);
+        }
+    }
+
+    return gray;
+}
+
+function estimateLayerCountInWindow(
+    gray: number[],
+    width: number,
+    height: number,
+    startX: number,
+    endX: number
+) {
+    const rowStart = Math.max(1, Math.floor(height * 0.28));
+    const rowEnd = Math.min(height - 2, Math.floor(height * 0.87));
+    const mergeGap = Math.max(10, Math.round(height * 0.035));
+    const signal: number[] = [];
+    let maxSignal = 0;
+
+    for (let y = rowStart; y <= rowEnd; y += 1) {
+        let sum = 0;
+        for (let x = startX; x < endX; x += 1) {
+            const below = gray[((y + 1) * width) + x] ?? 0;
+            const above = gray[((y - 1) * width) + x] ?? 0;
+            sum += Math.abs(below - above);
+        }
+        const avg = sum / Math.max(1, endX - startX);
+        signal[y] = avg;
+        if (avg > maxSignal) maxSignal = avg;
+    }
+
+    const threshold = Math.max(18, maxSignal * 0.28);
+    const peaks: number[] = [];
+    for (let y = rowStart + 1; y < rowEnd - 1; y += 1) {
+        const value = signal[y] ?? 0;
+        if (value < threshold) continue;
+        if (value >= (signal[y - 1] ?? 0) && value > (signal[y + 1] ?? 0)) {
+            peaks.push(y);
+        }
+    }
+
+    const merged: number[] = [];
+    for (const peak of peaks) {
+        if (merged.length === 0 || peak - merged[merged.length - 1]! > mergeGap) {
+            merged.push(peak);
+        }
+    }
+
+    const filtered = merged.filter((peak) => peak >= Math.floor(height * 0.31));
+    if (filtered.length < 5 || filtered.length > 13) {
+        return undefined;
+    }
+
+    return filtered.length + 1;
+}
+
+async function estimateMagnetImageHeuristic(imageBuffer: Buffer): Promise<MagnetImageHeuristic> {
+    const image = await loadImage(imageBuffer);
+    const crop = buildMagnetCrop(image);
+    const ctx = crop.canvas.getContext("2d");
+    const imageData = ctx.getImageData(0, 0, crop.width, crop.height);
+    const gray = toGrayscaleMatrix(imageData.data, crop.width, crop.height);
+    const windows: Array<[number, number]> = [
+        [0.04, 0.30],
+        [0.34, 0.54],
+        [0.58, 0.76],
+    ];
+
+    const candidateCounts = windows
+        .map(([start, end]) => estimateLayerCountInWindow(
+            gray,
+            crop.width,
+            crop.height,
+            Math.round(crop.width * start),
+            Math.round(crop.width * end),
+        ))
+        .filter((count): count is number => typeof count === "number");
+
+    if (candidateCounts.length < 3) {
+        return { notes: [] };
+    }
+
+    const sorted = [...candidateCounts].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+    const consistent = candidateCounts.every((count) => Math.abs(count - median) <= 1);
+
+    if (!consistent || median < 6 || median > 14) {
+        return { notes: [] };
+    }
+
+    return {
+        majorStackCount: median,
+        notes: [`Image heuristic estimated the major stack height at about ${median} magnets.`],
+    };
+}
+
+function applyMajorStackHeightHeuristic(
+    stacks: MagnetCountResult["stacks"],
+    heuristic?: MagnetImageHeuristic
+) {
+    if (!heuristic?.majorStackCount || stacks.length < 3) {
+        return { stacks, applied: false };
+    }
+
+    const normalized = stacks.map((stack) => ({ ...stack }));
+    const majorStacks = normalized.filter((stack) => stack.estimatedCount >= 3);
+    if (majorStacks.length < 3) {
+        return { stacks: normalized, applied: false };
+    }
+
+    const heuristicCount = heuristic.majorStackCount;
+    const closeInflatedStacks = majorStacks.filter((stack) => (
+        stack.estimatedCount >= heuristicCount + 1 && stack.estimatedCount <= heuristicCount + 3
+    )).length;
+
+    if (closeInflatedStacks < 2) {
+        return { stacks: normalized, applied: false };
+    }
+
+    let applied = false;
+    for (const stack of normalized) {
+        if (stack.estimatedCount >= heuristicCount + 1) {
+            stack.estimatedCount = heuristicCount;
+            stack.confidence = "low";
+            applied = true;
+        }
+    }
+
+    return { stacks: normalized, applied };
+}
+
+export function normalizeMagnetCountResult(
+    result: MagnetCountResult,
+    heuristic?: MagnetImageHeuristic
+): MagnetCountResult {
+    const outlierAdjustedStacks = normalizeSimilarStackOutliers(result.stacks);
+    const heuristicAdjusted = applyMajorStackHeightHeuristic(outlierAdjustedStacks, heuristic);
+    const stacks = heuristicAdjusted.stacks;
+    const stackTotal = stacks.reduce((sum, stack) => sum + stack.estimatedCount, 0);
     const total = stackTotal > 0 ? stackTotal : result.total;
 
     let confidence = result.confidence;
@@ -138,20 +307,33 @@ function normalizeResult(result: MagnetCountResult): MagnetCountResult {
     const notes: string[] = [];
 
     if (result.notes) notes.push(result.notes);
+    if (heuristic?.notes.length) notes.push(...heuristic.notes);
 
-    if (result.stacks.some((stack) => stack.confidence === "low")) {
+    if (stacks.some((stack) => stack.confidence === "low")) {
         confidence = "low";
         needsManualReview = true;
         notes.push("At least one stack was low confidence.");
     }
 
-    if (result.stacks.length >= 3 && total >= 45) {
+    if (result.stacks.length !== stacks.length || result.stacks.some((stack, index) => stack.estimatedCount !== stacks[index]?.estimatedCount)) {
+        confidence = "low";
+        needsManualReview = true;
+        notes.push("Adjusted an outlier stack to match the visible height pattern more conservatively.");
+    }
+
+    if (heuristicAdjusted.applied) {
+        confidence = "low";
+        needsManualReview = true;
+        notes.push("Applied the image-derived major-stack height heuristic to reduce seam overcounting.");
+    }
+
+    if (stacks.length >= 3 && total >= 45) {
         confidence = "low";
         needsManualReview = true;
         notes.push("Total looks inflated for the visible stack heights.");
     }
 
-    if (result.stacks.length === 0) {
+    if (stacks.length === 0) {
         confidence = "low";
         needsManualReview = true;
         notes.push("No reliable per-stack breakdown was detected.");
@@ -165,11 +347,42 @@ function normalizeResult(result: MagnetCountResult): MagnetCountResult {
 
     return {
         ...result,
+        stacks,
         total,
         confidence,
         needsManualReview,
         notes: notes.join(" ").trim(),
     };
+}
+
+function normalizeSimilarStackOutliers(stacks: MagnetCountResult["stacks"]): MagnetCountResult["stacks"] {
+    if (stacks.length < 3) {
+        return stacks;
+    }
+
+    const normalized = stacks.map((stack) => ({ ...stack }));
+    const majorStacks = normalized.filter((stack) => stack.estimatedCount >= 3);
+
+    if (majorStacks.length < 3) {
+        return normalized;
+    }
+
+    const counts = majorStacks.map((stack) => stack.estimatedCount).sort((a, b) => a - b);
+    const median = counts[Math.floor(counts.length / 2)] ?? 0;
+    const alignedClusterSize = majorStacks.filter((stack) => Math.abs(stack.estimatedCount - median) <= 1).length;
+
+    if (alignedClusterSize < 2) {
+        return normalized;
+    }
+
+    for (const stack of normalized) {
+        if (stack.estimatedCount >= median + 4) {
+            stack.estimatedCount = median;
+            stack.confidence = "low";
+        }
+    }
+
+    return normalized;
 }
 
 export class MagnetCountService {
@@ -184,6 +397,7 @@ export class MagnetCountService {
 
         const imageBuffer = await downloadTelegramPhoto(fileId);
         const variants = await buildImageVariants(imageBuffer);
+        const heuristic = await estimateMagnetImageHeuristic(imageBuffer);
 
         const response = await fetch("https://api.openai.com/v1/responses", {
             method: "POST",
@@ -251,7 +465,7 @@ export class MagnetCountService {
         const payload = await response.json() as any;
         const text = extractResponseText(payload);
         const parsed = MagnetCountSchema.parse(JSON.parse(text));
-        return normalizeResult(parsed);
+        return normalizeMagnetCountResult(parsed, heuristic);
     }
 }
 
