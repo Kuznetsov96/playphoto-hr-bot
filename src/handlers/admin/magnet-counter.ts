@@ -35,6 +35,7 @@ function buildResultText(result: {
     stackCounts?: number[] | undefined;
     notes?: string | undefined;
     correctedTotal?: number | undefined;
+    requiresManualConfirmation?: boolean | undefined;
 }) {
     const lines = ["🧲 <b>Magnet Count</b>", ""];
 
@@ -52,6 +53,10 @@ function buildResultText(result: {
 
     if (result.confidence) {
         lines.push(`Confidence: <b>${formatConfidence(result.confidence)}</b>`);
+    }
+
+    if (result.requiresManualConfirmation) {
+        lines.push(`Status: <b>Manual confirmation required</b>`);
     }
 
     if (result.notes) {
@@ -131,6 +136,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
             stackCounts: result.stackCounts,
             notes: result.notes,
             correctedTotal: result.correctedTotal,
+            requiresManualConfirmation: result.confidence === "low",
         }),
         getMagnetCounterKeyboard(true),
         { forceNew: true }
@@ -213,6 +219,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
                 stackCounts: ctx.session.supportData.magnetCount.stackCounts,
                 notes: ctx.session.supportData.magnetCount.notes,
                 correctedTotal,
+                requiresManualConfirmation: ctx.session.supportData.magnetCount.confidence === "low",
             }),
             getMagnetCounterKeyboard(true),
             { forceNew: true }
@@ -309,6 +316,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
                 confidence: result.confidence,
                 stackCounts: result.stacks.map((stack) => stack.estimatedCount),
                 notes: result.notes,
+                requiresManualConfirmation: result.confidence === "low" || result.needsManualReview,
             }) + ((result.confidence === "low" || result.needsManualReview)
                 ? "\n\n⚠️ <b>Low confidence.</b> Please verify the result manually before using it."
                 : ""),
