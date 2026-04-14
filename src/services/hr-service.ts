@@ -77,64 +77,6 @@ export async function notifyMentors(api: any, candidate: any) {
     }
 }
 
-function getShiftTimeFromLocationSchedule(schedule: string | null | undefined, shiftDate: Date): string | undefined {
-    if (!schedule) return undefined;
-
-    const isWeekend = [0, 6].includes(shiftDate.getDay());
-    const match = isWeekend
-        ? schedule.match(/Сб-Нд\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i)
-        : schedule.match(/Пн-Пт\s*[—-]\s*(\d{2}:\d{2}[—-]\d{2}:\d{2})/i);
-
-    return match?.[1];
-}
-
-async function syncCandidateFirstShiftFromSchedule(candId: string) {
-    const candidate = await candidateRepository.findById(candId);
-    if (!candidate?.user) return null;
-
-    const staff = await prisma.staffProfile.findUnique({
-        where: { userId: candidate.userId }
-    });
-    if (!staff) {
-        logger.warn({ candId, userId: candidate.userId }, "Final schedule sync skipped because staff profile is missing");
-        return null;
-    }
-
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const firstShift = await prisma.workShift.findFirst({
-        where: {
-            staffId: staff.id,
-            date: { gte: startOfToday }
-        },
-        orderBy: { date: 'asc' },
-        include: { location: true }
-    });
-    if (!firstShift) {
-        logger.warn({ candId, staffId: staff.id }, "Final schedule sync skipped because no future shifts were found");
-        return null;
-    }
-
-    const updateData: Prisma.CandidateUpdateInput = {
-        firstShiftDate: firstShift.date,
-        location: { connect: { id: firstShift.locationId } }
-    };
-    const shiftTime = getShiftTimeFromLocationSchedule(firstShift.location.schedule, firstShift.date);
-    if (shiftTime) updateData.firstShiftTime = shiftTime;
-
-    const updatedCandidate = await candidateRepository.update(candId, updateData);
-
-    try {
-        const { scheduleSyncService } = await import("./schedule-sync.js");
-        await scheduleSyncService.updateFirstShiftDateInSheet(candidate.user.telegramId.toString(), firstShift.date);
-    } catch (error) {
-        logger.warn({ err: error, candId }, "Failed to backfill first shift date in TEAM sheet after hire confirmation");
-    }
-
-    return updatedCandidate;
-}
-
 function getPostInterviewSummaryText(candidate: any) {
     const firstName = extractFirstName(candidate.fullName || "");
 
@@ -852,16 +794,10 @@ export const hrService = {
         await timelineRepository.createEvent(cand.user.id, 'STATUS_CHANGE', 'SYSTEM', `Кандидат офіційно найнятий (HIRED). Початок роботи.`, { status: 'HIRED' });
 
         // Synchronize Team from Google Sheets to ensure everything is up to date
-        let refreshedCandidate = cand;
         try {
             const { scheduleSyncService } = await import("./schedule-sync.js");
             const teamSyncResult = await scheduleSyncService.syncTeam();
             await scheduleSyncService.syncSchedule("Актуальний розклад", teamSyncResult.teamMapping);
-
-            const syncedCandidate = await syncCandidateFirstShiftFromSchedule(candId);
-            if (syncedCandidate) {
-                refreshedCandidate = syncedCandidate;
-            }
         } catch (e) {
             logger.error({ err: e }, "Failed to sync team after hiring");
         }
@@ -870,7 +806,7 @@ export const hrService = {
         const mentorId = MENTOR_IDS.length > 0 ? MENTOR_IDS[0] : null;
 
         return {
-            candidate: refreshedCandidate,
+            candidate: { ...cand, status: CandidateStatus.HIRED },
             mentorId: mentorId,
             candidateId: Number(cand.user.telegramId)
         };

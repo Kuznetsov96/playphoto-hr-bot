@@ -262,31 +262,76 @@ describe('MentorService', () => {
     });
 
     describe('onboarding filters', () => {
-        it('should count unresolved onboarding candidates with a planned first shift date', async () => {
+        it('should count unresolved onboarding candidates from future work shifts', async () => {
+            vi.mocked((prisma as any).candidate.findMany).mockResolvedValue([
+                {
+                    id: 'cand-onboarding',
+                    fullName: 'Candidate One',
+                    status: CandidateStatus.HIRED,
+                    isMentorLocked: true,
+                    firstShiftTime: null,
+                    location: null,
+                    user: {
+                        staffProfile: {
+                            shifts: [
+                                {
+                                    date: new Date('2026-04-19T00:00:00.000Z'),
+                                    location: { schedule: 'Пн-Пт — 15:00-21:00' }
+                                }
+                            ]
+                        }
+                    }
+                } as any
+            ]);
+
             await mentorService.getStats();
 
-            expect((prisma as any).candidate.count).toHaveBeenCalledWith({
+            expect((prisma as any).candidate.findMany).toHaveBeenCalledWith({
                 where: expect.objectContaining({
                     status: CandidateStatus.HIRED,
                     isMentorLocked: true,
-                    firstShiftDate: { not: null }
+                    user: expect.any(Object)
+                }),
+                include: expect.objectContaining({
+                    user: expect.any(Object)
                 })
             });
         });
 
-        it('should fetch unresolved onboarding candidates even without created work shifts', async () => {
-            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
-
-            await mentorService.getOnboardingCandidates();
-
-            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
-                CandidateStatus.HIRED,
-                expect.objectContaining({
+        it('should map onboarding date from the next real work shift', async () => {
+            const shiftDate = new Date('2026-04-19T00:00:00.000Z');
+            vi.mocked((prisma as any).candidate.findMany).mockResolvedValue([
+                {
+                    id: 'cand-onboarding',
+                    fullName: 'Candidate One',
                     status: CandidateStatus.HIRED,
                     isMentorLocked: true,
-                    firstShiftDate: { not: null }
-                })
-            );
+                    firstShiftTime: null,
+                    location: { id: 'loc1', name: 'Drive City', schedule: 'Сб-Нд — 12:00-21:00' },
+                    user: {
+                        staffProfile: {
+                            shifts: [
+                                {
+                                    date: shiftDate,
+                                    location: { id: 'loc1', name: 'Drive City', schedule: 'Сб-Нд — 12:00-21:00' }
+                                }
+                            ]
+                        }
+                    },
+                    firstShiftPartner: null,
+                    discoverySlot: null,
+                    trainingSlot: null,
+                    interviewSlot: null,
+                    messages: []
+                } as any
+            ]);
+
+            const candidates = await mentorService.getOnboardingCandidates();
+
+            expect(candidates).toHaveLength(1);
+            expect(candidates[0]?.firstShiftDate).toEqual(shiftDate);
+            expect(candidates[0]?.firstShiftTime).toBe('12:00-21:00');
+            expect(candidates[0]?.location?.name).toBe('Drive City');
         });
     });
 });

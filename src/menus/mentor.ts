@@ -22,9 +22,8 @@ const formatDate = (date: Date) => {
 };
 
 const getMentorCandidateProfileText = async (ctx: MyContext, candId: string) => {
-    const details = await mentorService.getCandidateDetails(candId);
-    if (!details || !details.cand) return "Candidate details not found. Please refresh /mentor.";
-    const cand = details.cand as any;
+    const cand = await mentorService.getCandidateForMentorProfile(candId) as any;
+    if (!cand) return "Candidate details not found. Please refresh /mentor.";
     const isMentorOnboarding = cand.status === "HIRED" && cand.isMentorLocked;
     const historySince = isMentorOnboarding
         ? (cand.firstShiftDate || cand.statusChangedAt || null)
