@@ -74,6 +74,15 @@ describe("MagnetCountService", () => {
         expect(result.stacks).toHaveLength(3);
         expect(result.confidence).toBe("low");
         expect(result.needsManualReview).toBe(true);
+
+        const openAiRequest = fetchMock.mock.calls[2]?.[1];
+        const body = JSON.parse(String(openAiRequest?.body));
+        const content = body.input[0].content;
+        const images = content.filter((item: any) => item.type === "input_image");
+
+        expect(images.length).toBeLessThanOrEqual(2);
+        expect(images.length).toBeGreaterThanOrEqual(1);
+        expect(images.every((item: any) => item.detail === "low")).toBe(true);
     });
 
     it("uses stack totals as the final total when per-stack data exists", async () => {
