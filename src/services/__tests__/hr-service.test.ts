@@ -77,8 +77,7 @@ vi.mock('../access-service.js', () => ({
 vi.mock('../schedule-sync.js', () => ({
     scheduleSyncService: {
         syncTeam: vi.fn().mockResolvedValue({ teamMapping: {} }),
-        syncSchedule: vi.fn().mockResolvedValue({ success: true }),
-        updateFirstShiftDateInSheet: vi.fn().mockResolvedValue(undefined)
+        syncSchedule: vi.fn().mockResolvedValue({ success: true })
     }
 }));
 
@@ -294,41 +293,23 @@ describe('hrService', () => {
     });
 
     describe('confirmFinalSchedule', () => {
-        it('should sync first shift date, time, and location from schedule when hiring', async () => {
-            const firstShiftDate = new Date('2026-04-14T00:00:00.000Z');
+        it('should keep staging date untouched and sync only team data when hiring', async () => {
             const candidateBeforeHire = {
                 id: 'cand1',
                 userId: 'user1',
                 fullName: 'Гудим Анна Любомирівна',
+                firstShiftDate: new Date('2026-04-10T12:00:00.000Z'),
                 locationId: 'old-location',
                 user: { id: 'user1', telegramId: 768450703n }
             } as any;
-            const candidateAfterSync = {
+            const hiredCandidate = {
                 ...candidateBeforeHire,
-                status: CandidateStatus.HIRED,
-                locationId: 'drive-city-id',
-                firstShiftDate,
-                firstShiftTime: '15:00-21:00'
+                status: CandidateStatus.HIRED
             } as any;
 
-            vi.mocked(candidateRepository.findById)
-                .mockResolvedValueOnce(candidateBeforeHire)
-                .mockResolvedValueOnce(candidateBeforeHire);
+            vi.mocked(candidateRepository.findById).mockResolvedValueOnce(candidateBeforeHire);
             vi.mocked(candidateRepository.update)
-                .mockResolvedValueOnce(candidateBeforeHire)
-                .mockResolvedValueOnce(candidateAfterSync);
-
-            const prisma = (await import('../../db/core.js')).default;
-            vi.mocked(prisma.staffProfile.findUnique).mockResolvedValue({ id: 'staff1', userId: 'user1' } as any);
-            vi.mocked(prisma.workShift.findFirst).mockResolvedValue({
-                staffId: 'staff1',
-                locationId: 'drive-city-id',
-                date: firstShiftDate,
-                location: {
-                    id: 'drive-city-id',
-                    schedule: 'Пн-Пт — 15:00-21:00'
-                }
-            } as any);
+                .mockResolvedValueOnce(hiredCandidate);
 
             const { scheduleSyncService } = await import('../schedule-sync.js');
 
@@ -336,14 +317,9 @@ describe('hrService', () => {
 
             expect(scheduleSyncService.syncTeam).toHaveBeenCalled();
             expect(scheduleSyncService.syncSchedule).toHaveBeenCalledWith('Актуальний розклад', {});
-            expect(candidateRepository.update).toHaveBeenNthCalledWith(1, 'cand1', { status: CandidateStatus.HIRED });
-            expect(candidateRepository.update).toHaveBeenNthCalledWith(2, 'cand1', {
-                firstShiftDate,
-                firstShiftTime: '15:00-21:00',
-                location: { connect: { id: 'drive-city-id' } }
-            });
-            expect(scheduleSyncService.updateFirstShiftDateInSheet).toHaveBeenCalledWith('768450703', firstShiftDate);
-            expect(result?.candidate).toEqual(candidateAfterSync);
+            expect(candidateRepository.update).toHaveBeenCalledTimes(1);
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', { status: CandidateStatus.HIRED });
+            expect(result?.candidate).toEqual(hiredCandidate);
         });
     });
 });
