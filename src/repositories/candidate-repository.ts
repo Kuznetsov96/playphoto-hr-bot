@@ -33,6 +33,11 @@ const LEGACY_READABLE_CANDIDATE_STATUSES: CandidateStatus[] = [
     CandidateStatus.BLOCKER
 ];
 
+const NDA_PENDING_STATUSES: CandidateStatus[] = [
+    CandidateStatus.TRAINING_COMPLETED,
+    CandidateStatus.NDA,
+];
+
 function isUnknownCandidateStatusError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("not found in enum 'CandidateStatus'");
@@ -977,12 +982,11 @@ export class CandidateRepository {
     async findAwaitingNDA(): Promise<CandidateWithRelations[]> {
         return prisma.candidate.findMany({
             where: {
-                status: CandidateStatus.TRAINING_COMPLETED,
+                status: { in: NDA_PENDING_STATUSES },
                 ndaConfirmedAt: null,
-                ndaSentAt: { not: null }
             },
             include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
-            orderBy: { ndaSentAt: 'asc' }
+            orderBy: [{ ndaSentAt: 'asc' }, { statusChangedAt: 'asc' }]
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
 
@@ -992,7 +996,7 @@ export class CandidateRepository {
 
         return prisma.candidate.findMany({
             where: {
-                status: CandidateStatus.TRAINING_COMPLETED,
+                status: { in: NDA_PENDING_STATUSES },
                 ndaConfirmedAt: null,
                 ndaSentAt: { lte: delayDate }
             } as any,
