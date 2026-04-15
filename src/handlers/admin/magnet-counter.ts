@@ -8,7 +8,7 @@ import { logBusinessEvent } from "../../core/log-events.js";
 import prisma from "../../db/core.js";
 import { OPENAI_VISION_MODEL } from "../../config.js";
 
-const ALLOWED_ROLES = new Set(["SUPPORT", "SUPER_ADMIN", "CO_FOUNDER"]);
+const ALLOWED_ROLES = new Set(["SUPPORT"]);
 
 export const adminMagnetCounterHandlers = new Composer<MyContext>();
 

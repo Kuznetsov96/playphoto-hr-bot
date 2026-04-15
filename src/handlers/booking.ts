@@ -32,8 +32,6 @@ export function buildMentorReschedulePatch(status: CandidateStatus) {
         notificationSent: false,
         currentStep: FunnelStep.TRAINING,
         isWaitlisted: isDiscovery ? false : true,
-        discoverySlot: { disconnect: true },
-        trainingSlot: { disconnect: true },
         trainingMeetLink: null
     };
 }
@@ -844,15 +842,15 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await ctx.answerCallbackQuery("Обирай новий час!");
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
-        const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
 
-        // Force disconnect any current slots on the candidate record to prevent "ghost" bookings
+        // Release the booked slot before updating candidate state.
+        // Disconnecting the relation first can leave a slot stuck with isBooked=true
+        // but no linked candidate, which makes it disappear from the schedule.
+        await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
+
         if (candidate) {
             await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
         }
-
-        // Release the specifically requested slot as well (context-safe)
-        await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
 
         // Notify Mentor about reschedule
         if (candidate) {

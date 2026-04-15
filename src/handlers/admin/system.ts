@@ -21,8 +21,9 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
     }
 
     const hasExtendedAccess = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER' || userRole === 'SUPPORT';
+    const canCountMagnets = userRole === "SUPPORT";
 
-    if (hasExtendedAccess) {
+    if (canCountMagnets) {
         range.text("🧲 Count Magnets", async (ctx: MyContext) => {
             await ScreenManager.renderScreen(
                 ctx,
@@ -34,7 +35,9 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
                 { pushToStack: true }
             );
         }).row();
+    }
 
+    if (hasExtendedAccess) {
         range.text(ADMIN_TEXTS["admin-sys-broadcast"], async (ctx: MyContext) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-sys-broadcast"], "admin-broadcast-hub", { pushToStack: true });
         }).row();
