@@ -824,6 +824,7 @@ async function processPipelineHealth(bot: Bot<MyContext>) {
     try {
         await recoverStaleInterviewCandidates(bot);
         await repairRejectedInterviewCompletedStates();
+        await alertStaleTrainingScheduledCandidates(bot);
     } catch (e) {
         logger.error({ err: e }, "Candidate pipeline health check failed");
     }
@@ -943,6 +944,62 @@ async function repairRejectedInterviewCompletedStates() {
     }
 
     return repaired;
+}
+
+async function alertStaleTrainingScheduledCandidates(bot: Bot<MyContext>) {
+    const now = new Date();
+    const staleThreshold = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+    const staleCandidates = await prisma.candidate.findMany({
+        where: {
+            status: CandidateStatus.TRAINING_SCHEDULED,
+            trainingSlotId: { not: null },
+            trainingSlot: {
+                is: {
+                    endTime: { lte: staleThreshold },
+                    isBooked: true,
+                }
+            }
+        },
+        include: {
+            user: true,
+            trainingSlot: true,
+            location: true,
+        },
+        orderBy: { statusChangedAt: "asc" },
+        take: 20,
+    });
+
+    if (staleCandidates.length === 0 || !ADMIN_IDS[0]) {
+        return [];
+    }
+
+    const fingerprint = staleCandidates
+        .map(c => `${c.id}:${c.trainingSlot?.endTime?.toISOString() || "no-slot"}`)
+        .join("|");
+
+    if (!(await shouldSendFunnelAlert("pipeline:stale-training-scheduled", fingerprint, 12))) {
+        return staleCandidates;
+    }
+
+    const preview = staleCandidates
+        .slice(0, 10)
+        .map(c => {
+            const endedAt = c.trainingSlot?.endTime
+                ? c.trainingSlot.endTime.toLocaleString("uk-UA", { timeZone: "Europe/Kyiv" })
+                : "unknown";
+            const location = c.location?.name || c.city || "No location";
+            return `• ${c.fullName || "Candidate"} — ${location} — завершився ${endedAt}`;
+        })
+        .join("\n");
+
+    await bot.api.sendMessage(
+        ADMIN_IDS[0],
+        `⚠️ <b>Stuck training candidates</b>\n\n<b>${staleCandidates.length}</b> candidate(s) are still in <b>TRAINING_SCHEDULED</b> more than 6 hours after their slot ended.\nMentor decision is still required, otherwise they never reach NDA.\n\n${preview}`,
+        { parse_mode: "HTML" }
+    ).catch(() => { });
+
+    await saveFunnelAlertState("pipeline:stale-training-scheduled", fingerprint);
+    return staleCandidates;
 }
 
 /**
