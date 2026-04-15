@@ -13,6 +13,8 @@ describe("buildMentorReschedulePatch", () => {
             notificationSent: false,
             trainingMeetLink: null,
         });
+        expect(patch).not.toHaveProperty("discoverySlot");
+        expect(patch).not.toHaveProperty("trainingSlot");
     });
 
     it("returns mentor waitlist patch for training reschedule", () => {
@@ -25,5 +27,7 @@ describe("buildMentorReschedulePatch", () => {
             notificationSent: false,
             trainingMeetLink: null,
         });
+        expect(patch).not.toHaveProperty("discoverySlot");
+        expect(patch).not.toHaveProperty("trainingSlot");
     });
 });
