@@ -377,7 +377,7 @@ adminNDAMenu.dynamic(async (ctx, range) => {
 });
 
 adminRecruitmentHandlers.callbackQuery("admin_staging_ready_nda", async (ctx: MyContext) => {
-    const candidates = await candidateRepository.findByStatusWithUser(CandidateStatus.TRAINING_COMPLETED, {
+    const candidates = await candidateRepository.findByStatusWithUser([CandidateStatus.TRAINING_COMPLETED, CandidateStatus.NDA], {
         ndaConfirmedAt: { not: null }
     });
 
