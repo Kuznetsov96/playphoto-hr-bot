@@ -146,7 +146,28 @@ adminBroadcastHandlers.callbackQuery("br_confirm_cities", async (ctx) => {
     if (!ctx.session.broadcastData) return;
 
     const type = ctx.session.broadcastData.targetType;
+    const selectedCities = (ctx.session.broadcastData.targetValue as string[] || []);
     if (type === 'pm_city' || type === 'city_chats') {
+        const allLocs = await locationRepository.findAllActive();
+        const cityLocs = allLocs.filter((l) => selectedCities.includes(normalizeCity(l.city)));
+
+        if (type === 'city_chats') {
+            const chatCount = new Set(cityLocs.filter((l) => l.telegramChatId).map((l) => String(l.telegramChatId))).size;
+            if (chatCount <= 1) {
+                ctx.session.broadcastData.step = 'SELECT_BUTTONS';
+                await renderButtonSelection(ctx);
+                await ctx.answerCallbackQuery();
+                return;
+            }
+        }
+
+        if (type === 'pm_city' && cityLocs.length <= 1) {
+            ctx.session.broadcastData.step = 'SELECT_BUTTONS';
+            await renderButtonSelection(ctx);
+            await ctx.answerCallbackQuery();
+            return;
+        }
+
         const kb = new InlineKeyboard()
             .text("📢 Everyone in these cities", "br_scope_all").row()
             .text("📍 Choose specific locations", "br_scope_locs").row()
@@ -470,12 +491,16 @@ adminBroadcastHandlers.callbackQuery("br_back_to_main", async (ctx) => {
 // --- MENU IMPLEMENTATIONS ---
 
 adminBroadcastListMenu.dynamic(async (ctx, range) => {
-    const broadcasts = await broadcastService.getRecentBroadcasts(5);
+    const broadcasts = await broadcastService.getRecentBroadcasts(20);
     if (broadcasts.length === 0) range.text("✅ No active broadcasts", (ctx) => ctx.answerCallbackQuery()).row();
     else {
         broadcasts.forEach((b: any) => {
             const date = new Date(b.createdAt).toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
-            range.text(`${date} | ${b.targetSummary || 'Broadcast'}`, async (ctx) => {
+            const pending = b.trackedMessages?.reduce((acc: number, t: any) => acc + (t.pendingReplies?.filter((r: any) => r.status === "pending").length || 0), 0) || 0;
+            const activePings = b.trackedMessages?.some((t: any) => t.nextPingAt) || false;
+            const label = `${activePings ? "🔔" : "✅"} ${date} #${b.id} | ⏳${pending} | ${b.targetSummary || 'Broadcast'}`;
+
+            range.text(label, async (ctx) => {
                 if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
                 ctx.session.candidateData.city = b.id.toString();
 
@@ -491,12 +516,14 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
             }).row();
         });
     }
-    range.text("🗄️ Archive", async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "🗄️ <b>Archive</b>", "admin-broadcast-archive", { pushToStack: true });
+    range.text("⏹ Stop All Active Pings", async (ctx) => {
+        const stopped = await broadcastService.stopAllPings();
+        await ctx.answerCallbackQuery(`Stopped: ${stopped}`);
+        await ScreenManager.renderScreen(ctx, `⏹️ <b>Active pings stopped:</b> ${stopped}`, "admin-broadcast-list");
     }).row()
-        .text("⬅️ Back", async (ctx) => {
-            await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
-        });
+    .text("⬅️ Back", async (ctx) => {
+        await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
+    });
 });
 
 adminBroadcastHubMenu.dynamic(async (ctx, range) => {
@@ -520,23 +547,9 @@ adminBroadcastHubMenu.dynamic(async (ctx, range) => {
 });
 
 adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
-    const broadcasts = await broadcastService.getRecentBroadcasts(20);
-    broadcasts.forEach((b: any) => {
-        const date = new Date(b.createdAt).toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
-        range.text(`✅ ${date} | ${b.messageText?.substring(0, 15) || '[Media]'}`, async (ctx) => {
-            if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
-            ctx.session.candidateData.city = b.id.toString();
-
-            const stats = await broadcastService.getStats(b.id);
-            const statsText = `📊 <b>Broadcast Statistics (ID: ${b.id})</b>\n\n` +
-                `🌐 Total chats: <b>${stats.totalChats}</b>\n` +
-                `✅ Confirmed: <b>${stats.confirmed}</b>\n` +
-                `❌ Declined: <b>${stats.declined}</b>\n` +
-                `⏳ Pending: <b>${stats.pending}</b>\n\n` +
-                `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`;
-            await ScreenManager.renderScreen(ctx, statsText, "admin-broadcast-manage", { pushToStack: true });
-        }).row();
-    });
+    range.text("ℹ️ Archive removed", async (ctx) => {
+        await ScreenManager.renderScreen(ctx, "📜 <b>History already includes all recent broadcasts.</b>", "admin-broadcast-list");
+    }).row();
     range.text("⬅️ Back", async (ctx) => {
         await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
     });
@@ -557,6 +570,19 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
 
         await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
     }).row()
+        .text("⏹ Stop Pings", async (ctx) => {
+            await broadcastService.stopPinging(bId);
+            await ctx.answerCallbackQuery("Pings stopped");
+
+            const freshStats = await broadcastService.getStats(bId);
+            const freshText = `📊 <b>Broadcast Statistics (ID: ${bId})</b>\n\n` +
+                `🌐 Total chats: <b>${freshStats.totalChats}</b>\n` +
+                `✅ Confirmed: <b>${freshStats.confirmed}</b>\n` +
+                `❌ Declined: <b>${freshStats.declined}</b>\n` +
+                `⏳ Pending: <b>${freshStats.pending}</b>\n\n` +
+                `⏹️ <b>Auto-pings are stopped for this broadcast.</b>`;
+            await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
+        }).row()
         .text("🗑️ Delete", async (ctx) => {
             await broadcastService.deleteBroadcast(ctx, bId);
             await ctx.answerCallbackQuery("✅ Deleted.");

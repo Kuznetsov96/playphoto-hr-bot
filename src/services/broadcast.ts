@@ -93,6 +93,13 @@ async function sendBroadcastPayload(api: any, chatId: number, text: string, medi
     return await api.sendMessage(chatId, text, extra);
 }
 
+function isActiveMembership(member: any): boolean {
+    if (!member || !member.status) return false;
+    if (member.status === "creator" || member.status === "administrator" || member.status === "member") return true;
+    if (member.status === "restricted") return member.is_member !== false;
+    return false;
+}
+
 export const broadcastService = {
     async getBroadcastTargetStats(target: BroadcastTarget): Promise<{ chats: number, users: number }> {
         const { chats, users } = await this.resolveTargets(target);
@@ -122,7 +129,7 @@ export const broadcastService = {
             const allLocs = await locationRepository.findAll();
             if (target.type === 'city_chats' && values.length > 0) {
                 for (const city of values) {
-                    const cityLocs = allLocs.filter(l => l.city === city && l.telegramChatId);
+                    const cityLocs = allLocs.filter(l => normalizeCity(l.city) === city && l.telegramChatId);
                     chats.push(...cityLocs.map(l => Number(l.telegramChatId)));
                 }
             } else if (target.type === 'city_chat_location' && values.length > 0) {
@@ -249,9 +256,10 @@ export const broadcastService = {
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(chatId),
                         messageId: sentMsg.message_id,
-                        nextPingAt: new Date(Date.now() + 20 * 60 * 60 * 1000)
+                        nextPingAt: new Date(Date.now() + initialDelay),
+                        pingIntervalMs: repeatInterval
                     });
-                    await this.populatePendingUsers(tracked.id, chatId);
+                    await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
                 sentCount++;
             } catch (e: any) {
@@ -302,7 +310,7 @@ export const broadcastService = {
         return sentCount;
     },
 
-    async populatePendingUsers(trackedMessageId: number, chatId: number | bigint) {
+    async populatePendingUsers(trackedMessageId: number, chatId: number | bigint, api?: any) {
         const numericChatId = Number(chatId);
         let city: string | undefined;
 
@@ -315,6 +323,9 @@ export const broadcastService = {
         const staff = await staffRepository.findActive() as StaffWithRelations[];
         const filteredStaff = staff.filter(s => {
             if (numericChatId === TEAM_CHATS.HUB) return true;
+            // For location/group chats, rely on live membership checks below.
+            // This supports staff temporarily working across multiple locations.
+            if (numericChatId < 0 && api) return true;
             if (matchedLoc) return s.locationId === matchedLoc.id;
             if (city) return s.location?.city === city;
             return false;
@@ -322,6 +333,26 @@ export const broadcastService = {
 
         for (const s of filteredStaff) {
             if (s.user?.telegramId) {
+                // For group broadcasts, ping only users who are real members of that chat.
+                if (numericChatId < 0 && api) {
+                    try {
+                        const member = await api.getChatMember(numericChatId, Number(s.user.telegramId));
+                        if (!isActiveMembership(member)) continue;
+                    } catch (e: any) {
+                        const description = String(e?.description || "").toLowerCase();
+                        if (
+                            e?.error_code === 400 ||
+                            description.includes("user not found") ||
+                            description.includes("participant_id_invalid") ||
+                            description.includes("user not participant")
+                        ) {
+                            continue;
+                        }
+                        logger.warn({ err: e, chatId: numericChatId, telegramId: s.user.telegramId }, "Membership probe failed during broadcast pending population");
+                        continue;
+                    }
+                }
+
                 const exists = await pendingReplyRepository.findFirst({
                     trackedMessageId,
                     userId: s.user.telegramId
@@ -453,6 +484,14 @@ export const broadcastService = {
 
     async stopPinging(broadcastId: number) {
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
+    },
+
+    async stopAllPings(): Promise<number> {
+        const result = await trackedMessageRepository.updateMany(
+            { nextPingAt: { not: null } },
+            { nextPingAt: null }
+        );
+        return result.count;
     },
 
     async deleteBroadcast(ctx: MyContext, broadcastId: number) {

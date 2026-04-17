@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
+import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
@@ -97,6 +98,51 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
     }
 }
 
+function isActiveMembership(member: any): boolean {
+    if (!member || !member.status) return false;
+    if (member.status === "creator" || member.status === "administrator" || member.status === "member") return true;
+    if (member.status === "restricted") return member.is_member !== false;
+    return false;
+}
+
+async function pruneNonMembersFromPending(msg: any, bot: Bot<MyContext>) {
+    const chatId = Number(msg.chatId);
+    if (chatId > 0) return msg.pendingReplies;
+
+    const stalePendingIds: number[] = [];
+    const stillPending: typeof msg.pendingReplies = [];
+
+    for (const reply of msg.pendingReplies) {
+        try {
+            const member = await bot.api.getChatMember(chatId, Number(reply.userId));
+            if (isActiveMembership(member)) {
+                stillPending.push(reply);
+            } else {
+                stalePendingIds.push(reply.id);
+            }
+        } catch (e: any) {
+            const description = String(e?.description || "").toLowerCase();
+            if (
+                e?.error_code === 400 ||
+                description.includes("user not found") ||
+                description.includes("participant_id_invalid") ||
+                description.includes("user not participant")
+            ) {
+                stalePendingIds.push(reply.id);
+                continue;
+            }
+            // Keep the pending reply on transient API failures.
+            stillPending.push(reply);
+        }
+    }
+
+    if (stalePendingIds.length > 0) {
+        await pendingReplyRepository.deleteMany({ id: { in: stalePendingIds } });
+    }
+
+    return stillPending;
+}
+
 export function startPingerLoop(bot: Bot<MyContext>) {
     logBusinessEvent({
         event: "broadcast.pinger_loop.started",
@@ -118,8 +164,10 @@ async function runPinger(bot: Bot<MyContext>) {
         const messagesToPing = await trackedMessageRepository.findToPing(now);
 
         for (const msg of messagesToPing) {
+            const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
+
             // 1. If no pending replies, stop pinging
-            if (msg.pendingReplies.length === 0) {
+            if (activePendingReplies.length === 0) {
                 await trackedMessageRepository.stopTracking(msg.id);
                 logBusinessEvent({
                     event: "broadcast.ping_tracking.completed",
@@ -155,7 +203,7 @@ async function runPinger(bot: Bot<MyContext>) {
                 text = `🔔 <b>Нагадування!</b>\nБудь ласка, натисніть кнопку "Підтвердити" у повідомленні вище 👆`;
             } else {
                 // Group chat reminder with mentions
-                const mentions = msg.pendingReplies.map(p => {
+                const mentions = activePendingReplies.map((p: any) => {
                     const user = p.user;
                     if (user.username) return `@${user.username}`;
                     return `<a href="tg://user?id=${user.telegramId}">${user.firstName || 'User'}</a>`;
@@ -208,7 +256,7 @@ async function runPinger(bot: Bot<MyContext>) {
                         trackedMessageId: msg.id,
                         chatId: msg.chatId,
                         messageId: msg.messageId,
-                        pendingReplies: msg.pendingReplies.length,
+                        pendingReplies: activePendingReplies.length,
                     },
                 });
             } catch (e: any) {
