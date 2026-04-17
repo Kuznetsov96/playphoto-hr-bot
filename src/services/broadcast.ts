@@ -100,6 +100,12 @@ function isActiveMembership(member: any): boolean {
     return false;
 }
 
+function hasPendingReplies(trackedMessages: any[]): boolean {
+    return trackedMessages.some((tracked) =>
+        (tracked.pendingReplies || []).some((reply: any) => reply.status === "pending")
+    );
+}
+
 export const broadcastService = {
     async getBroadcastTargetStats(target: BroadcastTarget): Promise<{ chats: number, users: number }> {
         const { chats, users } = await this.resolveTargets(target);
@@ -480,6 +486,33 @@ export const broadcastService = {
 
     async getRecentBroadcasts(limit = 20) {
         return await broadcastRepository.findRecent(limit);
+    },
+
+    async pruneCompletedArchive(keepCompleted: number = 100): Promise<number> {
+        if (keepCompleted < 0) keepCompleted = 0;
+
+        const all = await broadcastRepository.findRecent(2000);
+        const completed = all.filter((broadcast: any) => {
+            const trackedMessages = broadcast.trackedMessages || [];
+            const hasActivePings = trackedMessages.some((tracked: any) => Boolean(tracked.nextPingAt));
+            if (hasActivePings) return false;
+            return !hasPendingReplies(trackedMessages);
+        });
+
+        const toDelete = completed.slice(keepCompleted);
+        let deletedCount = 0;
+
+        for (const broadcast of toDelete) {
+            const trackedIds = (broadcast.trackedMessages || []).map((tracked: any) => tracked.id);
+            if (trackedIds.length > 0) {
+                await pendingReplyRepository.deleteMany({ trackedMessageId: { in: trackedIds } });
+                await trackedMessageRepository.deleteMany({ broadcastId: broadcast.id });
+            }
+            await broadcastRepository.delete(broadcast.id);
+            deletedCount++;
+        }
+
+        return deletedCount;
     },
 
     async stopPinging(broadcastId: number) {
