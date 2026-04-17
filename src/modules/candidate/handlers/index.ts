@@ -9,7 +9,6 @@ import { getCityCode, getShortLocationName } from "../../../utils/location-helpe
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
 import {
-    MAX_CANDIDATE_AGE,
     MIN_CANDIDATE_AGE,
     getAgeRejection,
     getCandidateAge,
@@ -61,7 +60,7 @@ function getAgeRejectionMeta(age: number) {
 }
 
 // --- VALIDATION SCHEMAS ---
-const CandidateSchema = z.object({
+export const CandidateSchema = z.object({
     fullName: z.string()
         .min(5, "ПІБ має бути не менше 5 символів")
         .max(100, "ПІБ занадто довге")
@@ -72,9 +71,6 @@ const CandidateSchema = z.object({
         .refine(date => {
             return getCandidateAge(date) >= MIN_CANDIDATE_AGE;
         }, "Ми приймаємо на роботу лише з 17 років")
-        .refine(date => {
-            return getCandidateAge(date) <= MAX_CANDIDATE_AGE;
-        }, "Дякуємо! Наразі ми не можемо продовжити анкету. Якщо умови зміняться, ми обов'язково напишемо тобі тут.")
         .refine(date => date > new Date(1950, 0, 1), "Введіть реальну дату народження"),
 });
 
