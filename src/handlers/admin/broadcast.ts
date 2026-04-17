@@ -12,12 +12,23 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 import type { BroadcastMediaItem } from "../../types/context.js";
 
 export const adminBroadcastHandlers = new Composer<MyContext>();
+const ARCHIVE_KEEP_COMPLETED = 100;
 
 // --- MENUS (Declared first to avoid cycles) ---
 export const adminBroadcastHubMenu = new Menu<MyContext>("admin-broadcast-hub");
 export const adminBroadcastListMenu = new Menu<MyContext>("admin-broadcast-list");
 export const adminBroadcastArchiveMenu = new Menu<MyContext>("admin-broadcast-archive");
 export const adminBroadcastManageMenu = new Menu<MyContext>("admin-broadcast-manage");
+
+function getPendingCount(broadcast: any): number {
+    return broadcast.trackedMessages?.reduce((acc: number, tracked: any) =>
+        acc + (tracked.pendingReplies?.filter((reply: any) => reply.status === "pending").length || 0), 0) || 0;
+}
+
+function isBroadcastActive(broadcast: any): boolean {
+    const hasActivePing = broadcast.trackedMessages?.some((tracked: any) => Boolean(tracked.nextPingAt)) || false;
+    return hasActivePing || getPendingCount(broadcast) > 0;
+}
 
 /**
  * Entry point from the menu
@@ -491,14 +502,17 @@ adminBroadcastHandlers.callbackQuery("br_back_to_main", async (ctx) => {
 // --- MENU IMPLEMENTATIONS ---
 
 adminBroadcastListMenu.dynamic(async (ctx, range) => {
-    const broadcasts = await broadcastService.getRecentBroadcasts(20);
-    if (broadcasts.length === 0) range.text("✅ No active broadcasts", (ctx) => ctx.answerCallbackQuery()).row();
+    const broadcasts = await broadcastService.getRecentBroadcasts(100);
+    const activeBroadcasts = broadcasts.filter((broadcast: any) => isBroadcastActive(broadcast)).slice(0, 10);
+
+    if (activeBroadcasts.length === 0) {
+        range.text("✅ Немає активних пінгів", (ctx) => ctx.answerCallbackQuery()).row();
+    }
     else {
-        broadcasts.forEach((b: any) => {
+        activeBroadcasts.forEach((b: any) => {
             const date = new Date(b.createdAt).toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
-            const pending = b.trackedMessages?.reduce((acc: number, t: any) => acc + (t.pendingReplies?.filter((r: any) => r.status === "pending").length || 0), 0) || 0;
-            const activePings = b.trackedMessages?.some((t: any) => t.nextPingAt) || false;
-            const label = `${activePings ? "🔔" : "✅"} ${date} #${b.id} | ⏳${pending} | ${b.targetSummary || 'Broadcast'}`;
+            const pending = getPendingCount(b);
+            const label = `🔔 ${date} #${b.id} | ⏳${pending} | ${b.targetSummary || 'Broadcast'}`;
 
             range.text(label, async (ctx) => {
                 if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
@@ -516,14 +530,26 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
             }).row();
         });
     }
+
+    range.text("🗂 Архів завершених", async (ctx) => {
+        await ScreenManager.renderScreen(ctx, "🗂 <b>Completed Broadcasts</b>", "admin-broadcast-archive", { pushToStack: true });
+    }).row();
+
     range.text("⏹ Stop All Active Pings", async (ctx) => {
-        const stopped = await broadcastService.stopAllPings();
-        await ctx.answerCallbackQuery(`Stopped: ${stopped}`);
-        await ScreenManager.renderScreen(ctx, `⏹️ <b>Active pings stopped:</b> ${stopped}`, "admin-broadcast-list");
+        const confirmKb = new InlineKeyboard()
+            .text("✅ Так, зупинити все", "br_stop_all_pings_exec").row()
+            .text("↩️ Скасувати", "br_stop_all_pings_cancel");
+
+        await ScreenManager.renderScreen(
+            ctx,
+            "⚠️ <b>Зупинити всі активні пінги?</b>\n\nЦе зупинить автоповтор для всіх поточних розсилок.",
+            confirmKb,
+            { pushToStack: true }
+        );
     }).row()
-    .text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
-    });
+        .text("⬅️ Back", async (ctx) => {
+            await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
+        });
 });
 
 adminBroadcastHubMenu.dynamic(async (ctx, range) => {
@@ -538,8 +564,8 @@ adminBroadcastHubMenu.dynamic(async (ctx, range) => {
         await startStatelessBroadcast(ctx);
     }).row();
 
-    range.text("📜 History / Manage", async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list", { pushToStack: true });
+    range.text("📜 Active / Manage", async (ctx) => {
+        await ScreenManager.renderScreen(ctx, "📜 <b>Active Broadcasts</b>", "admin-broadcast-list", { pushToStack: true });
     }).row();
     range.text("⬅️ Back", async (ctx) => {
         await ScreenManager.goBack(ctx, "🛠️ <b>System Settings</b>", "admin-system");
@@ -547,12 +573,53 @@ adminBroadcastHubMenu.dynamic(async (ctx, range) => {
 });
 
 adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
-    range.text("ℹ️ Archive removed", async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "📜 <b>History already includes all recent broadcasts.</b>", "admin-broadcast-list");
+    await broadcastService.pruneCompletedArchive(ARCHIVE_KEEP_COMPLETED);
+
+    const broadcasts = await broadcastService.getRecentBroadcasts(100);
+    const completedBroadcasts = broadcasts.filter((broadcast: any) => !isBroadcastActive(broadcast)).slice(0, 20);
+
+    if (completedBroadcasts.length === 0) {
+        range.text("✅ Архів порожній", async (ctx) => {
+            await ctx.answerCallbackQuery();
+        }).row();
+    } else {
+        completedBroadcasts.forEach((broadcast: any) => {
+            const date = new Date(broadcast.createdAt).toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
+            const label = `✅ ${date} #${broadcast.id} | ${broadcast.targetSummary || 'Broadcast'}`;
+
+            range.text(label, async (ctx) => {
+                if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
+                ctx.session.candidateData.city = broadcast.id.toString();
+
+                const stats = await broadcastService.getStats(broadcast.id);
+                const statsText = `📊 <b>Broadcast Statistics (ID: ${broadcast.id})</b>\n\n` +
+                    `🌐 Total chats: <b>${stats.totalChats}</b>\n` +
+                    `✅ Confirmed: <b>${stats.confirmed}</b>\n` +
+                    `❌ Declined: <b>${stats.declined}</b>\n` +
+                    `⏳ Pending: <b>${stats.pending}</b>`;
+                await ScreenManager.renderScreen(ctx, statsText, "admin-broadcast-manage", { pushToStack: true });
+            }).row();
+        });
+    }
+
+    range.text(`ℹ️ Зберігаємо останні ${ARCHIVE_KEEP_COMPLETED} завершених`, async (ctx) => {
+        await ctx.answerCallbackQuery();
     }).row();
+
     range.text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
+        await ScreenManager.goBack(ctx, "📜 <b>Active Broadcasts</b>", "admin-broadcast-list");
     });
+});
+
+adminBroadcastHandlers.callbackQuery("br_stop_all_pings_exec", async (ctx) => {
+    const stopped = await broadcastService.stopAllPings();
+    await ctx.answerCallbackQuery("Готово");
+    await ScreenManager.renderScreen(ctx, `⏹️ <b>Active pings stopped:</b> ${stopped}`, "admin-broadcast-list");
+});
+
+adminBroadcastHandlers.callbackQuery("br_stop_all_pings_cancel", async (ctx) => {
+    await ctx.answerCallbackQuery("Скасовано");
+    await ScreenManager.goBack(ctx, "📜 <b>Active Broadcasts</b>", "admin-broadcast-list");
 });
 
 adminBroadcastManageMenu.dynamic(async (ctx, range) => {
