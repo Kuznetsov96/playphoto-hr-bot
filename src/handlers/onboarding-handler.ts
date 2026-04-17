@@ -318,8 +318,8 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
                 hrDecision: "AGE_LIMIT"
             } as any);
 
-            const text = `Дякуємо, що заповнила анкету! 🌸\n\n` +
-                `На жаль, наразі всі позиції у нас зайняті. Ми зберегли твої дані і обов'язково зв'яжемося, якщо з'явиться можливість. Бажаємо успіхів! ✨`;
+            const text = `Дякуємо, що заповнила анкету.\n\n` +
+                `Ми зберегли твої дані й зв’яжемося з тобою, щойно з’явиться відповідна можливість.`;
 
             await cleanupMessages(ctx).catch(() => {});
             await ScreenManager.renderScreen(ctx, text, undefined, { forceNew: true });
