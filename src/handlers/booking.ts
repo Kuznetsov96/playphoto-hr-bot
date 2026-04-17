@@ -249,9 +249,9 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 });
 
 // 2. Відмова від участі — крок 1: підтвердження
-bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cb" });
-    if (!slotId) return;
+    if (!slotId) return next();
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
@@ -264,6 +264,7 @@ bookingHandlers.callbackQuery(/^cancel_booking_(.+)$/, async (ctx) => {
         `Якщо просто хочеш змінити час — поверніться і натисни «Змінити час». 🌸`,
         { parse_mode: "HTML", reply_markup: kb }
     );
+    return;
 });
 
 // 2.1. Відмова від участі — крок 2: підтверджено → REJECTED
@@ -517,6 +518,11 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
     logger.debug({ telegramId }, "Interview invite declined by candidate");
 
     const candidate = await candidateRepository.findByTelegramId(telegramId);
+    if (candidate?.interviewSlotId) {
+        await bookingService.cancelInterviewSlot(candidate.interviewSlotId, telegramId).catch((err) => {
+            logger.warn({ err, candidateId: candidate.id, slotId: candidate.interviewSlotId }, "Interview decline cleanup failed");
+        });
+    }
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
@@ -525,7 +531,8 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
             hrDecision: "REJECTED",
             candidateDecision: "Відмова кандидата (не актуально)",
             isWaitlisted: false,
-            notificationSent: true
+            notificationSent: true,
+            googleMeetLink: null
         }
     );
 
@@ -776,9 +783,9 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
 });
 
 // 10. Скасування навчання — крок 1: підтвердження
-bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ct" });
-    if (!slotId) return;
+    if (!slotId) return next();
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
@@ -791,6 +798,7 @@ bookingHandlers.callbackQuery(/^cancel_training_(.+)$/, async (ctx) => {
         `Якщо просто хочеш змінити час — поверніться і натисни «Змінити час». 🌸`,
         { parse_mode: "HTML", reply_markup: kb }
     );
+    return;
 });
 
 // 10.1. Скасування навчання — крок 2: підтверджено
