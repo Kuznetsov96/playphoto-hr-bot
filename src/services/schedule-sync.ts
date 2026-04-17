@@ -75,10 +75,16 @@ export class ScheduleSyncService {
         ]);
 
         let removedFromChatsCount = 0;
+        const participantStatuses = new Set(["creator", "administrator", "member", "restricted"]);
 
         for (const chatId of chatIds) {
             if (!chatId || Number.isNaN(chatId)) continue;
             try {
+                const member = await api.getChatMember(chatId, Number(telegramId));
+                if (!participantStatuses.has(member.status)) {
+                    continue;
+                }
+
                 await api.banChatMember(chatId, Number(telegramId));
                 await api.unbanChatMember(chatId, Number(telegramId));
                 removedFromChatsCount++;
