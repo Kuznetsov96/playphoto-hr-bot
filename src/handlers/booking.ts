@@ -15,6 +15,7 @@ import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
+import { getBirthDateRejection } from "../utils/candidate-age.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
@@ -63,6 +64,31 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     // 1. Interview actions guard
     if (interviewActions.some(a => data.startsWith(a))) {
+        const ageRejection = getBirthDateRejection(candidate.birthDate);
+        if (ageRejection) {
+            if (candidate.status !== CandidateStatus.REJECTED ||
+                (ageRejection === "AGE_LIMIT" && candidate.hrDecision !== "AGE_LIMIT") ||
+                (ageRejection === "UNDERAGE" && candidate.hrDecision !== "REJECTED_SYSTEM_UNDERAGE")) {
+                await candidateRepository.update(candidate.id, {
+                    status: CandidateStatus.REJECTED,
+                    hrDecision: ageRejection === "AGE_LIMIT" ? "AGE_LIMIT" : "REJECTED_SYSTEM_UNDERAGE",
+                    isWaitlisted: false,
+                    notificationSent: false,
+                    interviewWaitlistReason: null,
+                    hasUnreadMessage: false,
+                });
+            }
+
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ScreenManager.renderScreen(
+                ctx,
+                ageRejection === "AGE_LIMIT"
+                    ? CANDIDATE_TEXTS["candidate-reject-age-limit"]
+                    : CANDIDATE_TEXTS["candidate-reject-underage"]
+            );
+            return;
+        }
+
         const forbiddenStatuses: CandidateStatus[] = [
             CandidateStatus.REJECTED,
             CandidateStatus.TRAINING_SCHEDULED,
