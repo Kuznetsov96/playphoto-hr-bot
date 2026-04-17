@@ -21,6 +21,7 @@ import { sessionRepository } from "../repositories/session-repository.js";
 import { isImpossibleMentorState } from "./funnel-anomaly-detector.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { createKyivDate } from "../utils/bot-utils.js";
+import { getBirthDateRejection } from "../utils/candidate-age.js";
 
 
 /**
@@ -617,6 +618,7 @@ export async function startWorker(bot: Bot<MyContext>) {
             if (kyivHour === 11 && now.getMinutes() < 5) {
                 await processAbandonedApplications(bot);
                 await processAutoRejectInactiveCandidates(bot);
+                await processLegacyAgeLimitCandidates(bot);
                 // processStalePipelineAlert disabled: HR/Mentor/Admin see their queues in the bot menus
             }
 
@@ -1840,5 +1842,68 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
 
     } catch (e) {
         logger.error({ err: e }, "Candidate auto-reject inactive job failed");
+    }
+}
+
+async function processLegacyAgeLimitCandidates(bot: Bot<MyContext>) {
+    const candidates = await prisma.candidate.findMany({
+        where: {
+            status: {
+                in: [
+                    CandidateStatus.SCREENING,
+                    CandidateStatus.WAITLIST_HR,
+                    CandidateStatus.WAITLIST,
+                    CandidateStatus.MANUAL_REVIEW,
+                ]
+            },
+            birthDate: { not: null },
+        },
+        include: { user: true }
+    });
+
+    for (const cand of candidates) {
+        const ageRejection = getBirthDateRejection(cand.birthDate);
+        if (!ageRejection) continue;
+
+        const hrDecision = ageRejection === "AGE_LIMIT" ? "AGE_LIMIT" : "REJECTED_SYSTEM_UNDERAGE";
+        const finalText = ageRejection === "AGE_LIMIT"
+            ? CANDIDATE_TEXTS["candidate-reject-age-limit"]
+            : CANDIDATE_TEXTS["candidate-reject-underage"];
+
+        try {
+            await candidateRepository.update(cand.id, {
+                status: CandidateStatus.REJECTED,
+                hrDecision,
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                hasUnreadMessage: false,
+            });
+
+            try {
+                await bot.api.sendMessage(Number(cand.user.telegramId), finalText, { parse_mode: "HTML" });
+            } catch (e: any) {
+                if (isBotBlocked(e)) {
+                    await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                } else {
+                    logger.warn({ err: e, candidateId: cand.id }, "Legacy age-limit cleanup message delivery failed");
+                }
+            }
+
+            logBusinessEvent({
+                event: "candidate.legacy_age_gate_fixed",
+                candidateId: cand.id,
+                telegramId: cand.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "SCREENING",
+                result: "success",
+                reasonCode: ageRejection,
+                module: "worker",
+                operation: "processLegacyAgeLimitCandidates",
+            });
+        } catch (error) {
+            logger.error({ err: error, candidateId: cand.id }, "Legacy age-limit cleanup failed");
+        }
     }
 }

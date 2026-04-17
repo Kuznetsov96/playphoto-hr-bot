@@ -94,6 +94,22 @@ describe('BookingService', () => {
                 .rejects.toThrow('UNDERAGE_CANDIDATE');
         });
 
+        it('should throw error for age-limit candidate even with valid slot', async () => {
+            const txMock = {};
+
+            vi.mocked(prisma.$transaction).mockImplementationOnce(async (cb: any) => cb(txMock));
+            vi.mocked(interviewRepository.findSlotById).mockResolvedValue({ id: 'slot1', isBooked: false } as any);
+            vi.mocked(candidateRepository.findByTelegramId).mockResolvedValue({
+                id: 'cand-age',
+                status: 'SCREENING',
+                hrDecision: null,
+                birthDate: new Date('1994-09-23T00:00:00.000Z')
+            } as any);
+
+            await expect(bookingService.bookInterviewSlot(12345, 'slot1', 'user'))
+                .rejects.toThrow('AGE_LIMIT_CANDIDATE');
+        });
+
         it('should successfully book a slot and create google event', async () => {
             const startTime = new Date();
             const endTime = new Date();

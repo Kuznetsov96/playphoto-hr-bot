@@ -6,18 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { googleCalendar } from "./google-calendar.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
-
-function getAge(birthDate: Date): number {
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
-    }
-    return age;
-}
-
-const MAX_CANDIDATE_AGE = 26;
+import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
 
 function toIsoOrUndefined(value: unknown): string | undefined {
     if (value instanceof Date) return value.toISOString();
@@ -50,10 +39,11 @@ export class BookingService {
             if (candidate.hrDecision === "AGE_LIMIT") {
                 throw new Error("AGE_LIMIT_CANDIDATE");
             }
-            if (candidate.birthDate && getAge(new Date(candidate.birthDate)) < 17) {
+            const ageRejection = getBirthDateRejection(candidate.birthDate);
+            if (ageRejection === "UNDERAGE") {
                 throw new Error("UNDERAGE_CANDIDATE");
             }
-            if (candidate.birthDate && getAge(new Date(candidate.birthDate)) > MAX_CANDIDATE_AGE) {
+            if (ageRejection === "AGE_LIMIT") {
                 throw new Error("AGE_LIMIT_CANDIDATE");
             }
 
@@ -105,7 +95,7 @@ export class BookingService {
 
             const googleEvent = await googleCalendar.createInterviewEvent({
                 summary: `Співбесіда: ${candidateName}`,
-                description: `Кандидатка: ${candidateName}\nВік: ${candidate.birthDate ? (new Date().getFullYear() - new Date(candidate.birthDate).getFullYear()) : 'Не вказано'}\nЛокація: ${candidate.location?.name || 'Не вказано'}\nTelegram: @${username || 'немає'}`,
+                description: `Кандидатка: ${candidateName}\nВік: ${candidate.birthDate ? getCandidateAge(candidate.birthDate) : 'Не вказано'}\nЛокація: ${candidate.location?.name || 'Не вказано'}\nTelegram: @${username || 'немає'}`,
                 startTime,
                 endTime
             });

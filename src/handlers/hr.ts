@@ -284,6 +284,8 @@ hrHandlers.callbackQuery(/^invite_candidate_(.+)$/, async (ctx) => {
             await ctx.answerCallbackQuery(`✅ Invitation sent!`);
         } else if (result.reason === "bot_blocked") {
             await ctx.answerCallbackQuery("Candidate blocked the bot.");
+        } else if (result.reason === "age_ineligible") {
+            await ctx.answerCallbackQuery("Candidate no longer meets age requirements.");
         } else {
             await ctx.answerCallbackQuery("Invite failed.");
         }

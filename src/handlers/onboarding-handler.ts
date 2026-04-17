@@ -9,6 +9,7 @@ import { CandidateSchema, parseBirthDate } from "../schemas/candidate-schema.js"
 import { menuRegistry } from "../utils/menu-registry.js";
 import { Menu } from "@grammyjs/menu";
 import { CandidateStatus } from "@prisma/client";
+import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
 
 export const onboardingHandlers = new Composer<MyContext>();
 
@@ -295,16 +296,6 @@ onboardingHandlers.on("message:photo", async (ctx, next) => {
 
 import { FunnelStep } from "@prisma/client";
 
-function getCandidateAge(birthDate: Date): number {
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
-    return age;
-}
-
-const MAX_CANDIDATE_AGE = 26;
-
 async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     const candidateId = existingCandidate?.id;
     logBusinessEvent({
@@ -321,7 +312,7 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
 
     try {
         // Soft age filter: politely decline 26+ candidates
-        if (existingCandidate.birthDate && getCandidateAge(existingCandidate.birthDate) > MAX_CANDIDATE_AGE) {
+        if (getBirthDateRejection(existingCandidate.birthDate) === "AGE_LIMIT") {
             await candidateRepository.update(candidateId, {
                 status: CandidateStatus.REJECTED,
                 hrDecision: "AGE_LIMIT"
