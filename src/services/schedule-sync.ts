@@ -8,7 +8,7 @@ import { systemStateRepository } from "../repositories/system-state-repository.j
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
-import { accessService } from "./access-service.js";
+import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
 import type { Api } from "grammy";
 import logger from "../core/logger.js";
@@ -62,6 +62,43 @@ export class ScheduleSyncService {
 
     private ensureSheets() {
         if (!this.sheets) throw new Error("Google Sheets not configured (missing google-service-account.json)");
+    }
+
+    private async revokeFromAllTeamChats(api: Api, telegramId: bigint, reason: string): Promise<{ removedFromAtLeastOneChat: boolean; removedFromChatsCount: number }> {
+        const locations = await locationRepository.findAll();
+        const chatIds = new Set<number>([
+            TEAM_CHATS.CHANNEL,
+            TEAM_CHATS.HUB,
+            ...locations
+                .filter((loc) => Boolean(loc.telegramChatId))
+                .map((loc) => Number(loc.telegramChatId))
+        ]);
+
+        let removedFromChatsCount = 0;
+
+        for (const chatId of chatIds) {
+            if (!chatId || Number.isNaN(chatId)) continue;
+            try {
+                await api.banChatMember(chatId, Number(telegramId));
+                await api.unbanChatMember(chatId, Number(telegramId));
+                removedFromChatsCount++;
+            } catch (e: any) {
+                const description = String(e?.description || "").toLowerCase();
+                if (
+                    description.includes("user not found") ||
+                    description.includes("participant_id_invalid") ||
+                    description.includes("user not participant")
+                ) {
+                    continue;
+                }
+                logger.warn({ err: e, chatId, telegramId, reason }, "Failed to revoke staff access from team chat");
+            }
+        }
+
+        return {
+            removedFromAtLeastOneChat: removedFromChatsCount > 0,
+            removedFromChatsCount,
+        };
     }
 
     /**
@@ -284,6 +321,8 @@ export class ScheduleSyncService {
         let staffAdded = 0;
         let staffUpdated = 0;
         let skipped = 0;
+        let inactiveStaffProcessed = 0;
+        let inactiveStaffRemovedFromChats = 0;
 
         const locations = await locationRepository.findAll();
         // BATCH CACHE: Fetch all existing users and staff to avoid N+1 queries
@@ -362,15 +401,17 @@ export class ScheduleSyncService {
                 const profile = staffMap.get(user.id);
                 if (profile) {
                     // --- NEW: Channel Removal Logic ---
-                    // If staff was active and is now being deactivated
-                    if (profile.isActive && !isActive) {
+                    // If staff is marked as inactive in sheet, enforce removal from all managed team chats.
+                    if (!isActive) {
+                        inactiveStaffProcessed++;
                         if (api) {
                             try {
                                 // Ban removes the user and prevents them from re-joining until unbanned
                                 // We use a short ban or immediately unban if we just want a "kick"
-                                await api.banChatMember(TEAM_CHATS.CHANNEL, Number(telegramId));
-                                // Optional: immediately unban so they can be re-invited/join later if needed, but they are kicked now
-                                await api.unbanChatMember(TEAM_CHATS.CHANNEL, Number(telegramId));
+                                const revokeResult = await this.revokeFromAllTeamChats(api, telegramId, "STAFF_DEACTIVATED");
+                                if (revokeResult.removedFromAtLeastOneChat) {
+                                    inactiveStaffRemovedFromChats++;
+                                }
                                 logSecurityEvent({
                                     event: "security.staff.channel_access_removed",
                                     telegramId,
@@ -382,7 +423,7 @@ export class ScheduleSyncService {
                                     operation: "syncTeam",
                                     safeContext: {
                                         fullName,
-                                        reason: "STAFF_DEACTIVATED",
+                                        reason: profile.isActive ? "STAFF_DEACTIVATED" : "STAFF_INACTIVE_ENFORCEMENT",
                                     },
                                 });
                             } catch (e: any) {
@@ -422,6 +463,10 @@ export class ScheduleSyncService {
                         await (userRepository as any).update(user.id, { isBlocked: false });
                     } else {
                         await workShiftRepository.deleteManyForStaffSince(profile.id, todayKyiv);
+                        await pendingReplyRepository.deleteMany({
+                            userId: telegramId,
+                            status: "pending",
+                        });
                     }
 
                     staffUpdated++;
@@ -495,6 +540,8 @@ export class ScheduleSyncService {
             staffUpdated,
             activeBefore,
             activeAfter,
+            inactiveStaffProcessed,
+            inactiveStaffRemovedFromChats,
             teamMapping: teamMappingForSchedule,
             blocklistRes
         };

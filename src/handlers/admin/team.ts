@@ -260,6 +260,8 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 const teamDelta = (teamRes.activeAfter || 0) - (teamRes.activeBefore || 0);
                 const teamDeltaStr = teamDelta >= 0 ? `+${teamDelta}` : `${teamDelta}`;
                 report += `👥 Team: <b>${teamRes.activeAfter || 0}</b> (${teamDeltaStr})\n`;
+                report += `🚫 Inactive processed: <b>${teamRes.inactiveStaffProcessed || 0}</b>\n`;
+                report += `🧹 Removed from chats: <b>${teamRes.inactiveStaffRemovedFromChats || 0}</b>\n`;
 
                 const shiftDelta = (schedRes.shiftsAfter || 0) - (schedRes.shiftsBefore || 0);
                 const shiftDeltaStr = shiftDelta >= 0 ? `+${shiftDelta}` : `${shiftDelta}`;
