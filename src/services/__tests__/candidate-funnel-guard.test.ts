@@ -178,6 +178,21 @@ describe("candidate funnel guard", () => {
         expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
     });
 
+    it("allows reset from staging active back to staging setup", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.STAGING_ACTIVE,
+            currentStep: FunnelStep.FIRST_SHIFT,
+            hrDecision: "ACCEPTED",
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.STAGING_SETUP,
+            notificationSent: false,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
+
     it("allows ready for hire to awaiting first shift progression", () => {
         const oldState = makeCandidate({
             status: CandidateStatus.READY_FOR_HIRE,
