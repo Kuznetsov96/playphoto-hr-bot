@@ -14,6 +14,7 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
 import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
+import { getBirthDateRejection } from "../utils/candidate-age.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -397,9 +398,38 @@ export const hrService = {
         return true;
     },
 
-    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" }> {
+    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" | "age_ineligible" }> {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return { ok: false, reason: "not_found" };
+
+        const ageRejection = getBirthDateRejection(cand.birthDate);
+        if (ageRejection) {
+            await candidateRepository.update(candId, {
+                status: CandidateStatus.REJECTED,
+                hrDecision: ageRejection === "UNDERAGE" ? "REJECTED_SYSTEM_UNDERAGE" : "AGE_LIMIT",
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: null,
+                hasUnreadMessage: false,
+            });
+
+            audit({
+                event: "candidate_interview_invited",
+                result: "failed",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: {
+                    locationId: cand.locationId,
+                    city: cand.city,
+                    reason: ageRejection,
+                }
+            });
+
+            return { ok: false, reason: "age_ineligible" };
+        }
 
         const { extractFirstName } = await import("../utils/string-utils.js");
         const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");

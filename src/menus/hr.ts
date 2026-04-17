@@ -516,6 +516,8 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 await ctx.answerCallbackQuery("Sent! ✅");
             } else if (result.reason === "bot_blocked") {
                 await ctx.answerCallbackQuery("Candidate blocked the bot.");
+            } else if (result.reason === "age_ineligible") {
+                await ctx.answerCallbackQuery("Candidate no longer meets age requirements.");
             } else {
                 await ctx.answerCallbackQuery("Invite failed.");
             }
