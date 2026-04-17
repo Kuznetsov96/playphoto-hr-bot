@@ -8,9 +8,12 @@ import { extractFirstName } from "../../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../../utils/location-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
-
-const MIN_CANDIDATE_AGE = 17;
-const MAX_CANDIDATE_AGE = 26;
+import {
+    MAX_CANDIDATE_AGE,
+    MIN_CANDIDATE_AGE,
+    getAgeRejection,
+    getCandidateAge,
+} from "../../../utils/candidate-age.js";
 
 // --- HELPERS ---
 /**
@@ -26,22 +29,6 @@ function getLocationIds(candidateData: any): string[] {
     // Fallback: Try to use single locationId if it exists
     if (candidateData.locationId) return [candidateData.locationId];
     return [];
-}
-
-function getCandidateAge(date: Date): number {
-    const today = new Date();
-    let age = today.getFullYear() - date.getFullYear();
-    const m = today.getMonth() - date.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < date.getDate())) {
-        age--;
-    }
-    return age;
-}
-
-function getAgeRejection(age: number): "UNDERAGE" | "AGE_LIMIT" | null {
-    if (age < MIN_CANDIDATE_AGE) return "UNDERAGE";
-    if (age > MAX_CANDIDATE_AGE) return "AGE_LIMIT";
-    return null;
 }
 
 function getAgeRejectionMeta(age: number) {
