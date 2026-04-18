@@ -160,7 +160,11 @@ jobs:
         echo "REPO_LC=$REPO_LC" >> "$GITHUB_ENV"
         echo "$DOCKER_ENV" > .env
         if [ -n "$RECOVERY_CHAT_ID" ]; then
-          printf '\nRECOVERY_CHAT_ID=%s\n' "$RECOVERY_CHAT_ID" >> .env
+          if grep -q '^RECOVERY_CHAT_ID=' .env; then
+            sed -i "s|^RECOVERY_CHAT_ID=.*|RECOVERY_CHAT_ID=$RECOVERY_CHAT_ID|" .env
+          else
+            printf '\nRECOVERY_CHAT_ID=%s\n' "$RECOVERY_CHAT_ID" >> .env
+          fi
         fi
         echo "$SA_JSON" > google-service-account.json
 
