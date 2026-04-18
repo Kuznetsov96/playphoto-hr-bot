@@ -57,9 +57,19 @@ export const CANDIDATE_TEXTS = {
     "candidate-ask-other-city-name": "Напиши, будь ласка, з якого ти міста? ✍️",
 
     // --- 3. DISCOVERY ТА ОНЛАЙН СТАЖУВАННЯ ---
-    "discovery-invite": (_kbLink: string, channelLink: string, guideLink: string) => `Привіт! ✨\n\nПеред нашою відеозустріччю (20 хв) будь ласка:\n\n📚 Ознайомся з <a href="${guideLink}">гайдом фотографа</a>\n🕊️ Підпишись на <a href="${channelLink}">канал підтримки</a>\n\nОбери зручний час для знайомства:`,
+    "discovery-invite": (_kbLink: string, channelLink: string, guideLink: string) => {
+        const guideLine = guideLink
+            ? `📚 Ознайомся з <a href="${guideLink}">гайдом фотографа</a>`
+            : `📚 Гайд фотографа надішле наставниця окремо`;
+        return `Привіт! ✨\n\nПеред нашою відеозустріччю (20 хв) будь ласка:\n\n${guideLine}\n🕊️ Підпишись на <a href="${channelLink}">канал підтримки</a>\n\nОбери зручний час для знайомства:`;
+    },
     "discovery-confirm": (mentorName: string, date: string, time: string) => `Чудово, зустріч призначено! 📅\n\nНаставниця <b>${mentorName}</b> чекатиме на тебе. Якщо виникнуть питання — ти можеш написати їй особисто.\n\n⏰ <b>${date}</b> о <b>${time}</b>\n🔗 Посилання на Meet надішлю за 10 хвилин до початку.`,
-    "training-manual-invite": (date: string, time: string, channelLink: string, guideLink: string) => `<b>Ти в команді! 📸</b>\n\nНам було дуже приємно познайомитися. Твій наступний крок — online-стажування, де ми разом розберемо всі тонкощі твоєї нової ролі.\n\n📅 <b>${date}</b> о <b>${time}</b>\n\nБудь ласка, повністю ознайомся з гайдом фотографа перед зустріччю — це допоможе нам провести час продуктивно:\n\n🕊️ <a href="${channelLink}">Канал підтримки</a>\n📚 <a href="${guideLink}">Гайд фотографа</a>\n\nПосилання на зустріч надішлю за 10 хвилин до початку. До зустрічі! 🤍`,
+    "training-manual-invite": (date: string, time: string, channelLink: string, guideLink: string) => {
+        const guideLine = guideLink
+            ? `📚 <a href="${guideLink}">Гайд фотографа</a>`
+            : `📚 Гайд фотографа надішле наставниця окремо`;
+        return `<b>Ти в команді! 📸</b>\n\nНам було дуже приємно познайомитися. Твій наступний крок — online-стажування, де ми разом розберемо всі тонкощі твоєї нової ролі.\n\n📅 <b>${date}</b> о <b>${time}</b>\n\nБудь ласка, повністю ознайомся з гайдом фотографа перед зустріччю — це допоможе нам провести час продуктивно:\n\n🕊️ <a href="${channelLink}">Канал підтримки</a>\n${guideLine}\n\nПосилання на зустріч надішлю за 10 хвилин до початку. До зустрічі! 🤍`;
+    },
 
     // --- 4. NDA ---
     "nda-request": (_firstName: string, ndaLink: string, jobDetails: string) => `<b>Майже на місці ✨</b>\n\nПривіт! ✨ Залишилася остання формальність — ознайомлення з NDA. Це наш стандарт професійної етики та захисту спільної творчості. Це займе не більше 2-х хвилин.\n\n<b>Деталі роботи:</b>${jobDetails}\n\n📄 <b>Договір:</b> <a href="${ndaLink}">Ознайомитись з NDA</a>\n\nБудь ласка, прочитай та підтвердь готовність:`,
