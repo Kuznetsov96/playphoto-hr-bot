@@ -115,6 +115,7 @@ if (!NDA_LINK) console.warn("⚠️  NDA_LINK is not set — NDA flow will send 
 export const KNOWLEDGE_BASE_LINK = env.KNOWLEDGE_BASE_LINK || "https://t.me/+hC9UDoSZb3hiZjFi";
 export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge base channel
 export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
+if (!PHOTOGRAPHER_GUIDE_LINK) console.warn("⚠️  PHOTOGRAPHER_GUIDE_LINK is not set — mentor messages will be sent without a clickable guide link");
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 export const OPENAI_API_KEY = env.OPENAI_API_KEY || "";
