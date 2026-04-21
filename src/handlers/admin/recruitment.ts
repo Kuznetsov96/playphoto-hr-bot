@@ -120,7 +120,7 @@ function buildHiringNeedDetailKeyboard(item: Awaited<ReturnType<typeof hiringNee
         .text("➕ Need", `admin_hn_inc_${item.locationId}`)
         .text("➖ Need", `admin_hn_dec_${item.locationId}`)
         .row()
-        .text(hiringNeedsService.isUrgent(item.urgency) ? "Urgent: On" : "Urgent: Off", `admin_hn_urgent_${item.locationId}`)
+        .text(item.overrideUrgency ? "Urgent: Manual" : "Urgent: Set", `admin_hn_urgent_${item.locationId}`)
         .row()
         .text("Auto", `admin_hn_auto_${item.locationId}`)
         .row()
@@ -207,8 +207,8 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
     }).row();
 
-    range.text(hiringNeedsService.isUrgent(item.urgency) ? "Urgent: On" : "Urgent: Off", async (ctx) => {
-        await hiringNeedsService.setUrgencyOverride(locationId, hiringNeedsService.isUrgent(item.urgency) ? null : "CRITICAL");
+    range.text(item.overrideUrgency ? "Urgent: Manual" : "Urgent: Set", async (ctx) => {
+        await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
 
@@ -295,7 +295,7 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent(?:_(.+))?$/, async (ctx
             await ctx.answerCallbackQuery("Location not found").catch(() => { });
             return;
         }
-        await hiringNeedsService.setUrgencyOverride(locationId, hiringNeedsService.isUrgent(item.urgency) ? null : "CRITICAL");
+        await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
         await ctx.answerCallbackQuery("Urgency updated").catch(() => { });
     } catch (err) {
