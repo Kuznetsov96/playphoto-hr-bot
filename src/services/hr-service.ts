@@ -652,8 +652,8 @@ export const hrService = {
 
     async getCityRecruitmentStats() {
         const locations = await locationRepository.findAllActive();
-        const board = await hiringNeedsService.getBoard();
-        const boardMap = new Map(board.items.map((item) => [item.locationId, item]));
+        const board = await hiringNeedsService.getBoard().catch(() => null);
+        const boardMap = new Map((board?.items || []).map((item) => [item.locationId, item]));
 
         const results: any[] = [];
 
@@ -675,7 +675,7 @@ export const hrService = {
             // Show location ONLY if it has an active need (vacancies)
             if (loc.neededCount > 0) {
                 const boardItem = boardMap.get(loc.id);
-                const priority = boardItem?.urgency || "NORMAL";
+                const priority = boardItem?.urgency || (loc.neededCount >= 3 ? "URGENT" : "ACTIVE");
                 results.push({
                     city: loc.city,
                     locationName: loc.name,
