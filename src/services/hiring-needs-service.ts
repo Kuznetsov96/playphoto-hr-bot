@@ -113,14 +113,14 @@ function urgencyIcon(urgency: HiringUrgency): string {
 function urgencyLabel(urgency: HiringUrgency): string {
     switch (urgency) {
         case "CRITICAL":
-            return "Critical";
+            return "Urgent";
         case "HIGH":
-            return "High";
+            return "Urgent";
         case "NORMAL":
-            return "Normal";
+            return "Auto";
         case "LOW":
         default:
-            return "Low";
+            return "Auto";
     }
 }
 
@@ -270,7 +270,7 @@ export const hiringNeedsService = {
         lines.push("");
         lines.push(`Locations with demand: <b>${board.totals.withDemand}</b> / ${board.totals.locations}`);
         lines.push(`Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b>`);
-        lines.push(`Critical: <b>${board.totals.critical}</b> | High: <b>${board.totals.high}</b> | Normal: <b>${board.totals.normal}</b>`);
+        lines.push(`Urgent: <b>${board.totals.critical + board.totals.high}</b>`);
         lines.push("");
 
         const visibleItems = board.items.filter((item) => item.needed > 0);
@@ -305,7 +305,7 @@ export const hiringNeedsService = {
         const title = role === "HR" ? "Hiring Needs" : "Location Priorities";
         const lines: string[] = [
             `🎯 <b>${title}</b>`,
-            `Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b> | Critical: <b>${board.totals.critical}</b>`,
+            `Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b> | Urgent: <b>${board.totals.critical + board.totals.high}</b>`,
             ""
         ];
 
@@ -330,18 +330,18 @@ export const hiringNeedsService = {
 
         if (visibleItems.length > 7) {
             lines.push("");
-            lines.push(`<i>+${visibleItems.length - 7} more. Admin can manage the full board.</i>`);
+            lines.push(`<i>+${visibleItems.length - 7} more</i>`);
         }
 
         return lines.join("\n");
     },
 
     formatNeedDetail(item: HiringNeedItem): string {
-        const override = item.overrideUrgency ? ` (override: ${urgencyLabel(item.overrideUrgency)})` : "";
+        const override = item.overrideUrgency ? " (manual)" : "";
         return (
             `🎯 <b>Need Control</b>\n\n` +
             `📍 <b>${item.locationName}</b> (${item.city})\n` +
-            `Priority: <b>${urgencyLabel(item.urgency)}</b>${override}\n` +
+            `Urgent: <b>${item.urgency === "CRITICAL" || item.urgency === "HIGH" ? "Yes" : "No"}</b>${override}\n` +
             `Need: <b>${item.needed}</b>\n` +
             `Open: <b>${item.gap}</b>\n` +
             `HR pool: <b>${item.hrPool}</b>\n` +
@@ -360,6 +360,14 @@ export const hiringNeedsService = {
 
     getUrgencyLabel(urgency: HiringUrgency): string {
         return urgencyLabel(urgency);
+    },
+
+    isUrgent(urgency: HiringUrgency): boolean {
+        return urgency === "CRITICAL" || urgency === "HIGH";
+    },
+
+    getUrgencyRank(urgency: HiringUrgency): number {
+        return urgencyWeight(urgency);
     },
 
     async setUrgencyOverride(locationId: string, urgency: HiringUrgency | null): Promise<void> {
