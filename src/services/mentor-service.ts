@@ -272,8 +272,15 @@ export class MentorService {
             return null;
         }
 
-        let msgText = "";
+        await candidateRepository.update(candId, {
+            materialsSent: true,
+            materialsSentAt: new Date(),
+            status: "ACCEPTED",
+            notificationSent: true, // Mark as notified so worker doesn't send duplicate welcome
+            isWaitlisted: false
+        });
 
+        let msgText = "";
         if (cand.status === "WAITLIST" || cand.status === "WAITLIST_MENTOR") {
             msgText = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для нашої короткої зустрічі-знайомства. Тисни кнопку нижче, щоб обрати зручний час! 👇`;
         } else if (cand.materialsSent && !cand.discoverySlotId) {
@@ -284,14 +291,6 @@ export class MentorService {
                 : accessService.staticJoinLink;
             msgText = CANDIDATE_TEXTS["discovery-invite"](KNOWLEDGE_BASE_LINK, channelLink, PHOTOGRAPHER_GUIDE_LINK);
         }
-
-        await candidateRepository.update(candId, {
-            materialsSent: true,
-            materialsSentAt: new Date(),
-            status: "ACCEPTED",
-            notificationSent: true, // Mark as notified so worker doesn't send duplicate welcome
-            isWaitlisted: false
-        });
 
         audit({
             event: "candidate_materials_sent",
