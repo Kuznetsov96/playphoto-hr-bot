@@ -124,13 +124,14 @@ async function refreshHiringNeedDetails(ctx: MyContext, locationId: string) {
 
 adminHiringNeedsMenu.dynamic(async (ctx, range) => {
     const board = await hiringNeedsService.getBoard();
+    const openNeeds = board.items.filter((item) => item.needed > 0);
 
-    if (board.items.length === 0) {
+    if (openNeeds.length === 0) {
         range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
     } else {
-        for (const item of board.items.slice(0, 28)) {
+        for (const item of openNeeds.slice(0, 18)) {
             const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
-            const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city)} • need ${item.needed} • gap ${item.gap}`;
+            const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city)} • need ${item.needed} • open ${item.gap}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedLocationId = item.locationId;
                 await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(item), "admin-hiring-need-details", { pushToStack: true });

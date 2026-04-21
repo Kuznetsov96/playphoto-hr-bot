@@ -164,7 +164,7 @@ mentorHubMenu.dynamic(async (ctx, range) => {
 
     range.text(`🎯 Needs ${board.totals.critical}`, async (ctx) => {
         const fresh = await hiringNeedsService.getBoard();
-        const text = hiringNeedsService.formatBoardText(fresh, "MENTOR");
+        const text = hiringNeedsService.formatRoleSummary(fresh, "MENTOR");
         await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs", { pushToStack: true });
     }).row();
 
@@ -175,21 +175,6 @@ mentorHubMenu.dynamic(async (ctx, range) => {
 });
 
 mentorHiringNeedsMenu.dynamic(async (ctx, range) => {
-    const board = await hiringNeedsService.getBoard();
-    if (board.items.length === 0) {
-        range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
-    } else {
-        for (const item of board.items.slice(0, 20)) {
-            const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
-            const cityCode = getCityCode(item.city);
-            const shortLoc = getShortLocationName(item.locationName, item.city);
-            range.text(
-                `${icon} [${cityCode}] ${shortLoc} • need ${item.needed} • mentor ${item.mentorPool} • final ${item.finalPool}`,
-                (ctx) => ctx.answerCallbackQuery("Use this board to prioritize mentor actions")
-            ).row();
-        }
-    }
-
     range.text("🏠 Back", async (ctx) => {
         await ScreenManager.goBack(ctx, await mentorService.getHubText(), "mentor-hub-menu");
     });
