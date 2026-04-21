@@ -241,8 +241,12 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
     });
 });
 
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_inc_(.+)$/, async (ctx) => {
-    const locationId = ctx.match[1];
+function getHiringNeedLocationId(ctx: MyContext): string | undefined {
+    return ctx.match?.[1] || ctx.session.selectedLocationId;
+}
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_inc(?:_(.+))?$/, async (ctx) => {
+    const locationId = getHiringNeedLocationId(ctx);
     if (!locationId) {
         await ctx.answerCallbackQuery("Location not found").catch(() => { });
         return;
@@ -259,8 +263,8 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_inc_(.+)$/, async (ctx) => {
     }
 });
 
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_dec_(.+)$/, async (ctx) => {
-    const locationId = ctx.match[1];
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_dec(?:_(.+))?$/, async (ctx) => {
+    const locationId = getHiringNeedLocationId(ctx);
     if (!locationId) {
         await ctx.answerCallbackQuery("Location not found").catch(() => { });
         return;
@@ -277,8 +281,8 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_dec_(.+)$/, async (ctx) => {
     }
 });
 
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent_(.+)$/, async (ctx) => {
-    const locationId = ctx.match[1];
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent(?:_(.+))?$/, async (ctx) => {
+    const locationId = getHiringNeedLocationId(ctx);
     if (!locationId) {
         await ctx.answerCallbackQuery("Location not found").catch(() => { });
         return;
@@ -300,8 +304,8 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent_(.+)$/, async (ctx) => 
     }
 });
 
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_auto_(.+)$/, async (ctx) => {
-    const locationId = ctx.match[1];
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_auto(?:_(.+))?$/, async (ctx) => {
+    const locationId = getHiringNeedLocationId(ctx);
     if (!locationId) {
         await ctx.answerCallbackQuery("Location not found").catch(() => { });
         return;
