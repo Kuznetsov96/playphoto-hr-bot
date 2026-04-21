@@ -15,6 +15,7 @@ import logger from "../core/logger.js";
 import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
+import { hiringNeedsService } from "./hiring-needs-service.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -651,7 +652,8 @@ export const hrService = {
 
     async getCityRecruitmentStats() {
         const locations = await locationRepository.findAllActive();
-        const { getLocationPriority } = await import("../utils/location-helpers.js");
+        const board = await hiringNeedsService.getBoard();
+        const boardMap = new Map(board.items.map((item) => [item.locationId, item]));
 
         const results: any[] = [];
 
@@ -672,23 +674,26 @@ export const hrService = {
 
             // Show location ONLY if it has an active need (vacancies)
             if (loc.neededCount > 0) {
-                const priority = getLocationPriority(loc.neededCount);
+                const boardItem = boardMap.get(loc.id);
+                const priority = boardItem?.urgency || "NORMAL";
                 results.push({
                     city: loc.city,
                     locationName: loc.name,
                     locationId: loc.id,
                     candidateCount: freshCount,
                     totalNeeded: loc.neededCount,
-                    priority
+                    priority,
+                    gap: boardItem?.gap || loc.neededCount
                 });
             }
         }
 
         // Sort by priority (URGENT first) then by city
         return results.sort((a, b) => {
-            const pMap: Record<string, number> = { 'URGENT': 0, 'ACTIVE': 1, 'FULL': 2 };
+            const pMap: Record<string, number> = { "CRITICAL": 0, "HIGH": 1, "NORMAL": 2, "LOW": 3, "URGENT": 0, "ACTIVE": 2, "FULL": 3 };
             const pDiff = (pMap[a.priority] ?? 99) - (pMap[b.priority] ?? 99);
             if (pDiff !== 0) return pDiff;
+            if ((b.gap || 0) !== (a.gap || 0)) return (b.gap || 0) - (a.gap || 0);
             return a.city.localeCompare(b.city);
         });
     },

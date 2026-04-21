@@ -12,6 +12,7 @@ import { formatCandidateProfile, formatMessagePreview } from "../utils/profile-f
 import { formatCompactName, shortenName } from "../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
 import { ScreenManager } from "../utils/screen-manager.js";
+import { hiringNeedsService } from "../services/hiring-needs-service.js";
 
 // --- HELPERS ---
 const formatDate = (date: Date) => {
@@ -130,6 +131,8 @@ export const mentorOnboardingDayMenu = new Menu<MyContext>("mentor-onboarding-da
 menuRegistry.register(mentorOnboardingDayMenu);
 export const mentorOnboardingDetailsMenu = new Menu<MyContext>("mentor-onboarding-details");
 menuRegistry.register(mentorOnboardingDetailsMenu);
+export const mentorHiringNeedsMenu = new Menu<MyContext>("mentor-hiring-needs");
+menuRegistry.register(mentorHiringNeedsMenu);
 export const mentorBroadcastCitiesMenu = new Menu<MyContext>("mentor-broadcast-cities");
 menuRegistry.register(mentorBroadcastCitiesMenu);
 export const mentorBroadcastCombinedConfirmMenu = new Menu<MyContext>("mentor-broadcast-combined-confirm");
@@ -145,6 +148,7 @@ mentorActionSuccessMenu.text("🏠 Back to Hub", async (ctx) => {
 // --- 1. MENTOR HUB ---
 mentorHubMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
+    const board = await hiringNeedsService.getBoard();
 
     const totalInbox = stats.newAcceptedCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
     const inboxLabel = `📥 Inbox${totalInbox > 0 ? ` ${totalInbox}` : ''}`;
@@ -158,10 +162,37 @@ mentorHubMenu.dynamic(async (ctx, range) => {
         await updateCalendarDashboard(ctx);
     }).row();
 
+    range.text(`🎯 Needs ${board.totals.critical}`, async (ctx) => {
+        const fresh = await hiringNeedsService.getBoard();
+        const text = hiringNeedsService.formatBoardText(fresh, "MENTOR");
+        await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs", { pushToStack: true });
+    }).row();
+
     const onboardingLabel = `🚀 Onboarding${stats.onboardingCount > 0 ? ` ${stats.onboardingCount}` : ''}`;
     range.text(onboardingLabel, async (ctx) => {
         await ScreenManager.renderScreen(ctx, "🚀 <b>Onboarding</b>", "mentor-onboarding", { pushToStack: true });
     }).row();
+});
+
+mentorHiringNeedsMenu.dynamic(async (ctx, range) => {
+    const board = await hiringNeedsService.getBoard();
+    if (board.items.length === 0) {
+        range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
+    } else {
+        for (const item of board.items.slice(0, 20)) {
+            const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
+            const cityCode = getCityCode(item.city);
+            const shortLoc = getShortLocationName(item.locationName, item.city);
+            range.text(
+                `${icon} [${cityCode}] ${shortLoc} • need ${item.needed} • mentor ${item.mentorPool} • final ${item.finalPool}`,
+                (ctx) => ctx.answerCallbackQuery("Use this board to prioritize mentor actions")
+            ).row();
+        }
+    }
+
+    range.text("🏠 Back", async (ctx) => {
+        await ScreenManager.goBack(ctx, await mentorService.getHubText(), "mentor-hub-menu");
+    });
 });
 
 // --- 2. INBOX ---
@@ -684,6 +715,7 @@ mentorManualTrainingDateMenu.register(mentorManualTrainingTimeMenu);
 mentorManualTrainingDateMenu.register(mentorManualTimeSelectionMenu);
 mentorHubMenu.register(mentorTrainingDatesMenu);
 mentorTrainingDatesMenu.register(mentorTrainingDayViewMenu);
+mentorHubMenu.register(mentorHiringNeedsMenu);
 mentorHubMenu.register(mentorOnboardingMenu);
 mentorOnboardingMenu.register(mentorOnboardingDayMenu);
 mentorOnboardingDayMenu.register(mentorOnboardingDetailsMenu);
