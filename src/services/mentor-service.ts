@@ -17,8 +17,16 @@ import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
+import { hiringNeedsService } from "./hiring-needs-service.js";
 
 export class MentorService {
+    private getUrgencyRank(urgency: "LOW" | "NORMAL" | "HIGH" | "CRITICAL"): number {
+        if (urgency === "CRITICAL") return 4;
+        if (urgency === "HIGH") return 3;
+        if (urgency === "NORMAL") return 2;
+        return 1;
+    }
+
     private getKyivStartOfToday() {
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         kyivNow.setHours(0, 0, 0, 0);
@@ -254,8 +262,19 @@ export class MentorService {
         // 2. Ті, що отримали матеріали, але не записались (!discoverySlotId)
         // 3. Ті, що пройшли Discovery (DISCOVERY_COMPLETED)
         const waitingForAction = accepted.filter(c => !c.discoverySlotId);
+        const all = [...waitingForAction, ...discoveryDone];
+        const board = await hiringNeedsService.getBoard();
+        const urgencyByLocation = new Map(board.items.map((item) => [item.locationId, this.getUrgencyRank(item.urgency)]));
 
-        return [...waitingForAction, ...discoveryDone];
+        return all.sort((left, right) => {
+            const leftUrgency = urgencyByLocation.get(left.locationId || "") || 0;
+            const rightUrgency = urgencyByLocation.get(right.locationId || "") || 0;
+            if (leftUrgency !== rightUrgency) return rightUrgency - leftUrgency;
+
+            const leftTime = left.materialsSentAt ? new Date(left.materialsSentAt).getTime() : 0;
+            const rightTime = right.materialsSentAt ? new Date(right.materialsSentAt).getTime() : 0;
+            return leftTime - rightTime;
+        });
     }
 
     async sendMaterials(api: any, candId: string) {

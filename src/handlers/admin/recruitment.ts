@@ -15,6 +15,7 @@ import { getCityCode, getShortLocationName } from "../../utils/location-helpers.
 import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 import { statsService } from "../../services/stats-service.js";
 import { hrService } from "../../services/hr-service.js";
+import { hiringNeedsService, type HiringUrgency } from "../../services/hiring-needs-service.js";
 import { createKyivDate } from "../../utils/bot-utils.js";
 import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
@@ -30,6 +31,8 @@ export const adminNDAMenu = new Menu<MyContext>("admin-nda-tracking");
 export const adminCandidateMenu = new Menu<MyContext>("admin-candidate-details");
 export const adminFirstShiftStaffMenu = new Menu<MyContext>("admin-first-shift-staff");
 export const adminStagingSelectLocMenu = new Menu<MyContext>("admin-staging-select-loc");
+export const adminHiringNeedsMenu = new Menu<MyContext>("admin-hiring-needs");
+export const adminHiringNeedDetailsMenu = new Menu<MyContext>("admin-hiring-need-details");
 
 adminOpsMenu.dynamic(async (ctx, range) => {
     const telegramId = ctx.from?.id;
@@ -62,11 +65,159 @@ adminOpsMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
+    if (isSuperAdmin) {
+        range.text("🎯 Hiring Needs", async (ctx) => {
+            const board = await hiringNeedsService.getBoard();
+            const text = hiringNeedsService.formatBoardText(board, "ADMIN");
+            await ScreenManager.renderScreen(ctx, text, "admin-hiring-needs", { pushToStack: true });
+        }).row();
+    }
+
     range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
         const { staffService } = await import("../../modules/staff/services/index.js");
         const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
         const text = await staffService.getAdminHeader(userRole as any);
         await ScreenManager.goBack(ctx, text, "admin-main");
+    });
+});
+
+function getNextUrgency(current: HiringUrgency): HiringUrgency {
+    if (current === "LOW") return "NORMAL";
+    if (current === "NORMAL") return "HIGH";
+    if (current === "HIGH") return "CRITICAL";
+    return "LOW";
+}
+
+function parseDeadlineInput(raw: string): string | null {
+    const value = raw.trim();
+    if (!value || value === "-") return null;
+
+    const shortMatch = value.match(/^(\d{1,2})\.(\d{1,2})$/);
+    if (shortMatch) {
+        const day = Number(shortMatch[1]);
+        const month = Number(shortMatch[2]);
+        if (day < 1 || day > 31 || month < 1 || month > 12) return null;
+        return `${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}`;
+    }
+
+    const longMatch = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (longMatch) {
+        const day = Number(longMatch[1]);
+        const month = Number(longMatch[2]);
+        const year = Number(longMatch[3]);
+        if (day < 1 || day > 31 || month < 1 || month > 12 || year < 2024 || year > 2100) return null;
+        return `${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.${year}`;
+    }
+
+    return null;
+}
+
+async function refreshHiringNeedDetails(ctx: MyContext, locationId: string) {
+    const fresh = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+    if (!fresh) {
+        const board = await hiringNeedsService.getBoard();
+        await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
+        return;
+    }
+    await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
+}
+
+adminHiringNeedsMenu.dynamic(async (ctx, range) => {
+    const board = await hiringNeedsService.getBoard();
+
+    if (board.items.length === 0) {
+        range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
+    } else {
+        for (const item of board.items.slice(0, 28)) {
+            const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
+            const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city)} • need ${item.needed} • gap ${item.gap}`;
+            range.text(label, async (ctx) => {
+                ctx.session.selectedLocationId = item.locationId;
+                await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(item), "admin-hiring-need-details", { pushToStack: true });
+            }).row();
+        }
+    }
+
+    range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+        await ScreenManager.goBack(ctx, "🛠️ <b>HR Operations</b>", "admin-ops");
+    });
+});
+
+adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
+    const locationId = ctx.session.selectedLocationId;
+    if (!locationId) {
+        range.text("No selected location", (ctx) => ctx.answerCallbackQuery("Select location first")).row();
+        range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+            await ScreenManager.goBack(ctx, "🎯 <b>Hiring Needs</b>", "admin-hiring-needs");
+        });
+        return;
+    }
+
+    const board = await hiringNeedsService.getBoard();
+    const item = board.items.find((row) => row.locationId === locationId);
+
+    if (!item) {
+        range.text("Location is not in active board", (ctx) => ctx.answerCallbackQuery("No active demand")).row();
+        range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+            await ScreenManager.goBack(ctx, "🎯 <b>Hiring Needs</b>", "admin-hiring-needs");
+        });
+        return;
+    }
+
+    range.text("➕ Need", async (ctx) => {
+        await hiringNeedsService.adjustNeededCount(locationId, 1);
+        const fresh = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+        if (!fresh) {
+            const board = await hiringNeedsService.getBoard();
+            await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
+            return;
+        }
+        await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
+    });
+
+    range.text("➖ Need", async (ctx) => {
+        await hiringNeedsService.adjustNeededCount(locationId, -1);
+        const fresh = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+        if (!fresh) {
+            const board = await hiringNeedsService.getBoard();
+            await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
+            return;
+        }
+        await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
+    }).row();
+
+    range.text(`Priority: ${hiringNeedsService.getUrgencyLabel(item.urgency)}`, async (ctx) => {
+        const next = getNextUrgency(item.overrideUrgency || item.urgency);
+        await hiringNeedsService.setUrgencyOverride(locationId, next);
+        await refreshHiringNeedDetails(ctx, locationId);
+    }).row();
+
+    range.text("Auto Priority", async (ctx) => {
+        await hiringNeedsService.setUrgencyOverride(locationId, null);
+        await refreshHiringNeedDetails(ctx, locationId);
+    }).row();
+
+    range.text(item.deadline ? `📅 Deadline ${item.deadline}` : "📅 Set Deadline", async (ctx) => {
+        ctx.session.step = `set_hiring_deadline_${locationId}`;
+        await ctx.answerCallbackQuery();
+        await ctx.reply(
+            "✍️ Enter deadline (dd.mm or dd.mm.yyyy).\nSend '-' to clear.",
+            { reply_markup: { force_reply: true } }
+        );
+    });
+
+    range.text(item.note ? "📝 Edit Note" : "📝 Set Note", async (ctx) => {
+        ctx.session.step = `set_hiring_note_${locationId}`;
+        await ctx.answerCallbackQuery();
+        await ctx.reply(
+            "✍️ Enter short note (up to 140 chars).\nSend '-' to clear.",
+            { reply_markup: { force_reply: true } }
+        );
+    }).row();
+
+    range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+        const freshBoard = await hiringNeedsService.getBoard();
+        await ScreenManager.goBack(ctx, hiringNeedsService.formatBoardText(freshBoard, "ADMIN"), "admin-hiring-needs");
     });
 });
 
@@ -579,6 +730,29 @@ adminRecruitmentHandlers.callbackQuery(/^staging_(.+)_date_(.+)$/, async (ctx: M
 
 adminRecruitmentHandlers.on("message:text", async (ctx, next) => {
     const step = ctx.session.step || "";
+    if (step.startsWith("set_hiring_deadline_")) {
+        const locationId = step.replace("set_hiring_deadline_", "");
+        const deadline = parseDeadlineInput(ctx.message.text);
+        if (ctx.message.text.trim() !== "-" && deadline === null) {
+            await ctx.reply("❌ Invalid format. Use dd.mm or dd.mm.yyyy");
+            return;
+        }
+        await hiringNeedsService.setDeadline(locationId, deadline);
+        ctx.session.step = "idle";
+        await refreshHiringNeedDetails(ctx, locationId);
+        return;
+    }
+
+    if (step.startsWith("set_hiring_note_")) {
+        const locationId = step.replace("set_hiring_note_", "");
+        const raw = ctx.message.text.trim();
+        const note = raw === "-" ? null : raw.slice(0, 140);
+        await hiringNeedsService.setNote(locationId, note);
+        ctx.session.step = "idle";
+        await refreshHiringNeedDetails(ctx, locationId);
+        return;
+    }
+
     if (step.startsWith("set_staging_time_")) {
         await ctx.deleteMessage().catch(() => { });
         const candId = step.replace("set_staging_time_", "");

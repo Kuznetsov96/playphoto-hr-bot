@@ -15,12 +15,15 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { getUserAdminRole } from "../middleware/role-check.js";
 import { AdminRole, CandidateStatus } from "@prisma/client";
+import { hiringNeedsService } from "../services/hiring-needs-service.js";
 
 // --- MENUS (Declared first to prevent circular dependency issues) ---
 export const hrHubMenu = new Menu<MyContext>("hr-hub-menu");
 menuRegistry.register(hrHubMenu);
 export const hrToolsMenu = new Menu<MyContext>("hr-tools");
 menuRegistry.register(hrToolsMenu);
+export const hrHiringNeedsMenu = new Menu<MyContext>("hr-hiring-needs");
+menuRegistry.register(hrHiringNeedsMenu);
 export const hrInboxMenu = new Menu<MyContext>("hr-inbox");
 menuRegistry.register(hrInboxMenu);
 export const hrInboxNewMenu = new Menu<MyContext>("hr-inbox-new");
@@ -99,6 +102,7 @@ const getDayViewText = async (dateStr: string) => {
 hrHubMenu.dynamic(async (ctx, range) => {
     logger.info({ userId: ctx.from?.id }, `[UX] HR Lead entering Hub`);
     const stats = await hrService.getHubStats();
+    const needsBoard = await hiringNeedsService.getBoard();
     range.text(STAFF_TEXTS["hr-menu-inbox"]({ count: stats.inboxTotal }), async (ctx) => {
         ctx.session.candidatePage = 1;
         await ScreenManager.renderScreen(ctx, "📥 <b>Inbox</b>", "hr-inbox", { pushToStack: true });
@@ -106,9 +110,44 @@ hrHubMenu.dynamic(async (ctx, range) => {
     range.text(STAFF_TEXTS["hr-menu-calendar"]({ count: stats.todayInterviews }), async (ctx) => {
         await ScreenManager.renderScreen(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates", { pushToStack: true });
     });
+    range.text(`🎯 Hiring Needs (${needsBoard.totals.critical})`, async (ctx) => {
+        const board = await hiringNeedsService.getBoard();
+        const text = hiringNeedsService.formatBoardText(board, "HR");
+        await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs", { pushToStack: true });
+    }).row();
     range.text(STAFF_TEXTS["hr-menu-tools"], async (ctx) => {
         await ScreenManager.renderScreen(ctx, "📣 <b>Broadcasts & Tools</b>", "hr-tools", { pushToStack: true });
     }).row();
+});
+
+hrHiringNeedsMenu.dynamic(async (ctx, range) => {
+    const board = await hiringNeedsService.getBoard();
+    if (board.items.length === 0) {
+        range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
+    } else {
+        for (const item of board.items.slice(0, 24)) {
+            const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
+            const cityCode = getCityCode(item.city);
+            const shortLoc = getShortLocationName(item.locationName, item.city);
+            const label = `${icon} [${cityCode}] ${shortLoc} • need ${item.needed} • gap ${item.gap}`;
+            range.text(label, async (ctx) => {
+                ctx.session.broadcastCity = item.city;
+                ctx.session.broadcastLocationId = item.locationId;
+                ctx.session.candidatePage = 1;
+                await ScreenManager.renderScreen(
+                    ctx,
+                    `📍 <b>${item.locationName}</b>\nNeed: ${item.needed} | Gap: ${item.gap}\n\n` +
+                    `Opening reserve candidates for this location.`,
+                    "hr-waitlist-profiles",
+                    { pushToStack: true }
+                );
+            }).row();
+        }
+    }
+
+    range.text(STAFF_TEXTS["hr-menu-back-home"], async (ctx) => {
+        await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
+    });
 });
 
 // --- INBOX ---
@@ -1077,6 +1116,7 @@ hrStagingConfirmMenu.dynamic(async (ctx, range) => {
 hrHubMenu.register(hrInboxMenu);
 hrHubMenu.register(hrDashboardDatesMenu);
 hrHubMenu.register(hrDayViewMenu);
+hrHubMenu.register(hrHiringNeedsMenu);
 hrHubMenu.register(hrToolsMenu);
 hrHubMenu.register(hrCandidateUnifiedMenu);
 hrCandidateUnifiedMenu.register(hrChangeLocationUnifiedMenu);
