@@ -102,7 +102,6 @@ const getDayViewText = async (dateStr: string) => {
 hrHubMenu.dynamic(async (ctx, range) => {
     logger.info({ userId: ctx.from?.id }, `[UX] HR Lead entering Hub`);
     const stats = await hrService.getHubStats();
-    const needsBoard = await hiringNeedsService.getBoard();
     range.text(STAFF_TEXTS["hr-menu-inbox"]({ count: stats.inboxTotal }), async (ctx) => {
         ctx.session.candidatePage = 1;
         await ScreenManager.renderScreen(ctx, "📥 <b>Inbox</b>", "hr-inbox", { pushToStack: true });
@@ -110,7 +109,7 @@ hrHubMenu.dynamic(async (ctx, range) => {
     range.text(STAFF_TEXTS["hr-menu-calendar"]({ count: stats.todayInterviews }), async (ctx) => {
         await ScreenManager.renderScreen(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates", { pushToStack: true });
     });
-    range.text(`🎯 Hiring Needs (${needsBoard.totals.critical})`, async (ctx) => {
+    range.text("🎯 Hiring Needs", async (ctx) => {
         const board = await hiringNeedsService.getBoard();
         const text = hiringNeedsService.formatRoleSummary(board, "HR");
         await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs", { pushToStack: true });

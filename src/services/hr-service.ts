@@ -551,11 +551,22 @@ export const hrService = {
     },
 
     async getNewCandidates(take = 10) {
-        return candidateRepository.findByStatusWithUser(CandidateStatus.SCREENING, {
+        const candidates = await candidateRepository.findByStatusWithUser(CandidateStatus.SCREENING, {
             interviewSlotId: null,
             appearance: { not: null },
             isOtherCity: false
         });
+        const board = await hiringNeedsService.getBoard().catch(() => null);
+        const rankByLocation = new Map((board?.items || []).map((item) => [item.locationId, hiringNeedsService.getUrgencyRank(item.urgency)]));
+
+        return candidates
+            .sort((left, right) => {
+                const leftRank = rankByLocation.get(left.locationId || "") || 0;
+                const rightRank = rankByLocation.get(right.locationId || "") || 0;
+                if (leftRank !== rightRank) return rightRank - leftRank;
+                return (left.fullName || "").localeCompare(right.fullName || "");
+            })
+            .slice(0, take);
     },
 
     async getManualReviewCandidates() {

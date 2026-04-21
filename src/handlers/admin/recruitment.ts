@@ -81,13 +81,6 @@ adminOpsMenu.dynamic(async (ctx, range) => {
     });
 });
 
-function getNextUrgency(current: HiringUrgency): HiringUrgency {
-    if (current === "LOW") return "NORMAL";
-    if (current === "NORMAL") return "HIGH";
-    if (current === "HIGH") return "CRITICAL";
-    return "LOW";
-}
-
 function parseDeadlineInput(raw: string): string | null {
     const value = raw.trim();
     if (!value || value === "-") return null;
@@ -187,13 +180,12 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
     }).row();
 
-    range.text(`Priority: ${hiringNeedsService.getUrgencyLabel(item.urgency)}`, async (ctx) => {
-        const next = getNextUrgency(item.overrideUrgency || item.urgency);
-        await hiringNeedsService.setUrgencyOverride(locationId, next);
+    range.text(hiringNeedsService.isUrgent(item.urgency) ? "Urgent: On" : "Urgent: Off", async (ctx) => {
+        await hiringNeedsService.setUrgencyOverride(locationId, hiringNeedsService.isUrgent(item.urgency) ? null : "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
 
-    range.text("Auto Priority", async (ctx) => {
+    range.text("Auto", async (ctx) => {
         await hiringNeedsService.setUrgencyOverride(locationId, null);
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
