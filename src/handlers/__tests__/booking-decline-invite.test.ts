@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const cancelInterviewSlot = vi.fn().mockResolvedValue(undefined);
+const cancelTrainingSlot = vi.fn().mockResolvedValue(undefined);
 const findByTelegramId = vi.fn();
 const updateMany = vi.fn();
 const update = vi.fn();
@@ -68,7 +69,7 @@ vi.mock("../../config.js", () => ({
 vi.mock("../../services/booking-service.js", () => ({
     bookingService: {
         cancelInterviewSlot,
-        cancelTrainingSlot: vi.fn(),
+        cancelTrainingSlot,
         bookInterviewSlot: vi.fn(),
         bookTrainingSlot: vi.fn(),
     }
@@ -254,6 +255,70 @@ describe("booking decline invite", () => {
                 candidateDecision: "Кандидатка відмовилась від вакансії",
                 notificationSent: true,
                 googleMeetLink: null,
+            })
+        );
+    });
+
+    it("cancels a mentor-stage booking without rejecting the candidate", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-mentor-cancel",
+            fullName: "Jane",
+            status: "TRAINING_SCHEDULED",
+            trainingSlotId: "training-slot-cancel",
+        });
+
+        const ctx = {
+            from: { id: 555666 },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback(buildSignedCallback("cct", "training-slot-cancel"), ctx);
+
+        expect(cancelTrainingSlot).toHaveBeenCalledWith("training-slot-cancel", 555666);
+        expect(update).toHaveBeenCalledWith(
+            "cand-mentor-cancel",
+            expect.objectContaining({
+                status: "WAITLIST_MENTOR",
+                currentStep: "TRAINING",
+                isWaitlisted: true,
+                candidateDecision: null,
+                notificationSent: false,
+                trainingMeetLink: null,
+            })
+        );
+        expect(update).not.toHaveBeenCalledWith(
+            "cand-mentor-cancel",
+            expect.objectContaining({ status: "REJECTED" })
+        );
+    });
+
+    it("rejects mentor-stage candidates only after explicit withdrawal confirmation", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-mentor-withdraw",
+            fullName: "Jane",
+            status: "DISCOVERY_SCHEDULED",
+            discoverySlotId: "discovery-slot-withdraw",
+        });
+
+        const ctx = {
+            from: { id: 777888 },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback(buildSignedCallback("cwm", "discovery-slot-withdraw"), ctx);
+
+        expect(cancelTrainingSlot).toHaveBeenCalledWith("discovery-slot-withdraw", 777888);
+        expect(update).toHaveBeenCalledWith(
+            "cand-mentor-withdraw",
+            expect.objectContaining({
+                status: "REJECTED",
+                candidateDecision: "Кандидатка відмовилась від вакансії на mentor-етапі",
+                notificationSent: true,
+                trainingMeetLink: null,
             })
         );
     });
