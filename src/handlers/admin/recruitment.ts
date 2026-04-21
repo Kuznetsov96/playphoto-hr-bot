@@ -243,43 +243,79 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_inc_(.+)$/, async (ctx) => {
     const locationId = ctx.match[1];
-    if (!locationId) return;
-    ctx.session.selectedLocationId = locationId;
-    await hiringNeedsService.adjustNeededCount(locationId, 1);
-    await refreshHiringNeedDetails(ctx, locationId);
-    await ctx.answerCallbackQuery("Need increased").catch(() => { });
+    if (!locationId) {
+        await ctx.answerCallbackQuery("Location not found").catch(() => { });
+        return;
+    }
+
+    try {
+        ctx.session.selectedLocationId = locationId;
+        await hiringNeedsService.adjustNeededCount(locationId, 1);
+        await refreshHiringNeedDetails(ctx, locationId);
+        await ctx.answerCallbackQuery("Need increased").catch(() => { });
+    } catch (err) {
+        logger.error({ err, locationId }, "Failed to increase hiring need");
+        await ctx.answerCallbackQuery("Failed to update need").catch(() => { });
+    }
 });
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_dec_(.+)$/, async (ctx) => {
     const locationId = ctx.match[1];
-    if (!locationId) return;
-    ctx.session.selectedLocationId = locationId;
-    await hiringNeedsService.adjustNeededCount(locationId, -1);
-    await refreshHiringNeedDetails(ctx, locationId);
-    await ctx.answerCallbackQuery("Need decreased").catch(() => { });
+    if (!locationId) {
+        await ctx.answerCallbackQuery("Location not found").catch(() => { });
+        return;
+    }
+
+    try {
+        ctx.session.selectedLocationId = locationId;
+        await hiringNeedsService.adjustNeededCount(locationId, -1);
+        await refreshHiringNeedDetails(ctx, locationId);
+        await ctx.answerCallbackQuery("Need decreased").catch(() => { });
+    } catch (err) {
+        logger.error({ err, locationId }, "Failed to decrease hiring need");
+        await ctx.answerCallbackQuery("Failed to update need").catch(() => { });
+    }
 });
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent_(.+)$/, async (ctx) => {
     const locationId = ctx.match[1];
-    if (!locationId) return;
-    ctx.session.selectedLocationId = locationId;
-    const item = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
-    if (!item) {
+    if (!locationId) {
         await ctx.answerCallbackQuery("Location not found").catch(() => { });
         return;
     }
-    await hiringNeedsService.setUrgencyOverride(locationId, hiringNeedsService.isUrgent(item.urgency) ? null : "CRITICAL");
-    await refreshHiringNeedDetails(ctx, locationId);
-    await ctx.answerCallbackQuery("Urgency updated").catch(() => { });
+
+    try {
+        ctx.session.selectedLocationId = locationId;
+        const item = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+        if (!item) {
+            await ctx.answerCallbackQuery("Location not found").catch(() => { });
+            return;
+        }
+        await hiringNeedsService.setUrgencyOverride(locationId, hiringNeedsService.isUrgent(item.urgency) ? null : "CRITICAL");
+        await refreshHiringNeedDetails(ctx, locationId);
+        await ctx.answerCallbackQuery("Urgency updated").catch(() => { });
+    } catch (err) {
+        logger.error({ err, locationId }, "Failed to toggle hiring urgency");
+        await ctx.answerCallbackQuery("Failed to update urgency").catch(() => { });
+    }
 });
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_auto_(.+)$/, async (ctx) => {
     const locationId = ctx.match[1];
-    if (!locationId) return;
-    ctx.session.selectedLocationId = locationId;
-    await hiringNeedsService.setUrgencyOverride(locationId, null);
-    await refreshHiringNeedDetails(ctx, locationId);
-    await ctx.answerCallbackQuery("Auto priority restored").catch(() => { });
+    if (!locationId) {
+        await ctx.answerCallbackQuery("Location not found").catch(() => { });
+        return;
+    }
+
+    try {
+        ctx.session.selectedLocationId = locationId;
+        await hiringNeedsService.setUrgencyOverride(locationId, null);
+        await refreshHiringNeedDetails(ctx, locationId);
+        await ctx.answerCallbackQuery("Auto priority restored").catch(() => { });
+    } catch (err) {
+        logger.error({ err, locationId }, "Failed to reset hiring urgency to auto");
+        await ctx.answerCallbackQuery("Failed to set auto priority").catch(() => { });
+    }
 });
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_deadline_(.+)$/, async (ctx) => {
