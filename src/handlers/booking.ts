@@ -779,7 +779,8 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rt", slotId)).row()
-            .text("❌ Скасувати участь", buildSignedCallback("ct", slotId)).row()
+            .text("❌ Скасувати запис", buildSignedCallback("ct", slotId)).row()
+            .text("🚫 Відмовитись від вакансії", buildSignedCallback("wm", slotId)).row()
             .text("👩‍🏫 Написати наставниці", "contact_mentor");
 
         await cleanupMessages(ctx);
@@ -855,26 +856,25 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
     }
 });
 
-// 10. Скасування навчання — крок 1: підтвердження
+// 10. Скасування mentor-запису — крок 1: підтвердження
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ct" });
     if (!slotId) return next();
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, відмовляюсь", buildSignedCallback("cct", slotId)).row()
+        .text("✅ Так, скасувати запис", buildSignedCallback("cct", slotId)).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що хочеш скасувати?</b>\n\n` +
-        `Твою заявку буде закрито, а анкету видалено з нашої системи. Якщо в майбутньому захочеш повернутися — потрібно буде подати заявку заново.\n\n` +
-        `Якщо просто хочеш змінити час — поверніться і натисни «Змінити час». 🌸`,
+        `⚠️ <b>Ти впевнена, що хочеш скасувати запис?</b>\n\n` +
+        `Ми звільнимо цей час, а ти зможеш обрати інший слот для зустрічі, коли буде зручно. 🌸`,
         { parse_mode: "HTML", reply_markup: kb }
     );
     return;
 });
 
-// 10.1. Скасування навчання — крок 2: підтверджено
+// 10.1. Скасування mentor-запису — крок 2: підтверджено → back to mentor scheduling
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct" });
     if (!slotId) return next();
@@ -891,20 +891,14 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
 
         if (candidate) {
-            await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.REJECTED,
-                candidateDecision: "Кандидатка скасувала заявку самостійно",
-                notificationSent: true,
-                discoverySlot: { disconnect: true },
-                trainingSlot: { disconnect: true },
-                trainingMeetLink: null
-            });
+            await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
         }
 
-        await ctx.answerCallbackQuery("Заявку скасовано.");
+        await ctx.answerCallbackQuery("Запис скасовано.");
         await ctx.editMessageText(
-            "Зрозуміли, дякуємо, що попередила! 🌸\n\n" +
-            "Бажаємо тобі успіхів у пошуках і всього найкращого! Якщо в майбутньому захочеш повернутися — ми будемо раді бачити тебе. ✨"
+            "Готово, цей запис скасовано. 🌸\n\n" +
+            "Коли будеш готова, обери інший зручний час для зустрічі.",
+            { reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_training_scheduling") }
         );
 
         // Notify Mentor
@@ -912,9 +906,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             const { MENTOR_IDS } = await import("../config.js");
             const typeText = wasDiscovery ? "discovery" : "training";
             const name = candidate.fullName || "Candidate";
-            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
-                `👤 <b>${name}</b> cancelled her ${typeText} and left the pipeline.\n` +
-                `Reason: candidate decided not to continue.`;
+            const alertText = `🗓 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Booking Cancelled</b>\n\n` +
+                `👤 <b>${name}</b> cancelled her ${typeText} slot and can choose another time.`;
             const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
             for (const mentorId of MENTOR_IDS) {
                 await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
@@ -931,7 +924,79 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     }
 });
 
-// 10.2. Скасування — повернутись (dismiss)
+// 10.2. Повна відмова на mentor-етапі — крок 1: явне підтвердження
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "wm" });
+    if (!slotId) return next();
+    await ctx.answerCallbackQuery();
+
+    const kb = new InlineKeyboard()
+        .text("🚫 Так, відмовитись", buildSignedCallback("cwm", slotId)).row()
+        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+
+    await ctx.editMessageText(
+        `⚠️ <b>Ти впевнена, що хочеш відмовитись від вакансії?</b>\n\n` +
+        `Ми закриємо твою заявку та скасуємо запис. Якщо просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        { parse_mode: "HTML", reply_markup: kb }
+    );
+});
+
+// 10.3. Повна відмова на mentor-етапі — крок 2: підтверджено → REJECTED
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cwm" });
+    if (!slotId) return next();
+    if (isDuplicateBookingAction(`withdraw-mentor:${ctx.from.id}:${slotId}`)) {
+        await ctx.answerCallbackQuery("✅ Відмову вже зафіксовано.");
+        return;
+    }
+
+    try {
+        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
+
+        if (slotId !== "none") {
+            await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
+        }
+
+        if (candidate) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.REJECTED,
+                candidateDecision: "Кандидатка відмовилась від вакансії на mentor-етапі",
+                notificationSent: true,
+                discoverySlot: { disconnect: true },
+                trainingSlot: { disconnect: true },
+                trainingMeetLink: null
+            });
+        }
+
+        await ctx.answerCallbackQuery("Відмову зафіксовано.");
+        await ctx.editMessageText(
+            "Дякуємо, що повідомила. 🌸\n\n" +
+            "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
+        );
+
+        if (candidate) {
+            const { MENTOR_IDS } = await import("../config.js");
+            const typeText = wasDiscovery ? "discovery" : "training";
+            const name = candidate.fullName || "Candidate";
+            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
+                `👤 <b>${name}</b> declined the vacancy during ${typeText}.`;
+            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            for (const mentorId of MENTOR_IDS) {
+                await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
+            }
+        }
+    } catch (e: any) {
+        logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Mentor-stage vacancy withdrawal failed");
+        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+        } else {
+            await ctx.answerCallbackQuery("Сталася помилка.");
+        }
+    }
+});
+
+// 10.4. Скасування — повернутись (dismiss)
 bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
     await ctx.answerCallbackQuery();
     const { showCandidateStatus } = await import("../utils/candidate-ui.js");

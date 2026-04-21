@@ -162,7 +162,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             text += jobDetails;
             if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
             kb.text("🗓️ Перенести", buildSignedCallback("rt", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
-                .text("❌ Скасувати", buildSignedCallback("ct", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
+                .text("❌ Скасувати запис", buildSignedCallback("ct", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
+                .text("🚫 Відмовитись від вакансії", buildSignedCallback("wm", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
                 .text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
         }
