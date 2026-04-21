@@ -148,7 +148,6 @@ mentorActionSuccessMenu.text("🏠 Back to Hub", async (ctx) => {
 // --- 1. MENTOR HUB ---
 mentorHubMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
-    const board = await hiringNeedsService.getBoard();
 
     const totalInbox = stats.newAcceptedCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
     const inboxLabel = `📥 Inbox${totalInbox > 0 ? ` ${totalInbox}` : ''}`;
@@ -162,7 +161,7 @@ mentorHubMenu.dynamic(async (ctx, range) => {
         await updateCalendarDashboard(ctx);
     }).row();
 
-    range.text(`🎯 Needs ${board.totals.critical}`, async (ctx) => {
+    range.text("🎯 Needs", async (ctx) => {
         const fresh = await hiringNeedsService.getBoard();
         const text = hiringNeedsService.formatRoleSummary(fresh, "MENTOR");
         await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs", { pushToStack: true });

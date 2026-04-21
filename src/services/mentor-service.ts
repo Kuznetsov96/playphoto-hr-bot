@@ -20,13 +20,6 @@ import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 
 export class MentorService {
-    private getUrgencyRank(urgency: "LOW" | "NORMAL" | "HIGH" | "CRITICAL"): number {
-        if (urgency === "CRITICAL") return 4;
-        if (urgency === "HIGH") return 3;
-        if (urgency === "NORMAL") return 2;
-        return 1;
-    }
-
     private getKyivStartOfToday() {
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         kyivNow.setHours(0, 0, 0, 0);
@@ -264,7 +257,7 @@ export class MentorService {
         const waitingForAction = accepted.filter(c => !c.discoverySlotId);
         const all = [...waitingForAction, ...discoveryDone];
         const board = await hiringNeedsService.getBoard();
-        const urgencyByLocation = new Map(board.items.map((item) => [item.locationId, this.getUrgencyRank(item.urgency)]));
+        const urgencyByLocation = new Map(board.items.map((item) => [item.locationId, hiringNeedsService.getUrgencyRank(item.urgency)]));
 
         return all.sort((left, right) => {
             const leftUrgency = urgencyByLocation.get(left.locationId || "") || 0;
