@@ -300,8 +300,11 @@ export const hiringNeedsService = {
         return lines.join("\n");
     },
 
-    formatRoleSummary(board: HiringNeedsBoard, role: "HR" | "MENTOR"): string {
+    formatRoleSummary(board: HiringNeedsBoard, role: "HR" | "MENTOR", page = 1, pageSize = 7): string {
         const visibleItems = board.items.filter((item) => item.needed > 0);
+        const totalPages = Math.max(1, Math.ceil(visibleItems.length / pageSize));
+        const safePage = Math.min(Math.max(1, page), totalPages);
+        const pageItems = visibleItems.slice((safePage - 1) * pageSize, safePage * pageSize);
         const title = role === "HR" ? "Hiring Needs" : "Location Priorities";
         const lines: string[] = [
             `🎯 <b>${title}</b>`,
@@ -314,7 +317,12 @@ export const hiringNeedsService = {
             return lines.join("\n");
         }
 
-        for (const item of visibleItems.slice(0, 7)) {
+        if (totalPages > 1) {
+            lines.push(`Page <b>${safePage}</b>/<b>${totalPages}</b>`);
+            lines.push("");
+        }
+
+        for (const item of pageItems) {
             const icon = urgencyIcon(item.urgency);
             const city = getCityCode(item.city);
             const loc = getShortLocationName(item.locationName, item.city);
@@ -326,11 +334,6 @@ export const hiringNeedsService = {
             } else {
                 lines.push(`${icon} [${city}] ${loc}: open ${item.gap}, mentor ${item.mentorPool}, final ${item.finalPool}${deadline}${note}`);
             }
-        }
-
-        if (visibleItems.length > 7) {
-            lines.push("");
-            lines.push(`<i>+${visibleItems.length - 7} more</i>`);
         }
 
         return lines.join("\n");
