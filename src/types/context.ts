@@ -132,6 +132,7 @@ export interface SessionData {
     hrBackNav?: string;
     filterWaitlist?: boolean;
     candidatePage?: number;
+    hiringNeedsPage?: number;
     selectedNoSlotReason?: string | null;
     broadcastValue?: string | string[];
     broadcastCity?: string;

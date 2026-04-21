@@ -20,6 +20,7 @@ export class ScreenManager {
         'selectedDate',
         'selectedOnboardingDate',
         'candidatePage',
+        'hiringNeedsPage',
         'broadcastCity',
         'broadcastLocationId',
         'statsView'

@@ -14,6 +14,8 @@ import { getCityCode, getShortLocationName } from "../utils/location-helpers.js"
 import { ScreenManager } from "../utils/screen-manager.js";
 import { hiringNeedsService } from "../services/hiring-needs-service.js";
 
+const HIRING_NEEDS_PAGE_SIZE = 7;
+
 // --- HELPERS ---
 const formatDate = (date: Date) => {
     const d = date.getDate();
@@ -162,8 +164,9 @@ mentorHubMenu.dynamic(async (ctx, range) => {
     }).row();
 
     range.text("🎯 Needs", async (ctx) => {
+        ctx.session.hiringNeedsPage = 1;
         const fresh = await hiringNeedsService.getBoard();
-        const text = hiringNeedsService.formatRoleSummary(fresh, "MENTOR");
+        const text = hiringNeedsService.formatRoleSummary(fresh, "MENTOR", 1, HIRING_NEEDS_PAGE_SIZE);
         await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs", { pushToStack: true });
     }).row();
 
@@ -174,6 +177,32 @@ mentorHubMenu.dynamic(async (ctx, range) => {
 });
 
 mentorHiringNeedsMenu.dynamic(async (ctx, range) => {
+    const board = await hiringNeedsService.getBoard();
+    const totalItems = board.items.filter((item) => item.needed > 0).length;
+    const totalPages = Math.ceil(totalItems / HIRING_NEEDS_PAGE_SIZE);
+    const page = Math.min(Math.max(1, ctx.session.hiringNeedsPage || 1), Math.max(1, totalPages));
+
+    if (totalPages > 1) {
+        if (page > 1) {
+            range.text("⬅️ Previous", async (ctx) => {
+                ctx.session.hiringNeedsPage = page - 1;
+                const fresh = await hiringNeedsService.getBoard();
+                const text = hiringNeedsService.formatRoleSummary(fresh, "MENTOR", ctx.session.hiringNeedsPage, HIRING_NEEDS_PAGE_SIZE);
+                await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs");
+            });
+        }
+
+        if (page < totalPages) {
+            range.text("Next ➡️", async (ctx) => {
+                ctx.session.hiringNeedsPage = page + 1;
+                const fresh = await hiringNeedsService.getBoard();
+                const text = hiringNeedsService.formatRoleSummary(fresh, "MENTOR", ctx.session.hiringNeedsPage, HIRING_NEEDS_PAGE_SIZE);
+                await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs");
+            });
+        }
+        range.row();
+    }
+
     range.text("🏠 Back", async (ctx) => {
         await ScreenManager.goBack(ctx, await mentorService.getHubText(), "mentor-hub-menu");
     });
