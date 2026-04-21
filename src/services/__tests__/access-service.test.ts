@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccessService } from "../access-service.js";
+import { CandidateStatus, Role } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
     findWithProfilesByTelegramId: vi.fn(),
@@ -54,5 +55,24 @@ describe("AccessService", () => {
             result: "success",
             telegramId: 123n,
         }));
+    });
+
+    it("allows candidates throughout discovery and training access window", async () => {
+        const service = new AccessService();
+
+        for (const status of [
+            CandidateStatus.ACCEPTED,
+            CandidateStatus.DISCOVERY_SCHEDULED,
+            CandidateStatus.DISCOVERY_COMPLETED,
+            CandidateStatus.TRAINING_SCHEDULED,
+            CandidateStatus.TRAINING_COMPLETED,
+        ]) {
+            mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
+                role: Role.CANDIDATE,
+                candidate: { status },
+            });
+
+            await expect(service.isAuthorized(123n)).resolves.toBe(true);
+        }
     });
 });

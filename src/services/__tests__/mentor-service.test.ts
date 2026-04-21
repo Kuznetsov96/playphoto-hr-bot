@@ -89,6 +89,7 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
 
 import { mentorService } from '../mentor-service.js';
 import { candidateRepository } from '../../repositories/candidate-repository.js';
+import { accessService } from '../access-service.js';
 import prisma from '../../db/core.js';
 
 describe('MentorService', () => {
@@ -149,6 +150,33 @@ describe('MentorService', () => {
 
             expect(result).not.toBeNull();
             expect(candidateRepository.update).toHaveBeenCalled();
+        });
+
+        it('should mark candidate as accepted before creating the private channel invite', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand4',
+                status: CandidateStatus.INTERVIEW_COMPLETED,
+                hrDecision: 'ACCEPTED',
+                notificationSent: true,
+                currentStep: FunnelStep.TRAINING,
+                isWaitlisted: false,
+                materialsSent: false,
+                user: { telegramId: 987n }
+            } as any);
+            vi.mocked(candidateRepository.update).mockResolvedValue({} as any);
+            vi.mocked(accessService.createInviteLink).mockResolvedValue('https://t.me/+fresh');
+
+            const result = await mentorService.sendMaterials({} as any, 'cand4');
+
+            expect(result).not.toBeNull();
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand4', expect.objectContaining({
+                status: 'ACCEPTED',
+                notificationSent: true,
+                isWaitlisted: false
+            }));
+            expect(accessService.createInviteLink).toHaveBeenCalledWith(987n);
+            expect(vi.mocked(candidateRepository.update).mock.invocationCallOrder[0])
+                .toBeLessThan(vi.mocked(accessService.createInviteLink).mock.invocationCallOrder[0]!);
         });
     });
 
