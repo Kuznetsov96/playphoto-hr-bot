@@ -269,30 +269,68 @@ export const hiringNeedsService = {
         lines.push(`🎯 <b>${header}</b>`);
         lines.push("");
         lines.push(`Locations with demand: <b>${board.totals.withDemand}</b> / ${board.totals.locations}`);
-        lines.push(`Need: <b>${board.totals.totalNeed}</b> | Operational gap: <b>${board.totals.totalGap}</b>`);
+        lines.push(`Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b>`);
         lines.push(`Critical: <b>${board.totals.critical}</b> | High: <b>${board.totals.high}</b> | Normal: <b>${board.totals.normal}</b>`);
         lines.push("");
 
-        if (board.items.length === 0) {
+        const visibleItems = board.items.filter((item) => item.needed > 0);
+
+        if (visibleItems.length === 0) {
             lines.push("No active hiring demand right now.");
             return lines.join("\n");
         }
 
-        for (const item of board.items.slice(0, 14)) {
+        for (const item of visibleItems.slice(0, 8)) {
             const icon = urgencyIcon(item.urgency);
             const shortLoc = getShortLocationName(item.locationName, item.city);
             const city = getCityCode(item.city);
             const deadlineSuffix = item.deadline ? ` | ddl ${item.deadline}` : "";
             lines.push(
-                `${icon} [${city}] ${shortLoc} | need ${item.needed} | gap ${item.gap}` +
+                `${icon} [${city}] ${shortLoc} | need ${item.needed} | open ${item.gap}` +
                 ` | hr ${item.hrPool} | mentor ${item.mentorPool} | final ${item.finalPool}` +
                 ` | first-shift ${item.reservedFirstShift}${deadlineSuffix}`
             );
         }
 
-        if (board.items.length > 14) {
+        if (visibleItems.length > 8) {
             lines.push("");
-            lines.push(`<i>+${board.items.length - 14} more locations</i>`);
+            lines.push(`<i>+${visibleItems.length - 8} more locations</i>`);
+        }
+
+        return lines.join("\n");
+    },
+
+    formatRoleSummary(board: HiringNeedsBoard, role: "HR" | "MENTOR"): string {
+        const visibleItems = board.items.filter((item) => item.needed > 0);
+        const title = role === "HR" ? "Hiring Needs" : "Location Priorities";
+        const lines: string[] = [
+            `🎯 <b>${title}</b>`,
+            `Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b> | Critical: <b>${board.totals.critical}</b>`,
+            ""
+        ];
+
+        if (visibleItems.length === 0) {
+            lines.push("No open hiring needs right now.");
+            return lines.join("\n");
+        }
+
+        for (const item of visibleItems.slice(0, 7)) {
+            const icon = urgencyIcon(item.urgency);
+            const city = getCityCode(item.city);
+            const loc = getShortLocationName(item.locationName, item.city);
+            const deadline = item.deadline ? ` | ${item.deadline}` : "";
+            const note = item.note ? ` | ${item.note}` : "";
+
+            if (role === "HR") {
+                lines.push(`${icon} [${city}] ${loc}: need ${item.needed}, open ${item.gap}, HR ${item.hrPool}${deadline}${note}`);
+            } else {
+                lines.push(`${icon} [${city}] ${loc}: open ${item.gap}, mentor ${item.mentorPool}, final ${item.finalPool}${deadline}${note}`);
+            }
+        }
+
+        if (visibleItems.length > 7) {
+            lines.push("");
+            lines.push(`<i>+${visibleItems.length - 7} more. Admin can manage the full board.</i>`);
         }
 
         return lines.join("\n");
@@ -305,7 +343,7 @@ export const hiringNeedsService = {
             `📍 <b>${item.locationName}</b> (${item.city})\n` +
             `Priority: <b>${urgencyLabel(item.urgency)}</b>${override}\n` +
             `Need: <b>${item.needed}</b>\n` +
-            `Operational gap: <b>${item.gap}</b>\n` +
+            `Open: <b>${item.gap}</b>\n` +
             `HR pool: <b>${item.hrPool}</b>\n` +
             `Mentor pool: <b>${item.mentorPool}</b>\n` +
             `Final pool: <b>${item.finalPool}</b>\n` +

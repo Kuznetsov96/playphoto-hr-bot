@@ -112,7 +112,7 @@ hrHubMenu.dynamic(async (ctx, range) => {
     });
     range.text(`🎯 Hiring Needs (${needsBoard.totals.critical})`, async (ctx) => {
         const board = await hiringNeedsService.getBoard();
-        const text = hiringNeedsService.formatBoardText(board, "HR");
+        const text = hiringNeedsService.formatRoleSummary(board, "HR");
         await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs", { pushToStack: true });
     }).row();
     range.text(STAFF_TEXTS["hr-menu-tools"], async (ctx) => {
@@ -121,30 +121,6 @@ hrHubMenu.dynamic(async (ctx, range) => {
 });
 
 hrHiringNeedsMenu.dynamic(async (ctx, range) => {
-    const board = await hiringNeedsService.getBoard();
-    if (board.items.length === 0) {
-        range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
-    } else {
-        for (const item of board.items.slice(0, 24)) {
-            const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
-            const cityCode = getCityCode(item.city);
-            const shortLoc = getShortLocationName(item.locationName, item.city);
-            const label = `${icon} [${cityCode}] ${shortLoc} • need ${item.needed} • gap ${item.gap}`;
-            range.text(label, async (ctx) => {
-                ctx.session.broadcastCity = item.city;
-                ctx.session.broadcastLocationId = item.locationId;
-                ctx.session.candidatePage = 1;
-                await ScreenManager.renderScreen(
-                    ctx,
-                    `📍 <b>${item.locationName}</b>\nNeed: ${item.needed} | Gap: ${item.gap}\n\n` +
-                    `Opening reserve candidates for this location.`,
-                    "hr-waitlist-profiles",
-                    { pushToStack: true }
-                );
-            }).row();
-        }
-    }
-
     range.text(STAFF_TEXTS["hr-menu-back-home"], async (ctx) => {
         await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
     });
