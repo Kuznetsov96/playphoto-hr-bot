@@ -112,7 +112,34 @@ async function refreshHiringNeedDetails(ctx: MyContext, locationId: string) {
         await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
         return;
     }
-    await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
+    await renderHiringNeedDetails(ctx, fresh);
+}
+
+function buildHiringNeedDetailKeyboard(item: Awaited<ReturnType<typeof hiringNeedsService.getBoard>>["items"][number]) {
+    return new InlineKeyboard()
+        .text("➕ Need", `admin_hn_inc_${item.locationId}`)
+        .text("➖ Need", `admin_hn_dec_${item.locationId}`)
+        .row()
+        .text(hiringNeedsService.isUrgent(item.urgency) ? "Urgent: On" : "Urgent: Off", `admin_hn_urgent_${item.locationId}`)
+        .row()
+        .text("Auto", `admin_hn_auto_${item.locationId}`)
+        .row()
+        .text(item.deadline ? `📅 Deadline ${item.deadline}` : "📅 Set Deadline", `admin_hn_deadline_${item.locationId}`)
+        .text(item.note ? "📝 Edit Note" : "📝 Set Note", `admin_hn_note_${item.locationId}`)
+        .row()
+        .text(ADMIN_TEXTS["hr-menu-back"], "admin_hn_back");
+}
+
+async function renderHiringNeedDetails(ctx: MyContext, item: Awaited<ReturnType<typeof hiringNeedsService.getBoard>>["items"][number], options: { pushToStack?: boolean } = {}) {
+    const renderOptions: { pushToStack?: boolean; manualMenuId: string } = { manualMenuId: "admin-hiring-need-details" };
+    if (options.pushToStack !== undefined) renderOptions.pushToStack = options.pushToStack;
+
+    await ScreenManager.renderScreen(
+        ctx,
+        hiringNeedsService.formatNeedDetail(item),
+        buildHiringNeedDetailKeyboard(item),
+        renderOptions
+    );
 }
 
 adminHiringNeedsMenu.dynamic(async (ctx, range) => {
@@ -127,7 +154,7 @@ adminHiringNeedsMenu.dynamic(async (ctx, range) => {
             const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city)} • need ${item.needed} • open ${item.gap}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedLocationId = item.locationId;
-                await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(item), "admin-hiring-need-details", { pushToStack: true });
+                await renderHiringNeedDetails(ctx, item, { pushToStack: true });
             }).row();
         }
     }
@@ -212,6 +239,77 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
         const freshBoard = await hiringNeedsService.getBoard();
         await ScreenManager.goBack(ctx, hiringNeedsService.formatBoardText(freshBoard, "ADMIN"), "admin-hiring-needs");
     });
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_inc_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+    ctx.session.selectedLocationId = locationId;
+    await hiringNeedsService.adjustNeededCount(locationId, 1);
+    await refreshHiringNeedDetails(ctx, locationId);
+    await ctx.answerCallbackQuery("Need increased").catch(() => { });
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_dec_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+    ctx.session.selectedLocationId = locationId;
+    await hiringNeedsService.adjustNeededCount(locationId, -1);
+    await refreshHiringNeedDetails(ctx, locationId);
+    await ctx.answerCallbackQuery("Need decreased").catch(() => { });
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+    ctx.session.selectedLocationId = locationId;
+    const item = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+    if (!item) {
+        await ctx.answerCallbackQuery("Location not found").catch(() => { });
+        return;
+    }
+    await hiringNeedsService.setUrgencyOverride(locationId, hiringNeedsService.isUrgent(item.urgency) ? null : "CRITICAL");
+    await refreshHiringNeedDetails(ctx, locationId);
+    await ctx.answerCallbackQuery("Urgency updated").catch(() => { });
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_auto_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+    ctx.session.selectedLocationId = locationId;
+    await hiringNeedsService.setUrgencyOverride(locationId, null);
+    await refreshHiringNeedDetails(ctx, locationId);
+    await ctx.answerCallbackQuery("Auto priority restored").catch(() => { });
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_deadline_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+    ctx.session.selectedLocationId = locationId;
+    ctx.session.step = `set_hiring_deadline_${locationId}`;
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+        "✍️ Enter deadline (dd.mm or dd.mm.yyyy).\nSend '-' to clear.",
+        { reply_markup: { force_reply: true } }
+    );
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_note_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+    ctx.session.selectedLocationId = locationId;
+    ctx.session.step = `set_hiring_note_${locationId}`;
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+        "✍️ Enter short note (up to 140 chars).\nSend '-' to clear.",
+        { reply_markup: { force_reply: true } }
+    );
+});
+
+adminRecruitmentHandlers.callbackQuery("admin_hn_back", async (ctx) => {
+    const freshBoard = await hiringNeedsService.getBoard();
+    await ScreenManager.goBack(ctx, hiringNeedsService.formatBoardText(freshBoard, "ADMIN"), "admin-hiring-needs");
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminOfflineStagingMenu.dynamic(async (ctx, range) => {
