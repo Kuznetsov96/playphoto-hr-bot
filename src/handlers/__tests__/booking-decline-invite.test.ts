@@ -3,21 +3,25 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const cancelInterviewSlot = vi.fn().mockResolvedValue(undefined);
 const findByTelegramId = vi.fn();
 const updateMany = vi.fn();
+const update = vi.fn();
 
 vi.mock("grammy", () => {
     class MockComposer {
         private callbackHandlers: Array<{ pattern: string | RegExp; handler: (ctx: any) => Promise<void> | void }> = [];
+        private onHandlers: Array<(ctx: any, next: () => Promise<void>) => Promise<void> | void> = [];
 
         callbackQuery(pattern: string | RegExp, handler: (ctx: any) => Promise<void> | void) {
             this.callbackHandlers.push({ pattern, handler });
             return this;
         }
 
-        on() {
+        on(_filter: string, handler: (ctx: any, next: () => Promise<void>) => Promise<void> | void) {
+            this.onHandlers.push(handler);
             return this;
         }
 
         async __runCallback(data: string, ctx: any) {
+            ctx.callbackQuery = { ...(ctx.callbackQuery || {}), data };
             for (const entry of this.callbackHandlers) {
                 if (typeof entry.pattern === "string" && entry.pattern === data) {
                     await entry.handler(ctx);
@@ -28,7 +32,16 @@ vi.mock("grammy", () => {
                     return;
                 }
             }
-            throw new Error(`No callback handler matched: ${data}`);
+
+            let index = -1;
+            const runNext = async (): Promise<void> => {
+                index++;
+                const handler = this.onHandlers[index];
+                if (!handler) throw new Error(`No callback handler matched: ${data}`);
+                await handler(ctx, runNext);
+            };
+
+            await runNext();
         }
     }
 
@@ -65,7 +78,7 @@ vi.mock("../../repositories/candidate-repository.js", () => ({
     candidateRepository: {
         findByTelegramId,
         updateMany,
-        update: vi.fn(),
+        update,
     }
 }));
 
@@ -117,9 +130,11 @@ vi.mock("../../constants/staff-texts.js", () => ({
 
 describe("booking decline invite", () => {
     let bookingHandlers: any;
+    let buildSignedCallback: (code: string, payload: string) => string;
 
     beforeAll(async () => {
         ({ bookingHandlers } = await import("../booking.js"));
+        ({ buildSignedCallback } = await import("../../utils/signed-callback.js"));
     });
 
     beforeEach(() => {
@@ -177,6 +192,68 @@ describe("booking decline invite", () => {
             { user: { telegramId: BigInt(987654) } },
             expect.objectContaining({
                 status: "REJECTED",
+            })
+        );
+    });
+
+    it("cancels an interview booking without rejecting the candidate", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-cancel",
+            fullName: "Jane",
+            interviewSlotId: "slot-cancel",
+        });
+
+        const ctx = {
+            from: { id: 111222 },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback(buildSignedCallback("ccb", "slot-cancel"), ctx);
+
+        expect(cancelInterviewSlot).toHaveBeenCalledWith("slot-cancel", 111222);
+        expect(update).toHaveBeenCalledWith(
+            "cand-cancel",
+            expect.objectContaining({
+                status: "WAITLIST_HR",
+                currentStep: "INTERVIEW",
+                isWaitlisted: true,
+                candidateDecision: null,
+                notificationSent: false,
+                googleMeetLink: null,
+            })
+        );
+        expect(update).not.toHaveBeenCalledWith(
+            "cand-cancel",
+            expect.objectContaining({ status: "REJECTED" })
+        );
+    });
+
+    it("rejects only after explicit vacancy withdrawal confirmation", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-withdraw",
+            fullName: "Jane",
+            interviewSlotId: "slot-withdraw",
+        });
+
+        const ctx = {
+            from: { id: 333444 },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback(buildSignedCallback("cwi", "slot-withdraw"), ctx);
+
+        expect(cancelInterviewSlot).toHaveBeenCalledWith("slot-withdraw", 333444);
+        expect(update).toHaveBeenCalledWith(
+            "cand-withdraw",
+            expect.objectContaining({
+                status: "REJECTED",
+                candidateDecision: "Кандидатка відмовилась від вакансії",
+                notificationSent: true,
+                googleMeetLink: null,
             })
         );
     });

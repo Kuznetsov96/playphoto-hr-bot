@@ -131,7 +131,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
             } else text = `🌸 <b>${firstName}</b>, ти записана на співбесіду!`;
             kb.text("🗓️ Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
-                .text("❌ Скасувати", buildSignedCallback("cb", candidate.interviewSlotId || "none"));
+                .text("❌ Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).row()
+                .text("🚫 Відмовитись від вакансії", buildSignedCallback("wi", candidate.interviewSlotId || "none"));
             if (canContactStaff) kb.row().text("👩‍💼 Написати HR", "contact_hr");
             break;
         }
