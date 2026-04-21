@@ -17,6 +17,8 @@ import { getUserAdminRole } from "../middleware/role-check.js";
 import { AdminRole, CandidateStatus } from "@prisma/client";
 import { hiringNeedsService } from "../services/hiring-needs-service.js";
 
+const HIRING_NEEDS_PAGE_SIZE = 7;
+
 // --- MENUS (Declared first to prevent circular dependency issues) ---
 export const hrHubMenu = new Menu<MyContext>("hr-hub-menu");
 menuRegistry.register(hrHubMenu);
@@ -110,8 +112,9 @@ hrHubMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates", { pushToStack: true });
     });
     range.text("🎯 Hiring Needs", async (ctx) => {
+        ctx.session.hiringNeedsPage = 1;
         const board = await hiringNeedsService.getBoard();
-        const text = hiringNeedsService.formatRoleSummary(board, "HR");
+        const text = hiringNeedsService.formatRoleSummary(board, "HR", 1, HIRING_NEEDS_PAGE_SIZE);
         await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs", { pushToStack: true });
     }).row();
     range.text(STAFF_TEXTS["hr-menu-tools"], async (ctx) => {
@@ -120,6 +123,32 @@ hrHubMenu.dynamic(async (ctx, range) => {
 });
 
 hrHiringNeedsMenu.dynamic(async (ctx, range) => {
+    const board = await hiringNeedsService.getBoard();
+    const totalItems = board.items.filter((item) => item.needed > 0).length;
+    const totalPages = Math.ceil(totalItems / HIRING_NEEDS_PAGE_SIZE);
+    const page = Math.min(Math.max(1, ctx.session.hiringNeedsPage || 1), Math.max(1, totalPages));
+
+    if (totalPages > 1) {
+        if (page > 1) {
+            range.text("⬅️ Previous", async (ctx) => {
+                ctx.session.hiringNeedsPage = page - 1;
+                const fresh = await hiringNeedsService.getBoard();
+                const text = hiringNeedsService.formatRoleSummary(fresh, "HR", ctx.session.hiringNeedsPage, HIRING_NEEDS_PAGE_SIZE);
+                await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs");
+            });
+        }
+
+        if (page < totalPages) {
+            range.text("Next ➡️", async (ctx) => {
+                ctx.session.hiringNeedsPage = page + 1;
+                const fresh = await hiringNeedsService.getBoard();
+                const text = hiringNeedsService.formatRoleSummary(fresh, "HR", ctx.session.hiringNeedsPage, HIRING_NEEDS_PAGE_SIZE);
+                await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs");
+            });
+        }
+        range.row();
+    }
+
     range.text(STAFF_TEXTS["hr-menu-back-home"], async (ctx) => {
         await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
     });
