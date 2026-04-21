@@ -198,7 +198,8 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rb", result.slot.id)).row()
-            .text("❌ Скасувати участь", buildSignedCallback("cb", result.slot.id));
+            .text("❌ Скасувати запис", buildSignedCallback("cb", result.slot.id)).row()
+            .text("🚫 Відмовитись від вакансії", buildSignedCallback("wi", result.slot.id));
         if ((result as any).candidate?.gender !== "male") {
             kb.row().text("👩‍💼 Написати HR", "contact_hr");
         }
@@ -248,26 +249,25 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     }
 });
 
-// 2. Відмова від участі — крок 1: підтвердження
+// 2. Скасування запису — крок 1: підтвердження
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cb" });
     if (!slotId) return next();
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, відмовляюсь", buildSignedCallback("ccb", slotId)).row()
+        .text("✅ Так, скасувати запис", buildSignedCallback("ccb", slotId)).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що хочеш скасувати?</b>\n\n` +
-        `Твою заявку буде закрито, а анкету видалено з нашої системи. Якщо в майбутньому захочеш повернутися — потрібно буде подати заявку заново.\n\n` +
-        `Якщо просто хочеш змінити час — поверніться і натисни «Змінити час». 🌸`,
+        `⚠️ <b>Ти впевнена, що хочеш скасувати запис?</b>\n\n` +
+        `Ми звільнимо цей час, а ти зможеш обрати інший слот для співбесіди, коли буде зручно. 🌸`,
         { parse_mode: "HTML", reply_markup: kb }
     );
     return;
 });
 
-// 2.1. Відмова від участі — крок 2: підтверджено → REJECTED
+// 2.1. Скасування запису — крок 2: підтверджено → back to interview slot selection
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb" });
     if (!slotId) return next();
@@ -282,26 +282,30 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
         if (candidate) {
             await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.REJECTED,
-                candidateDecision: "Кандидатка відмовилась від участі",
-                notificationSent: true,
+                status: CandidateStatus.WAITLIST_HR,
+                currentStep: FunnelStep.INTERVIEW,
+                isWaitlisted: true,
+                candidateDecision: null,
+                notificationSent: false,
+                interviewWaitlistReason: null,
                 interviewSlot: { disconnect: true },
                 googleMeetLink: null
             });
         }
 
-        await ctx.answerCallbackQuery("Заявку скасовано.");
+        await ctx.answerCallbackQuery("Запис скасовано.");
         await ctx.editMessageText(
-            "Зрозуміли, дякуємо, що попередила! 🌸\n\n" +
-            "Бажаємо тобі успіхів у пошуках і всього найкращого! Якщо в майбутньому захочеш повернутися — ми будемо раді бачити тебе. ✨"
+            "Готово, цей запис скасовано. 🌸\n\n" +
+            "Коли будеш готова, обери інший зручний час для співбесіди.",
+            { reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling") }
         );
 
         // Notify HR
         if (candidate) {
             const { HR_IDS } = await import("../config.js");
             const name = candidate.fullName || "Candidate";
-            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
-                `👤 <b>${name}</b> cancelled her application and left the pipeline.`;
+            const alertText = `🗓 <b>Interview Booking Cancelled</b>\n\n` +
+                `👤 <b>${name}</b> cancelled her interview slot and can choose another time.`;
             const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
             for (const hrId of HR_IDS) {
                 await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
@@ -310,6 +314,75 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview cancellation failed");
+        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+        } else {
+            await ctx.answerCallbackQuery("Сталася помилка.");
+        }
+    }
+});
+
+// 3. Повна відмова від вакансії — крок 1: явне підтвердження
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "wi" });
+    if (!slotId) return next();
+    await ctx.answerCallbackQuery();
+
+    const kb = new InlineKeyboard()
+        .text("🚫 Так, відмовитись", buildSignedCallback("cwi", slotId)).row()
+        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+
+    await ctx.editMessageText(
+        `⚠️ <b>Ти впевнена, що хочеш відмовитись від вакансії?</b>\n\n` +
+        `Ми закриємо твою заявку та скасуємо запис на співбесіду. Якщо просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        { parse_mode: "HTML", reply_markup: kb }
+    );
+});
+
+// 3.1. Повна відмова від вакансії — крок 2: підтверджено → REJECTED
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cwi" });
+    if (!slotId) return next();
+    if (isDuplicateBookingAction(`withdraw-interview:${ctx.from.id}:${slotId}`)) {
+        await ctx.answerCallbackQuery("✅ Відмову вже зафіксовано.");
+        return;
+    }
+
+    try {
+        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        if (slotId !== "none") {
+            await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
+        }
+
+        if (candidate) {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.REJECTED,
+                candidateDecision: "Кандидатка відмовилась від вакансії",
+                notificationSent: true,
+                interviewWaitlistReason: null,
+                interviewSlot: { disconnect: true },
+                googleMeetLink: null
+            });
+        }
+
+        await ctx.answerCallbackQuery("Відмову зафіксовано.");
+        await ctx.editMessageText(
+            "Дякуємо, що повідомила. 🌸\n\n" +
+            "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
+        );
+
+        if (candidate) {
+            const { HR_IDS } = await import("../config.js");
+            const name = candidate.fullName || "Candidate";
+            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
+                `👤 <b>${name}</b> declined the vacancy after booking an interview.`;
+            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
+            for (const hrId of HR_IDS) {
+                await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
+            }
+        }
+    } catch (e: any) {
+        logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview vacancy withdrawal failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
             await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
         } else {
