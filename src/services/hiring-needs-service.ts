@@ -3,10 +3,10 @@ import prisma from "../db/core.js";
 import { systemStateRepository } from "../repositories/system-state-repository.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
 
-export type HiringUrgency = "LOW" | "NORMAL" | "HIGH" | "CRITICAL";
+export type HiringUrgency = "NORMAL" | "CRITICAL";
 
 type HiringNeedMeta = {
-    urgency?: HiringUrgency;
+    urgency?: "CRITICAL";
     deadline?: string;
     note?: string;
     updatedAt?: string;
@@ -36,10 +36,8 @@ export type HiringNeedsBoard = {
     totals: {
         locations: number;
         withDemand: number;
-        critical: number;
-        high: number;
+        urgent: number;
         normal: number;
-        low: number;
         totalNeed: number;
         totalGap: number;
     };
@@ -86,12 +84,8 @@ const RESERVED_FIRST_SHIFT_STATUSES = new Set<CandidateStatus>([
 function urgencyWeight(urgency: HiringUrgency): number {
     switch (urgency) {
         case "CRITICAL":
-            return 4;
-        case "HIGH":
-            return 3;
-        case "NORMAL":
             return 2;
-        case "LOW":
+        case "NORMAL":
         default:
             return 1;
     }
@@ -101,13 +95,9 @@ function urgencyIcon(urgency: HiringUrgency): string {
     switch (urgency) {
         case "CRITICAL":
             return "🔴";
-        case "HIGH":
-            return "🟠";
         case "NORMAL":
-            return "🟡";
-        case "LOW":
         default:
-            return "🟢";
+            return "🟠";
     }
 }
 
@@ -115,21 +105,81 @@ function urgencyLabel(urgency: HiringUrgency): string {
     switch (urgency) {
         case "CRITICAL":
             return "Urgent";
-        case "HIGH":
-            return "Urgent";
         case "NORMAL":
-            return "Normal";
-        case "LOW":
         default:
-            return "Normal";
+            return "Standard";
     }
 }
 
-function deriveUrgency(needed: number, gap: number): HiringUrgency {
-    if (gap >= 3 || needed >= 4) return "CRITICAL";
-    if (gap >= 2 || needed >= 2) return "HIGH";
-    if (gap >= 1 || needed >= 1) return "NORMAL";
-    return "LOW";
+function normalizeUrgency(value?: string): HiringUrgency | null {
+    if (!value) return null;
+    if (value === "CRITICAL" || value === "HIGH") return "CRITICAL";
+    return null;
+}
+
+function createEmptyItem(
+    location: { id: string; name: string; city: string; neededCount: number | null; isHiddenFromCandidates: boolean },
+    meta: HiringNeedMeta
+): HiringNeedItem {
+    const needed = Math.max(0, location.neededCount || 0);
+    const overrideUrgency = normalizeUrgency(meta.urgency);
+
+    return {
+        locationId: location.id,
+        locationName: location.name,
+        city: location.city,
+        isHiddenFromCandidates: location.isHiddenFromCandidates,
+        needed,
+        hrPool: 0,
+        mentorPool: 0,
+        finalPool: 0,
+        reservedFirstShift: 0,
+        hired7d: 0,
+        gap: needed,
+        urgency: overrideUrgency || "NORMAL",
+        overrideUrgency,
+        deadline: meta.deadline || null,
+        note: meta.note || null
+    };
+}
+
+function applyCandidateToItem(
+    row: HiringNeedItem,
+    candidate: {
+        status: CandidateStatus;
+        statusChangedAt: Date | null;
+        firstShiftDate: Date | null;
+        currentStep: FunnelStep | null;
+        user: { botBlockedAt: Date | null };
+    },
+    weekAgo: Date
+) {
+    if (candidate.user.botBlockedAt) return;
+
+    if (candidate.status === CandidateStatus.HIRED) {
+        if (candidate.statusChangedAt && candidate.statusChangedAt >= weekAgo) {
+            row.hired7d++;
+        }
+        return;
+    }
+
+    if (HR_POOL_STATUSES.has(candidate.status)) row.hrPool++;
+    if (MENTOR_POOL_STATUSES.has(candidate.status)) row.mentorPool++;
+    if (FINAL_POOL_STATUSES.has(candidate.status)) row.finalPool++;
+
+    if (
+        RESERVED_FIRST_SHIFT_STATUSES.has(candidate.status) &&
+        candidate.firstShiftDate &&
+        candidate.currentStep === FunnelStep.FIRST_SHIFT
+    ) {
+        row.reservedFirstShift++;
+    }
+}
+
+function finalizeItem(row: HiringNeedItem): HiringNeedItem {
+    row.gap = Math.max(0, row.needed - row.reservedFirstShift);
+    row.urgency = row.overrideUrgency ? "CRITICAL" : "NORMAL";
+    return row;
 }
 
 async function readMetaState(): Promise<HiringNeedMetaState> {
@@ -163,7 +213,6 @@ export const hiringNeedsService = {
                     status: true,
                     statusChangedAt: true,
                     firstShiftDate: true,
-                    isWaitlisted: true,
                     currentStep: true,
                     user: { select: { botBlockedAt: true } }
                 }
@@ -174,64 +223,17 @@ export const hiringNeedsService = {
         const byLocation = new Map<string, HiringNeedItem>();
         for (const location of locations) {
             const meta = metaState[location.id] || {};
-            const needed = Math.max(0, location.neededCount || 0);
-            byLocation.set(location.id, {
-                locationId: location.id,
-                locationName: location.name,
-                city: location.city,
-                isHiddenFromCandidates: location.isHiddenFromCandidates,
-                needed,
-                hrPool: 0,
-                mentorPool: 0,
-                finalPool: 0,
-                reservedFirstShift: 0,
-                hired7d: 0,
-                gap: needed,
-                urgency: "LOW",
-                overrideUrgency: meta.urgency || null,
-                deadline: meta.deadline || null,
-                note: meta.note || null
-            });
+            byLocation.set(location.id, createEmptyItem(location, meta));
         }
 
         for (const candidate of candidates) {
             const locationId = candidate.locationId || "";
             const row = byLocation.get(locationId);
             if (!row) continue;
-            if (candidate.user.botBlockedAt) continue;
-
-            if (candidate.status === CandidateStatus.HIRED) {
-                if (candidate.statusChangedAt && candidate.statusChangedAt >= weekAgo) {
-                    row.hired7d++;
-                }
-                continue;
-            }
-
-            if (HR_POOL_STATUSES.has(candidate.status)) {
-                row.hrPool++;
-            }
-            if (MENTOR_POOL_STATUSES.has(candidate.status)) {
-                row.mentorPool++;
-            }
-            if (FINAL_POOL_STATUSES.has(candidate.status)) {
-                row.finalPool++;
-            }
-
-            if (
-                RESERVED_FIRST_SHIFT_STATUSES.has(candidate.status) &&
-                candidate.firstShiftDate &&
-                candidate.currentStep === FunnelStep.FIRST_SHIFT
-            ) {
-                row.reservedFirstShift++;
-            }
+            applyCandidateToItem(row, candidate, weekAgo);
         }
 
-        const items = Array.from(byLocation.values()).map((row) => {
-            row.gap = Math.max(0, row.needed - row.reservedFirstShift);
-            // Manual urgent only: no auto-ranking based on needed/gap.
-            row.urgency = row.overrideUrgency ? row.overrideUrgency : "NORMAL";
-            return row;
-        }).filter((row) => options.includeEmpty ||
+        const items = Array.from(byLocation.values()).map(finalizeItem).filter((row) => options.includeEmpty ||
             row.needed > 0 ||
             row.hrPool > 0 ||
             row.mentorPool > 0 ||
@@ -250,10 +252,8 @@ export const hiringNeedsService = {
         const totals = {
             locations: locations.length,
             withDemand: items.filter((item) => item.needed > 0).length,
-            critical: items.filter((item) => item.urgency === "CRITICAL").length,
-            high: items.filter((item) => item.urgency === "HIGH").length,
+            urgent: items.filter((item) => item.urgency === "CRITICAL").length,
             normal: items.filter((item) => item.urgency === "NORMAL").length,
-            low: items.filter((item) => item.urgency === "LOW").length,
             totalNeed: items.reduce((acc, item) => acc + item.needed, 0),
             totalGap: items.reduce((acc, item) => acc + item.gap, 0),
         };
@@ -262,7 +262,31 @@ export const hiringNeedsService = {
     },
 
     async getLocationItem(locationId: string): Promise<HiringNeedItem | null> {
-        return (await this.getBoard({ includeEmpty: true })).items.find((row) => row.locationId === locationId) || null;
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const [location, candidates, metaState] = await Promise.all([
+            prisma.location.findFirst({
+                where: { id: locationId, isHidden: false },
+                select: { id: true, name: true, city: true, neededCount: true, isHiddenFromCandidates: true }
+            }),
+            prisma.candidate.findMany({
+                where: { locationId },
+                select: {
+                    status: true,
+                    statusChangedAt: true,
+                    firstShiftDate: true,
+                    currentStep: true,
+                    user: { select: { botBlockedAt: true } }
+                }
+            }),
+            readMetaState()
+        ]);
+
+        if (!location) return null;
+        const item = createEmptyItem(location, metaState[locationId] || {});
+        for (const candidate of candidates) {
+            applyCandidateToItem(item, candidate, weekAgo);
+        }
+        return finalizeItem(item);
     },
 
     formatBoardText(board: HiringNeedsBoard, role: "HR" | "MENTOR" | "ADMIN"): string {
@@ -277,7 +301,7 @@ export const hiringNeedsService = {
         lines.push("");
         lines.push(`Locations with demand: <b>${board.totals.withDemand}</b> / ${board.totals.locations}`);
         lines.push(`Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b>`);
-        lines.push(`Urgent: <b>${board.totals.critical + board.totals.high}</b>`);
+        lines.push(`Urgent: <b>${board.totals.urgent}</b>`);
         lines.push("");
 
         const visibleItems = board.items.filter((item) => item.needed > 0);
@@ -320,7 +344,7 @@ export const hiringNeedsService = {
         const title = role === "HR" ? "Hiring Needs" : "Location Priorities";
         const lines: string[] = [
             `🎯 <b>${title}</b>`,
-            `Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b> | Urgent: <b>${board.totals.critical + board.totals.high}</b>`,
+            `Need: <b>${board.totals.totalNeed}</b> | Open: <b>${board.totals.totalGap}</b> | Urgent: <b>${board.totals.urgent}</b>`,
             ""
         ];
 
@@ -404,15 +428,11 @@ export const hiringNeedsService = {
         return urgencyLabel(urgency);
     },
 
-    isUrgent(urgency: HiringUrgency): boolean {
-        return urgency === "CRITICAL" || urgency === "HIGH";
-    },
-
     getUrgencyRank(urgency: HiringUrgency): number {
         return urgencyWeight(urgency);
     },
 
-    async setUrgencyOverride(locationId: string, urgency: HiringUrgency | null): Promise<void> {
+    async setUrgencyOverride(locationId: string, urgency: "CRITICAL" | null): Promise<void> {
         const state = await readMetaState();
         const current = state[locationId] || {};
         const next: HiringNeedMeta = { ...current, updatedAt: new Date().toISOString() };
