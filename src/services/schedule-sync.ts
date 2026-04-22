@@ -74,6 +74,7 @@ export class ScheduleSyncService {
         const chatIds = new Set<number>([
             TEAM_CHATS.CHANNEL,
             TEAM_CHATS.HUB,
+            TEAM_CHATS.SUPPORT,
             ...locations
                 .filter((loc) => Boolean(loc.telegramChatId))
                 .map((loc) => Number(loc.telegramChatId))
@@ -92,7 +93,6 @@ export class ScheduleSyncService {
                 }
 
                 await api.banChatMember(chatId, Number(telegramId));
-                await api.unbanChatMember(chatId, Number(telegramId));
                 removedFromChatsCount++;
             } catch (e: any) {
                 const description = String(e?.description || "").toLowerCase();
