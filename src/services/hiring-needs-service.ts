@@ -118,10 +118,10 @@ function urgencyLabel(urgency: HiringUrgency): string {
         case "HIGH":
             return "Urgent";
         case "NORMAL":
-            return "Auto";
+            return "Normal";
         case "LOW":
         default:
-            return "Auto";
+            return "Normal";
     }
 }
 
@@ -228,7 +228,8 @@ export const hiringNeedsService = {
 
         const items = Array.from(byLocation.values()).map((row) => {
             row.gap = Math.max(0, row.needed - row.reservedFirstShift);
-            row.urgency = row.overrideUrgency || deriveUrgency(row.needed, row.gap);
+            // Manual urgent only: no auto-ranking based on needed/gap.
+            row.urgency = row.overrideUrgency ? row.overrideUrgency : "NORMAL";
             return row;
         }).filter((row) => options.includeEmpty ||
             row.needed > 0 ||
@@ -351,8 +352,7 @@ export const hiringNeedsService = {
     },
 
     formatNeedDetail(item: HiringNeedItem): string {
-        const urgent = item.urgency === "CRITICAL" || item.urgency === "HIGH" ? "Yes" : "No";
-        const urgencyMode = item.overrideUrgency ? "Manual" : "Auto";
+        const urgent = item.overrideUrgency ? "Yes" : "No";
         const poolParts = [
             item.hrPool > 0 ? `HR <b>${item.hrPool}</b>` : null,
             item.mentorPool > 0 ? `Mentor <b>${item.mentorPool}</b>` : null,
@@ -364,8 +364,10 @@ export const hiringNeedsService = {
             "",
             `📍 <b>${item.locationName}</b> (${item.city})`,
             `Need: <b>${item.needed}</b> | Open: <b>${item.gap}</b>`,
-            `Urgent: <b>${urgent}</b> <i>(${urgencyMode})</i>`,
         ];
+        if (item.overrideUrgency) {
+            lines.push(`Urgent: <b>${urgent}</b>`);
+        }
 
         if (poolParts.length > 0) {
             lines.push(`Pool: ${poolParts.join(" | ")}`);

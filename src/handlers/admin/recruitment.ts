@@ -98,17 +98,12 @@ function urgentModeButtonLabel(item: HiringNeedItem): string {
     return item.overrideUrgency ? "✓ Urgent" : "Urgent";
 }
 
-function autoModeButtonLabel(item: HiringNeedItem): string {
-    return item.overrideUrgency ? "Auto" : "✓ Auto";
-}
-
 function buildHiringNeedDetailKeyboard(item: HiringNeedItem) {
     return new InlineKeyboard()
         .text("➕ Need", `admin_hn_inc_${item.locationId}`)
         .text("➖ Need", `admin_hn_dec_${item.locationId}`)
         .row()
         .text(urgentModeButtonLabel(item), `admin_hn_urgent_${item.locationId}`)
-        .text(autoModeButtonLabel(item), `admin_hn_auto_${item.locationId}`)
         .row()
         .text(item.note ? "📝 Edit Note" : "📝 Set Note", `admin_hn_note_${item.locationId}`)
         .row()
@@ -255,12 +250,8 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
     }).row();
 
     range.text(urgentModeButtonLabel(item), async (ctx) => {
-        await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
-        await refreshHiringNeedDetails(ctx, locationId);
-    });
-
-    range.text(autoModeButtonLabel(item), async (ctx) => {
-        await hiringNeedsService.setUrgencyOverride(locationId, null);
+        // Toggle manual urgent
+        await hiringNeedsService.setUrgencyOverride(locationId, item.overrideUrgency ? null : "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
 
@@ -333,30 +324,12 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent(?:_(.+))?$/, async (ctx
             await ctx.answerCallbackQuery("Location not found").catch(() => { });
             return;
         }
-        await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
+        await hiringNeedsService.setUrgencyOverride(locationId, item.overrideUrgency ? null : "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
-        await ctx.answerCallbackQuery("Urgent enabled").catch(() => { });
+        await ctx.answerCallbackQuery(item.overrideUrgency ? "Urgent cleared" : "Urgent enabled").catch(() => { });
     } catch (err) {
         logger.error({ err, locationId }, "Failed to toggle hiring urgency");
         await ctx.answerCallbackQuery("Failed to update urgency").catch(() => { });
-    }
-});
-
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_auto(?:_(.+))?$/, async (ctx) => {
-    const locationId = getHiringNeedLocationId(ctx);
-    if (!locationId) {
-        await ctx.answerCallbackQuery("Location not found").catch(() => { });
-        return;
-    }
-
-    try {
-        ctx.session.selectedLocationId = locationId;
-        await hiringNeedsService.setUrgencyOverride(locationId, null);
-        await refreshHiringNeedDetails(ctx, locationId);
-        await ctx.answerCallbackQuery("Auto mode enabled").catch(() => { });
-    } catch (err) {
-        logger.error({ err, locationId }, "Failed to reset hiring urgency to auto");
-        await ctx.answerCallbackQuery("Failed to set auto priority").catch(() => { });
     }
 });
 
