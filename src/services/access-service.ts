@@ -168,12 +168,14 @@ export class AccessService {
         try {
             if (!(await this.isAuthorized(telegramId))) return null;
             const api = this.getSafeApi();
-            await api.unbanChatMember(this.chatId, Number(telegramId)).catch((e: any) => {
-                const description = String(e?.description || "").toLowerCase();
-                if (!description.includes("user not found") && !description.includes("user is not a member")) {
-                    logger.warn({ err: e, telegramId }, "Failed to clear channel ban before invite link creation");
-                }
-            });
+            for (const chatId of this.getRevocationChatIds()) {
+                await api.unbanChatMember(chatId, Number(telegramId)).catch((e: any) => {
+                    const description = String(e?.description || "").toLowerCase();
+                    if (!description.includes("user not found") && !description.includes("user is not a member")) {
+                        logger.warn({ err: e, chatId, telegramId }, "Failed to clear protected chat ban before invite link creation");
+                    }
+                });
+            }
             const link = await api.createChatInviteLink(this.chatId, {
                 member_limit: 1,
                 name: `Invite for ${telegramId.toString()}`
