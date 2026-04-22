@@ -263,6 +263,17 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 if ((teamRes.inactiveStaffRemovedFromChats || 0) > 0) {
                     report += `🧹 Removed from chats: <b>${teamRes.inactiveStaffRemovedFromChats}</b>\n`;
                 }
+                const removalFailures = teamRes.inactiveStaffRemovalFailures || [];
+                if (removalFailures.length > 0) {
+                    const failedChatIds = Array.from(new Set(
+                        removalFailures.map((failure: any) => String(failure.chatId))
+                    )).slice(0, 6);
+                    report += `⚠️ Chat removals failed: <b>${removalFailures.length}</b>`;
+                    if (failedChatIds.length > 0) {
+                        report += ` (${failedChatIds.join(', ')})`;
+                    }
+                    report += `\n`;
+                }
 
                 const shiftDelta = (schedRes.shiftsAfter || 0) - (schedRes.shiftsBefore || 0);
                 const shiftDeltaStr = shiftDelta >= 0 ? `+${shiftDelta}` : `${shiftDelta}`;

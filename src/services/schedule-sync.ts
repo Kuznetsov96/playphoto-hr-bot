@@ -22,6 +22,11 @@ interface TeamMember {
     locationName?: string;
 }
 
+interface ChatRevokeFailure {
+    chatId: number;
+    error: string;
+}
+
 /** Map of short codes used in schedule cells → location name pattern */
 const LOCATION_CODE_MAP: Record<string, string> = {
     'SP': 'smile park',
@@ -64,7 +69,7 @@ export class ScheduleSyncService {
         if (!this.sheets) throw new Error("Google Sheets not configured (missing google-service-account.json)");
     }
 
-    private async revokeFromAllTeamChats(api: Api, telegramId: bigint, reason: string): Promise<{ removedFromAtLeastOneChat: boolean; removedFromChatsCount: number }> {
+    private async revokeFromAllTeamChats(api: Api, telegramId: bigint, reason: string): Promise<{ removedFromAtLeastOneChat: boolean; removedFromChatsCount: number; failedChats: ChatRevokeFailure[] }> {
         const locations = await locationRepository.findAll();
         const chatIds = new Set<number>([
             TEAM_CHATS.CHANNEL,
@@ -75,6 +80,7 @@ export class ScheduleSyncService {
         ]);
 
         let removedFromChatsCount = 0;
+        const failedChats: ChatRevokeFailure[] = [];
         const participantStatuses = new Set(["creator", "administrator", "member", "restricted"]);
 
         for (const chatId of chatIds) {
@@ -91,12 +97,17 @@ export class ScheduleSyncService {
             } catch (e: any) {
                 const description = String(e?.description || "").toLowerCase();
                 if (
+                    description.includes("member not found") ||
                     description.includes("user not found") ||
                     description.includes("participant_id_invalid") ||
                     description.includes("user not participant")
                 ) {
                     continue;
                 }
+                failedChats.push({
+                    chatId,
+                    error: e?.description || e?.message || "Unknown Telegram API error",
+                });
                 logger.warn({ err: e, chatId, telegramId, reason }, "Failed to revoke staff access from team chat");
             }
         }
@@ -104,6 +115,7 @@ export class ScheduleSyncService {
         return {
             removedFromAtLeastOneChat: removedFromChatsCount > 0,
             removedFromChatsCount,
+            failedChats,
         };
     }
 
@@ -329,6 +341,7 @@ export class ScheduleSyncService {
         let skipped = 0;
         let inactiveStaffProcessed = 0;
         let inactiveStaffRemovedFromChats = 0;
+        const inactiveStaffRemovalFailures: Array<ChatRevokeFailure & { fullName: string; telegramId: string }> = [];
 
         const locations = await locationRepository.findAll();
         // BATCH CACHE: Fetch all existing users and staff to avoid N+1 queries
@@ -415,21 +428,26 @@ export class ScheduleSyncService {
                                 // Ban removes the user and prevents them from re-joining until unbanned
                                 // We use a short ban or immediately unban if we just want a "kick"
                                 const revokeResult = await this.revokeFromAllTeamChats(api, telegramId, "STAFF_DEACTIVATED");
-                                if (revokeResult.removedFromAtLeastOneChat) {
-                                    inactiveStaffRemovedFromChats++;
-                                }
+                                inactiveStaffRemovedFromChats += revokeResult.removedFromChatsCount;
+                                inactiveStaffRemovalFailures.push(...revokeResult.failedChats.map((failure) => ({
+                                    ...failure,
+                                    fullName,
+                                    telegramId: telegramId.toString(),
+                                })));
                                 logSecurityEvent({
                                     event: "security.staff.channel_access_removed",
                                     telegramId,
                                     userId: user.id,
                                     actorType: "system",
                                     actorRole: "system",
-                                    result: "success",
+                                    result: revokeResult.failedChats.length > 0 ? "failed" : "success",
                                     module: "schedule-sync",
                                     operation: "syncTeam",
                                     safeContext: {
                                         fullName,
                                         reason: profile.isActive ? "STAFF_DEACTIVATED" : "STAFF_INACTIVE_ENFORCEMENT",
+                                        removedFromChatsCount: revokeResult.removedFromChatsCount,
+                                        failedChatsCount: revokeResult.failedChats.length,
                                     },
                                 });
                             } catch (e: any) {
@@ -548,6 +566,7 @@ export class ScheduleSyncService {
             activeAfter,
             inactiveStaffProcessed,
             inactiveStaffRemovedFromChats,
+            inactiveStaffRemovalFailures,
             teamMapping: teamMappingForSchedule,
             blocklistRes
         };
