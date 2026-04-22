@@ -16,7 +16,7 @@ import { formatLocationName, normalizeCity } from "./utils.js";
 import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 import { statsService } from "../../services/stats-service.js";
 import { hrService } from "../../services/hr-service.js";
-import { hiringNeedsService, type HiringUrgency } from "../../services/hiring-needs-service.js";
+import { hiringNeedsService } from "../../services/hiring-needs-service.js";
 import { createKyivDate } from "../../utils/bot-utils.js";
 import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
@@ -230,39 +230,12 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
     }
 
     const item = await hiringNeedsService.getLocationItem(locationId);
-
-    if (!item) {
-        range.text("Location is not in active board", (ctx) => ctx.answerCallbackQuery("No active demand")).row();
-        range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
-            await ScreenManager.goBack(ctx, "🎯 <b>Hiring Needs</b>", "admin-hiring-needs");
-        });
-        return;
+    if (item) {
+        range.text("🔄 Refresh", async (ctx) => {
+            await renderHiringNeedDetails(ctx, item);
+            await ctx.answerCallbackQuery().catch(() => { });
+        }).row();
     }
-
-    range.text("➕ Need", async (ctx) => {
-        await hiringNeedsService.adjustNeededCount(locationId, 1);
-        await refreshHiringNeedDetails(ctx, locationId);
-    });
-
-    range.text("➖ Need", async (ctx) => {
-        await hiringNeedsService.adjustNeededCount(locationId, -1);
-        await refreshHiringNeedDetails(ctx, locationId);
-    }).row();
-
-    range.text(urgentModeButtonLabel(item), async (ctx) => {
-        // Toggle manual urgent
-        await hiringNeedsService.setUrgencyOverride(locationId, item.overrideUrgency ? null : "CRITICAL");
-        await refreshHiringNeedDetails(ctx, locationId);
-    }).row();
-
-    range.text(item.note ? "📝 Edit Note" : "📝 Set Note", async (ctx) => {
-        ctx.session.step = `set_hiring_note_${locationId}`;
-        await ctx.answerCallbackQuery();
-        await ctx.reply(
-            "✍️ Enter short note (up to 140 chars).\nSend '-' to clear.",
-            { reply_markup: { force_reply: true } }
-        );
-    }).row();
 
     range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
         const freshBoard = await hiringNeedsService.getBoard();
