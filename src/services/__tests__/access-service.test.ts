@@ -42,8 +42,8 @@ describe("AccessService", () => {
             service.syncUserAccess(123n, "Routine Sync"),
         ]);
 
-        expect(banChatMember).toHaveBeenCalledTimes(1);
-        expect(unbanChatMember).toHaveBeenCalledTimes(1);
+        expect(banChatMember).toHaveBeenCalled();
+        expect(unbanChatMember).not.toHaveBeenCalled();
         expect(mocks.securityAudit).toHaveBeenCalledTimes(2);
         expect(mocks.securityAudit).toHaveBeenNthCalledWith(1, expect.objectContaining({
             event: "security.channel_access.revoked",
@@ -74,5 +74,21 @@ describe("AccessService", () => {
 
             await expect(service.isAuthorized(123n)).resolves.toBe(true);
         }
+    });
+
+    it("clears an existing channel ban before creating a valid one-time invite", async () => {
+        const service = new AccessService();
+        const unbanChatMember = vi.fn().mockResolvedValue(undefined);
+        const createChatInviteLink = vi.fn().mockResolvedValue({ invite_link: "https://t.me/+fresh" });
+
+        service.setApi({ unbanChatMember, createChatInviteLink });
+        mocks.findWithProfilesByTelegramId.mockResolvedValue({
+            role: Role.STAFF,
+            staffProfile: { isActive: true },
+        });
+
+        await expect(service.createInviteLink(123n)).resolves.toBe("https://t.me/+fresh");
+        expect(unbanChatMember).toHaveBeenCalledTimes(1);
+        expect(createChatInviteLink).toHaveBeenCalledTimes(1);
     });
 });
