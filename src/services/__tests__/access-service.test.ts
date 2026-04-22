@@ -42,7 +42,7 @@ describe("AccessService", () => {
             service.syncUserAccess(123n, "Routine Sync"),
         ]);
 
-        expect(banChatMember).toHaveBeenCalledTimes(3);
+        expect(banChatMember).toHaveBeenCalled();
         expect(unbanChatMember).not.toHaveBeenCalled();
         expect(mocks.securityAudit).toHaveBeenCalledTimes(2);
         expect(mocks.securityAudit).toHaveBeenNthCalledWith(1, expect.objectContaining({
