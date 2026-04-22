@@ -25,7 +25,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
     const { 
         adminOpsMenu: recruitmentOpsMenu, adminOfflineStagingMenu, adminCandidateMenu, adminNDAMenu,
         adminFirstShiftStaffMenu, adminStagingSelectLocMenu, adminHiringNeedsMenu, adminHiringNeedDetailsMenu,
-        adminHiringNeedCitiesMenu, adminHiringNeedLocationsMenu, adminHiringNeedCitySelectMenu
+        adminHiringNeedCitiesMenu, adminHiringNeedLocationsMenu
     } = await import("./recruitment.js");
 
     const { hrFinalStepMenu } = await import("../../menus/hr.js");
@@ -75,7 +75,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     bot.use(adminHiringNeedDetailsMenu);
     bot.use(adminHiringNeedCitiesMenu);
     bot.use(adminHiringNeedLocationsMenu);
-    bot.use(adminHiringNeedCitySelectMenu);
     bot.use(hrFinalStepMenu);
     
     bot.use(adminBroadcastHubMenu);
@@ -120,7 +119,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     menuRegistry.register(adminHiringNeedDetailsMenu);
     menuRegistry.register(adminHiringNeedCitiesMenu);
     menuRegistry.register(adminHiringNeedLocationsMenu);
-    menuRegistry.register(adminHiringNeedCitySelectMenu);
     
     menuRegistry.register(adminBroadcastHubMenu);
     menuRegistry.register(adminBroadcastListMenu);
@@ -155,7 +153,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     adminHiringNeedsMenu.register(adminHiringNeedDetailsMenu);
     adminHiringNeedsMenu.register(adminHiringNeedCitiesMenu);
     adminHiringNeedCitiesMenu.register(adminHiringNeedLocationsMenu);
-    adminHiringNeedDetailsMenu.register(adminHiringNeedCitySelectMenu);
     recruitmentOpsMenu.register(hrFinalStepMenu);
     
     adminMenu.register(adminFinanceMenu);
