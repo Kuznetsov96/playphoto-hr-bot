@@ -18,6 +18,7 @@ export type HiringNeedItem = {
     locationId: string;
     locationName: string;
     city: string;
+    isHiddenFromCandidates: boolean;
     needed: number;
     hrPool: number;
     mentorPool: number;
@@ -148,12 +149,12 @@ async function writeMetaState(state: HiringNeedMetaState): Promise<void> {
 }
 
 export const hiringNeedsService = {
-    async getBoard(): Promise<HiringNeedsBoard> {
+    async getBoard(options: { includeEmpty?: boolean } = {}): Promise<HiringNeedsBoard> {
         const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const [locations, candidates, metaState] = await Promise.all([
             prisma.location.findMany({
                 where: { isHidden: false },
-                select: { id: true, name: true, city: true, neededCount: true }
+                select: { id: true, name: true, city: true, neededCount: true, isHiddenFromCandidates: true }
             }),
             prisma.candidate.findMany({
                 where: { locationId: { not: null } },
@@ -178,6 +179,7 @@ export const hiringNeedsService = {
                 locationId: location.id,
                 locationName: location.name,
                 city: location.city,
+                isHiddenFromCandidates: location.isHiddenFromCandidates,
                 needed,
                 hrPool: 0,
                 mentorPool: 0,
@@ -228,7 +230,7 @@ export const hiringNeedsService = {
             row.gap = Math.max(0, row.needed - row.reservedFirstShift);
             row.urgency = row.overrideUrgency || deriveUrgency(row.needed, row.gap);
             return row;
-        }).filter((row) =>
+        }).filter((row) => options.includeEmpty ||
             row.needed > 0 ||
             row.hrPool > 0 ||
             row.mentorPool > 0 ||
@@ -256,6 +258,10 @@ export const hiringNeedsService = {
         };
 
         return { totals, items };
+    },
+
+    async getLocationItem(locationId: string): Promise<HiringNeedItem | null> {
+        return (await this.getBoard({ includeEmpty: true })).items.find((row) => row.locationId === locationId) || null;
     },
 
     formatBoardText(board: HiringNeedsBoard, role: "HR" | "MENTOR" | "ADMIN"): string {
@@ -340,11 +346,13 @@ export const hiringNeedsService = {
     },
 
     formatNeedDetail(item: HiringNeedItem): string {
-        const override = item.overrideUrgency ? " (manual)" : "";
+        const urgent = item.urgency === "CRITICAL" || item.urgency === "HIGH" ? "Yes" : "No";
+        const urgencyMode = item.overrideUrgency ? "Manual" : "Auto";
         return (
             `🎯 <b>Need Control</b>\n\n` +
             `📍 <b>${item.locationName}</b> (${item.city})\n` +
-            `Urgent: <b>${item.urgency === "CRITICAL" || item.urgency === "HIGH" ? "Yes" : "No"}</b>${override}\n` +
+            `Urgent: <b>${urgent}</b> <i>(${urgencyMode})</i>\n` +
+            `Candidate status: <b>${item.isHiddenFromCandidates ? "Hidden" : "Visible"}</b>\n` +
             `Need: <b>${item.needed}</b>\n` +
             `Open: <b>${item.gap}</b>\n` +
             `HR pool: <b>${item.hrPool}</b>\n` +
