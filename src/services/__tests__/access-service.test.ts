@@ -76,7 +76,7 @@ describe("AccessService", () => {
         }
     });
 
-    it("clears an existing channel ban before creating a valid one-time invite", async () => {
+    it("clears existing protected chat bans before creating a valid one-time invite", async () => {
         const service = new AccessService();
         const unbanChatMember = vi.fn().mockResolvedValue(undefined);
         const createChatInviteLink = vi.fn().mockResolvedValue({ invite_link: "https://t.me/+fresh" });
@@ -88,7 +88,7 @@ describe("AccessService", () => {
         });
 
         await expect(service.createInviteLink(123n)).resolves.toBe("https://t.me/+fresh");
-        expect(unbanChatMember).toHaveBeenCalledTimes(1);
+        expect(unbanChatMember).toHaveBeenCalled();
         expect(createChatInviteLink).toHaveBeenCalledTimes(1);
     });
 });
