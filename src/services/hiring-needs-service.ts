@@ -286,6 +286,11 @@ export const hiringNeedsService = {
             return lines.join("\n");
         }
 
+        if (role === "ADMIN") {
+            lines.push("<i>Select location below.</i>");
+            return lines.join("\n");
+        }
+
         for (const item of visibleItems.slice(0, 8)) {
             const icon = urgencyIcon(item.urgency);
             const shortLoc = getShortLocationName(item.locationName, item.city);
@@ -348,21 +353,45 @@ export const hiringNeedsService = {
     formatNeedDetail(item: HiringNeedItem): string {
         const urgent = item.urgency === "CRITICAL" || item.urgency === "HIGH" ? "Yes" : "No";
         const urgencyMode = item.overrideUrgency ? "Manual" : "Auto";
-        return (
-            `🎯 <b>Need Control</b>\n\n` +
-            `📍 <b>${item.locationName}</b> (${item.city})\n` +
-            `Urgent: <b>${urgent}</b> <i>(${urgencyMode})</i>\n` +
-            `Candidate status: <b>${item.isHiddenFromCandidates ? "Hidden" : "Visible"}</b>\n` +
-            `Need: <b>${item.needed}</b>\n` +
-            `Open: <b>${item.gap}</b>\n` +
-            `HR pool: <b>${item.hrPool}</b>\n` +
-            `Mentor pool: <b>${item.mentorPool}</b>\n` +
-            `Final pool: <b>${item.finalPool}</b>\n` +
-            `First shift scheduled: <b>${item.reservedFirstShift}</b>\n` +
-            `Hired 7d: <b>${item.hired7d}</b>\n` +
-            `Deadline: <b>${item.deadline || "—"}</b>\n` +
-            `Note: <b>${item.note || "—"}</b>`
-        );
+        const poolParts = [
+            item.hrPool > 0 ? `HR <b>${item.hrPool}</b>` : null,
+            item.mentorPool > 0 ? `Mentor <b>${item.mentorPool}</b>` : null,
+            item.finalPool > 0 ? `Final <b>${item.finalPool}</b>` : null,
+        ].filter(Boolean);
+
+        const lines = [
+            `🎯 <b>Need Control</b>`,
+            "",
+            `📍 <b>${item.locationName}</b> (${item.city})`,
+            `Need: <b>${item.needed}</b> | Open: <b>${item.gap}</b>`,
+            `Urgent: <b>${urgent}</b> <i>(${urgencyMode})</i>`,
+        ];
+
+        if (poolParts.length > 0) {
+            lines.push(`Pool: ${poolParts.join(" | ")}`);
+        }
+
+        if (item.reservedFirstShift > 0) {
+            lines.push(`First shift: <b>${item.reservedFirstShift}</b>`);
+        }
+
+        if (item.hired7d > 0) {
+            lines.push(`Hired 7d: <b>${item.hired7d}</b>`);
+        }
+
+        if (item.isHiddenFromCandidates) {
+            lines.push(`Candidate status: <b>Hidden</b>`);
+        }
+
+        if (item.deadline) {
+            lines.push(`Deadline: <b>${item.deadline}</b>`);
+        }
+
+        if (item.note) {
+            lines.push(`Note: <b>${item.note}</b>`);
+        }
+
+        return lines.join("\n");
     },
 
     getUrgencyIcon(urgency: HiringUrgency): string {
