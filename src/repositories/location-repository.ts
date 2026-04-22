@@ -30,7 +30,7 @@ export class LocationRepository {
             let fopId = l.fopId;
             if (!fopId || fopId === 'KUZNETSOV') { // Kuznetsov is default, check for overrides
                 if (isSmileKyiv || l.name === 'Leoland') {
-                    fopId = 'GUPALOVA';
+                    fopId = 'POSREDNIKOVA';
                 } else if (isKarpukTerminalLocation || karpukLocs.includes(l.legacyName || '')) {
                     fopId = 'KARPUK';
                 } else if (posrednikovaLocs.includes(l.name) || posrednikovaLocs.includes(l.legacyName || '')) {
@@ -82,7 +82,7 @@ export class LocationRepository {
             let fopId = l.fopId;
             if (!fopId || fopId === 'KUZNETSOV') { // Kuznetsov is default, check for overrides
                 if (isSmileKyiv || l.name === 'Leoland') {
-                    fopId = 'GUPALOVA';
+                    fopId = 'POSREDNIKOVA';
                 } else if (isKarpukTerminalLocation || karpukLocs.includes(l.legacyName || '')) {
                     fopId = 'KARPUK';
                 } else if (posrednikovaLocs.includes(l.name) || posrednikovaLocs.includes(l.legacyName || '')) {
