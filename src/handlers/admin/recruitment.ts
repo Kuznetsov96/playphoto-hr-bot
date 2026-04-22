@@ -12,6 +12,7 @@ import { startAdminSearch } from "./search.js";
 import { formatCandidateProfile } from "../../utils/profile-formatter.js";
 import { formatCompactName, extractFirstName, shortenName } from "../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../utils/location-helpers.js";
+import { formatLocationName, normalizeCity } from "./utils.js";
 import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 import { statsService } from "../../services/stats-service.js";
 import { hrService } from "../../services/hr-service.js";
@@ -33,6 +34,11 @@ export const adminFirstShiftStaffMenu = new Menu<MyContext>("admin-first-shift-s
 export const adminStagingSelectLocMenu = new Menu<MyContext>("admin-staging-select-loc");
 export const adminHiringNeedsMenu = new Menu<MyContext>("admin-hiring-needs");
 export const adminHiringNeedDetailsMenu = new Menu<MyContext>("admin-hiring-need-details");
+export const adminHiringNeedCitiesMenu = new Menu<MyContext>("admin-hiring-need-cities");
+export const adminHiringNeedLocationsMenu = new Menu<MyContext>("admin-hiring-need-locations");
+export const adminHiringNeedCitySelectMenu = new Menu<MyContext>("admin-hiring-need-city-select");
+
+type HiringNeedItem = Awaited<ReturnType<typeof hiringNeedsService.getBoard>>["items"][number];
 
 adminOpsMenu.dynamic(async (ctx, range) => {
     const telegramId = ctx.from?.id;
@@ -41,10 +47,6 @@ adminOpsMenu.dynamic(async (ctx, range) => {
 
     range.text(ADMIN_TEXTS["admin-ops-search"], async (ctx) => {
         await startAdminSearch(ctx);
-    }).row();
-
-    range.text(ADMIN_TEXTS["admin-ops-locations"], async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "🏙️ <b>Select City:</b>", "admin-cities", { pushToStack: true });
     }).row();
 
     if (isSuperAdmin) {
@@ -66,7 +68,7 @@ adminOpsMenu.dynamic(async (ctx, range) => {
     }
 
     if (isSuperAdmin) {
-        range.text("🎯 Hiring Needs", async (ctx) => {
+        range.text("🎯 Locations / Hiring", async (ctx) => {
             const board = await hiringNeedsService.getBoard();
             const text = hiringNeedsService.formatBoardText(board, "ADMIN");
             await ScreenManager.renderScreen(ctx, text, "admin-hiring-needs", { pushToStack: true });
@@ -106,7 +108,7 @@ function parseDeadlineInput(raw: string): string | null {
 }
 
 async function refreshHiringNeedDetails(ctx: MyContext, locationId: string) {
-    const fresh = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+    const fresh = await hiringNeedsService.getLocationItem(locationId);
     if (!fresh) {
         const board = await hiringNeedsService.getBoard();
         await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
@@ -115,22 +117,32 @@ async function refreshHiringNeedDetails(ctx: MyContext, locationId: string) {
     await renderHiringNeedDetails(ctx, fresh);
 }
 
-function buildHiringNeedDetailKeyboard(item: Awaited<ReturnType<typeof hiringNeedsService.getBoard>>["items"][number]) {
+function urgentModeButtonLabel(item: HiringNeedItem): string {
+    return item.overrideUrgency ? "✓ Urgent" : "Urgent";
+}
+
+function autoModeButtonLabel(item: HiringNeedItem): string {
+    return item.overrideUrgency ? "Auto" : "✓ Auto";
+}
+
+function buildHiringNeedDetailKeyboard(item: HiringNeedItem) {
     return new InlineKeyboard()
         .text("➕ Need", `admin_hn_inc_${item.locationId}`)
         .text("➖ Need", `admin_hn_dec_${item.locationId}`)
         .row()
-        .text(item.overrideUrgency ? "Urgent: Manual" : "Urgent: Set", `admin_hn_urgent_${item.locationId}`)
-        .row()
-        .text("Auto", `admin_hn_auto_${item.locationId}`)
+        .text(urgentModeButtonLabel(item), `admin_hn_urgent_${item.locationId}`)
+        .text(autoModeButtonLabel(item), `admin_hn_auto_${item.locationId}`)
         .row()
         .text(item.deadline ? `📅 Deadline ${item.deadline}` : "📅 Set Deadline", `admin_hn_deadline_${item.locationId}`)
         .text(item.note ? "📝 Edit Note" : "📝 Set Note", `admin_hn_note_${item.locationId}`)
         .row()
+        .text(item.isHiddenFromCandidates ? "🔓 Show" : "🔒 Hide", `admin_hn_visibility_${item.locationId}`)
+        .text("🏙️ City", `admin_hn_city_${item.locationId}`)
+        .row()
         .text(ADMIN_TEXTS["hr-menu-back"], "admin_hn_back");
 }
 
-async function renderHiringNeedDetails(ctx: MyContext, item: Awaited<ReturnType<typeof hiringNeedsService.getBoard>>["items"][number], options: { pushToStack?: boolean } = {}) {
+async function renderHiringNeedDetails(ctx: MyContext, item: HiringNeedItem, options: { pushToStack?: boolean } = {}) {
     const renderOptions: { pushToStack?: boolean; manualMenuId: string } = { manualMenuId: "admin-hiring-need-details" };
     if (options.pushToStack !== undefined) renderOptions.pushToStack = options.pushToStack;
 
@@ -159,8 +171,72 @@ adminHiringNeedsMenu.dynamic(async (ctx, range) => {
         }
     }
 
+    range.text("📍 All Locations", async (ctx) => {
+        await ScreenManager.renderScreen(ctx, "🏙️ <b>Select City:</b>", "admin-hiring-need-cities", { pushToStack: true });
+    }).row();
+
     range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🛠️ <b>HR Operations</b>", "admin-ops");
+    });
+});
+
+adminHiringNeedCitiesMenu.dynamic(async (_ctx, range) => {
+    const cities = await locationRepository.findAllCities(false);
+    for (const city of cities) {
+        range.text(normalizeCity(city), async (ctx) => {
+            if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
+            ctx.session.candidateData.city = city;
+            await ScreenManager.renderScreen(ctx, `📍 <b>Locations in ${normalizeCity(city)}:</b>`, "admin-hiring-need-locations", { pushToStack: true });
+        }).row();
+    }
+
+    range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+        const board = await hiringNeedsService.getBoard();
+        await ScreenManager.goBack(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
+    });
+});
+
+adminHiringNeedLocationsMenu.dynamic(async (ctx, range) => {
+    if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
+    const city = ctx.session.candidateData.city;
+    if (!city) return;
+
+    const locations = await locationRepository.findByCityAdmin(city);
+    for (const location of locations.filter((location) => !location.isHidden)) {
+        const visibilityIcon = location.isHiddenFromCandidates ? "👻" : "👁️";
+        const status = location.neededCount > 0 ? `🟢 (${location.neededCount})` : "🔴 (0)";
+        const label = `${visibilityIcon} ${formatLocationName(location.name, city)} ${status}`;
+        range.text(label, async (ctx) => {
+            ctx.session.selectedLocationId = location.id;
+            const item = await hiringNeedsService.getLocationItem(location.id);
+            if (!item) {
+                await ctx.answerCallbackQuery("Location not found").catch(() => { });
+                return;
+            }
+            await renderHiringNeedDetails(ctx, item, { pushToStack: true });
+        }).row();
+    }
+
+    range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+        await ScreenManager.goBack(ctx, "🏙️ <b>Select City:</b>", "admin-hiring-need-cities");
+    });
+});
+
+adminHiringNeedCitySelectMenu.dynamic(async (ctx, range) => {
+    const locationId = ctx.session.selectedLocationId;
+    if (!locationId) return;
+
+    const cities = await locationRepository.findAllCities(false);
+    for (const city of cities) {
+        range.text(normalizeCity(city), async (ctx) => {
+            await locationRepository.update(locationId, { city });
+            await ctx.answerCallbackQuery(`City changed to ${normalizeCity(city)}`).catch(() => { });
+            await refreshHiringNeedDetails(ctx, locationId);
+        }).row();
+    }
+
+    range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
+        await refreshHiringNeedDetails(ctx, locationId);
     });
 });
 
@@ -174,8 +250,7 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
         return;
     }
 
-    const board = await hiringNeedsService.getBoard();
-    const item = board.items.find((row) => row.locationId === locationId);
+    const item = await hiringNeedsService.getLocationItem(locationId);
 
     if (!item) {
         range.text("Location is not in active board", (ctx) => ctx.answerCallbackQuery("No active demand")).row();
@@ -187,32 +262,20 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
 
     range.text("➕ Need", async (ctx) => {
         await hiringNeedsService.adjustNeededCount(locationId, 1);
-        const fresh = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
-        if (!fresh) {
-            const board = await hiringNeedsService.getBoard();
-            await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
-            return;
-        }
-        await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
+        await refreshHiringNeedDetails(ctx, locationId);
     });
 
     range.text("➖ Need", async (ctx) => {
         await hiringNeedsService.adjustNeededCount(locationId, -1);
-        const fresh = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
-        if (!fresh) {
-            const board = await hiringNeedsService.getBoard();
-            await ScreenManager.renderScreen(ctx, hiringNeedsService.formatBoardText(board, "ADMIN"), "admin-hiring-needs");
-            return;
-        }
-        await ScreenManager.renderScreen(ctx, hiringNeedsService.formatNeedDetail(fresh), "admin-hiring-need-details");
-    }).row();
-
-    range.text(item.overrideUrgency ? "Urgent: Manual" : "Urgent: Set", async (ctx) => {
-        await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
 
-    range.text("Auto", async (ctx) => {
+    range.text(urgentModeButtonLabel(item), async (ctx) => {
+        await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
+        await refreshHiringNeedDetails(ctx, locationId);
+    });
+
+    range.text(autoModeButtonLabel(item), async (ctx) => {
         await hiringNeedsService.setUrgencyOverride(locationId, null);
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
@@ -290,14 +353,14 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_urgent(?:_(.+))?$/, async (ctx
 
     try {
         ctx.session.selectedLocationId = locationId;
-        const item = (await hiringNeedsService.getBoard()).items.find((row) => row.locationId === locationId);
+        const item = await hiringNeedsService.getLocationItem(locationId);
         if (!item) {
             await ctx.answerCallbackQuery("Location not found").catch(() => { });
             return;
         }
         await hiringNeedsService.setUrgencyOverride(locationId, "CRITICAL");
         await refreshHiringNeedDetails(ctx, locationId);
-        await ctx.answerCallbackQuery("Urgency updated").catch(() => { });
+        await ctx.answerCallbackQuery("Urgent enabled").catch(() => { });
     } catch (err) {
         logger.error({ err, locationId }, "Failed to toggle hiring urgency");
         await ctx.answerCallbackQuery("Failed to update urgency").catch(() => { });
@@ -315,11 +378,47 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_auto(?:_(.+))?$/, async (ctx) 
         ctx.session.selectedLocationId = locationId;
         await hiringNeedsService.setUrgencyOverride(locationId, null);
         await refreshHiringNeedDetails(ctx, locationId);
-        await ctx.answerCallbackQuery("Auto priority restored").catch(() => { });
+        await ctx.answerCallbackQuery("Auto mode enabled").catch(() => { });
     } catch (err) {
         logger.error({ err, locationId }, "Failed to reset hiring urgency to auto");
         await ctx.answerCallbackQuery("Failed to set auto priority").catch(() => { });
     }
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_visibility_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+
+    try {
+        ctx.session.selectedLocationId = locationId;
+        const location = await locationRepository.findById(locationId);
+        if (!location) {
+            await ctx.answerCallbackQuery("Location not found").catch(() => { });
+            return;
+        }
+
+        const nextHidden = !location.isHiddenFromCandidates;
+        await locationRepository.update(locationId, { isHiddenFromCandidates: nextHidden });
+        await refreshHiringNeedDetails(ctx, locationId);
+        await ctx.answerCallbackQuery(nextHidden ? "Hidden from candidates" : "Visible to candidates").catch(() => { });
+    } catch (err) {
+        logger.error({ err, locationId }, "Failed to toggle location candidate visibility");
+        await ctx.answerCallbackQuery("Failed to update visibility").catch(() => { });
+    }
+});
+
+adminRecruitmentHandlers.callbackQuery(/^admin_hn_city_(.+)$/, async (ctx) => {
+    const locationId = ctx.match[1];
+    if (!locationId) return;
+
+    ctx.session.selectedLocationId = locationId;
+    await ctx.answerCallbackQuery().catch(() => { });
+    await ScreenManager.renderScreen(
+        ctx,
+        "🏙️ <b>Select new city:</b>",
+        "admin-hiring-need-city-select",
+        { pushToStack: true }
+    );
 });
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_deadline_(.+)$/, async (ctx) => {
