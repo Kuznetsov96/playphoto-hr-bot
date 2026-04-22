@@ -28,6 +28,14 @@ export class AccessService {
         return this.api;
     }
 
+    private getRevocationChatIds(): number[] {
+        return Array.from(new Set([
+            TEAM_CHATS.CHANNEL,
+            TEAM_CHATS.HUB,
+            TEAM_CHATS.SUPPORT,
+        ].filter((chatId): chatId is number => Boolean(chatId) && !Number.isNaN(chatId))));
+    }
+
     /**
      * Checks if a user is authorized to be in the team channel.
      * Unified logic: Active Staff, Admins, or Candidates in Mentorship/Training.
@@ -68,7 +76,7 @@ export class AccessService {
     }
 
     /**
-     * Proactively syncs user access (kicks if unauthorized).
+     * Proactively syncs user access (bans if unauthorized).
      */
     async syncUserAccess(telegramId: bigint, reason: string = "Routine Sync") {
         try {
@@ -82,7 +90,7 @@ export class AccessService {
     }
 
     /**
-     * Removes user from the channel.
+     * Removes user from the channel and keeps the ban in place.
      */
     async revokeAccess(telegramId: bigint, reason: string = "Unauthorized") {
         const key = telegramId.toString();
@@ -93,6 +101,7 @@ export class AccessService {
         }
 
         const revokePromise = (async () => {
+            const chatIds = this.getRevocationChatIds();
             try {
                 securityAudit({
                     event: "security.channel_access.revoked",
@@ -100,18 +109,31 @@ export class AccessService {
                     actorType: "system",
                     telegramId,
                     entityType: "channel_access",
-                    context: { reason, chatId: this.chatId }
+                    context: { reason, chatIds }
                 });
                 const api = this.getSafeApi();
-                await api.banChatMember(this.chatId, Number(telegramId));
-                await api.unbanChatMember(this.chatId, Number(telegramId));
+
+                const failures: Array<{ chatId: number; error: string }> = [];
+                for (const chatId of chatIds) {
+                    try {
+                        await api.banChatMember(chatId, Number(telegramId));
+                    } catch (e: any) {
+                        const description = String(e?.description || "").toLowerCase();
+                        if (description.includes("user not found") || description.includes("participant_id_invalid")) {
+                            continue;
+                        }
+                        failures.push({ chatId, error: e?.description || e?.message || "Unknown Telegram API error" });
+                        logger.error({ err: e, chatId, telegramId }, "Failed to revoke protected chat access");
+                    }
+                }
+
                 securityAudit({
                     event: "security.channel_access.revoked",
-                    result: "success",
+                    result: failures.length > 0 ? "failed" : "success",
                     actorType: "system",
                     telegramId,
                     entityType: "channel_access",
-                    context: { reason, chatId: this.chatId }
+                    context: { reason, chatIds, failedChats: failures.length }
                 });
             } catch (e: any) {
                 if (e.description?.includes("user is not a member")) return;
@@ -146,6 +168,12 @@ export class AccessService {
         try {
             if (!(await this.isAuthorized(telegramId))) return null;
             const api = this.getSafeApi();
+            await api.unbanChatMember(this.chatId, Number(telegramId)).catch((e: any) => {
+                const description = String(e?.description || "").toLowerCase();
+                if (!description.includes("user not found") && !description.includes("user is not a member")) {
+                    logger.warn({ err: e, telegramId }, "Failed to clear channel ban before invite link creation");
+                }
+            });
             const link = await api.createChatInviteLink(this.chatId, {
                 member_limit: 1,
                 name: `Invite for ${telegramId.toString()}`
