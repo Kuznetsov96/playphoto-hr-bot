@@ -36,9 +36,9 @@ export const adminHiringNeedsMenu = new Menu<MyContext>("admin-hiring-needs");
 export const adminHiringNeedDetailsMenu = new Menu<MyContext>("admin-hiring-need-details");
 export const adminHiringNeedCitiesMenu = new Menu<MyContext>("admin-hiring-need-cities");
 export const adminHiringNeedLocationsMenu = new Menu<MyContext>("admin-hiring-need-locations");
-export const adminHiringNeedCitySelectMenu = new Menu<MyContext>("admin-hiring-need-city-select");
 
 type HiringNeedItem = Awaited<ReturnType<typeof hiringNeedsService.getBoard>>["items"][number];
+const ADMIN_HIRING_NEEDS_PAGE_SIZE = 8;
 
 adminOpsMenu.dynamic(async (ctx, range) => {
     const telegramId = ctx.from?.id;
@@ -69,6 +69,7 @@ adminOpsMenu.dynamic(async (ctx, range) => {
 
     if (isSuperAdmin) {
         range.text("🎯 Locations / Hiring", async (ctx) => {
+            ctx.session.hiringNeedsPage = 1;
             const board = await hiringNeedsService.getBoard();
             const text = hiringNeedsService.formatBoardText(board, "ADMIN");
             await ScreenManager.renderScreen(ctx, text, "admin-hiring-needs", { pushToStack: true });
@@ -82,30 +83,6 @@ adminOpsMenu.dynamic(async (ctx, range) => {
         await ScreenManager.goBack(ctx, text, "admin-main");
     });
 });
-
-function parseDeadlineInput(raw: string): string | null {
-    const value = raw.trim();
-    if (!value || value === "-") return null;
-
-    const shortMatch = value.match(/^(\d{1,2})\.(\d{1,2})$/);
-    if (shortMatch) {
-        const day = Number(shortMatch[1]);
-        const month = Number(shortMatch[2]);
-        if (day < 1 || day > 31 || month < 1 || month > 12) return null;
-        return `${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}`;
-    }
-
-    const longMatch = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-    if (longMatch) {
-        const day = Number(longMatch[1]);
-        const month = Number(longMatch[2]);
-        const year = Number(longMatch[3]);
-        if (day < 1 || day > 31 || month < 1 || month > 12 || year < 2024 || year > 2100) return null;
-        return `${String(day).padStart(2, "0")}.${String(month).padStart(2, "0")}.${year}`;
-    }
-
-    return null;
-}
 
 async function refreshHiringNeedDetails(ctx: MyContext, locationId: string) {
     const fresh = await hiringNeedsService.getLocationItem(locationId);
@@ -133,11 +110,9 @@ function buildHiringNeedDetailKeyboard(item: HiringNeedItem) {
         .text(urgentModeButtonLabel(item), `admin_hn_urgent_${item.locationId}`)
         .text(autoModeButtonLabel(item), `admin_hn_auto_${item.locationId}`)
         .row()
-        .text(item.deadline ? `📅 Deadline ${item.deadline}` : "📅 Set Deadline", `admin_hn_deadline_${item.locationId}`)
         .text(item.note ? "📝 Edit Note" : "📝 Set Note", `admin_hn_note_${item.locationId}`)
         .row()
         .text(item.isHiddenFromCandidates ? "🔓 Show" : "🔒 Hide", `admin_hn_visibility_${item.locationId}`)
-        .text("🏙️ City", `admin_hn_city_${item.locationId}`)
         .row()
         .text(ADMIN_TEXTS["hr-menu-back"], "admin_hn_back");
 }
@@ -157,17 +132,44 @@ async function renderHiringNeedDetails(ctx: MyContext, item: HiringNeedItem, opt
 adminHiringNeedsMenu.dynamic(async (ctx, range) => {
     const board = await hiringNeedsService.getBoard();
     const openNeeds = board.items.filter((item) => item.needed > 0);
+    const totalPages = Math.max(1, Math.ceil(openNeeds.length / ADMIN_HIRING_NEEDS_PAGE_SIZE));
+    const page = Math.min(Math.max(1, ctx.session.hiringNeedsPage || 1), totalPages);
+    ctx.session.hiringNeedsPage = page;
+    const pageItems = openNeeds.slice((page - 1) * ADMIN_HIRING_NEEDS_PAGE_SIZE, page * ADMIN_HIRING_NEEDS_PAGE_SIZE);
 
     if (openNeeds.length === 0) {
         range.text("No active demand", (ctx) => ctx.answerCallbackQuery("No open needs")).row();
     } else {
-        for (const item of openNeeds.slice(0, 18)) {
+        for (const item of pageItems) {
             const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
             const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city)} • need ${item.needed} • open ${item.gap}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedLocationId = item.locationId;
                 await renderHiringNeedDetails(ctx, item, { pushToStack: true });
             }).row();
+        }
+
+        if (totalPages > 1) {
+            if (page > 1) {
+                range.text("⬅️ Previous", async (ctx) => {
+                    ctx.session.hiringNeedsPage = page - 1;
+                    await ctx.menu.update();
+                    await ctx.answerCallbackQuery().catch(() => { });
+                });
+            }
+
+            range.text(`Page ${page}/${totalPages}`, async (ctx) => {
+                await ctx.answerCallbackQuery(`Page ${page}/${totalPages}`).catch(() => { });
+            });
+
+            if (page < totalPages) {
+                range.text("Next ➡️", async (ctx) => {
+                    ctx.session.hiringNeedsPage = page + 1;
+                    await ctx.menu.update();
+                    await ctx.answerCallbackQuery().catch(() => { });
+                });
+            }
+            range.row();
         }
     }
 
@@ -222,24 +224,6 @@ adminHiringNeedLocationsMenu.dynamic(async (ctx, range) => {
     });
 });
 
-adminHiringNeedCitySelectMenu.dynamic(async (ctx, range) => {
-    const locationId = ctx.session.selectedLocationId;
-    if (!locationId) return;
-
-    const cities = await locationRepository.findAllCities(false);
-    for (const city of cities) {
-        range.text(normalizeCity(city), async (ctx) => {
-            await locationRepository.update(locationId, { city });
-            await ctx.answerCallbackQuery(`City changed to ${normalizeCity(city)}`).catch(() => { });
-            await refreshHiringNeedDetails(ctx, locationId);
-        }).row();
-    }
-
-    range.text(ADMIN_TEXTS["hr-menu-back"], async (ctx) => {
-        await refreshHiringNeedDetails(ctx, locationId);
-    });
-});
-
 adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
     const locationId = ctx.session.selectedLocationId;
     if (!locationId) {
@@ -279,15 +263,6 @@ adminHiringNeedDetailsMenu.dynamic(async (ctx, range) => {
         await hiringNeedsService.setUrgencyOverride(locationId, null);
         await refreshHiringNeedDetails(ctx, locationId);
     }).row();
-
-    range.text(item.deadline ? `📅 Deadline ${item.deadline}` : "📅 Set Deadline", async (ctx) => {
-        ctx.session.step = `set_hiring_deadline_${locationId}`;
-        await ctx.answerCallbackQuery();
-        await ctx.reply(
-            "✍️ Enter deadline (dd.mm or dd.mm.yyyy).\nSend '-' to clear.",
-            { reply_markup: { force_reply: true } }
-        );
-    });
 
     range.text(item.note ? "📝 Edit Note" : "📝 Set Note", async (ctx) => {
         ctx.session.step = `set_hiring_note_${locationId}`;
@@ -405,32 +380,6 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_visibility_(.+)$/, async (ctx)
         logger.error({ err, locationId }, "Failed to toggle location candidate visibility");
         await ctx.answerCallbackQuery("Failed to update visibility").catch(() => { });
     }
-});
-
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_city_(.+)$/, async (ctx) => {
-    const locationId = ctx.match[1];
-    if (!locationId) return;
-
-    ctx.session.selectedLocationId = locationId;
-    await ctx.answerCallbackQuery().catch(() => { });
-    await ScreenManager.renderScreen(
-        ctx,
-        "🏙️ <b>Select new city:</b>",
-        "admin-hiring-need-city-select",
-        { pushToStack: true }
-    );
-});
-
-adminRecruitmentHandlers.callbackQuery(/^admin_hn_deadline_(.+)$/, async (ctx) => {
-    const locationId = ctx.match[1];
-    if (!locationId) return;
-    ctx.session.selectedLocationId = locationId;
-    ctx.session.step = `set_hiring_deadline_${locationId}`;
-    await ctx.answerCallbackQuery();
-    await ctx.reply(
-        "✍️ Enter deadline (dd.mm or dd.mm.yyyy).\nSend '-' to clear.",
-        { reply_markup: { force_reply: true } }
-    );
 });
 
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_note_(.+)$/, async (ctx) => {
@@ -960,19 +909,6 @@ adminRecruitmentHandlers.callbackQuery(/^staging_(.+)_date_(.+)$/, async (ctx: M
 
 adminRecruitmentHandlers.on("message:text", async (ctx, next) => {
     const step = ctx.session.step || "";
-    if (step.startsWith("set_hiring_deadline_")) {
-        const locationId = step.replace("set_hiring_deadline_", "");
-        const deadline = parseDeadlineInput(ctx.message.text);
-        if (ctx.message.text.trim() !== "-" && deadline === null) {
-            await ctx.reply("❌ Invalid format. Use dd.mm or dd.mm.yyyy");
-            return;
-        }
-        await hiringNeedsService.setDeadline(locationId, deadline);
-        ctx.session.step = "idle";
-        await refreshHiringNeedDetails(ctx, locationId);
-        return;
-    }
-
     if (step.startsWith("set_hiring_note_")) {
         const locationId = step.replace("set_hiring_note_", "");
         const raw = ctx.message.text.trim();
