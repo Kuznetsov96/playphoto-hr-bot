@@ -462,20 +462,8 @@ async function renderReview(ctx: MyContext) {
     if (mediaItems.length === 1) ctx.session.broadcastDraft.media = mediaItems[0];
     if (mediaItems.length > 1) ctx.session.broadcastDraft.media = mediaItems;
     (ctx.session as any).broadcastValue = data.targetValue;
-
-    if (mediaItems.length > 1) {
-        const msg = await ctx.replyWithPhoto(mediaItems[0]!.fileId, { caption: preview, parse_mode: "HTML", reply_markup: kb });
-        data.menuMessageId = msg.message_id;
-    } else if (data.media?.type === 'photo') {
-        const msg = await ctx.replyWithPhoto(data.media.fileId, { caption: preview, parse_mode: "HTML", reply_markup: kb });
-        data.menuMessageId = msg.message_id;
-    } else if (data.media?.type === 'video') {
-        const msg = await ctx.replyWithVideo(data.media.fileId, { caption: preview, parse_mode: "HTML", reply_markup: kb });
-        data.menuMessageId = msg.message_id;
-    } else {
-        const msg = await ctx.reply(preview, { parse_mode: "HTML", reply_markup: kb });
-        data.menuMessageId = msg.message_id;
-    }
+    const msg = await ctx.reply(preview, { parse_mode: "HTML", reply_markup: kb });
+    data.menuMessageId = msg.message_id;
 }
 
 adminBroadcastHandlers.callbackQuery("br_cancel", async (ctx) => {
@@ -703,11 +691,7 @@ adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
         const kb = getBroadcastKb(true, true, stats);
         kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
 
-        if (draft.media) {
-            await ctx.editMessageCaption({ caption: preview, reply_markup: kb }).catch(() => { });
-        } else {
-            await ctx.editMessageText(preview, { reply_markup: kb }).catch(() => { });
-        }
+        await ctx.editMessageText(preview, { reply_markup: kb }).catch(() => { });
     } catch (e: any) {
         logger.error({ err: e }, "Broadcast test failed");
         await ctx.reply(`❌ Test failed: ${e.message}`);

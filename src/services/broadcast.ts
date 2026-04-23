@@ -69,13 +69,12 @@ async function sendBroadcastPayload(api: any, chatId: number, text: string, medi
         const mediaGroup = media.map((item, index) => ({
             type: item.type,
             media: item.fileId,
-            ...(index === 0 ? { caption: text, parse_mode: "HTML" as const } : {})
         }));
 
         await api.sendMediaGroup(chatId, mediaGroup);
 
-        if (buttonType !== 'none') {
-            return await api.sendMessage(chatId, getBroadcastFollowUpText(buttonType), extra);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
         }
 
         return null;
@@ -83,11 +82,19 @@ async function sendBroadcastPayload(api: any, chatId: number, text: string, medi
 
     const singleMedia = Array.isArray(media) ? media[0] : media;
     if (singleMedia?.type === 'photo') {
-        return await api.sendPhoto(chatId, singleMedia.fileId, { caption: text, ...extra });
+        await api.sendPhoto(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
     }
 
     if (singleMedia?.type === 'video') {
-        return await api.sendVideo(chatId, singleMedia.fileId, { caption: text, ...extra });
+        await api.sendVideo(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
     }
 
     return await api.sendMessage(chatId, text, extra);
