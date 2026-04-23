@@ -50,6 +50,11 @@ export const LOCATION_DETAILS: Record<string, { address: string, schedule: strin
     schedule: "Пн-Пт — 14:00-21:00, Сб-Нд — 12:00-21:00",
     salary: "Пн-Пт — 1 человек 25%, Сб-Нд — 1 человек 30%"
   },
+  "Kidlandia": {
+    address: "Київ, проспект Степана Бандери, 34-В, РЦ «BLOCKBUSTER», 2 поверх",
+    schedule: "Пн-Пт — 14:00-21:00, Сб-Нд — 12:00-21:00",
+    salary: "Пн-Пт — 1 человек 20%, Сб-Нд — 1 человек 30%"
+  },
   "Fly Kids Рівне": {
     address: "Рівне, вул. Київська, 67А (ТЦ Арена)",
     schedule: "Пн-Пт — 15:00-21:00, Сб-Нд — 12:00-21:00",

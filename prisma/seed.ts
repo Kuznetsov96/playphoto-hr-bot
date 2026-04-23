@@ -33,6 +33,20 @@ const locations = [
         schedule: "Пн-Пт — 14:00-21:00\nСб-Нд — 12:00-21:00",
         salary: "Пн-Пт — 1 человек 25%, Сб-Нд — 1 человек 30%"
     },
+    {
+        city: 'Київ',
+        name: 'Kidlandia, Kyiv',
+        name_db: 'Kidlandia',
+        address_db: 'Київ, проспект Степана Бандери, 34-В, РЦ «BLOCKBUSTER», 2 поверх',
+        sheet: 'Kidlandia',
+        schedule: "Пн-Пт — 14:00-21:00\nСб-Нд — 12:00-21:00",
+        salary: "Пн-Пт — 1 человек 20%\nСб-Нд — 1 человек 30%",
+        hasAcquiring: true,
+        cashInEnvelope: false,
+        fopId: 'KARPUK',
+        searchId: 19,
+        telegramChatId: BigInt(-1001982334091)
+    },
 
     // --- ЛЬВІВ ---
     {
@@ -205,7 +219,12 @@ async function main() {
                     googleMapsLink: mapsLink,
                     schedule: loc.schedule,
                     salary: loc.salary,
-                    sheet: loc.sheet
+                    sheet: loc.sheet,
+                    hasAcquiring: loc.hasAcquiring ?? false,
+                    cashInEnvelope: loc.cashInEnvelope ?? false,
+                    fopId: loc.fopId ?? null,
+                    searchId: loc.searchId ?? null,
+                    telegramChatId: loc.telegramChatId ?? null
                 }
             });
         } else {
@@ -217,7 +236,12 @@ async function main() {
                     googleMapsLink: mapsLink,
                     schedule: loc.schedule,
                     salary: loc.salary,
-                    sheet: loc.sheet
+                    sheet: loc.sheet,
+                    hasAcquiring: loc.hasAcquiring ?? false,
+                    cashInEnvelope: loc.cashInEnvelope ?? false,
+                    fopId: loc.fopId ?? null,
+                    searchId: loc.searchId ?? null,
+                    telegramChatId: loc.telegramChatId ?? null
                 }
             });
         }
