@@ -7,6 +7,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
+import { sendTaskNotification } from "./utils.js";
 
 const composer = new Composer<MyContext>();
 
@@ -122,7 +123,7 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
 
         await ScreenManager.renderScreen(
             ctx,
-            `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>You can add <b>photo</b> or <b>file</b> to the task.</i>`,
+            `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>`,
             keyboard,
             { pushToStack: true }
         );
@@ -269,7 +270,7 @@ composer.callbackQuery("tas_st_done", async (ctx) => {
     const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
     await ScreenManager.renderScreen(
         ctx,
-        `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>You can add <b>photo</b> or <b>file</b> to the task.</i>`,
+        `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>`,
         keyboard,
         { pushToStack: true }
     );
@@ -277,21 +278,48 @@ composer.callbackQuery("tas_st_done", async (ctx) => {
 });
 
 // Helper to handle task text and media
-async function handleTaskInput(ctx: MyContext, text?: string, fileId?: string) {
+async function handleTaskInput(
+    ctx: MyContext,
+    options: {
+        text?: string;
+        fileId?: string;
+        mediaType?: "photo" | "video" | "document";
+        sourceChatId?: number;
+        sourceMessageId?: number;
+    }
+) {
     if (!ctx.session.taskCreation || ctx.session.taskCreation.step !== "entering_text") return;
 
-    const taskText = text || ctx.message?.caption || "";
-    if (!taskText && !fileId) {
+    const taskText = options.text || ctx.message?.caption || "";
+    if (!taskText && !options.fileId) {
         await ctx.reply("❌ Task text or file is required.");
         return;
     }
 
+    if (options.fileId) {
+        ctx.session.taskCreation.fileId = options.fileId;
+        ctx.session.taskCreation.mediaType = options.mediaType || "photo";
+        ctx.session.taskCreation.sourceChatId = options.sourceChatId;
+        ctx.session.taskCreation.sourceMessageId = options.sourceMessageId;
+    }
+
+    if (!taskText) {
+        const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+        await ScreenManager.renderScreen(
+            ctx,
+            `📎 <b>Attachment saved for ${ctx.session.taskCreation.staffName}</b>\n\nNow send the full task text in a separate message.`,
+            keyboard,
+            { pushToStack: true }
+        );
+        return;
+    }
+
     ctx.session.taskCreation.taskText = taskText;
-    ctx.session.taskCreation.fileId = fileId || null;
     ctx.session.taskCreation.step = "setting_time";
 
     const dateStr = ctx.session.taskCreation.date!;
     const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
+    const attachmentLine = ctx.session.taskCreation.fileId ? `\n📎 <b>Attachment:</b> ${ctx.session.taskCreation.mediaType || "media"}` : "";
 
     const keyboard = new InlineKeyboard();
     keyboard.text("🌑 End of day", "tas_time_23:59")
@@ -302,7 +330,7 @@ async function handleTaskInput(ctx: MyContext, text?: string, fileId?: string) {
 
     await ScreenManager.renderScreen(
         ctx,
-        `📍 Task for ${ctx.session.taskCreation.staffName}:\n<i>${taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,
+        `📍 Task for ${ctx.session.taskCreation.staffName}:${attachmentLine}\n<i>${taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,
         keyboard,
         { pushToStack: true }
     );
@@ -350,8 +378,21 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
             const staffKb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
 
             try {
-                if (task.fileId) await ctx.api.sendPhoto(Number(staffTelegramId), task.fileId, { caption: taskMessage, parse_mode: "HTML", reply_markup: staffKb });
-                else await ctx.api.sendMessage(Number(staffTelegramId), taskMessage, { parse_mode: "HTML", reply_markup: staffKb });
+                const notificationOptions: {
+                    replyMarkup: InlineKeyboard;
+                    sourceChatId?: number;
+                    sourceMessageId?: number;
+                    fileId?: string | null;
+                    mediaType?: "photo" | "video" | "document";
+                } = {
+                    replyMarkup: staffKb,
+                };
+                if (ctx.session.taskCreation.sourceChatId !== undefined) notificationOptions.sourceChatId = ctx.session.taskCreation.sourceChatId;
+                if (ctx.session.taskCreation.sourceMessageId !== undefined) notificationOptions.sourceMessageId = ctx.session.taskCreation.sourceMessageId;
+                if (task.fileId !== undefined) notificationOptions.fileId = task.fileId;
+                if (ctx.session.taskCreation.mediaType !== undefined) notificationOptions.mediaType = ctx.session.taskCreation.mediaType;
+
+                await sendTaskNotification(ctx, Number(staffTelegramId), taskMessage, notificationOptions);
                 results.push({ name: displayName, success: true });
             } catch (error: any) {
                 results.push({ name: displayName, success: false, error: error.message });
@@ -404,7 +445,7 @@ composer.on("message:text", async (ctx, next) => {
             return await ScreenManager.renderScreen(ctx, "❌ Access Denied", errKb);
         }
 
-        if (step === "entering_text") await handleTaskInput(ctx, ctx.message.text);
+        if (step === "entering_text") await handleTaskInput(ctx, { text: ctx.message.text });
         else {
             const timeInput = ctx.message.text.trim();
             if (/^\d{1,2}:\d{2}$/.test(timeInput)) await executeTaskCreation(ctx, timeInput);
@@ -416,18 +457,62 @@ composer.on("message:text", async (ctx, next) => {
 
 composer.on("message:photo", async (ctx, next) => {
     if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
-        await ctx.deleteMessage().catch(() => { });
         if (!await checkTaskCreationRole(ctx)) return;
         const photo = ctx.message.photo[ctx.message.photo.length - 1];
-        await handleTaskInput(ctx, ctx.message.caption, photo?.file_id);
+        const input: {
+            text?: string;
+            fileId?: string;
+            mediaType?: "photo" | "video" | "document";
+            sourceChatId?: number;
+            sourceMessageId?: number;
+        } = {
+            mediaType: "photo",
+            sourceChatId: ctx.chat.id,
+            sourceMessageId: ctx.message.message_id,
+        };
+        if (ctx.message.caption !== undefined) input.text = ctx.message.caption;
+        if (photo?.file_id !== undefined) input.fileId = photo.file_id;
+        await handleTaskInput(ctx, input);
+    } else await next();
+});
+
+composer.on("message:video", async (ctx, next) => {
+    if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
+        if (!await checkTaskCreationRole(ctx)) return;
+        const input: {
+            text?: string;
+            fileId?: string;
+            mediaType?: "photo" | "video" | "document";
+            sourceChatId?: number;
+            sourceMessageId?: number;
+        } = {
+            fileId: ctx.message.video.file_id,
+            mediaType: "video",
+            sourceChatId: ctx.chat.id,
+            sourceMessageId: ctx.message.message_id,
+        };
+        if (ctx.message.caption !== undefined) input.text = ctx.message.caption;
+        await handleTaskInput(ctx, input);
     } else await next();
 });
 
 composer.on("message:document", async (ctx, next) => {
     if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
-        await ctx.deleteMessage().catch(() => { });
         if (!await checkTaskCreationRole(ctx)) return;
-        await handleTaskInput(ctx, ctx.message.caption, ctx.message.document.file_id);
+        const input: {
+            text?: string;
+            fileId?: string;
+            mediaType?: "photo" | "video" | "document";
+            sourceChatId?: number;
+            sourceMessageId?: number;
+        } = {
+            fileId: ctx.message.document.file_id,
+            mediaType: "document",
+            sourceChatId: ctx.chat.id,
+            sourceMessageId: ctx.message.message_id,
+        };
+        if (ctx.message.caption !== undefined) input.text = ctx.message.caption;
+        await handleTaskInput(ctx, input);
     } else await next();
 });
 

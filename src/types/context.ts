@@ -18,6 +18,11 @@ export interface BroadcastMediaItem {
     fileId: string;
 }
 
+export interface TaskAttachmentItem {
+    type: 'photo' | 'video' | 'document';
+    fileId: string;
+}
+
 export interface SessionData {
     step: string;
     navStack: StackEntry[]; // Smart navigation history with state preservation
@@ -72,6 +77,10 @@ export interface SessionData {
         workDate?: string;
         deadlineTime?: string | null;
         text?: string;
+        fileId?: string | null;
+        mediaType?: TaskAttachmentItem["type"];
+        sourceChatId?: number;
+        sourceMessageId?: number;
         menuMessageId?: number;
     };
 

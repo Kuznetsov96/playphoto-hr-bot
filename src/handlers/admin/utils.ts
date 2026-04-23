@@ -204,6 +204,40 @@ export function msgToHtml(text: string, entities: any[] = []): string {
     return result;
 }
 
+export async function sendTaskNotification(
+    ctx: MyContext,
+    targetChatId: number,
+    text: string,
+    options?: {
+        replyMarkup?: InstanceType<typeof InlineKeyboard>;
+        sourceChatId?: number;
+        sourceMessageId?: number;
+        fileId?: string | null;
+        mediaType?: "photo" | "video" | "document";
+    }
+) {
+    if (options?.fileId) {
+        if (options.mediaType === "video") {
+            await ctx.api.sendVideo(targetChatId, options.fileId);
+        } else if (options.mediaType === "document") {
+            await ctx.api.sendDocument(targetChatId, options.fileId);
+        } else {
+            await ctx.api.sendPhoto(targetChatId, options.fileId);
+        }
+    } else if (options?.sourceChatId && options?.sourceMessageId) {
+        await ctx.api.copyMessage(targetChatId, options.sourceChatId, options.sourceMessageId);
+    }
+
+    const sendOptions: Record<string, unknown> = {
+        parse_mode: "HTML",
+    };
+    if (options?.replyMarkup) {
+        sendOptions.reply_markup = options.replyMarkup;
+    }
+
+    await ctx.api.sendMessage(targetChatId, text, sendOptions as any);
+}
+
 /**
  * Cleans up raw location names from DDS/Technical prefixes
  * and formats them as "Name (City)"
