@@ -66,6 +66,7 @@ export const CHAT_ID_TO_NAME: Record<number, string> = {
     [-1002429009554]: "Kyiv SP Darynok",
     [-1002373731296]: "Kyiv SP Kyiv",
     [-1002625052844]: "Kyiv FK Kyiv",
+    [-1001982334091]: "Kyiv Kidlandia",
     [-1002331115725]: "ZP Volkland 1",
     [-1002695718575]: "ZP Volkland 2",
     [-1003005306666]: "ZP Volkland 3",

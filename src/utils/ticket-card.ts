@@ -21,6 +21,7 @@ const LOCATION_SHORTCUTS: Record<string, string> = {
     "Smile Park|Київ": "SP",
     "Smile Park (Darynok)|Київ": "Dar",
     "Fly Kids|Київ": "FKK",
+    "Kidlandia|Київ": "Kid",
 
     // Zaporizhzhia
     "Volkland|Запоріжжя": "Volk",
