@@ -1270,8 +1270,8 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         } catch (e: any) {
             logger.error({ err: e, topicId, targetTelegramId: Number(staffUser.telegramId) }, "Support outgoing topic reply forwarding failed");
             const errorMsg = e.description?.includes("blocked")
-                ? "❌ Не вдалося доставити повідомлення (користувач заблокував бота)."
-                : "❌ Не вдалося доставити повідомлення користувачу.";
+                ? "❌ Failed to deliver the message (user blocked the bot)."
+                : "❌ Failed to deliver the message to the user.";
             await ctx.reply(errorMsg, { message_thread_id: topicId });
             return true;
         }
@@ -1395,8 +1395,8 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
             error: e,
         });
         const errorMsg = e.description?.includes("blocked")
-            ? "❌ Не вдалося доставити повідомлення (користувач заблокував бота)."
-            : "❌ Не вдалося доставити повідомлення користувачу.";
+            ? "❌ Failed to deliver the message (user blocked the bot)."
+            : "❌ Failed to deliver the message to the user.";
         await ctx.reply(errorMsg, { message_thread_id: topicId });
         return true;
     }

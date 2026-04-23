@@ -7,6 +7,7 @@ import { taskService } from "../../services/task-service.js";
 import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import { sendTaskNotification } from "./utils.js";
 
 export const taskFlowHandlers = new Composer<MyContext>();
 
@@ -54,7 +55,8 @@ taskFlowHandlers.callbackQuery(/^task_date_(.+)$/, async (ctx) => {
 async function renderTextPrompt(ctx: MyContext) {
     const data = ctx.session.taskData;
     if (!data) return;
-    const text = `📝 <b>Task Text</b>\n👤 Staff: ${data.staffName}\n\n👇 <b>Write task text now:</b>`;
+    const attachmentLine = data.fileId ? `\n📎 <b>Attachment saved:</b> ${data.mediaType || "media"}` : "";
+    const text = `📝 <b>Task Content</b>\n👤 Staff: ${data.staffName}${attachmentLine}\n\n👇 <b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
     const kb = new InlineKeyboard().text("⬅️ Back", "task_back_date").text("❌ Cancel", "task_cancel_flow");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
@@ -71,12 +73,37 @@ export async function handleTaskText(ctx: MyContext) {
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
     if (!hasAnyRole(role, 'SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT')) return false;
 
-    const text = ctx.message?.text;
-    if (!text) return false;
-
-    await ctx.deleteMessage().catch(() => {});
+    const message = ctx.message;
+    if (!message) return false;
 
     if (step === 'AWAITING_TEXT') {
+        const text = message.text?.trim() || message.caption?.trim() || "";
+        const media = message.photo
+            ? { type: 'photo' as const, fileId: message.photo[message.photo.length - 1]!.file_id }
+            : message.video
+                ? { type: 'video' as const, fileId: message.video.file_id }
+                : message.document
+                    ? { type: 'document' as const, fileId: message.document.file_id }
+                    : undefined;
+
+        if (!text && !media) return false;
+
+        if (media) {
+            ctx.session.taskData.fileId = media.fileId;
+            ctx.session.taskData.mediaType = media.type;
+            ctx.session.taskData.sourceChatId = ctx.chat?.id;
+            ctx.session.taskData.sourceMessageId = message.message_id;
+        }
+
+        if (!text) {
+            await renderTextPrompt(ctx);
+            return true;
+        }
+
+        if (!media) {
+            await ctx.deleteMessage().catch(() => {});
+        }
+
         ctx.session.taskData.text = text;
         ctx.session.taskData.step = 'SET_DEADLINE';
         await renderDeadlineSelection(ctx);
@@ -84,6 +111,9 @@ export async function handleTaskText(ctx: MyContext) {
     } 
     
     if (step === 'SET_DEADLINE') {
+        const text = message.text;
+        if (!text) return false;
+        await ctx.deleteMessage().catch(() => {});
         const timeInput = text.trim();
         if (/^\d{1,2}:\d{2}$/.test(timeInput)) {
             ctx.session.taskData.deadlineTime = timeInput;
@@ -111,7 +141,8 @@ async function renderDeadlineSelection(ctx: MyContext) {
     kb.text("⏩ No time", "task_time_none").row();
     kb.text("⬅️ Back to Text", "task_back_text").text("❌ Cancel", "task_cancel_flow");
 
-    const text = `⏰ <b>Set Deadline</b>\n👤 Staff: ${data.staffName}\n📅 Date: ${prettyDate}\n📝 Text: <i>${data.text}</i>\n\n👇 <b>Select or write time (e.g. 15:00):</b>`;
+    const attachmentLine = data.fileId ? `\n📎 Attachment: <b>${data.mediaType || "media"}</b>` : "";
+    const text = `⏰ <b>Set Deadline</b>\n👤 Staff: ${data.staffName}\n📅 Date: ${prettyDate}${attachmentLine}\n📝 Text: <i>${data.text}</i>\n\n👇 <b>Select or write time (e.g. 15:00):</b>`;
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
@@ -143,8 +174,9 @@ async function renderConfirmation(ctx: MyContext) {
     if (!data) return;
     
     const deadlineStr = data.deadlineTime ? ` ⏰ ${data.deadlineTime}` : " (No time)";
-    
-    const summary = `✅ <b>Task Confirmation</b>\n\n👤 <b>${data.staffName}</b>\n📅 ${new Date(data.workDate!).toLocaleDateString("uk-UA")}${deadlineStr}\n\n📝 <i>${data.text}</i>`;
+    const attachmentLine = data.fileId ? `\n📎 <b>Attachment:</b> ${data.mediaType || "media"}` : "";
+
+    const summary = `✅ <b>Task Confirmation</b>\n\n👤 <b>${data.staffName}</b>\n📅 ${new Date(data.workDate!).toLocaleDateString("uk-UA")}${deadlineStr}${attachmentLine}\n\n📝 <i>${data.text}</i>`;
     const kb = new InlineKeyboard().text("✅ Create", "task_confirm_save").row().text("⬅️ Back", "task_back_deadline").text("❌ Cancel", "task_cancel_flow");
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true });
 }
@@ -182,6 +214,7 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
             taskText: data.text!,
             workDate: new Date(data.workDate!),
             deadlineTime: data.deadlineTime || null,
+            fileId: data.fileId || null,
             createdById: ctx.from!.id.toString()
         });
 
@@ -199,11 +232,22 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                 const notifText =
                     `📋 <b>Нове завдання${dateStr ? ` на ${dateStr}` : ""}!</b>\n\n` +
                     `${task.taskText}${deadlineStr}`;
-                
-                await ctx.api.sendMessage(Number(staffUser.telegramId), notifText, {
-                    parse_mode: "HTML",
-                    reply_markup: new InlineKeyboard().text("📋 Переглянути завдання", "staff_hub_tasks_redirect")
-                });
+
+                const notificationOptions: {
+                    replyMarkup: InlineKeyboard;
+                    sourceChatId?: number;
+                    sourceMessageId?: number;
+                    fileId?: string | null;
+                    mediaType?: "photo" | "video" | "document";
+                } = {
+                    replyMarkup: new InlineKeyboard().text("📋 Переглянути завдання", "staff_hub_tasks_redirect"),
+                };
+                if (data.sourceChatId !== undefined) notificationOptions.sourceChatId = data.sourceChatId;
+                if (data.sourceMessageId !== undefined) notificationOptions.sourceMessageId = data.sourceMessageId;
+                if (data.fileId !== undefined) notificationOptions.fileId = data.fileId;
+                if (data.mediaType !== undefined) notificationOptions.mediaType = data.mediaType;
+
+                await sendTaskNotification(ctx, Number(staffUser.telegramId), notifText, notificationOptions);
             } else {
                 deliveryStatus = "✅ Task created, but user has no Telegram ID linked.";
             }
