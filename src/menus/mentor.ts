@@ -680,6 +680,12 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, "<b>Select new date for first shift:</b>", "mentor-manual-date", { pushToStack: true });
     }).row();
 
+    range.text("🚀 Open First Shift Flow", async (ctx) => {
+        const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
+        await firstShiftOnboardingService.notifyCandidate(ctx.api, candId);
+        await ctx.answerCallbackQuery("First shift onboarding opened.");
+    }).row();
+
     range.text("✅ Successful Onboarding", async (ctx) => {
         await mentorService.completeOnboarding(candId, true);
         await ScreenManager.renderScreen(ctx, "🚀 <b>Onboarding Successful!</b>", "mentor-onboarding");

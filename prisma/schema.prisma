@@ -146,6 +146,7 @@ model Candidate {
   user              User           @relation(fields: [userId], references: [id])
   messages          Message[]
   lead              Lead?
+  firstShiftOnboardingCase FirstShiftOnboardingCase?
 
   @@index([status])
   @@index([userId])
@@ -473,6 +474,55 @@ model OutgoingTopic {
   @@index([userId])
 }
 
+model FirstShiftOnboardingCase {
+  id          String                     @id @default(cuid())
+  candidateId String                    @unique
+  status      FirstShiftOnboardingStatus @default(OPEN)
+  chatId      BigInt?
+  topicId     Int?
+  currentStepKey String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  failureReason String?
+  mentorFinalNote String?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  steps     FirstShiftOnboardingStep[]
+
+  @@index([status, updatedAt])
+  @@index([topicId])
+}
+
+model FirstShiftOnboardingStep {
+  id          String                         @id @default(cuid())
+  caseId      String
+  key         String
+  block       String
+  title       String
+  prompt      String
+  order       Int
+  inputType   FirstShiftOnboardingInputType
+  status      FirstShiftOnboardingStepStatus @default(LOCKED)
+  requiresMentorApproval Boolean             @default(true)
+  submittedText String?
+  photoIds    String?
+  mentorComment String?
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  completedAt DateTime?
+  createdAt   DateTime                       @default(now())
+  updatedAt   DateTime                       @updatedAt
+
+  case FirstShiftOnboardingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, key])
+  @@index([caseId, order])
+  @@index([status])
+}
+
 model MagnetCountRun {
   id                 String                 @id @default(cuid())
   adminUserId        String
@@ -513,6 +563,35 @@ enum TicketStatus {
   OPEN
   IN_PROGRESS
   CLOSED
+}
+
+enum FirstShiftOnboardingStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSING
+  PENDING_FINAL
+  PASSED
+  FAILED
+  CANCELLED
+}
+
+enum FirstShiftOnboardingStepStatus {
+  LOCKED
+  ACTIVE
+  SUBMITTED
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+enum FirstShiftOnboardingInputType {
+  BUTTON
+  PHOTO
+  MULTIPLE_PHOTOS
+  SCREENSHOT
+  TEXT
+  LINK
+  MENTOR_OBSERVED
 }
 
 enum MagnetCountConfidence {
