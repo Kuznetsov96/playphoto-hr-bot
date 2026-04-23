@@ -12,6 +12,7 @@ import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { staffSupportHandlers, handleSupportGroupMessage } from "../modules/staff/handlers/support.js";
 import { supportHandlers, handleSupportMessage } from "./support.js";
+import { firstShiftOnboardingHandlers, handleFirstShiftOnboardingCandidateMessage, handleFirstShiftOnboardingGroupMessage } from "./first-shift-onboarding.js";
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
@@ -49,6 +50,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         data.startsWith("staff_") || data.startsWith("staff-") || data.startsWith("admin_") || data.startsWith("admin-") ||
         data.startsWith("hr_") || data.startsWith("hr-") ||
         data.startsWith("mentor_") || data.startsWith("mentor-") ||
+        data.startsWith("fso_") ||
         data.startsWith("tas_") || data.startsWith("task_") || data.startsWith("b_") || data.startsWith("ticket_") ||
         data.startsWith("broadcast_") || data.startsWith("pref_") || data.startsWith("onb_") ||
         data.startsWith("gender_") || data.startsWith("city_") || data.startsWith("loc_") || data.startsWith("src_") ||
@@ -203,6 +205,7 @@ handlers.callbackQuery(/^broadcast_confirm_decline_(.+)$/, async (ctx) => {
 
 // Reordered: Support handlers first to avoid Admin/HR Menu interference (greedy matches)
 handlers.use(supportHandlers);
+handlers.use(firstShiftOnboardingHandlers);
 handlers.use(staffSupportHandlers); // ✅ NEW: Allow Admins to use ticket buttons (ticket_assign, etc.)
 
 // Replaced global registration with conditional one in routing below
@@ -216,6 +219,10 @@ handlers.on("message", async (ctx, next) => {
     // 0. Preferences comment capture
     const { handlePreferenceComment } = await import("./preferences-flow.js");
     if (await handlePreferenceComment(ctx)) return;
+
+    // Check if it's an Admin message in Support Group
+    const firstShiftHandled = await handleFirstShiftOnboardingGroupMessage(ctx);
+    if (firstShiftHandled) return;
 
     // Check if it's an Admin message in Support Group
     // A. For Staff (Returns true if handled)
@@ -284,6 +291,9 @@ handlers.use(async (ctx, next) => {
 
         // 1. Support & Communication Priority
         guestApp.on("message", async (ctx, next) => {
+            const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
+            if (firstShiftHandled) return;
+
             const handled = await handleSupportMessage(ctx);
             if (handled) return;
             await next();
