@@ -975,6 +975,7 @@ hrDashboardDatesMenu.dynamic(async (ctx, range) => {
     range.text("➕ Add New Slots", async (ctx) => {
         delete ctx.session.selectedCandidateId;
         const { createDatePickerKb } = await import("../utils/slot-builder.js");
+        ctx.session.slotBuilder = { date: "", mode: "calendar" };
         await ctx.reply("📅 <b>Select Date for Interview Slots:</b>", {
             parse_mode: "HTML",
             reply_markup: createDatePickerKb("hr_sb")
@@ -1065,7 +1066,7 @@ hrDayViewMenu.dynamic(async (ctx, range) => {
         const { createTimePickerKb } = await import("../utils/slot-builder.js");
         const dateParts = selectedDate.split('.');
         const isoDate = `${new Date().getFullYear()}-${dateParts[1]}-${dateParts[0]}`;
-        ctx.session.slotBuilder = { date: isoDate };
+        ctx.session.slotBuilder = { date: isoDate, mode: "calendar" };
         await ctx.reply(`🕒 <b>Adding time for ${selectedDate}</b>\n\nSelect the <b>Start Time</b>:`, {
             parse_mode: "HTML", reply_markup: createTimePickerKb("hr_sb")
         });

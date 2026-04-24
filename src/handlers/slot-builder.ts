@@ -22,7 +22,8 @@ slotBuilderHandlers.callbackQuery(/^(hr|mentor)_sb_date_(.+)$/, async (ctx) => {
         dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv' }).format(tomorrow);
     }
 
-    ctx.session.slotBuilder = { 
+    ctx.session.slotBuilder = {
+        ...ctx.session.slotBuilder,
         date: dateStr!
     };
     const kb = createTimePickerKb(`${role}_sb`);
@@ -39,7 +40,11 @@ slotBuilderHandlers.callbackQuery(/^(hr|mentor)_sb_time_(\d+)$/, async (ctx) => 
     const hour = parseInt(ctx.match[2]!);
 
     if (!ctx.session.slotBuilder) {
-        ctx.session.slotBuilder = { date: new Date().toISOString().split('T')[0] || "", startHour: hour, startMinute: 0 };
+        ctx.session.slotBuilder = {
+            date: new Date().toISOString().split('T')[0] || "",
+            startHour: hour,
+            startMinute: 0
+        };
     } else {
         ctx.session.slotBuilder.startHour = hour;
         ctx.session.slotBuilder.startMinute = 0;
@@ -151,7 +156,7 @@ async function executeSlotCreation(ctx: MyContext, role: 'hr' | 'mentor', durati
     const [y, m, d] = sb.date.split('-').map(Number);
     const start = createKyivDate(y!, m! - 1, d!, sb.startHour, sb.startMinute || 0);
     const end = new Date(start.getTime() + duration * 60000);
-    const candId = ctx.session.selectedCandidateId;
+    const candId = sb.mode === 'calendar' ? undefined : (sb.candidateId || ctx.session.selectedCandidateId);
 
     try {
         if (role === 'hr') {

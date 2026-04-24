@@ -66,6 +66,8 @@ export interface SessionData {
         startHour?: number;
         startMinute?: number;
         duration?: number;
+        mode?: 'calendar' | 'candidate';
+        candidateId?: string;
     };
 
     taskData?: {
