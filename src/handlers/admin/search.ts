@@ -114,7 +114,7 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
     const isDirectMessageStep = step.startsWith("admin_msg_");
     const isSearchStep = step === "admin_search_cand" || step === "admin_search_staff";
 
-    if (isDirectReplyStep || isDirectMessageStep || isSearchStep) {
+    if (isSearchStep) {
         await ctx.deleteMessage().catch(() => { });
     }
 
@@ -139,6 +139,7 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
                 Number(targetTgId),
                 outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
             );
+            await ctx.deleteMessage().catch(() => { });
 
             // 3. Log to Timeline
             const { timelineRepository } = await import("../../repositories/timeline-repository.js");
@@ -314,6 +315,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
             Number(user.telegramId),
             outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
         );
+        await ctx.deleteMessage().catch(() => { });
 
         const { timelineRepository } = await import("../../repositories/timeline-repository.js");
         await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', messageTextStr, {
