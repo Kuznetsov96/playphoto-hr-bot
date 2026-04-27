@@ -157,7 +157,7 @@ export async function showStaffSchedule(ctx: MyContext) {
             (c) => c.locationId === s.locationId && c.date.getTime() === s.date.getTime()
         );
 
-        if (colleagues.length > 0) {
+        if (colleagues.length === 1) {
             const names = colleagues.map((c) => formatShiftColleague(
                 c.staff.fullName,
                 c.staff.user?.username,
