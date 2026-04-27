@@ -133,7 +133,11 @@ export async function showStaffSchedule(ctx: MyContext) {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user || !user.staffProfile) return;
 
-    const shifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, new Date(), 100);
+    const now = new Date();
+    const kyivToday = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+    kyivToday.setHours(0, 0, 0, 0);
+
+    const shifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivToday, 100);
 
     if (shifts.length === 0) {
         const text = "У тебе поки немає призначених змін. 📅\nЯк тільки вони з'являться — я повідомлю!";
