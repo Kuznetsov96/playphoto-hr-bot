@@ -98,8 +98,6 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
         const targetId = Number(ctx.session.supportData.replyingToUserId);
         const replyText = getAdminOutboundText(ctx.message) || "[Media Reply]";
 
-        await ctx.deleteMessage().catch(() => { });
-
         try {
             const { InlineKeyboard } = await import("grammy");
             const { userRepository } = await import("../../repositories/user-repository.js");
@@ -118,6 +116,7 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
                 targetId,
                 outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
             );
+            await ctx.deleteMessage().catch(() => { });
             await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent.", "admin-main");
             if (user) {
                 const { timelineRepository } = await import("../../repositories/timeline-repository.js");
