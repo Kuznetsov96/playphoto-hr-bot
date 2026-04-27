@@ -632,6 +632,8 @@ export class ScheduleSyncService {
         let currentLocation: Location | null = null;
         let currentCity: string | null = null;
         let syncCount = 0;
+        let skippedUnknownCodeCount = 0;
+        let skippedSectionMismatchCount = 0;
 
         const cities = Object.values(CITY_NAME_MAP);
         const shiftsToCreate: Array<{ staffId: string; locationId: string; date: Date }> = [];
@@ -653,18 +655,37 @@ export class ScheduleSyncService {
                     if (staffProfile) {
                         for (const [colIdx, date] of Object.entries(dateMap)) {
                             const cell = String(row[parseInt(colIdx)] || "").trim();
-                            if (!this.isShiftCode(cell)) continue;
-
-                            const shiftLocation = this.resolveLocationFromCode(cell, currentLocation, allLocations, currentCity || undefined) || currentLocation;
-
-                            if (shiftLocation) {
-                                shiftsToCreate.push({
-                                    staffId: staffProfile.id,
-                                    locationId: shiftLocation.id,
-                                    date
-                                });
-                                syncCount++;
+                            const shiftCode = this.getShiftCode(cell);
+                            if (!shiftCode) {
+                                if (!this.isIgnorableScheduleCell(cell)) {
+                                    skippedUnknownCodeCount++;
+                                    logger.warn({ label, cell, date: date.toISOString().slice(0, 10), currentLocation: currentLocation?.name, currentCity }, "Schedule sync skipped unknown shift code");
+                                }
+                                continue;
                             }
+
+                            const shiftLocation = this.resolveLocationFromCode(shiftCode, currentLocation, allLocations, currentCity || undefined);
+                            if (!shiftLocation) continue;
+
+                            if (currentLocation && shiftLocation.id !== currentLocation.id) {
+                                skippedSectionMismatchCount++;
+                                logger.warn({
+                                    label,
+                                    cell: shiftCode,
+                                    date: date.toISOString().slice(0, 10),
+                                    currentLocation: currentLocation.name,
+                                    resolvedLocation: shiftLocation.name,
+                                    currentCity
+                                }, "Schedule sync skipped cross-section shift code");
+                                continue;
+                            }
+
+                            shiftsToCreate.push({
+                                staffId: staffProfile.id,
+                                locationId: shiftLocation.id,
+                                date
+                            });
+                            syncCount++;
                         }
                         continue;
                     }
@@ -696,6 +717,8 @@ export class ScheduleSyncService {
             safeContext: {
                 sheetName,
                 shiftCount: syncCount,
+                skippedUnknownCodeCount,
+                skippedSectionMismatchCount,
                 from: minDate.toISOString(),
                 to: maxDate.toISOString(),
             },
@@ -724,6 +747,8 @@ export class ScheduleSyncService {
                 sheetName,
                 shiftsBefore,
                 shiftsAfter: syncCount,
+                skippedUnknownCodeCount,
+                skippedSectionMismatchCount,
             },
         });
 
@@ -1010,13 +1035,22 @@ export class ScheduleSyncService {
         return candidates[0] ?? null;
     }
 
-    private isShiftCode(cell: string): boolean {
-        if (!cell || cell.length === 0) return false;
+    private getShiftCode(cell: string): string | null {
+        if (this.isIgnorableScheduleCell(cell)) return null;
+        const upper = cell.trim().toUpperCase();
+        return LOCATION_CODE_MAP[upper] ? upper : null;
+    }
+
+    private isIgnorableScheduleCell(cell: string): boolean {
+        if (!cell || cell.length === 0) return true;
         const upper = cell.toUpperCase();
         const offMarkers = ["В", "В.", "В/В", "X", "Х", "OFF", "ОФФ"];
-        if (offMarkers.includes(upper)) return false;
-        if (/^\d+$/.test(cell)) return false;
-        return true;
+        if (offMarkers.includes(upper)) return true;
+        return /^\d+$/.test(cell);
+    }
+
+    private isShiftCode(cell: string): boolean {
+        return this.getShiftCode(cell) !== null;
     }
 
     private async fetchTeamMapping(): Promise<{ [key: string]: TeamMember }> {
