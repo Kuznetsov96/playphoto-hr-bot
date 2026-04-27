@@ -966,9 +966,11 @@ export class ScheduleSyncService {
             'sp київ': { name: 'smile park', city: 'Київ', exclude: 'darynok' },
             'sp львів': { name: 'smile park', city: 'Львів' },
             'sp харків': { name: 'smile park', city: 'Харків' },
+            'ft черкаси': { name: 'fantasy town', city: 'Черкаси' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
             'fk львів': { name: 'fly kids', city: 'Львів' },
             'fk рівне': { name: 'fly kids', city: 'Рівне' },
+            'dh khmelnytskyi': { name: 'dytyache horyshche', city: 'Хмельницький' },
             // Volkland without number = Volkland 1; numbered variants match exactly
             'volkland': { name: 'volkland 1', city: 'Запоріжжя', exact: true },
             'volkland 2': { name: 'volkland 2', city: 'Запоріжжя', exact: true },
