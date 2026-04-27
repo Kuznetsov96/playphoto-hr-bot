@@ -576,6 +576,7 @@ export class ScheduleSyncService {
     async syncSchedule(sheetName: string = "Актуальний розклад", existingTeamMap?: { [key: string]: TeamMember }) {
         this.ensureSheets();
         const teamMap = existingTeamMap || await this.fetchTeamMapping();
+        const { hiddenRows, hiddenColumns } = await this.fetchHiddenScheduleIndexes(sheetName);
         const res = await this.sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID_SCHEDULE,
             range: `'${sheetName}'!A1:AL500`
@@ -587,6 +588,7 @@ export class ScheduleSyncService {
         const currentYear = new Date().getFullYear();
         dateHeader.forEach((cell: any, idx: number) => {
             if (idx === 0) return;
+            if (hiddenColumns.has(idx)) return;
             const str = String(cell).trim().toLowerCase();
             if (!str) return;
             let date: Date | null = null;
@@ -635,6 +637,8 @@ export class ScheduleSyncService {
         const shiftsToCreate: Array<{ staffId: string; locationId: string; date: Date }> = [];
 
         for (let i = 2; i < rows.length; i++) {
+            if (hiddenRows.has(i)) continue;
+
             const row = rows[i];
             if (!row || row.length === 0) continue;
 
@@ -736,6 +740,31 @@ export class ScheduleSyncService {
             shiftsBefore,
             shiftsAfter: syncCount
         };
+    }
+
+    private async fetchHiddenScheduleIndexes(sheetName: string): Promise<{ hiddenRows: Set<number>; hiddenColumns: Set<number> }> {
+        const hiddenRows = new Set<number>();
+        const hiddenColumns = new Set<number>();
+
+        const res = await this.sheets.spreadsheets.get({
+            spreadsheetId: SPREADSHEET_ID_SCHEDULE,
+            ranges: [`'${sheetName}'!A1:AL500`],
+            includeGridData: true,
+            fields: "sheets(properties(title),data(rowMetadata(hiddenByFilter,hiddenByUser),columnMetadata(hiddenByFilter,hiddenByUser)))"
+        });
+
+        const sheet = res.data.sheets?.find((s: any) => s.properties?.title === sheetName);
+        const gridData = sheet?.data?.[0];
+
+        gridData?.rowMetadata?.forEach((metadata: any, index: number) => {
+            if (metadata?.hiddenByFilter || metadata?.hiddenByUser) hiddenRows.add(index);
+        });
+
+        gridData?.columnMetadata?.forEach((metadata: any, index: number) => {
+            if (metadata?.hiddenByFilter || metadata?.hiddenByUser) hiddenColumns.add(index);
+        });
+
+        return { hiddenRows, hiddenColumns };
     }
 
     /**
