@@ -105,6 +105,7 @@ describe("AccessService", () => {
 
         await expect(service.createInviteLink(123n)).resolves.toBe("https://t.me/+fresh");
         expect(unbanChatMember).toHaveBeenCalled();
+        expect(unbanChatMember).toHaveBeenCalledWith(expect.any(Number), 123, { only_if_banned: true });
         expect(createChatInviteLink).toHaveBeenCalledTimes(1);
     });
 
@@ -121,5 +122,6 @@ describe("AccessService", () => {
         await service.syncUserAccess(123n, "Routine Sync");
 
         expect(unbanChatMember).toHaveBeenCalled();
+        expect(unbanChatMember).toHaveBeenCalledWith(expect.any(Number), 123, { only_if_banned: true });
     });
 });
