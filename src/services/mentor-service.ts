@@ -499,12 +499,14 @@ export class MentorService {
 
         const caseStatus = candidate.firstShiftOnboardingCase?.status || null;
         const hasActiveCase = !!caseStatus && !["PASSED", "FAILED"].includes(caseStatus);
+        const hasPassedFirstShiftOnboarding = caseStatus === "PASSED";
         const isReopenableStatus =
             candidate.status === CandidateStatus.AWAITING_FIRST_SHIFT ||
             candidate.status === CandidateStatus.HIRED;
 
         const shouldRelock =
             !hasActiveCase &&
+            !hasPassedFirstShiftOnboarding &&
             !candidate.isMentorLocked &&
             isReopenableStatus &&
             (!candidate.firstShiftDate || candidate.firstShiftDate < fromDate || hasDateDrift);
