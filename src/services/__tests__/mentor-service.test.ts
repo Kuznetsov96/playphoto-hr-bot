@@ -404,5 +404,48 @@ describe('MentorService', () => {
                 refreshed: true,
             }));
         });
+
+        it('should not relock onboarding after a passed first-shift onboarding case', async () => {
+            const shiftDate = new Date('2026-05-03T00:00:00.000Z');
+            vi.mocked((prisma as any).staffProfile.findUnique).mockResolvedValue({
+                id: 'staff-1',
+                user: {
+                    candidate: {
+                        id: 'cand-onboarding',
+                        status: CandidateStatus.HIRED,
+                        isMentorLocked: false,
+                        firstShiftDate: new Date('2026-04-05T09:00:00.000Z'),
+                        firstShiftTime: '15:00-17:00',
+                        locationId: 'old-loc',
+                        firstShiftOnboardingCase: { status: 'PASSED' },
+                    }
+                },
+                shifts: [
+                    {
+                        date: shiftDate,
+                        locationId: 'loc-lviv',
+                        location: {
+                            name: 'Smile Park (Львів)',
+                            schedule: 'Сб-Нд — 12:00-21:00',
+                        }
+                    }
+                ]
+            } as any);
+
+            const result = await mentorService.syncHireOnboardingStateForStaff('staff-1');
+
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-onboarding', expect.objectContaining({
+                firstShiftDate: shiftDate,
+                firstShiftTime: '12:00-21:00',
+                location: { connect: { id: 'loc-lviv' } }
+            }));
+            expect(candidateRepository.update).not.toHaveBeenCalledWith('cand-onboarding', expect.objectContaining({
+                isMentorLocked: true,
+            }));
+            expect(result).toEqual(expect.objectContaining({
+                relocked: false,
+                refreshed: true,
+            }));
+        });
     });
 });
