@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import path from "path";
 import fs from "fs";
+import { randomUUID } from "crypto";
 import type { Location } from "@prisma/client";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
@@ -12,7 +13,7 @@ import { pendingReplyRepository } from "../repositories/pending-reply-repository
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
 import type { Api } from "grammy";
 import logger from "../core/logger.js";
-import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
+import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 
 interface TeamMember {
     fullName: string;
@@ -25,6 +26,63 @@ interface TeamMember {
 interface ChatRevokeFailure {
     chatId: number;
     error: string;
+}
+
+type EmploymentSyncStatus = "active" | "inactive" | "unknown";
+
+interface TeamSheetSnapshotRow {
+    rowNumber: number;
+    fullName: string;
+    telegramId: string | null;
+    rawStatus: string;
+    employmentStatus: EmploymentSyncStatus;
+    hidden: boolean;
+    existingUserId?: string;
+    existingStaffId?: string;
+    existingStaffActive?: boolean;
+}
+
+interface TeamSyncDuplicateTelegram {
+    telegramId: string;
+    rows: number[];
+    statuses: string[];
+}
+
+interface TeamSyncDeactivationCandidate {
+    rowNumber: number;
+    fullName: string;
+    telegramId: string;
+    existingUserId: string;
+    existingStaffId: string;
+    rawStatus: string;
+}
+
+interface TeamSyncAnalysis {
+    rows: any[][];
+    hiddenRows: Set<number>;
+    hiddenColumns: Set<number>;
+    snapshot: TeamSheetSnapshotRow[];
+    visibleStaffRows: number;
+    hiddenStaffRows: number;
+    activeRows: number;
+    inactiveRows: number;
+    unknownStatusRows: number;
+    duplicateTelegramIds: TeamSyncDuplicateTelegram[];
+    deactivationCandidates: TeamSyncDeactivationCandidate[];
+}
+
+interface TeamSyncPreview {
+    token: string;
+    generatedAt: string;
+    activeBefore: number;
+    visibleStaffRows: number;
+    hiddenStaffRows: number;
+    activeRows: number;
+    inactiveRows: number;
+    unknownStatusRows: number;
+    duplicateTelegramIds: TeamSyncDuplicateTelegram[];
+    deactivationCandidates: TeamSyncDeactivationCandidate[];
+    requiresConfirmation: boolean;
 }
 
 /** Map of short codes used in schedule cells → location name pattern */
@@ -67,6 +125,209 @@ export class ScheduleSyncService {
 
     private ensureSheets() {
         if (!this.sheets) throw new Error("Google Sheets not configured (missing google-service-account.json)");
+    }
+
+    private interpretEmploymentStatus(status: string): EmploymentSyncStatus {
+        const normalized = status.trim().toLowerCase();
+        if (normalized === "працює") return "active";
+        if (normalized === "закінчення роботи") return "inactive";
+        return "unknown";
+    }
+
+    private async fetchHiddenIndexes(spreadsheetId: string, sheetName: string, range: string): Promise<{ hiddenRows: Set<number>; hiddenColumns: Set<number> }> {
+        const hiddenRows = new Set<number>();
+        const hiddenColumns = new Set<number>();
+
+        const res = await this.sheets.spreadsheets.get({
+            spreadsheetId,
+            ranges: [`'${sheetName}'!${range}`],
+            includeGridData: true,
+            fields: "sheets(properties(title),data(rowMetadata(hiddenByFilter,hiddenByUser),columnMetadata(hiddenByFilter,hiddenByUser)))"
+        });
+
+        const sheet = res.data.sheets?.find((s: any) => s.properties?.title === sheetName);
+        const gridData = sheet?.data?.[0];
+
+        gridData?.rowMetadata?.forEach((metadata: any, index: number) => {
+            if (metadata?.hiddenByFilter || metadata?.hiddenByUser) hiddenRows.add(index);
+        });
+
+        gridData?.columnMetadata?.forEach((metadata: any, index: number) => {
+            if (metadata?.hiddenByFilter || metadata?.hiddenByUser) hiddenColumns.add(index);
+        });
+
+        return { hiddenRows, hiddenColumns };
+    }
+
+    private async loadTeamSheet() {
+        const sheetName = "В роботі";
+        const range = "A1:S2000";
+        const [{ hiddenRows, hiddenColumns }, res] = await Promise.all([
+            this.fetchHiddenIndexes(SPREADSHEET_ID_TEAM, sheetName, range),
+            this.sheets.spreadsheets.values.get({
+                spreadsheetId: SPREADSHEET_ID_TEAM,
+                range: `'${sheetName}'!${range}`
+            })
+        ]);
+
+        return {
+            rows: (res.data.values || []) as any[][],
+            hiddenRows,
+            hiddenColumns,
+        };
+    }
+
+    private analyzeTeamSheet(rows: any[][], hiddenRows: Set<number>, allUsers: Array<{ id: string; telegramId: bigint }>, allStaff: Array<{ id: string; userId: string; isActive: boolean }>): TeamSyncAnalysis {
+        const userMap = new Map(allUsers.map((u) => [u.telegramId.toString(), u]));
+        const staffMap = new Map(allStaff.map((s) => [s.userId, s]));
+        const snapshot: TeamSheetSnapshotRow[] = [];
+        const duplicateTracker = new Map<string, TeamSyncDuplicateTelegram>();
+        const deactivationCandidates: TeamSyncDeactivationCandidate[] = [];
+
+        let visibleStaffRows = 0;
+        let hiddenStaffRows = 0;
+        let activeRows = 0;
+        let inactiveRows = 0;
+        let unknownStatusRows = 0;
+
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i] || [];
+            const fullName = String(row[2] || "").trim();
+            const rawStatus = String(row[5] || "").trim();
+            const telegramIdStr = String(row[17] || "").trim();
+            const hidden = hiddenRows.has(i);
+
+            if (!fullName) continue;
+
+            const telegramId = this.parseTelegramId(telegramIdStr);
+            const employmentStatus = this.interpretEmploymentStatus(rawStatus);
+            const user = telegramId ? userMap.get(telegramId.toString()) : undefined;
+            const profile = user ? staffMap.get(user.id) : undefined;
+
+            snapshot.push({
+                rowNumber: i + 1,
+                fullName,
+                telegramId: telegramId?.toString() || null,
+                rawStatus,
+                employmentStatus,
+                hidden,
+                ...(user?.id ? { existingUserId: user.id } : {}),
+                ...(profile?.id ? { existingStaffId: profile.id } : {}),
+                ...(profile ? { existingStaffActive: profile.isActive } : {}),
+            });
+
+            if (hidden) {
+                hiddenStaffRows++;
+                continue;
+            }
+
+            visibleStaffRows++;
+
+            if (!telegramId) continue;
+
+            const key = telegramId.toString();
+            const duplicate = duplicateTracker.get(key);
+            if (duplicate) {
+                duplicate.rows.push(i + 1);
+                duplicate.statuses.push(rawStatus);
+            } else {
+                duplicateTracker.set(key, {
+                    telegramId: key,
+                    rows: [i + 1],
+                    statuses: [rawStatus],
+                });
+            }
+
+            if (employmentStatus === "active") activeRows++;
+            else if (employmentStatus === "inactive") inactiveRows++;
+            else unknownStatusRows++;
+
+            if (employmentStatus === "inactive" && user && profile?.isActive) {
+                deactivationCandidates.push({
+                    rowNumber: i + 1,
+                    fullName,
+                    telegramId: key,
+                    existingUserId: user.id,
+                    existingStaffId: profile.id,
+                    rawStatus,
+                });
+            }
+        }
+
+        return {
+            rows,
+            hiddenRows,
+            hiddenColumns: new Set<number>(),
+            snapshot,
+            visibleStaffRows,
+            hiddenStaffRows,
+            activeRows,
+            inactiveRows,
+            unknownStatusRows,
+            duplicateTelegramIds: Array.from(duplicateTracker.values()).filter((item) => item.rows.length > 1),
+            deactivationCandidates,
+        };
+    }
+
+    async previewTeamSync(requestedBy?: number | bigint) {
+        this.ensureSheets();
+
+        const activeBefore = await staffRepository.countActive();
+        const { rows, hiddenRows } = await this.loadTeamSheet();
+        const [allUsers, allStaff] = await Promise.all([
+            userRepository.findAll(),
+            staffRepository.findAll(),
+        ]);
+
+        const analysis = this.analyzeTeamSheet(
+            rows,
+            hiddenRows,
+            allUsers.map((user) => ({ id: user.id, telegramId: user.telegramId })),
+            allStaff.map((staff) => ({ id: staff.id, userId: staff.userId, isActive: staff.isActive }))
+        );
+
+        const token = randomUUID();
+        const preview: TeamSyncPreview = {
+            token,
+            generatedAt: new Date().toISOString(),
+            activeBefore,
+            visibleStaffRows: analysis.visibleStaffRows,
+            hiddenStaffRows: analysis.hiddenStaffRows,
+            activeRows: analysis.activeRows,
+            inactiveRows: analysis.inactiveRows,
+            unknownStatusRows: analysis.unknownStatusRows,
+            duplicateTelegramIds: analysis.duplicateTelegramIds,
+            deactivationCandidates: analysis.deactivationCandidates,
+            requiresConfirmation: analysis.deactivationCandidates.length > 0,
+        };
+
+        await systemStateRepository.setJson(`team-sync-preview:${token}`, preview);
+        await systemStateRepository.setJson(`team-sync-sheet-snapshot:${token}`, analysis.snapshot);
+        await systemStateRepository.setJson("team-sync-sheet-snapshot:last", {
+            token,
+            generatedAt: preview.generatedAt,
+            snapshot: analysis.snapshot,
+        });
+
+        logAuditEvent({
+            event: "team_sync.preview_generated",
+            actorType: "admin",
+            telegramId: requestedBy,
+            result: "success",
+            module: "schedule-sync",
+            operation: "previewTeamSync",
+            safeContext: {
+                token,
+                activeBefore,
+                visibleStaffRows: analysis.visibleStaffRows,
+                hiddenStaffRows: analysis.hiddenStaffRows,
+                duplicateCount: analysis.duplicateTelegramIds.length,
+                deactivationCount: analysis.deactivationCandidates.length,
+                unknownStatusRows: analysis.unknownStatusRows,
+            },
+        });
+
+        return preview;
     }
 
     private async revokeFromAllTeamChats(api: Api, telegramId: bigint, reason: string): Promise<{ removedFromAtLeastOneChat: boolean; removedFromChatsCount: number; failedChats: ChatRevokeFailure[] }> {
@@ -325,12 +586,7 @@ export class ScheduleSyncService {
         // Get count of active staff BEFORE
         const activeBefore = await staffRepository.countActive();
 
-        const res = await this.sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID_TEAM,
-            range: "'В роботі'!A1:S2000"
-        });
-
-        const rows = res.data.values;
+        const { rows, hiddenRows } = await this.loadTeamSheet();
         if (!rows || rows.length === 0) {
             logger.warn("No data found in team sheet");
             return { success: false, message: "No data in Team sheet" };
@@ -341,6 +597,7 @@ export class ScheduleSyncService {
         let skipped = 0;
         let inactiveStaffProcessed = 0;
         let inactiveStaffRemovedFromChats = 0;
+        let unknownStatusRows = 0;
         const inactiveStaffRemovalFailures: Array<ChatRevokeFailure & { fullName: string; telegramId: string }> = [];
 
         const locations = await locationRepository.findAll();
@@ -350,12 +607,53 @@ export class ScheduleSyncService {
         const userMap = new Map(allUsers.map(u => [u.telegramId, u]));
         const staffMap = new Map(allStaff.map(s => [s.userId, s]));
 
+        const analysis = this.analyzeTeamSheet(
+            rows,
+            hiddenRows,
+            allUsers.map((user) => ({ id: user.id, telegramId: user.telegramId })),
+            allStaff.map((staff) => ({ id: staff.id, userId: staff.userId, isActive: staff.isActive }))
+        );
+
+        await systemStateRepository.setJson("team-sync-sheet-snapshot:last", {
+            generatedAt: new Date().toISOString(),
+            snapshot: analysis.snapshot,
+        });
+
+        if (analysis.duplicateTelegramIds.length > 0) {
+            const preview = analysis.duplicateTelegramIds
+                .slice(0, 5)
+                .map((item) => `${item.telegramId} rows ${item.rows.join(", ")}`)
+                .join("; ");
+            throw new Error(`Duplicate Telegram IDs in team sheet: ${preview}`);
+        }
+
         const teamMappingForSchedule: { [key: string]: TeamMember } = {};
         const todayKyiv = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         todayKyiv.setHours(0, 0, 0, 0);
+        const massDeactivationThreshold = Math.max(5, Math.ceil(activeBefore * 0.2));
+        if (analysis.deactivationCandidates.length >= massDeactivationThreshold) {
+            const guardMessage = `Mass staff deactivation guard triggered: ${analysis.deactivationCandidates.length} candidates out of ${activeBefore} active staff`;
+            logger.error({ activeBefore, deactivationCandidates: analysis.deactivationCandidates.length, massDeactivationThreshold }, guardMessage);
+            logSecurityEvent({
+                event: "security.staff.mass_deactivation_guard_triggered",
+                actorType: "system",
+                actorRole: "system",
+                result: "blocked",
+                reasonCode: "MASS_DEACTIVATION_GUARD",
+                module: "schedule-sync",
+                operation: "syncTeam",
+                safeContext: {
+                    activeBefore,
+                    deactivationCandidates: analysis.deactivationCandidates.length,
+                    threshold: massDeactivationThreshold,
+                },
+            });
+            throw new Error(guardMessage);
+        }
 
         for (let i = 1; i < rows.length; i++) {
-            const row = rows[i];
+            if (hiddenRows.has(i)) continue;
+            const row = rows[i] || [];
             const fullName = String(row[2] || "").trim();
             const phone = String(row[3] || "").trim();
             const directoryName = String(row[4] || "").trim();
@@ -367,12 +665,30 @@ export class ScheduleSyncService {
 
             if (!fullName) { skipped++; continue; }
 
-            // Normalize status for comparison
-            const normalizedStatus = status.toLowerCase();
-            const isActive = normalizedStatus === "працює";
+            const employmentStatus = this.interpretEmploymentStatus(status);
+            if (employmentStatus === "unknown") {
+                unknownStatusRows++;
+                logger.warn({ fullName, status, rowNumber: i + 1, telegramId: telegramIdStr || null }, "Unknown staff employment status in team sheet; preserving current active flag");
+                logSecurityEvent({
+                    event: "security.staff.sync_unknown_status",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "skipped",
+                    reasonCode: "UNKNOWN_TEAM_STATUS",
+                    module: "schedule-sync",
+                    operation: "syncTeam",
+                    telegramId: this.parseTelegramId(telegramIdStr) || undefined,
+                    safeContext: {
+                        fullName,
+                        rawStatus: status,
+                        rowNumber: i + 1,
+                    },
+                });
+                skipped++;
+                continue;
+            }
 
-            // If status is "Закінчення роботи", isActive will be false.
-            // This is correct because "працює" is the only explicitly active status.
+            const isActive = employmentStatus === "active";
 
             const telegramId = this.parseTelegramId(telegramIdStr);
 
@@ -419,9 +735,10 @@ export class ScheduleSyncService {
 
                 const profile = staffMap.get(user.id);
                 if (profile) {
+                    const wasActive = profile.isActive === true;
                     // --- NEW: Channel Removal Logic ---
-                    // If staff is marked as inactive in sheet, enforce removal from all managed team chats.
-                    if (!isActive) {
+                    // Only revoke chat access on a real active -> inactive transition.
+                    if (!isActive && wasActive) {
                         inactiveStaffProcessed++;
                         if (api) {
                             try {
@@ -445,7 +762,9 @@ export class ScheduleSyncService {
                                     operation: "syncTeam",
                                     safeContext: {
                                         fullName,
-                                        reason: profile.isActive ? "STAFF_DEACTIVATED" : "STAFF_INACTIVE_ENFORCEMENT",
+                                        reason: "STAFF_DEACTIVATED",
+                                        sheetStatus: status,
+                                        sheetRow: i + 1,
                                         removedFromChatsCount: revokeResult.removedFromChatsCount,
                                         failedChatsCount: revokeResult.failedChats.length,
                                     },
@@ -473,14 +792,67 @@ export class ScheduleSyncService {
                         }
                     }
 
-                    await staffRepository.update(profile.id, {
+                    if (wasActive && !isActive) {
+                        logAuditEvent({
+                            event: "staff.deactivation_requested",
+                            actorType: "system",
+                            actorRole: "system",
+                            result: "started",
+                            module: "schedule-sync",
+                            operation: "syncTeam",
+                            userId: user.id,
+                            telegramId,
+                            safeContext: {
+                                fullName,
+                                rawStatus: status,
+                                rowNumber: i + 1,
+                                source: "TEAM_SHEET_SYNC",
+                            },
+                        });
+                    }
+
+                    const updatePayload: any = {
                         fullName,
                         surnameNameDot,
                         phone: phone || profile.phone,
                         location: location ? { connect: { id: location.id } } : { disconnect: true },
                         isActive,
                         ...(birthDate ? { birthDate } : {})
-                    });
+                    };
+
+                    if (wasActive && !isActive) {
+                        updatePayload.deactivatedAt = new Date();
+                        updatePayload.deactivatedBy = "system:team-sync";
+                        updatePayload.deactivatedSource = "TEAM_SHEET_SYNC";
+                        updatePayload.deactivatedReason = status || "unknown";
+                    } else if (!wasActive && isActive) {
+                        updatePayload.deactivatedAt = null;
+                        updatePayload.deactivatedBy = null;
+                        updatePayload.deactivatedSource = null;
+                        updatePayload.deactivatedReason = null;
+                    }
+
+                    await staffRepository.update(profile.id, updatePayload);
+
+                    if (profile.isActive !== isActive) {
+                        logBusinessEvent({
+                            event: "staff.active_status_synced",
+                            actorType: "system",
+                            actorRole: "system",
+                            result: "success",
+                            module: "schedule-sync",
+                            operation: "syncTeam",
+                            userId: user.id,
+                            telegramId,
+                            safeContext: {
+                                fullName,
+                                fromActive: profile.isActive,
+                                toActive: isActive,
+                                rawStatus: status,
+                                rowNumber: i + 1,
+                            },
+                        });
+                    }
 
                     // Also ensure they are not blocked if they are working
                     if (isActive) {
@@ -554,6 +926,9 @@ export class ScheduleSyncService {
                 activeBefore,
                 activeAfter,
                 skipped,
+                unknownStatusRows,
+                duplicateTelegramIds: analysis.duplicateTelegramIds.length,
+                deactivationCandidates: analysis.deactivationCandidates.length,
                 blocklistSyncSuccess: blocklistRes.success,
             },
         });
@@ -567,6 +942,9 @@ export class ScheduleSyncService {
             inactiveStaffProcessed,
             inactiveStaffRemovedFromChats,
             inactiveStaffRemovalFailures,
+            unknownStatusRows,
+            duplicateTelegramIds: analysis.duplicateTelegramIds,
+            deactivationCandidates: analysis.deactivationCandidates,
             teamMapping: teamMappingForSchedule,
             blocklistRes
         };
@@ -768,28 +1146,7 @@ export class ScheduleSyncService {
     }
 
     private async fetchHiddenScheduleIndexes(sheetName: string): Promise<{ hiddenRows: Set<number>; hiddenColumns: Set<number> }> {
-        const hiddenRows = new Set<number>();
-        const hiddenColumns = new Set<number>();
-
-        const res = await this.sheets.spreadsheets.get({
-            spreadsheetId: SPREADSHEET_ID_SCHEDULE,
-            ranges: [`'${sheetName}'!A1:AL500`],
-            includeGridData: true,
-            fields: "sheets(properties(title),data(rowMetadata(hiddenByFilter,hiddenByUser),columnMetadata(hiddenByFilter,hiddenByUser)))"
-        });
-
-        const sheet = res.data.sheets?.find((s: any) => s.properties?.title === sheetName);
-        const gridData = sheet?.data?.[0];
-
-        gridData?.rowMetadata?.forEach((metadata: any, index: number) => {
-            if (metadata?.hiddenByFilter || metadata?.hiddenByUser) hiddenRows.add(index);
-        });
-
-        gridData?.columnMetadata?.forEach((metadata: any, index: number) => {
-            if (metadata?.hiddenByFilter || metadata?.hiddenByUser) hiddenColumns.add(index);
-        });
-
-        return { hiddenRows, hiddenColumns };
+        return this.fetchHiddenIndexes(SPREADSHEET_ID_SCHEDULE, sheetName, "A1:AL500");
     }
 
     /**

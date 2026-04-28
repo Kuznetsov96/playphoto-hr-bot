@@ -156,6 +156,11 @@ export interface SessionData {
     adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;
+    teamSyncPreview?: {
+        token: string;
+        generatedAt: number;
+        requiresConfirmation: boolean;
+    };
 }
 
 export type MyContext = Context & SessionFlavor<SessionData> & ConversationFlavor<Context & SessionFlavor<SessionData>> & MenuFlavor & {
