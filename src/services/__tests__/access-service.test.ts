@@ -76,6 +76,22 @@ describe("AccessService", () => {
         }
     });
 
+    it("allows candidates awaiting first shift or already hired before staff promotion catches up", async () => {
+        const service = new AccessService();
+
+        for (const status of [
+            CandidateStatus.AWAITING_FIRST_SHIFT,
+            CandidateStatus.HIRED,
+        ]) {
+            mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
+                role: Role.CANDIDATE,
+                candidate: { status },
+            });
+
+            await expect(service.isAuthorized(123n)).resolves.toBe(true);
+        }
+    });
+
     it("clears existing protected chat bans before creating a valid one-time invite", async () => {
         const service = new AccessService();
         const unbanChatMember = vi.fn().mockResolvedValue(undefined);
@@ -90,5 +106,20 @@ describe("AccessService", () => {
         await expect(service.createInviteLink(123n)).resolves.toBe("https://t.me/+fresh");
         expect(unbanChatMember).toHaveBeenCalled();
         expect(createChatInviteLink).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears protected chat bans during routine sync for authorized users", async () => {
+        const service = new AccessService();
+        const unbanChatMember = vi.fn().mockResolvedValue(undefined);
+
+        service.setApi({ unbanChatMember });
+        mocks.findWithProfilesByTelegramId.mockResolvedValue({
+            role: Role.STAFF,
+            staffProfile: { isActive: true },
+        });
+
+        await service.syncUserAccess(123n, "Routine Sync");
+
+        expect(unbanChatMember).toHaveBeenCalled();
     });
 });
