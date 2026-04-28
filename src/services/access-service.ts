@@ -36,6 +36,18 @@ export class AccessService {
         ].filter((chatId): chatId is number => Boolean(chatId) && !Number.isNaN(chatId))));
     }
 
+    private async clearProtectedChatBan(telegramId: bigint) {
+        const api = this.getSafeApi();
+        for (const chatId of this.getRevocationChatIds()) {
+            await api.unbanChatMember(chatId, Number(telegramId)).catch((e: any) => {
+                const description = String(e?.description || "").toLowerCase();
+                if (!description.includes("user not found") && !description.includes("user is not a member")) {
+                    logger.warn({ err: e, chatId, telegramId }, "Failed to clear protected chat ban");
+                }
+            });
+        }
+    }
+
     /**
      * Checks if a user is authorized to be in the team channel.
      * Unified logic: Active Staff, Admins, or Candidates in Mentorship/Training.
@@ -67,7 +79,9 @@ export class AccessService {
                 CandidateStatus.KNOWLEDGE_TEST,
                 CandidateStatus.STAGING_SETUP,
                 CandidateStatus.STAGING_ACTIVE,
-                CandidateStatus.READY_FOR_HIRE
+                CandidateStatus.READY_FOR_HIRE,
+                CandidateStatus.AWAITING_FIRST_SHIFT,
+                CandidateStatus.HIRED,
             ];
             return allowedStatuses.includes(status);
         }
@@ -81,9 +95,11 @@ export class AccessService {
     async syncUserAccess(telegramId: bigint, reason: string = "Routine Sync") {
         try {
             const authorized = await this.isAuthorized(telegramId);
-            if (!authorized) {
-                await this.revokeAccess(telegramId, reason);
+            if (authorized) {
+                await this.clearProtectedChatBan(telegramId);
+                return;
             }
+            await this.revokeAccess(telegramId, reason);
         } catch (e) {
             logger.error({ err: e, telegramId }, "Failed to sync user access");
         }
@@ -168,14 +184,7 @@ export class AccessService {
         try {
             if (!(await this.isAuthorized(telegramId))) return null;
             const api = this.getSafeApi();
-            for (const chatId of this.getRevocationChatIds()) {
-                await api.unbanChatMember(chatId, Number(telegramId)).catch((e: any) => {
-                    const description = String(e?.description || "").toLowerCase();
-                    if (!description.includes("user not found") && !description.includes("user is not a member")) {
-                        logger.warn({ err: e, chatId, telegramId }, "Failed to clear protected chat ban before invite link creation");
-                    }
-                });
-            }
+            await this.clearProtectedChatBan(telegramId);
             const link = await api.createChatInviteLink(this.chatId, {
                 member_limit: 1,
                 name: `Invite for ${telegramId.toString()}`
