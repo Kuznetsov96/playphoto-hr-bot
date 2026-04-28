@@ -109,14 +109,24 @@ export class StaffRepository {
     }
 
     async update(id: string, data: Prisma.StaffProfileUpdateInput): Promise<StaffProfile> {
+        const previousProfile = await prisma.staffProfile.findUnique({
+            where: { id },
+            select: { isActive: true }
+        });
+
         const profile = await prisma.staffProfile.update({
             where: { id },
             data,
             include: { user: true }
         });
 
-        // If isActive status changed, sync channel access
-        if (data.isActive !== undefined && profile.user?.telegramId) {
+        // Sync protected chat access only when the active flag actually changes.
+        if (
+            data.isActive !== undefined &&
+            previousProfile &&
+            previousProfile.isActive !== profile.isActive &&
+            profile.user?.telegramId
+        ) {
             try {
                 const { accessService } = await import("../services/access-service.js");
                 await accessService.syncUserAccess(profile.user.telegramId);

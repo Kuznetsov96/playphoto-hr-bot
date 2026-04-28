@@ -36,7 +36,13 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
             const staffName = staff.surnameNameDot || staff.fullName;
             logger.warn({ telegramId, staffId: staff.id }, "Staff blocked bot; auto-deactivation started");
 
-            await staffRepository.update(staff.id, { isActive: false });
+            await staffRepository.update(staff.id, {
+                isActive: false,
+                deactivatedAt: new Date(),
+                deactivatedBy: "system:pinger",
+                deactivatedSource: "BOT_BLOCKED",
+                deactivatedReason: "Telegram 403 bot blocked"
+            } as any);
             await scheduleSyncService.markStaffBotBlocked(telegramId);
             logSecurityEvent({
                 event: "security.staff.bot_blocked",

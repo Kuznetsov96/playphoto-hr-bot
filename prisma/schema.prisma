@@ -334,6 +334,10 @@ model StaffProfile {
   fopName              String?
   salaryBalance        Float       @default(0)
   isActive             Boolean     @default(true)
+  deactivatedAt        DateTime?
+  deactivatedBy        String?
+  deactivatedSource    String?
+  deactivatedReason    String?
   isWelcomeSent        Boolean     @default(false)
   locationId           String?
   lastTaskDigestAt     DateTime?
