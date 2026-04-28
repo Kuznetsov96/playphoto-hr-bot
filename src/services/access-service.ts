@@ -39,7 +39,7 @@ export class AccessService {
     private async clearProtectedChatBan(telegramId: bigint) {
         const api = this.getSafeApi();
         for (const chatId of this.getRevocationChatIds()) {
-            await api.unbanChatMember(chatId, Number(telegramId)).catch((e: any) => {
+            await api.unbanChatMember(chatId, Number(telegramId), { only_if_banned: true }).catch((e: any) => {
                 const description = String(e?.description || "").toLowerCase();
                 if (!description.includes("user not found") && !description.includes("user is not a member")) {
                     logger.warn({ err: e, chatId, telegramId }, "Failed to clear protected chat ban");
