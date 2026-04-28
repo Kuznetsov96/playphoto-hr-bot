@@ -465,6 +465,73 @@ export class MentorService {
         return await this.findMentorOnboardingCandidates();
     }
 
+    async syncHireOnboardingStateForStaff(staffId: string) {
+        const fromDate = this.getKyivStartOfToday();
+        const staff = await prisma.staffProfile.findUnique({
+            where: { id: staffId },
+            include: {
+                user: {
+                    include: {
+                        candidate: {
+                            include: {
+                                firstShiftOnboardingCase: true,
+                            },
+                        },
+                    },
+                },
+                shifts: {
+                    where: { date: { gte: fromDate } },
+                    orderBy: { date: "asc" },
+                    take: 1,
+                    include: { location: true },
+                },
+            },
+        });
+
+        const candidate = staff?.user?.candidate;
+        const nextShift = staff?.shifts?.[0];
+        if (!candidate || !nextShift) return null;
+
+        const nextShiftTime = getShiftTimeFromLocationSchedule(nextShift.location?.schedule, nextShift.date) || candidate.firstShiftTime;
+        const hasDateDrift = !candidate.firstShiftDate || candidate.firstShiftDate.getTime() !== nextShift.date.getTime();
+        const hasTimeDrift = (candidate.firstShiftTime || null) !== (nextShiftTime || null);
+        const hasLocationDrift = candidate.locationId !== nextShift.locationId;
+
+        const caseStatus = candidate.firstShiftOnboardingCase?.status || null;
+        const hasActiveCase = !!caseStatus && !["PASSED", "FAILED"].includes(caseStatus);
+        const isReopenableStatus =
+            candidate.status === CandidateStatus.AWAITING_FIRST_SHIFT ||
+            candidate.status === CandidateStatus.HIRED;
+
+        const shouldRelock =
+            !hasActiveCase &&
+            !candidate.isMentorLocked &&
+            isReopenableStatus &&
+            (!candidate.firstShiftDate || candidate.firstShiftDate < fromDate || hasDateDrift);
+
+        const updateData: Prisma.CandidateUpdateInput = {};
+        if (hasDateDrift) updateData.firstShiftDate = nextShift.date;
+        if (hasTimeDrift) updateData.firstShiftTime = nextShiftTime;
+        if (hasLocationDrift) updateData.location = { connect: { id: nextShift.locationId } };
+        if (shouldRelock) updateData.isMentorLocked = true;
+
+        if (Object.keys(updateData).length > 0) {
+            await candidateRepository.update(candidate.id, updateData);
+        }
+
+        return {
+            candidateId: candidate.id,
+            relocked: shouldRelock,
+            refreshed: Object.keys(updateData).length > 0,
+            nextShift: {
+                date: nextShift.date,
+                locationId: nextShift.locationId,
+                locationName: nextShift.location?.name || candidate.locationId || "Unknown",
+                time: nextShiftTime || null,
+            },
+        };
+    }
+
     async completeOnboarding(candId: string, success: boolean) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
