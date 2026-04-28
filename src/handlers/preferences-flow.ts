@@ -256,6 +256,14 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         const staffNameForTable = (user?.staffProfile as any)?.surnameNameDot || user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
         const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає побажань";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
+        const wasNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
+        let createdStaffProfile = false;
+
+        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        const currentMonthName = kyivNow.toLocaleString('uk-UA', { month: 'long' });
+        const isCurrentMonth = (month || "").toLowerCase() === currentMonthName.toLowerCase();
+        const shouldMoveToNext = !!ctx.session.preferencesData.forceNextMonth && isCurrentMonth;
+        const shouldPersistToSheet = !wasNewCandidate || !shouldMoveToNext;
 
         const prefData: PreferenceData = {
             timestamp,
@@ -264,11 +272,27 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             comment: comment || ""
         };
 
-        try {
-            const { preferencesQueue } = await import("../core/queue.js");
-            await preferencesQueue.add('save-pref', prefData, { attempts: 5, backoff: { type: 'exponential', delay: 10000 } });
-        } catch {
-            await preferencesService.savePreference(prefData);
+        if (shouldPersistToSheet) {
+            if (wasNewCandidate && !user?.staffProfile && user?.candidate) {
+                const { staffRepository } = await import("../repositories/staff-repository.js");
+                const createData: any = {
+                    user: { connect: { id: user.id } },
+                    fullName: user.candidate.fullName || "Фотограф",
+                    isActive: true
+                };
+                if (user.candidate.locationId) createData.location = { connect: { id: user.candidate.locationId } };
+                await staffRepository.create(createData);
+                createdStaffProfile = true;
+            }
+
+            try {
+                const { preferencesQueue } = await import("../core/queue.js");
+                await preferencesQueue.add('save-pref', prefData, { attempts: 5, backoff: { type: 'exponential', delay: 10000 } });
+            } catch {
+                await preferencesService.savePreference(prefData);
+            }
+        } else {
+            logger.info({ telegramId, month }, "Skipping sheet write for candidate current-month preferences; admin notification only");
         }
 
         // Mark pending reply as confirmed → stops pinger reminders
@@ -280,11 +304,6 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         // Mark this user as having filled preferences for this month → broadcast will skip them
         const prefFilledKey = `pref_filled:${telegramId}:${month}`;
         await redis.set(prefFilledKey, "1", "EX", 40 * 24 * 60 * 60); // 40 days TTL
-
-        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-        const currentMonthName = kyivNow.toLocaleString('uk-UA', { month: 'long' });
-        const isCurrentMonth = (month || "").toLowerCase() === currentMonthName.toLowerCase();
-        const shouldMoveToNext = !!ctx.session.preferencesData.forceNextMonth && isCurrentMonth;
 
         await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
 
@@ -307,9 +326,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             delete ctx.session.preferencesData;
             ctx.session.step = "idle";
 
-            const isNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
-
-            if (isNewCandidate) {
+            if (wasNewCandidate) {
                 // Auto-hire: create StaffProfile + flip role, but DON'T send "schedule ready" yet.
                 // The real welcome ("Графік готовий!") comes later when admin syncs shifts.
                 try {
@@ -320,7 +337,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     const candidate = user.candidate!;
 
                     // Create StaffProfile (isWelcomeSent defaults to false)
-                    if (!user.staffProfile) {
+                    if (!user.staffProfile && !createdStaffProfile) {
                         const createData: any = {
                             user: { connect: { id: user.id } },
                             fullName: candidate.fullName || "Фотограф",
@@ -359,7 +376,6 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         }
 
         // Only notify admin for new candidates (auto-hire), not for regular staff filling monthly preferences
-        const wasNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
         if (wasNewCandidate) {
             const { ADMIN_IDS } = await import("../config.js");
             if (ADMIN_IDS.length > 0) {
