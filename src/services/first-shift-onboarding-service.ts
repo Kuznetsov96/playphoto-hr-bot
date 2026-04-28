@@ -7,6 +7,7 @@ import logger from "../core/logger.js";
 import { FIRST_SHIFT_ONBOARDING_CHAT_ID } from "../config.js";
 import { FIRST_SHIFT_ONBOARDING_STEPS, FIRST_SHIFT_ONBOARDING_TEXTS } from "../constants/first-shift-onboarding-texts.js";
 import { firstShiftOnboardingRepository, type FirstShiftOnboardingCaseWithRelations } from "../repositories/first-shift-onboarding-repository.js";
+import { candidateRepository } from "../repositories/candidate-repository.js";
 import { timelineRepository } from "../repositories/timeline-repository.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
@@ -314,6 +315,10 @@ export class FirstShiftOnboardingService {
         const updated = await firstShiftOnboardingRepository.updateCase(onboardingCase.id, {
             status: "PASSED",
             completedAt: new Date(),
+        });
+        await candidateRepository.update(updated.candidate.id, {
+            status: "HIRED",
+            isMentorLocked: false,
         });
         await api.sendMessage(Number(updated.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.completed, { parse_mode: "HTML" });
         await this.postTopicStatus(api, updated, FIRST_SHIFT_ONBOARDING_TEXTS.topicClosed);
