@@ -9,6 +9,7 @@ import { getBirthdaysByMonth } from "../../services/birthday-service.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
+import { systemStateRepository } from "../../repositories/system-state-repository.js";
 import { formatLocationName, normalizeCity } from "./utils.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
@@ -20,6 +21,257 @@ import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
+
+function formatTeamSyncPreview(preview: any): string {
+    const duplicatePreview = (preview.duplicateTelegramIds || [])
+        .slice(0, 5)
+        .map((item: any) => `• <code>${item.telegramId}</code> — rows ${item.rows.join(", ")}`)
+        .join("\n");
+
+    const deactivationPreview = (preview.deactivationCandidates || [])
+        .slice(0, 8)
+        .map((item: any) => `• ${item.fullName} — row ${item.rowNumber} — <code>${item.rawStatus}</code>`)
+        .join("\n");
+
+    let text = `🔎 <b>Full Sync Preview</b>\n\n` +
+        `👥 Active in DB now: <b>${preview.activeBefore}</b>\n` +
+        `📄 Visible team rows: <b>${preview.visibleStaffRows}</b>\n` +
+        `🙈 Hidden team rows: <b>${preview.hiddenStaffRows}</b>\n` +
+        `✅ Active rows in sheet: <b>${preview.activeRows}</b>\n` +
+        `⛔ Inactive rows in sheet: <b>${preview.inactiveRows}</b>\n` +
+        `❓ Unknown statuses: <b>${preview.unknownStatusRows}</b>\n` +
+        `🧯 Deactivation candidates: <b>${preview.deactivationCandidates.length}</b>\n` +
+        `🪪 Duplicate Telegram IDs: <b>${preview.duplicateTelegramIds.length}</b>\n`;
+
+    if (preview.duplicateTelegramIds?.length) {
+        text += `\n⚠️ <b>Duplicates detected</b>\n${duplicatePreview}\n`;
+    }
+
+    if (preview.deactivationCandidates?.length) {
+        text += `\n⚠️ <b>Will deactivate on confirm</b>\n${deactivationPreview}\n`;
+    }
+
+    if (!preview.duplicateTelegramIds?.length && !preview.deactivationCandidates?.length && !preview.unknownStatusRows) {
+        text += `\nNo risky changes detected.`;
+    }
+
+    return text;
+}
+
+async function executeFullSync(ctx: MyContext, msg: any) {
+    const telegramId = ctx.from?.id;
+    audit({ event: "team_sync", result: "started", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id });
+    try {
+        const prisma = (await import("../../db/core.js")).default;
+        const blocklistBefore = await prisma.user.count({ where: { isBlocked: true } });
+
+        const teamRes = await scheduleSyncService.syncTeam(ctx.api);
+
+        const shiftsBefore = await prisma.workShift.findMany({
+            where: { date: { gte: new Date() } },
+            select: { staffId: true, date: true, locationId: true }
+        });
+        const beforeMap = new Map<string, Set<string>>();
+        for (const s of shiftsBefore) {
+            const key = `${s.date.toISOString()}|${s.locationId}`;
+            if (!beforeMap.has(s.staffId)) beforeMap.set(s.staffId, new Set());
+            beforeMap.get(s.staffId)!.add(key);
+        }
+
+        const schedRes = await scheduleSyncService.syncSchedule("Актуальний розклад", teamRes.teamMapping);
+
+        const shiftsAfter = await prisma.workShift.findMany({
+            where: { date: { gte: new Date() } },
+            select: { staffId: true, date: true, locationId: true }
+        });
+        const afterMap = new Map<string, Set<string>>();
+        for (const s of shiftsAfter) {
+            const key = `${s.date.toISOString()}|${s.locationId}`;
+            if (!afterMap.has(s.staffId)) afterMap.set(s.staffId, new Set());
+            afterMap.get(s.staffId)!.add(key);
+        }
+
+        const changedStaffIds = new Set<string>();
+        const allStaffIds = new Set([...beforeMap.keys(), ...afterMap.keys()]);
+        for (const sid of allStaffIds) {
+            const before = beforeMap.get(sid);
+            const after = afterMap.get(sid);
+            if (!before && !after) continue;
+            if (!before || !after || before.size !== after.size) { changedStaffIds.add(sid); continue; }
+            for (const k of before) { if (!after.has(k)) { changedStaffIds.add(sid); break; } }
+        }
+
+        const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
+        const { staffRepository } = await import("../../repositories/staff-repository.js");
+        const { AdminRole } = await import("@prisma/client");
+        const { mentorService } = await import("../../services/mentor-service.js");
+        const excludedRoles = [AdminRole.SUPER_ADMIN, AdminRole.CO_FOUNDER, AdminRole.SUPPORT, AdminRole.HR_LEAD, AdminRole.MENTOR_LEAD];
+
+        const newHires = await staffRepository.findMany({
+            where: {
+                isWelcomeSent: false,
+                isActive: true,
+                shifts: { some: {} },
+                user: {
+                    OR: [
+                        { adminRole: null },
+                        { adminRole: { notIn: excludedRoles } }
+                    ]
+                }
+            },
+            include: { user: { include: { candidate: true } } }
+        });
+
+        let newHiresNotified = 0;
+        for (const staff of newHires) {
+            try {
+                if (!staff.user) continue;
+                const staffTgId = Number(staff.user.telegramId);
+                const { staffService } = await import("../../modules/staff/services/index.js");
+                const welcomed = await staffService.finalizeStaffActivation(staff.id, ctx.api);
+
+                const startOfToday = new Date();
+                startOfToday.setHours(0, 0, 0, 0);
+                const upcomingShifts = await prisma.workShift.findMany({
+                    where: { staffId: staff.id, date: { gte: startOfToday } },
+                    orderBy: { date: 'asc' },
+                    include: { location: true },
+                    take: 30
+                });
+
+                if (welcomed) {
+                    newHiresNotified++;
+                    if (upcomingShifts.length > 0) {
+                        let schedMsg = `📅 <b>Твій графік:</b>\n\n`;
+                        for (const s of upcomingShifts) {
+                            const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
+                            const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
+                            schedMsg += `▫️ <code>${dateStr}</code> — ${s.location.name}\n`;
+                        }
+                        schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
+                        const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
+                        await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
+                    }
+                }
+
+                const firstShift = upcomingShifts[0];
+                await mentorService.syncHireOnboardingStateForStaff(staff.id);
+                if (welcomed && firstShift && MENTOR_IDS.length > 0) {
+                    const dateStr = firstShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+                    const mentorMsg =
+                        `🎓 <b>New Staff Onboarding!</b>\n\n` +
+                        `👤 Name: <b>${staff.fullName}</b>\n` +
+                        `📅 First Shift: <b>${dateStr}</b>\n` +
+                        `📍 Location: <b>${firstShift.location.name}</b>\n\n` +
+                        `Please control their first day and help with adaptation! ✨`;
+                    const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${staff.id}`);
+                    await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
+                }
+
+                if (firstShift) {
+                    await scheduleSyncService.updateFirstShiftDateInSheet(
+                        staff.user.telegramId.toString(), firstShift.date
+                    ).catch(() => { });
+                }
+            } catch (err) {
+                logger.error({ err, staffId: staff.id }, "Team sync welcome or mentor notification failed");
+            }
+        }
+
+        let staffNotified = 0;
+        const newHireIds = new Set(newHires.map(h => h.id));
+        if (changedStaffIds.size > 0) {
+            const staffToNotify = await staffRepository.findMany({
+                where: {
+                    id: { in: Array.from(changedStaffIds) },
+                    isActive: true,
+                    isWelcomeSent: true
+                },
+                include: { user: true }
+            });
+
+            for (const s of staffToNotify) {
+                if (!s.user || newHireIds.has(s.id)) continue;
+                try {
+                    const onboardingSync = await mentorService.syncHireOnboardingStateForStaff(s.id);
+                    const updateMsg = `📅 <b>Графік оновлено!</b>\n\nПереглянь свої зміни — можливо, є зміни у датах чи локації. ✨`;
+                    const updateKb = new InlineKeyboard().text("🗓 Мій графік", "staff_hub_nav");
+                    await ctx.api.sendMessage(Number(s.user.telegramId), updateMsg, { parse_mode: "HTML", reply_markup: updateKb }).catch(() => { });
+                    staffNotified++;
+
+                    if (onboardingSync?.relocked && MENTOR_IDS.length > 0) {
+                        const dateStr = onboardingSync.nextShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+                        const mentorMsg =
+                            `🔁 <b>Onboarding Reopened</b>\n\n` +
+                            `👤 Name: <b>${s.fullName}</b>\n` +
+                            `📅 First Shift: <b>${dateStr}</b>\n` +
+                            `📍 Location: <b>${onboardingSync.nextShift.locationName}</b>\n\n` +
+                            `Candidate returned to mentor onboarding because the first real shift changed.`;
+                        const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${s.id}`);
+                        await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
+                    }
+                } catch { }
+            }
+        }
+
+        let report = `✅ <b>Sync Complete!</b>\n\n`;
+
+        const teamDelta = (teamRes.activeAfter || 0) - (teamRes.activeBefore || 0);
+        const teamDeltaStr = teamDelta >= 0 ? `+${teamDelta}` : `${teamDelta}`;
+        report += `👥 Team: <b>${teamRes.activeAfter || 0}</b> (${teamDeltaStr})\n`;
+        if ((teamRes.inactiveStaffRemovedFromChats || 0) > 0) {
+            report += `🧹 Removed from chats: <b>${teamRes.inactiveStaffRemovedFromChats}</b>\n`;
+        }
+        if ((teamRes.unknownStatusRows || 0) > 0) {
+            report += `❓ Unknown status rows skipped: <b>${teamRes.unknownStatusRows}</b>\n`;
+        }
+        const removalFailures = teamRes.inactiveStaffRemovalFailures || [];
+        if (removalFailures.length > 0) {
+            const failedChatIds = Array.from(new Set(
+                removalFailures.map((failure: any) => String(failure.chatId))
+            )).slice(0, 6);
+            report += `⚠️ Chat removals failed: <b>${removalFailures.length}</b>`;
+            if (failedChatIds.length > 0) {
+                report += ` (${failedChatIds.join(', ')})`;
+            }
+            report += `\n`;
+        }
+
+        const shiftDelta = (schedRes.shiftsAfter || 0) - (schedRes.shiftsBefore || 0);
+        const shiftDeltaStr = shiftDelta >= 0 ? `+${shiftDelta}` : `${shiftDelta}`;
+        report += `📅 Shifts: <b>${schedRes.shiftsAfter || 0}</b> (${shiftDeltaStr})\n`;
+
+        if (teamRes.blocklistRes) {
+            const bl = teamRes.blocklistRes;
+            if (bl.success) {
+                const blocklistDelta = (bl.count || 0) - (typeof blocklistBefore !== 'undefined' ? blocklistBefore : 0);
+                const blocklistDeltaStr = blocklistDelta >= 0 ? `+${blocklistDelta}` : `${blocklistDelta}`;
+                report += `🛡️ Blocklist: <b>${bl.count}</b> (${blocklistDeltaStr})\n`;
+            } else {
+                report += `🛡️ Blocklist: ⚠️ Failed (${bl.error})\n`;
+            }
+        }
+
+        if (newHiresNotified > 0) {
+            report += `📢 <b>${newHiresNotified}</b> new hires notified! ✨\n`;
+        }
+        if (newHires.length > newHiresNotified) {
+            report += `⚠️ <b>${newHires.length - newHiresNotified}</b> new hires unreachable (haven't started bot)\n`;
+        }
+        if (staffNotified > 0) {
+            report += `📅 <b>${staffNotified}</b> staff notified about schedule changes`;
+        }
+
+        audit({ event: "team_sync", result: "success", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id });
+        await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, report, { parse_mode: "HTML" });
+    } catch (e: any) {
+        audit({ event: "team_sync", result: "failed", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id, error: e.message });
+        logger.error({ err: e, telegramId }, "Team full sync failed");
+        await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, `❌ <b>Sync Error:</b> ${e.message}`, { parse_mode: "HTML" });
+    } finally {
+        delete ctx.session.teamSyncPreview;
+    }
+}
 
 /**
  * Birthday Selection Menu
@@ -98,230 +350,24 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
     // Only Super Admin can sync or see reports
     if (hasPermission(userRole as any, 'STAFF_SYNC')) {
         range.text("🔄 Full Sync", async (ctx) => {
-            const msg = await ctx.reply("⏳ Starting Full System Sync...");
             const telegramId = ctx.from?.id;
-            audit({ event: "team_sync", result: "started", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id });
-            try {
-                // Get blocklist count BEFORE sync
-                const prisma = (await import("../../db/core.js")).default;
-                const blocklistBefore = await prisma.user.count({ where: { isBlocked: true } });
+            const preview = await scheduleSyncService.previewTeamSync(telegramId);
+            ctx.session.teamSyncPreview = {
+                token: preview.token,
+                generatedAt: Date.now(),
+                requiresConfirmation: preview.requiresConfirmation,
+            };
 
-                const teamRes = await scheduleSyncService.syncTeam(ctx.api);
-
-                // --- Snapshot shifts BEFORE schedule sync ---
-                const shiftsBefore = await prisma.workShift.findMany({
-                    where: { date: { gte: new Date() } },
-                    select: { staffId: true, date: true, locationId: true }
-                });
-                const beforeMap = new Map<string, Set<string>>();
-                for (const s of shiftsBefore) {
-                    const key = `${s.date.toISOString()}|${s.locationId}`;
-                    if (!beforeMap.has(s.staffId)) beforeMap.set(s.staffId, new Set());
-                    beforeMap.get(s.staffId)!.add(key);
-                }
-
-                const schedRes = await scheduleSyncService.syncSchedule("Актуальний розклад", teamRes.teamMapping);
-
-                // --- Snapshot shifts AFTER schedule sync ---
-                const shiftsAfter = await prisma.workShift.findMany({
-                    where: { date: { gte: new Date() } },
-                    select: { staffId: true, date: true, locationId: true }
-                });
-                const afterMap = new Map<string, Set<string>>();
-                for (const s of shiftsAfter) {
-                    const key = `${s.date.toISOString()}|${s.locationId}`;
-                    if (!afterMap.has(s.staffId)) afterMap.set(s.staffId, new Set());
-                    afterMap.get(s.staffId)!.add(key);
-                }
-
-                // Keep candidate.firstShiftDate reserved for offline staging.
-                // Mentor onboarding reads the real first work shift directly from StaffProfile + WorkShift.
-
-                // --- Diff: find staff whose schedule actually changed ---
-                const changedStaffIds = new Set<string>();
-                const allStaffIds = new Set([...beforeMap.keys(), ...afterMap.keys()]);
-                for (const sid of allStaffIds) {
-                    const before = beforeMap.get(sid);
-                    const after = afterMap.get(sid);
-                    if (!before && !after) continue;
-                    if (!before || !after || before.size !== after.size) { changedStaffIds.add(sid); continue; }
-                    for (const k of before) { if (!after.has(k)) { changedStaffIds.add(sid); break; } }
-                }
-
-                // --- NEW: Notify New Hires & Mentors ---
-                const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
-                const { staffRepository } = await import("../../repositories/staff-repository.js");
-                const { AdminRole } = await import("@prisma/client");
-                const { mentorService } = await import("../../services/mentor-service.js");
-                // Only welcome standard staff/candidates, exclude admins
-                const excludedRoles = [AdminRole.SUPER_ADMIN, AdminRole.CO_FOUNDER, AdminRole.SUPPORT, AdminRole.HR_LEAD, AdminRole.MENTOR_LEAD];
-
-                const newHires = await staffRepository.findMany({
-                    where: {
-                        isWelcomeSent: false,
-                        isActive: true,
-                        shifts: { some: {} },
-                        user: { 
-                            OR: [
-                                { adminRole: null },
-                                { adminRole: { notIn: excludedRoles } }
-                            ]
-                        }
-                    },
-                    include: { user: { include: { candidate: true } } }
-                });
-
-                let newHiresNotified = 0;
-                for (const staff of newHires) {
-                    try {
-                        if (!staff.user) continue;
-                        const staffTgId = Number(staff.user.telegramId);
-
-                        // 1. Send generic welcome & flip role
-                        const { staffService } = await import("../../modules/staff/services/index.js");
-                        const welcomed = await staffService.finalizeStaffActivation(staff.id, ctx.api);
-
-                        // 2. Send follow-up with the actual schedule
-                        const startOfToday = new Date();
-                        startOfToday.setHours(0, 0, 0, 0);
-                        const upcomingShifts = await prisma.workShift.findMany({
-                            where: { staffId: staff.id, date: { gte: startOfToday } },
-                            orderBy: { date: 'asc' },
-                            include: { location: true },
-                            take: 30
-                        });
-
-                        if (welcomed) {
-                            newHiresNotified++;
-                            if (upcomingShifts.length > 0) {
-                                let schedMsg = `📅 <b>Твій графік:</b>\n\n`;
-                                for (const s of upcomingShifts) {
-                                    const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
-                                    const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-                                    schedMsg += `▫️ <code>${dateStr}</code> — ${s.location.name}\n`;
-                                }
-                                schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
-                                const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
-                                await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
-                            }
-                        }
-
-                        // 3. Notify mentor
-                        const firstShift = upcomingShifts[0];
-                        await mentorService.syncHireOnboardingStateForStaff(staff.id);
-                        if (welcomed && firstShift && MENTOR_IDS.length > 0) {
-                            const dateStr = firstShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
-                            const mentorMsg =
-                                `🎓 <b>New Staff Onboarding!</b>\n\n` +
-                                `👤 Name: <b>${staff.fullName}</b>\n` +
-                                `📅 First Shift: <b>${dateStr}</b>\n` +
-                                `📍 Location: <b>${firstShift.location.name}</b>\n\n` +
-                                `Please control their first day and help with adaptation! ✨`;
-
-                            const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${staff.id}`);
-                            await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
-                        }
-
-                        // 4. Write first shift date to Team spreadsheet (column G)
-                        if (firstShift) {
-                            await scheduleSyncService.updateFirstShiftDateInSheet(
-                                staff.user.telegramId.toString(), firstShift.date
-                            ).catch(() => { });
-                        }
-                    } catch (err) {
-                        logger.error({ err, staffId: staff.id }, "Team sync welcome or mentor notification failed");
-                    }
-                }
-
-                // --- Notify existing staff whose schedule actually changed ---
-                let staffNotified = 0;
-                const newHireIds = new Set(newHires.map(h => h.id));
-                if (changedStaffIds.size > 0) {
-                    const staffToNotify = await staffRepository.findMany({
-                        where: {
-                            id: { in: Array.from(changedStaffIds) },
-                            isActive: true,
-                            isWelcomeSent: true
-                        },
-                        include: { user: true }
-                    });
-
-                    for (const s of staffToNotify) {
-                        if (!s.user || newHireIds.has(s.id)) continue;
-                        try {
-                            const onboardingSync = await mentorService.syncHireOnboardingStateForStaff(s.id);
-                            const updateMsg = `📅 <b>Графік оновлено!</b>\n\nПереглянь свої зміни — можливо, є зміни у датах чи локації. ✨`;
-                            const updateKb = new InlineKeyboard().text("🗓 Мій графік", "staff_hub_nav");
-                            await ctx.api.sendMessage(Number(s.user.telegramId), updateMsg, { parse_mode: "HTML", reply_markup: updateKb }).catch(() => { });
-                            staffNotified++;
-
-                            if (onboardingSync?.relocked && MENTOR_IDS.length > 0) {
-                                const dateStr = onboardingSync.nextShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
-                                const mentorMsg =
-                                    `🔁 <b>Onboarding Reopened</b>\n\n` +
-                                    `👤 Name: <b>${s.fullName}</b>\n` +
-                                    `📅 First Shift: <b>${dateStr}</b>\n` +
-                                    `📍 Location: <b>${onboardingSync.nextShift.locationName}</b>\n\n` +
-                                    `Candidate returned to mentor onboarding because the first real shift changed.`;
-                                const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${s.id}`);
-                                await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
-                            }
-                        } catch { /* skip */ }
-                    }
-                }
-
-                let report = `✅ <b>Sync Complete!</b>\n\n`;
-
-                const teamDelta = (teamRes.activeAfter || 0) - (teamRes.activeBefore || 0);
-                const teamDeltaStr = teamDelta >= 0 ? `+${teamDelta}` : `${teamDelta}`;
-                report += `👥 Team: <b>${teamRes.activeAfter || 0}</b> (${teamDeltaStr})\n`;
-                if ((teamRes.inactiveStaffRemovedFromChats || 0) > 0) {
-                    report += `🧹 Removed from chats: <b>${teamRes.inactiveStaffRemovedFromChats}</b>\n`;
-                }
-                const removalFailures = teamRes.inactiveStaffRemovalFailures || [];
-                if (removalFailures.length > 0) {
-                    const failedChatIds = Array.from(new Set(
-                        removalFailures.map((failure: any) => String(failure.chatId))
-                    )).slice(0, 6);
-                    report += `⚠️ Chat removals failed: <b>${removalFailures.length}</b>`;
-                    if (failedChatIds.length > 0) {
-                        report += ` (${failedChatIds.join(', ')})`;
-                    }
-                    report += `\n`;
-                }
-
-                const shiftDelta = (schedRes.shiftsAfter || 0) - (schedRes.shiftsBefore || 0);
-                const shiftDeltaStr = shiftDelta >= 0 ? `+${shiftDelta}` : `${shiftDelta}`;
-                report += `📅 Shifts: <b>${schedRes.shiftsAfter || 0}</b> (${shiftDeltaStr})\n`;
-
-                if (teamRes.blocklistRes) {
-                    const bl = teamRes.blocklistRes;
-                    if (bl.success) {
-                        const blocklistDelta = (bl.count || 0) - (typeof blocklistBefore !== 'undefined' ? blocklistBefore : 0);
-                        const blocklistDeltaStr = blocklistDelta >= 0 ? `+${blocklistDelta}` : `${blocklistDelta}`;
-                        report += `🛡️ Blocklist: <b>${bl.count}</b> (${blocklistDeltaStr})\n`;
-                    } else {
-                        report += `🛡️ Blocklist: ⚠️ Failed (${bl.error})\n`;
-                    }
-                }
-
-                if (newHiresNotified > 0) {
-                    report += `📢 <b>${newHiresNotified}</b> new hires notified! ✨\n`;
-                }
-                if (newHires.length > newHiresNotified) {
-                    report += `⚠️ <b>${newHires.length - newHiresNotified}</b> new hires unreachable (haven't started bot)\n`;
-                }
-                if (staffNotified > 0) {
-                    report += `📅 <b>${staffNotified}</b> staff notified about schedule changes`;
-                }
-
-                audit({ event: "team_sync", result: "success", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id });
-                await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, report, { parse_mode: "HTML" });
-            } catch (e: any) {
-                audit({ event: "team_sync", result: "failed", actorType: "admin", telegramId, entityType: "system", updateId: ctx.update.update_id, error: e.message });
-                logger.error({ err: e, telegramId }, "Team full sync failed");
-                await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, `❌ <b>Sync Error:</b> ${e.message}`, { parse_mode: "HTML" });
+            const kb = new InlineKeyboard();
+            if (!preview.duplicateTelegramIds.length) {
+                kb.text(preview.requiresConfirmation ? "⚠️ Confirm Full Sync" : "✅ Run Full Sync", "team_sync_confirm");
             }
+            kb.text("✖️ Cancel", "team_sync_cancel");
+
+            await ctx.reply(formatTeamSyncPreview(preview), {
+                parse_mode: "HTML",
+                reply_markup: kb
+            });
         });
         range.text("📂 Custom Sync", async (ctx) => {
             ctx.session.step = "sync_other_sheet";
@@ -402,6 +448,45 @@ export const adminTeamHandlers = new Composer<MyContext>();
 adminTeamHandlers.callbackQuery("back_to_schedule_dates", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-schedule-select-date"], "admin-schedule-dates");
+});
+
+adminTeamHandlers.callbackQuery("team_sync_cancel", async (ctx) => {
+    await ctx.answerCallbackQuery("Sync cancelled");
+    delete ctx.session.teamSyncPreview;
+    await ctx.editMessageText("❌ <b>Full Sync cancelled.</b>", { parse_mode: "HTML" }).catch(() => { });
+});
+
+adminTeamHandlers.callbackQuery("team_sync_confirm", async (ctx) => {
+    await ctx.answerCallbackQuery();
+
+    const previewMeta = ctx.session.teamSyncPreview;
+    if (!previewMeta) {
+        await ctx.reply("❌ Sync preview expired. Start Full Sync again.");
+        return;
+    }
+
+    const preview = await systemStateRepository.getJson<any>(`team-sync-preview:${previewMeta.token}`);
+    if (!preview) {
+        delete ctx.session.teamSyncPreview;
+        await ctx.reply("❌ Sync preview not found. Start Full Sync again.");
+        return;
+    }
+
+    if ((preview.duplicateTelegramIds || []).length > 0) {
+        await ctx.editMessageText("❌ <b>Sync blocked.</b>\n\nDuplicate Telegram IDs detected in the team sheet. Fix the sheet first and rerun preview.", { parse_mode: "HTML" }).catch(() => { });
+        delete ctx.session.teamSyncPreview;
+        return;
+    }
+
+    const ageMs = Date.now() - previewMeta.generatedAt;
+    if (ageMs > 15 * 60 * 1000) {
+        delete ctx.session.teamSyncPreview;
+        await ctx.editMessageText("❌ <b>Sync preview expired.</b>\n\nGenerate a fresh preview before confirming.", { parse_mode: "HTML" }).catch(() => { });
+        return;
+    }
+
+    const progressMsg = await ctx.reply("⏳ Starting Full System Sync...");
+    await executeFullSync(ctx, progressMsg);
 });
 
 export const adminScheduleHistoryMenu = new Menu<MyContext>("admin-schedule-history");
