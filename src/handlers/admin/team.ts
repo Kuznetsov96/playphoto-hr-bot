@@ -152,6 +152,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                 const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
                 const { staffRepository } = await import("../../repositories/staff-repository.js");
                 const { AdminRole } = await import("@prisma/client");
+                const { mentorService } = await import("../../services/mentor-service.js");
                 // Only welcome standard staff/candidates, exclude admins
                 const excludedRoles = [AdminRole.SUPER_ADMIN, AdminRole.CO_FOUNDER, AdminRole.SUPPORT, AdminRole.HR_LEAD, AdminRole.MENTOR_LEAD];
 
@@ -207,6 +208,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
 
                         // 3. Notify mentor
                         const firstShift = upcomingShifts[0];
+                        await mentorService.syncHireOnboardingStateForStaff(staff.id);
                         if (welcomed && firstShift && MENTOR_IDS.length > 0) {
                             const dateStr = firstShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
                             const mentorMsg =
@@ -247,10 +249,23 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
                     for (const s of staffToNotify) {
                         if (!s.user || newHireIds.has(s.id)) continue;
                         try {
+                            const onboardingSync = await mentorService.syncHireOnboardingStateForStaff(s.id);
                             const updateMsg = `📅 <b>Графік оновлено!</b>\n\nПереглянь свої зміни — можливо, є зміни у датах чи локації. ✨`;
                             const updateKb = new InlineKeyboard().text("🗓 Мій графік", "staff_hub_nav");
                             await ctx.api.sendMessage(Number(s.user.telegramId), updateMsg, { parse_mode: "HTML", reply_markup: updateKb }).catch(() => { });
                             staffNotified++;
+
+                            if (onboardingSync?.relocked && MENTOR_IDS.length > 0) {
+                                const dateStr = onboardingSync.nextShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+                                const mentorMsg =
+                                    `🔁 <b>Onboarding Reopened</b>\n\n` +
+                                    `👤 Name: <b>${s.fullName}</b>\n` +
+                                    `📅 First Shift: <b>${dateStr}</b>\n` +
+                                    `📍 Location: <b>${onboardingSync.nextShift.locationName}</b>\n\n` +
+                                    `Candidate returned to mentor onboarding because the first real shift changed.`;
+                                const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${s.id}`);
+                                await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
+                            }
                         } catch { /* skip */ }
                     }
                 }

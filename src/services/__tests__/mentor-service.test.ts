@@ -14,6 +14,7 @@ vi.mock('grammy', () => {
 vi.mock('../../db/core.js', () => ({
     default: {
         candidate: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]) },
+        staffProfile: { findUnique: vi.fn().mockResolvedValue(null) },
         trainingSlot: { count: vi.fn().mockResolvedValue(0) }
     }
 }));
@@ -21,6 +22,7 @@ vi.mock('../../db/core.js', () => ({
 vi.mock('../../repositories/candidate-repository.js', () => ({
     candidateRepository: {
         findById: vi.fn(),
+        findByUserId: vi.fn(),
         update: vi.fn(),
         findByStatusWithUser: vi.fn().mockResolvedValue([]),
         findByStatus: vi.fn().mockResolvedValue([]),
@@ -360,6 +362,47 @@ describe('MentorService', () => {
             expect(candidates[0]?.firstShiftDate).toEqual(shiftDate);
             expect(candidates[0]?.firstShiftTime).toBe('12:00-21:00');
             expect(candidates[0]?.location?.name).toBe('Drive City');
+        });
+
+        it('should relock onboarding and refresh first shift when the real staff schedule moved', async () => {
+            const shiftDate = new Date('2026-05-03T00:00:00.000Z');
+            vi.mocked((prisma as any).staffProfile.findUnique).mockResolvedValue({
+                id: 'staff-1',
+                user: {
+                    candidate: {
+                        id: 'cand-onboarding',
+                        status: CandidateStatus.HIRED,
+                        isMentorLocked: false,
+                        firstShiftDate: new Date('2026-04-05T09:00:00.000Z'),
+                        firstShiftTime: '15:00-17:00',
+                        locationId: 'old-loc',
+                        firstShiftOnboardingCase: null,
+                    }
+                },
+                shifts: [
+                    {
+                        date: shiftDate,
+                        locationId: 'loc-lviv',
+                        location: {
+                            name: 'Smile Park (Львів)',
+                            schedule: 'Сб-Нд — 12:00-21:00',
+                        }
+                    }
+                ]
+            } as any);
+
+            const result = await mentorService.syncHireOnboardingStateForStaff('staff-1');
+
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-onboarding', expect.objectContaining({
+                firstShiftDate: shiftDate,
+                firstShiftTime: '12:00-21:00',
+                isMentorLocked: true,
+                location: { connect: { id: 'loc-lviv' } }
+            }));
+            expect(result).toEqual(expect.objectContaining({
+                relocked: true,
+                refreshed: true,
+            }));
         });
     });
 });
