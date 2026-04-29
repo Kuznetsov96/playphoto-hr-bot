@@ -16,6 +16,7 @@ import { ScreenManager } from "../utils/screen-manager.js";
 import { getUserAdminRole } from "../middleware/role-check.js";
 import { AdminRole, CandidateStatus } from "@prisma/client";
 import { hiringNeedsService } from "../services/hiring-needs-service.js";
+import { buildSignedCallback } from "../utils/signed-callback.js";
 
 const HIRING_NEEDS_PAGE_SIZE = 7;
 
@@ -728,6 +729,20 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     }
                 }).row();
             }
+
+            range.text("🚫 Withdraw & Reject", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                const confirmText = `⚠️ <b>Confirm Rejection</b>\n\n` +
+                    `Ти збираєшся закрити кандидатку як <b>REJECTED</b> через відмову на етапі офлайн-стажування.\n\n` +
+                    `Після підтвердження ми:\n` +
+                    `• приберемо її зі staging\n` +
+                    `• надішлемо скасування партнеру\n` +
+                    `• закриємо її заявку`;
+                const kb = new InlineKeyboard()
+                    .text("🚫 Yes, Reject", buildSignedCallback("hwr", cand.id)).row()
+                    .text("⬅️ Back", "hr_cancel_withdraw_reject");
+                await ScreenManager.renderScreen(ctx, confirmText, kb, { pushToStack: true });
+            }).row();
         }
 
         // --- ACTIVE STAGING (Former OFFLINE_STAGING with notificationSent=true) ---
@@ -751,6 +766,20 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 await candidateRepository.update(cand.id, { status: "STAGING_SETUP" as any, notificationSent: false, stagingNotifiedAt: null });
                 await ctx.answerCallbackQuery("Reset to setup mode 🛠");
                 await ctx.menu.update();
+            }).row();
+
+            range.text("🚫 Withdraw & Reject", async (ctx) => {
+                await ctx.answerCallbackQuery();
+                const confirmText = `⚠️ <b>Confirm Rejection</b>\n\n` +
+                    `Ти збираєшся закрити кандидатку як <b>REJECTED</b> через відмову на етапі офлайн-стажування.\n\n` +
+                    `Після підтвердження ми:\n` +
+                    `• приберемо її зі staging\n` +
+                    `• надішлемо скасування партнеру\n` +
+                    `• закриємо її заявку`;
+                const kb = new InlineKeyboard()
+                    .text("🚫 Yes, Reject", buildSignedCallback("hwr", cand.id)).row()
+                    .text("⬅️ Back", "hr_cancel_withdraw_reject");
+                await ScreenManager.renderScreen(ctx, confirmText, kb, { pushToStack: true });
             }).row();
         }
 
