@@ -8,7 +8,6 @@ import { extractFirstName } from "../../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../../utils/location-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
-import { hrService } from "../../../services/hr-service.js";
 import {
     MIN_CANDIDATE_AGE,
     getAgeRejection,
@@ -549,6 +548,7 @@ candidateHandlers.on("callback_query:data", async (ctx, next) => {
     if (!candId) return next();
     await ctx.answerCallbackQuery();
     try {
+        const { hrService } = await import("../../../services/hr-service.js");
         const cand = await hrService.getCandidateDetails(candId);
         if (!cand) return;
         if (Number(cand.user.telegramId) !== ctx.from?.id) {
