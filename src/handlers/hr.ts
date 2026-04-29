@@ -106,7 +106,7 @@ hrHandlers.on("callback_query:data", async (ctx, next) => {
     const { ScreenManager } = await import("../utils/screen-manager.js");
     await ScreenManager.renderScreen(
         ctx,
-        `❌ <b>Candidate Rejected</b>\n\nЗаявку закрито, staging скасовано, партнерці надіслано сповіщення.`,
+        `❌ <b>Candidate Rejected</b>\n\nThe application has been closed, staging has been cancelled, and the assigned partner has been notified.`,
         "hr-final-step-menu",
         { pushToStack: true }
     );
