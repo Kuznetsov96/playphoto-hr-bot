@@ -733,11 +733,11 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             range.text("🚫 Withdraw & Reject", async (ctx) => {
                 await ctx.answerCallbackQuery();
                 const confirmText = `⚠️ <b>Confirm Rejection</b>\n\n` +
-                    `Ти збираєшся закрити кандидатку як <b>REJECTED</b> через відмову на етапі офлайн-стажування.\n\n` +
-                    `Після підтвердження ми:\n` +
-                    `• приберемо її зі staging\n` +
-                    `• надішлемо скасування партнеру\n` +
-                    `• закриємо її заявку`;
+                    `You are about to mark this candidate as <b>REJECTED</b> because she withdrew during offline staging.\n\n` +
+                    `After confirmation, we will:\n` +
+                    `• remove her from staging\n` +
+                    `• notify the assigned partner\n` +
+                    `• close her application`;
                 const kb = new InlineKeyboard()
                     .text("🚫 Yes, Reject", buildSignedCallback("hwr", cand.id)).row()
                     .text("⬅️ Back", "hr_cancel_withdraw_reject");
@@ -771,11 +771,11 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             range.text("🚫 Withdraw & Reject", async (ctx) => {
                 await ctx.answerCallbackQuery();
                 const confirmText = `⚠️ <b>Confirm Rejection</b>\n\n` +
-                    `Ти збираєшся закрити кандидатку як <b>REJECTED</b> через відмову на етапі офлайн-стажування.\n\n` +
-                    `Після підтвердження ми:\n` +
-                    `• приберемо її зі staging\n` +
-                    `• надішлемо скасування партнеру\n` +
-                    `• закриємо її заявку`;
+                    `You are about to mark this candidate as <b>REJECTED</b> because she withdrew during offline staging.\n\n` +
+                    `After confirmation, we will:\n` +
+                    `• remove her from staging\n` +
+                    `• notify the assigned partner\n` +
+                    `• close her application`;
                 const kb = new InlineKeyboard()
                     .text("🚫 Yes, Reject", buildSignedCallback("hwr", cand.id)).row()
                     .text("⬅️ Back", "hr_cancel_withdraw_reject");
