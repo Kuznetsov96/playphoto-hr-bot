@@ -100,6 +100,126 @@ function getPostInterviewSummaryText(candidate: any) {
 }
 
 export const hrService = {
+    async notifyPartnerAboutStagingCancellation(api: any, cand: any, reason: "candidate_cancelled" | "candidate_withdrew") {
+        const partnerTelegramId = cand.firstShiftPartner?.user?.telegramId;
+        if (!partnerTelegramId) return false;
+
+        const candidateName = cand.fullName || "Кандидатка";
+        const dateStr = cand.firstShiftDate ? new Date(cand.firstShiftDate).toLocaleDateString("uk-UA") : null;
+        const timeStr = cand.firstShiftTime || "15:00-17:00";
+        const locationName = cand.location?.name || "локація не вказана";
+        const reasonText = reason === "candidate_withdrew"
+            ? "Кандидатка повідомила, що не буде продовжувати відбір."
+            : "Кандидатка скасувала погоджене стажування.";
+
+        const message = `⚠️ <b>Стажування скасовано</b>\n\n` +
+            `👤 <b>${candidateName}</b>\n` +
+            `📍 <b>${locationName}</b>\n` +
+            `${dateStr ? `🗓 <b>${dateStr} • ${timeStr}</b>\n` : ""}\n` +
+            `${reasonText}`;
+
+        try {
+            await api.sendMessage(Number(partnerTelegramId), message, { parse_mode: "HTML" });
+            return true;
+        } catch (error) {
+            logger.warn({ err: error, candidateId: cand.id, partnerTelegramId }, "Failed to notify partner about staging cancellation");
+            return false;
+        }
+    },
+
+    async cancelCandidateStaging(api: any, candId: string) {
+        const cand = await this.getCandidateDetails(candId);
+        if (!cand) return { ok: false as const, reason: "not_found" as const };
+
+        if (cand.status !== CandidateStatus.STAGING_SETUP && cand.status !== CandidateStatus.STAGING_ACTIVE) {
+            return { ok: false as const, reason: "invalid_status" as const };
+        }
+
+        await this.notifyPartnerAboutStagingCancellation(api, cand, "candidate_cancelled");
+
+        await candidateRepository.update(candId, {
+            firstShiftDate: null,
+            firstShiftTime: null,
+            firstShiftPartner: { disconnect: true },
+            status: CandidateStatus.STAGING_SETUP,
+            currentStep: FunnelStep.FIRST_SHIFT,
+            notificationSent: false,
+            stagingNotifiedAt: null
+        });
+
+        const { HR_IDS } = await import("../config.js");
+        const hrMessage = `⚠️ <b>Internship Cancelled!</b>\n\n👤 Candidate: <b>${cand.fullName}</b>\n🏙️ City: ${cand.city}\n\nShe clicked "I can't come".`;
+        for (const hrId of HR_IDS) {
+            try {
+                await api.sendMessage(hrId, hrMessage, { parse_mode: "HTML" });
+            } catch (error) {
+                logger.warn({ err: error, hrId, candidateId: cand.id }, "Failed to notify HR about candidate staging cancellation");
+            }
+        }
+
+        audit({
+            event: "candidate_staging_cancelled",
+            result: "success",
+            actorType: "candidate",
+            telegramId: cand.user.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: { fromStatus: cand.status, toStatus: CandidateStatus.STAGING_SETUP }
+        });
+
+        return { ok: true as const };
+    },
+
+    async rejectCandidateWithdrawalFromStaging(api: any, candId: string) {
+        const cand = await this.getCandidateDetails(candId);
+        if (!cand) return { ok: false as const, reason: "not_found" as const };
+
+        if (cand.status !== CandidateStatus.STAGING_SETUP && cand.status !== CandidateStatus.STAGING_ACTIVE) {
+            return { ok: false as const, reason: "invalid_status" as const };
+        }
+
+        await this.notifyPartnerAboutStagingCancellation(api, cand, "candidate_withdrew");
+
+        await candidateRepository.update(candId, {
+            status: CandidateStatus.REJECTED,
+            hrDecision: "REJECTED",
+            candidateDecision: "Кандидатка відмовилась від участі на етапі офлайн-стажування",
+            firstShiftDate: null,
+            firstShiftTime: null,
+            firstShiftPartner: { disconnect: true },
+            notificationSent: false,
+            stagingNotifiedAt: null,
+            currentStep: FunnelStep.FIRST_SHIFT
+        });
+
+        try {
+            await api.sendMessage(
+                Number(cand.user.telegramId),
+                "Дякуємо, що попередила. Ми закрили твою заявку. Якщо захочеш повернутись у майбутньому, напиши нам. 🌸"
+            );
+        } catch (error) {
+            logger.warn({ err: error, candidateId: cand.id }, "Failed to notify candidate about staging withdrawal rejection");
+        }
+
+        await accessService.syncUserAccess(cand.user.telegramId, "Candidate withdrew during offline staging");
+
+        audit({
+            event: "candidate_rejected",
+            result: "success",
+            actorType: "admin",
+            telegramId: cand.user.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: {
+                reason: "CANDIDATE_WITHDREW_DURING_STAGING",
+                fromStatus: cand.status,
+                toStatus: CandidateStatus.REJECTED
+            }
+        });
+
+        return { ok: true as const };
+    },
+
     async getHubStats() {
         const now = new Date();
         const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);

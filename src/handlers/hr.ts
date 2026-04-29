@@ -10,8 +10,26 @@ import { createKyivDate } from "../utils/bot-utils.js";
 import { formatCandidateProfile } from "../utils/profile-formatter.js";
 import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
+import { readCallbackPayload } from "../utils/signed-callback.js";
 
 export const hrHandlers = new Composer<MyContext>();
+
+async function renderHrCandidateUnified(ctx: MyContext, candId: string) {
+    const candidate = await hrService.getCandidateDetails(candId);
+    if (!candidate) {
+        await ctx.reply("Candidate not found.");
+        return;
+    }
+
+    ctx.session.candidateData = { id: candidate.id } as any;
+    const text = await formatCandidateProfile(ctx as any, candidate as any, {
+        includeActionLabel: true,
+        actionLabel: "Please review the profile and make a decision:"
+    });
+
+    const { ScreenManager } = await import("../utils/screen-manager.js");
+    await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
+}
 
 async function buildInterviewSlotsCreatedKeyboard() {
     const stats = await hrService.getHubStats();
@@ -26,21 +44,9 @@ async function buildInterviewSlotsCreatedKeyboard() {
 hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     await ctx.answerCallbackQuery();
-
-    const candidate = await hrService.getCandidateDetails(candId);
-    if (!candidate) return ctx.reply("Candidate not found.");
-
-    ctx.session.candidateData = { id: candidate.id } as any;
     ctx.session.viewingFromInbox = true; // Show 'Mark as Read' since this comes from notification
     delete ctx.session.selectedSlotId;
-
-    const text = await formatCandidateProfile(ctx as any, candidate as any, {
-        includeActionLabel: true,
-        actionLabel: "Please review the profile and make a decision:"
-    });
-
-    const { ScreenManager } = await import("../utils/screen-manager.js");
-    await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
+    await renderHrCandidateUnified(ctx, candId);
 });
 
 hrHandlers.callbackQuery("hr_main_calendar", async (ctx) => {
@@ -77,6 +83,33 @@ hrHandlers.callbackQuery(/^view_candidate_new_(\d+)$/, async (ctx) => {
 
     const { ScreenManager } = await import("../utils/screen-manager.js");
     await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
+});
+
+hrHandlers.callbackQuery("hr_cancel_withdraw_reject", async (ctx) => {
+    await ctx.answerCallbackQuery("Cancelled");
+    const candId = ctx.session.candidateData?.id;
+    if (!candId) return;
+    await renderHrCandidateUnified(ctx, candId);
+});
+
+hrHandlers.on("callback_query:data", async (ctx, next) => {
+    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "hwr" });
+    if (!candId) return next();
+
+    await ctx.answerCallbackQuery();
+    const result = await hrService.rejectCandidateWithdrawalFromStaging(ctx.api, candId);
+    if (!result.ok) {
+        await ctx.reply("Unable to reject candidate.");
+        return;
+    }
+
+    const { ScreenManager } = await import("../utils/screen-manager.js");
+    await ScreenManager.renderScreen(
+        ctx,
+        `❌ <b>Candidate Rejected</b>\n\nЗаявку закрито, staging скасовано, партнерці надіслано сповіщення.`,
+        "hr-final-step-menu",
+        { pushToStack: true }
+    );
 });
 
 hrHandlers.command("hr", async (ctx) => {

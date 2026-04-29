@@ -544,12 +544,12 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
 }
 
 candidateHandlers.on("callback_query:data", async (ctx, next) => {
-    const { candidateRepository } = ctx.di;
     const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cstg" });
     if (!candId) return next();
     await ctx.answerCallbackQuery();
     try {
-        const cand = await candidateRepository.findById(candId);
+        const { hrService } = await import("../../../services/hr-service.js");
+        const cand = await hrService.getCandidateDetails(candId);
         if (!cand) return;
         if (Number(cand.user.telegramId) !== ctx.from?.id) {
             await ctx.answerCallbackQuery("Ця дія недоступна.");
@@ -561,18 +561,8 @@ candidateHandlers.on("callback_query:data", async (ctx, next) => {
             return;
         }
 
-        await candidateRepository.update(candId, {
-            firstShiftDate: null,
-            firstShiftTime: null,
-            firstShiftPartner: { disconnect: true },
-            status: CandidateStatus.STAGING_SETUP,
-            currentStep: FunnelStep.FIRST_SHIFT
-        });
+        await hrService.cancelCandidateStaging(ctx.api, candId);
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["staging-cancelled-by-candidate"]);
-        const { HR_IDS } = await import("../../../config.js");
-        if (HR_IDS.length > 0) {
-            await ctx.api.sendMessage(HR_IDS[0]!, `⚠️ <b>Internship Cancelled!</b>\n\n👤 Candidate: <b>${cand.fullName}</b>\n🏙️ City: ${cand.city}\n\nShe clicked "I can't come".`, { parse_mode: "HTML" });
-        }
     } catch (e) {
         const { default: logger } = await import("../../../core/logger.js");
         logger.error({ err: e, candId }, "Candidate staging cancellation failed");

@@ -3,6 +3,7 @@ import { hrService } from '../hr-service.js';
 import { candidateRepository } from '../../repositories/candidate-repository.js';
 import { interviewRepository } from '../../repositories/interview-repository.js';
 import { locationRepository } from '../../repositories/location-repository.js';
+import { accessService } from '../access-service.js';
 import { CandidateStatus, FunnelStep } from '@prisma/client';
 
 // Mock Prisma
@@ -66,6 +67,11 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
     timelineRepository: {
         createEvent: vi.fn().mockResolvedValue({})
     }
+}));
+
+vi.mock('../../config.js', () => ({
+    HR_IDS: [111111],
+    MENTOR_IDS: [444444]
 }));
 
 vi.mock('../access-service.js', () => ({
@@ -179,6 +185,88 @@ describe('hrService', () => {
                 materialsSent: false,
                 hasUnreadMessage: false
             });
+        });
+    });
+
+    describe('offline staging withdrawal flows', () => {
+        const mockApi = {
+            sendMessage: vi.fn().mockResolvedValue({})
+        };
+
+        it('cancels candidate staging, clears assignment, and notifies partner and HR', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand1',
+                fullName: 'Аліна Шульська',
+                city: 'Lviv',
+                status: CandidateStatus.STAGING_ACTIVE,
+                firstShiftDate: new Date('2026-05-01T12:00:00.000Z'),
+                firstShiftTime: '15:00-17:00',
+                location: { name: 'Karamel' },
+                firstShiftPartner: { user: { telegramId: 222222 } },
+                user: { telegramId: 333333 }
+            } as any);
+
+            const result = await hrService.cancelCandidateStaging(mockApi, 'cand1');
+
+            expect(result).toEqual({ ok: true });
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
+                firstShiftDate: null,
+                firstShiftTime: null,
+                firstShiftPartner: { disconnect: true },
+                status: CandidateStatus.STAGING_SETUP,
+                currentStep: FunnelStep.FIRST_SHIFT,
+                notificationSent: false,
+                stagingNotifiedAt: null
+            });
+            expect(mockApi.sendMessage).toHaveBeenCalledWith(
+                222222,
+                expect.stringContaining('Стажування скасовано'),
+                { parse_mode: 'HTML' }
+            );
+            expect(mockApi.sendMessage).toHaveBeenCalledWith(
+                111111,
+                expect.stringContaining('Internship Cancelled!'),
+                { parse_mode: 'HTML' }
+            );
+        });
+
+        it('rejects candidate who withdrew during staging and syncs access', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand2',
+                fullName: 'Аліна Шульська',
+                city: 'Lviv',
+                status: CandidateStatus.STAGING_SETUP,
+                firstShiftDate: new Date('2026-05-01T12:00:00.000Z'),
+                firstShiftTime: '15:00-17:00',
+                location: { name: 'Karamel' },
+                firstShiftPartner: { user: { telegramId: 222222 } },
+                user: { telegramId: 333333 }
+            } as any);
+
+            const result = await hrService.rejectCandidateWithdrawalFromStaging(mockApi, 'cand2');
+
+            expect(result).toEqual({ ok: true });
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand2', {
+                status: CandidateStatus.REJECTED,
+                hrDecision: 'REJECTED',
+                candidateDecision: 'Кандидатка відмовилась від участі на етапі офлайн-стажування',
+                firstShiftDate: null,
+                firstShiftTime: null,
+                firstShiftPartner: { disconnect: true },
+                notificationSent: false,
+                stagingNotifiedAt: null,
+                currentStep: FunnelStep.FIRST_SHIFT
+            });
+            expect(mockApi.sendMessage).toHaveBeenCalledWith(
+                222222,
+                expect.stringContaining('не буде продовжувати відбір'),
+                { parse_mode: 'HTML' }
+            );
+            expect(mockApi.sendMessage).toHaveBeenCalledWith(
+                333333,
+                expect.stringContaining('Ми закрили твою заявку')
+            );
+            expect(accessService.syncUserAccess).toHaveBeenCalledWith(333333, 'Candidate withdrew during offline staging');
         });
     });
 
