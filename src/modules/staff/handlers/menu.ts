@@ -6,11 +6,13 @@ import { workShiftRepository } from "../../../repositories/work-shift-repository
 import { supportRepository } from "../../../repositories/support-repository.js";
 import { staffService } from "../services/index.js";
 import { taskService } from "../../../services/task-service.js";
+import { taskProofService, mapTelegramMessageToTaskProofInput } from "../../../services/task-proof-service.js";
 import { truncateText } from "../../../utils/task-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { escapeHtml } from "../../../handlers/admin/utils.js";
 import logger from "../../../core/logger.js";
 import { buildSignedCallback } from "../../../utils/signed-callback.js";
+import { TEAM_CHATS } from "../../../config.js";
 
 export const staffHandlers = new Composer<MyContext>();
 
@@ -30,6 +32,41 @@ function formatShiftColleague(fullName: string, username?: string | null, telegr
     }
 
     return escapedLabel;
+}
+
+function buildTaskProofKeyboard(taskId: string) {
+    return new InlineKeyboard()
+        .text("✅ Завершити завдання", `staff_task_proof_submit_${taskId}`).row()
+        .text("❌ Скасувати", `staff_task_proof_cancel_${taskId}`);
+}
+
+function buildTaskProofText(taskText: string, proofCount: number) {
+    const proofLine = proofCount > 0
+        ? `\n\n📦 <b>Збережено елементів:</b> ${proofCount}`
+        : "";
+
+    return (
+        `📎 <b>Надішли підтвердження до завдання:</b>\n\n` +
+        `<i>${escapeHtml(truncateText(taskText, 250))}</i>\n\n` +
+        `Можна надсилати текст, фото, відео, файли, голосові або кілька повідомлень підряд.` +
+        `${proofLine}\n\n` +
+        `Коли все надішлеш, натисни <b>«Завершити завдання»</b>.`
+    );
+}
+
+async function renderTaskProofScreen(
+    ctx: MyContext,
+    taskId: string,
+    taskText: string,
+    proofCount: number,
+    pushToStack: boolean = false,
+) {
+    await ScreenManager.renderScreen(
+        ctx,
+        buildTaskProofText(taskText, proofCount),
+        buildTaskProofKeyboard(taskId),
+        { forceNew: true, pushToStack }
+    );
 }
 
 /**
@@ -204,11 +241,21 @@ export async function showStaffTasks(ctx: MyContext, forceNew: boolean = false) 
         text += `${index + 1}. ${status} ${truncateText(task.taskText, 100)}${deadline}\n\n`;
 
         if (!task.isCompleted) {
-            kb.text(`🏁 Виконати #${index + 1}`, `staff_task_toggle_${task.id}`)
-                .text(`❓ Питання`, `staff_task_help_${task.id}`)
-                .row();
+            if (task.completionMode === "PROOF_REQUIRED") {
+                kb.text(`📤 Надіслати підтвердження #${index + 1}`, `staff_task_proof_start_${task.id}`)
+                    .text(`❓ Питання`, `staff_task_help_${task.id}`)
+                    .row();
+            } else {
+                kb.text(`🏁 Виконати #${index + 1}`, `staff_task_toggle_${task.id}`)
+                    .text(`❓ Питання`, `staff_task_help_${task.id}`)
+                    .row();
+            }
         } else {
-            kb.text(`✅ Виконано #${index + 1}`, `staff_task_toggle_${task.id}`).row();
+            if (task.completionMode === "PROOF_REQUIRED") {
+                text += `   📎 <i>Підтвердження надіслано</i>\n\n`;
+            } else {
+                kb.text(`✅ Виконано #${index + 1}`, `staff_task_toggle_${task.id}`).row();
+            }
         }
     });
 
@@ -290,6 +337,81 @@ export async function showStaffLogistics(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
+async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<ReturnType<typeof taskProofService.submitDraft>>) {
+    if (!TEAM_CHATS.SUPPORT) return;
+
+    const task = submission.task;
+    const staff = submission.staff;
+    const header =
+        `📎 <b>Підтвердження по завданню</b>\n` +
+        `👤 ${escapeHtml(staff.fullName)}\n` +
+        `🆔 <code>${task.id}</code>\n\n` +
+        `<i>${escapeHtml(truncateText(task.taskText, 250))}</i>`;
+
+    await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, header, { parse_mode: "HTML" }).catch((err) => {
+        logger.warn({ err, taskId: task.id }, "Task proof summary delivery to support chat failed");
+    });
+
+    for (const item of submission.items) {
+        try {
+            if (item.type === "TEXT" && item.text) {
+                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `📝 ${escapeHtml(item.text)}`, { parse_mode: "HTML" });
+                continue;
+            }
+
+            const caption = item.caption ? escapeHtml(item.caption) : undefined;
+            if (!item.telegramFileId) continue;
+
+            if (item.type === "PHOTO") {
+                await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+            } else if (item.type === "VIDEO") {
+                await ctx.api.sendVideo(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+            } else if (item.type === "DOCUMENT") {
+                await ctx.api.sendDocument(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+            } else if (item.type === "VOICE") {
+                await ctx.api.sendVoice(TEAM_CHATS.SUPPORT, item.telegramFileId);
+            } else if (item.type === "AUDIO") {
+                await ctx.api.sendAudio(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+            } else if (item.type === "ANIMATION") {
+                await ctx.api.sendAnimation(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+            }
+        } catch (err) {
+            logger.warn({ err, taskId: task.id, proofItemId: item.id }, "Task proof item delivery to support chat failed");
+        }
+    }
+}
+
+export async function handleTaskProofMessage(ctx: MyContext): Promise<boolean> {
+    if (ctx.chat?.type !== "private" || !ctx.message || !ctx.from?.id) return false;
+
+    const telegramId = BigInt(ctx.from.id);
+    const user = await userRepository.findWithStaffProfileByTelegramId(telegramId);
+    const staffId = user?.staffProfile?.id;
+    if (!staffId) return false;
+
+    const stepTaskId = ctx.session.step?.startsWith("awaiting_task_proof_")
+        ? ctx.session.step.replace("awaiting_task_proof_", "")
+        : null;
+    const activeDraft = stepTaskId
+        ? await taskProofService.getDraft(stepTaskId)
+        : await taskProofService.getActiveDraftByStaffId(staffId);
+    if (!activeDraft) return false;
+
+    const proofInput = mapTelegramMessageToTaskProofInput(ctx.message);
+    if (!proofInput) {
+        await ctx.reply("⚠️ Для підтвердження підійдуть текст, фото, відео, файл або голосове повідомлення.");
+        return true;
+    }
+
+    const updated = await taskProofService.appendItem(activeDraft.taskId, staffId, proofInput);
+    if (!updated) return true;
+
+    ctx.session.step = `awaiting_task_proof_${activeDraft.taskId}`;
+    ctx.session.taskProofFlow = { taskId: activeDraft.taskId };
+    await renderTaskProofScreen(ctx, activeDraft.taskId, updated.task.taskText, updated.items.length);
+    return true;
+}
+
 /**
  * Shared logic to start support flow from menu
  */
@@ -358,6 +480,77 @@ staffHandlers.callbackQuery("open_support_dialog", async (ctx) => {
 staffHandlers.callbackQuery("staff_hub_tasks_redirect", async (ctx) => {
     await ctx.answerCallbackQuery();
     await showStaffTasks(ctx, true);
+});
+
+staffHandlers.callbackQuery(/^staff_task_proof_start_(.+)$/, async (ctx) => {
+    const taskId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) {
+        return ctx.answerCallbackQuery("Користувача не знайдено");
+    }
+
+    const task = await taskService.getTaskById(taskId);
+    if (!task || task.staffId !== user.staffProfile.id) {
+        return ctx.answerCallbackQuery("Завдання не знайдено");
+    }
+
+    try {
+        const draft = await taskProofService.startDraft(taskId, user.staffProfile.id);
+        ctx.session.step = `awaiting_task_proof_${taskId}`;
+        ctx.session.taskProofFlow = { taskId };
+        await renderTaskProofScreen(ctx, taskId, task.taskText, draft.items.length, true);
+        await ctx.answerCallbackQuery();
+    } catch (error: any) {
+        const message = error?.message === "Another proof draft is already in progress"
+            ? "Заверши або скасуй поточне підтвердження"
+            : "Не вдалося відкрити підтвердження";
+        await ctx.answerCallbackQuery(message);
+    }
+});
+
+staffHandlers.callbackQuery(/^staff_task_proof_submit_(.+)$/, async (ctx) => {
+    const taskId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) {
+        return ctx.answerCallbackQuery("Користувача не знайдено");
+    }
+
+    try {
+        const submission = await taskProofService.submitDraft(taskId, user.staffProfile.id);
+        ctx.session.step = "idle";
+        delete ctx.session.taskProofFlow;
+        await notifySupportAboutTaskProof(ctx, submission);
+        await showStaffTasks(ctx, true);
+        await ctx.answerCallbackQuery("Підтвердження надіслано");
+    } catch (error: any) {
+        const message = error?.message === "Draft is empty"
+            ? "Спочатку надішли підтвердження"
+            : "Не вдалося завершити завдання";
+        await ctx.answerCallbackQuery(message);
+    }
+});
+
+staffHandlers.callbackQuery(/^staff_task_proof_cancel_(.+)$/, async (ctx) => {
+    const taskId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) {
+        return ctx.answerCallbackQuery("Користувача не знайдено");
+    }
+
+    await taskProofService.cancelDraft(taskId, user.staffProfile.id).catch(() => false);
+    ctx.session.step = "idle";
+    delete ctx.session.taskProofFlow;
+    await showStaffTasks(ctx, true);
+    await ctx.answerCallbackQuery("Надсилання скасовано");
 });
 
 staffHandlers.callbackQuery(/^staff_task_toggle_(.+)$/, async (ctx) => {

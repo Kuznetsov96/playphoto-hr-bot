@@ -3,6 +3,7 @@ import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { taskService } from "../../services/task-service.js";
+import { taskProofService } from "../../services/task-proof-service.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
@@ -135,6 +136,8 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
 
     const staffName = formatStaffName(task.staff.fullName);
     const status = task.isCompleted ? ADMIN_TEXTS["admin-tasks-status-done"] : ADMIN_TEXTS["admin-tasks-status-pending"];
+    const completionModeLabel = task.completionMode === "PROOF_REQUIRED" ? "Потрібне підтвердження" : "Швидке виконання";
+    const proofSubmission = task.proofSubmission;
 
     let dateDisplay = ADMIN_TEXTS["admin-tasks-date-soon"];
     if (task.workDate) {
@@ -157,6 +160,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     text += ADMIN_TEXTS["admin-tasks-date"]({ date: dateDisplay, deadline }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-city"]({ city: resolvedCity }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-location"]({ location: resolvedLocationName }) + "\n";
+    text += `⚙️ <b>Тип:</b> ${completionModeLabel}\n`;
     text += ADMIN_TEXTS["admin-tasks-text"]({ text: task.taskText }) + "\n\n";
 
     if (task.fileId) {
@@ -164,12 +168,26 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     }
 
     text += ADMIN_TEXTS["admin-tasks-status-label"]({ status }) + "\n";
+    if (task.completedAt) {
+        text += `🕒 <b>Completed at:</b> ${new Date(task.completedAt).toLocaleString("uk-UA")}\n`;
+    }
+    if (task.completionMode === "PROOF_REQUIRED") {
+        const proofStatus = proofSubmission?.status === "SUBMITTED"
+            ? `Надіслано (${proofSubmission.items.length})`
+            : proofSubmission?.status === "DRAFT"
+                ? `Чернетка (${proofSubmission.items.length})`
+                : "Ще не надіслано";
+        text += `📎 <b>Підтвердження:</b> ${proofStatus}\n`;
+    }
 
     const keyboard = new InlineKeyboard();
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-toggle"], `task_toggle_${taskId}_${dateStr}`).row();
 
     if (task.fileId) {
         keyboard.text(ADMIN_TEXTS["admin-tasks-btn-view-file"], `task_view_file_${taskId}`).row();
+    }
+    if (proofSubmission?.items.length) {
+        keyboard.text("📎 Переглянути підтвердження", `task_view_proof_${taskId}`).row();
     }
 
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-msg-staff"], `admin_msg_staff_${task.staffId}`).row();
@@ -273,6 +291,49 @@ composer.callbackQuery(/^task_view_file_(.+)$/, async (ctx: MyContext) => {
     await ctx.replyWithDocument(task.fileId).catch(async () => {
         await ctx.reply("⚠️ Could not retrieve the file. It may have been deleted.");
     });
+});
+
+composer.callbackQuery(/^task_view_proof_(.+)$/, async (ctx: MyContext) => {
+    const taskId = ctx.match![1]!;
+    await ctx.answerCallbackQuery();
+
+    const submission = await taskProofService.getSubmission(taskId);
+    if (!submission || submission.items.length === 0) {
+        await ctx.reply("⚠️ Підтвердження ще не надіслано.");
+        return;
+    }
+
+    const header =
+        `📎 <b>Підтвердження по завданню</b>\n` +
+        `👤 ${submission.staff.fullName}\n` +
+        `🆔 <code>${submission.task.id}</code>\n` +
+        `📦 Елементів: <b>${submission.items.length}</b>\n\n` +
+        `<i>${submission.task.taskText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>`;
+    await ctx.reply(header, { parse_mode: "HTML" });
+
+    for (const item of submission.items) {
+        const caption = item.caption || undefined;
+        if (item.type === "TEXT" && item.text) {
+            await ctx.reply(`📝 ${item.text}`);
+            continue;
+        }
+
+        if (!item.telegramFileId) continue;
+
+        if (item.type === "PHOTO") {
+            await ctx.replyWithPhoto(item.telegramFileId, caption ? { caption } : undefined);
+        } else if (item.type === "VIDEO") {
+            await ctx.replyWithVideo(item.telegramFileId, caption ? { caption } : undefined);
+        } else if (item.type === "DOCUMENT") {
+            await ctx.replyWithDocument(item.telegramFileId, caption ? { caption } : undefined);
+        } else if (item.type === "VOICE") {
+            await ctx.replyWithVoice(item.telegramFileId);
+        } else if (item.type === "AUDIO") {
+            await ctx.replyWithAudio(item.telegramFileId, caption ? { caption } : undefined);
+        } else if (item.type === "ANIMATION") {
+            await ctx.replyWithAnimation(item.telegramFileId, caption ? { caption } : undefined);
+        }
+    }
 });
 
 // Обробник написання повідомлення співробітнику з деталей завдання

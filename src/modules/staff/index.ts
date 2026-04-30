@@ -1,6 +1,6 @@
 import { Composer } from "grammy";
 import type { MyContext } from "../../types/context.js";
-import { staffHandlers } from "./handlers/menu.js";
+import { staffHandlers, handleTaskProofMessage } from "./handlers/menu.js";
 import { staffSupportHandlers, handleStaffMessage } from "./handlers/support.js";
 import { handlePreferenceComment } from "../../handlers/preferences-flow.js";
 import { bot } from "../../core/bot.js";
@@ -15,10 +15,13 @@ staffModule.use(staffSupportHandlers);
 
 // 3. Handle Messages (Support Flow for Staff)
 staffModule.on("message", async (ctx, next) => {
-    // A. Check for Preference Flow Comment first
+    // A. Task proof collection takes priority over generic text handlers.
+    if (await handleTaskProofMessage(ctx)) return;
+
+    // B. Check for Preference Flow Comment first
     if (await handlePreferenceComment(ctx)) return;
 
-    // B. Attempt to handle as staff support message
+    // C. Attempt to handle as staff support message
     const handled = await handleStaffMessage(ctx, bot);
     if (handled) return;
 
