@@ -136,7 +136,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
 
     const staffName = formatStaffName(task.staff.fullName);
     const status = task.isCompleted ? ADMIN_TEXTS["admin-tasks-status-done"] : ADMIN_TEXTS["admin-tasks-status-pending"];
-    const completionModeLabel = task.completionMode === "PROOF_REQUIRED" ? "Потрібне підтвердження" : "Швидке виконання";
+    const completionModeLabel = task.completionMode === "PROOF_REQUIRED" ? "Proof Required" : "Quick Completion";
     const proofSubmission = task.proofSubmission;
 
     let dateDisplay = ADMIN_TEXTS["admin-tasks-date-soon"];
@@ -160,7 +160,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     text += ADMIN_TEXTS["admin-tasks-date"]({ date: dateDisplay, deadline }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-city"]({ city: resolvedCity }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-location"]({ location: resolvedLocationName }) + "\n";
-    text += `⚙️ <b>Тип:</b> ${completionModeLabel}\n`;
+    text += `⚙️ <b>Completion Type:</b> ${completionModeLabel}\n`;
     text += ADMIN_TEXTS["admin-tasks-text"]({ text: task.taskText }) + "\n\n";
 
     if (task.fileId) {
@@ -173,11 +173,11 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     }
     if (task.completionMode === "PROOF_REQUIRED") {
         const proofStatus = proofSubmission?.status === "SUBMITTED"
-            ? `Надіслано (${proofSubmission.items.length})`
+            ? `Submitted (${proofSubmission.items.length})`
             : proofSubmission?.status === "DRAFT"
-                ? `Чернетка (${proofSubmission.items.length})`
-                : "Ще не надіслано";
-        text += `📎 <b>Підтвердження:</b> ${proofStatus}\n`;
+                ? `Draft (${proofSubmission.items.length})`
+                : "Not submitted";
+        text += `📎 <b>Proof:</b> ${proofStatus}\n`;
     }
 
     const keyboard = new InlineKeyboard();
@@ -187,7 +187,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
         keyboard.text(ADMIN_TEXTS["admin-tasks-btn-view-file"], `task_view_file_${taskId}`).row();
     }
     if (proofSubmission?.items.length) {
-        keyboard.text("📎 Переглянути підтвердження", `task_view_proof_${taskId}`).row();
+        keyboard.text("📎 View Proof", `task_view_proof_${taskId}`).row();
     }
 
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-msg-staff"], `admin_msg_staff_${task.staffId}`).row();
@@ -299,15 +299,15 @@ composer.callbackQuery(/^task_view_proof_(.+)$/, async (ctx: MyContext) => {
 
     const submission = await taskProofService.getSubmission(taskId);
     if (!submission || submission.items.length === 0) {
-        await ctx.reply("⚠️ Підтвердження ще не надіслано.");
+        await ctx.reply("⚠️ Proof has not been submitted yet.");
         return;
     }
 
     const header =
-        `📎 <b>Підтвердження по завданню</b>\n` +
+        `📎 <b>Task Proof</b>\n` +
         `👤 ${submission.staff.fullName}\n` +
         `🆔 <code>${submission.task.id}</code>\n` +
-        `📦 Елементів: <b>${submission.items.length}</b>\n\n` +
+        `📦 Items: <b>${submission.items.length}</b>\n\n` +
         `<i>${submission.task.taskText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>`;
     await ctx.reply(header, { parse_mode: "HTML" });
 

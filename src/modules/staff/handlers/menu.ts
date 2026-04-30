@@ -343,7 +343,7 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
     const task = submission.task;
     const staff = submission.staff;
     const header =
-        `📎 <b>Підтвердження по завданню</b>\n` +
+        `📎 <b>Task Proof Submission</b>\n` +
         `👤 ${escapeHtml(staff.fullName)}\n` +
         `🆔 <code>${task.id}</code>\n\n` +
         `<i>${escapeHtml(truncateText(task.taskText, 250))}</i>`;

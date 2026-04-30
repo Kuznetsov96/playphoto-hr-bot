@@ -48,15 +48,15 @@ function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "locatio
 
 async function renderTaskModeSelection(ctx: MyContext, backCallback: string) {
     const keyboard = new InlineKeyboard()
-        .text("⚡ Швидке виконання", "tas_mode_quick").row()
-        .text("📎 Потрібне підтвердження", "tas_mode_proof").row()
+        .text("⚡ Quick Completion", "tas_mode_quick").row()
+        .text("📎 Proof Required", "tas_mode_proof").row()
         .text("⬅️ Back", backCallback);
 
     await ScreenManager.renderScreen(
         ctx,
-        "✅ <b>Оберіть тип виконання завдання:</b>\n\n" +
-        "⚡ <b>Швидке виконання</b> — фотограф просто натискає «Виконати».\n\n" +
-        "📎 <b>Потрібне підтвердження</b> — фотограф спочатку надсилає текст/фото/файли, а потім окремо завершує завдання.",
+        "✅ <b>Select task completion type:</b>\n\n" +
+        "⚡ <b>Quick Completion</b> — the photographer just taps \"Complete\".\n\n" +
+        "📎 <b>Proof Required</b> — the photographer first sends text/photos/files and then completes the task separately.",
         keyboard,
         { pushToStack: true }
     );
@@ -293,7 +293,7 @@ composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
         ctx,
         `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n` +
         `<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>\n\n` +
-        `Тип виконання: <b>${ctx.session.taskCreation.completionMode === "PROOF_REQUIRED" ? "Потрібне підтвердження" : "Швидке виконання"}</b>`,
+        `Completion type: <b>${ctx.session.taskCreation.completionMode === "PROOF_REQUIRED" ? "Proof Required" : "Quick Completion"}</b>`,
         keyboard,
         { pushToStack: true }
     );
