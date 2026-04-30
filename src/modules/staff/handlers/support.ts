@@ -60,6 +60,55 @@ function isDuplicateSupportAction(actionKey: string) {
     return !supportActionDedupe.tryAcquire(actionKey);
 }
 
+function getSupportMessageTypeLabel(message: NonNullable<MyContext["message"]>): string {
+    if (message.text) return "текст";
+    if (message.photo) return "фото";
+    if (message.video) return "відео";
+    if (message.document) return "документ";
+    if (message.sticker) return "стікер";
+    if (message.voice) return "голосове повідомлення";
+    if (message.video_note) return "відеокружечок";
+    if (message.contact) return "контакт";
+    if (message.location) return "локація";
+    if (message.animation) return "анімація";
+    if (message.audio) return "аудіо";
+    if (message.poll) return "опитування";
+    if (message.dice) return "dice";
+    if (message.venue) return "venue";
+    return "непідтримуваний тип повідомлення";
+}
+
+function getSupportMessagePreview(message: NonNullable<MyContext["message"]>): string {
+    const text = message.text || message.caption;
+    if (text) return text;
+    return `[${getSupportMessageTypeLabel(message)}]`;
+}
+
+function buildSupportFallbackBody(message: NonNullable<MyContext["message"]>): string {
+    const text = message.text || message.caption;
+    if (text) {
+        return `📝 <b>Вміст повідомлення</b>\n${escapeHtml(text)}`;
+    }
+
+    return `⚠️ <b>Повідомлення не вдалося автоматично переслати</b>\nТип: <b>${escapeHtml(getSupportMessageTypeLabel(message))}</b>`;
+}
+
+function classifySupportForwardingError(error: any) {
+    const rawMessage = error?.description || error?.message || "Unknown Telegram API error";
+    const normalizedMessage = String(rawMessage).toLowerCase();
+    const isTopicError = normalizedMessage.includes("thread") ||
+        normalizedMessage.includes("topic") ||
+        normalizedMessage.includes("not found");
+    const isNotForwardable = normalizedMessage.includes("can't be forwarded") ||
+        normalizedMessage.includes("message can't be forwarded");
+
+    return {
+        rawMessage: String(rawMessage),
+        isTopicError,
+        isNotForwardable,
+    };
+}
+
 // 1. Start Ticket Creation Flow
 staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
     const telegramId = ctx.from?.id;
@@ -1140,7 +1189,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
 
                     // Log to Timeline (Message from Staff)
                     const { timelineRepository } = await import("../../../repositories/timeline-repository.js");
-                    await timelineRepository.createEvent(user.id, 'MESSAGE', 'USER', ctx.message.text || ctx.message.caption || "[Media Message]", {
+                    await timelineRepository.createEvent(user.id, 'MESSAGE', 'USER', getSupportMessagePreview(ctx.message), {
                         ticketId: activeTicket?.id,
                         outgoingTopicId: activeOutgoingTopic?.id,
                         media: ctx.message.photo ? 'photo' : (ctx.message.video ? 'video' : null)
@@ -1154,10 +1203,17 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
 
                 return true;
             } catch (e: any) {
-                // Broad detection for topic issues: clear topicId in DB for ANY error related to message thread
-                const isTopicError = e.message?.toLowerCase().includes("thread") ||
-                    e.message?.toLowerCase().includes("topic") ||
-                    e.message?.toLowerCase().includes("not found");
+                const { rawMessage, isTopicError, isNotForwardable } = classifySupportForwardingError(e);
+
+                logger.error({
+                    err: e,
+                    userId: user.id,
+                    topicId: targetTopicId,
+                    ticketId: activeTicket?.id,
+                    outgoingTopicId: activeOutgoingTopic?.id,
+                    errorMessage: rawMessage,
+                    reason: isTopicError ? "topic_unavailable" : (isNotForwardable ? "message_not_forwardable" : "copy_failed"),
+                }, "Support topic forwarding failed");
 
                 if (isTopicError) {
                     if (activeTicket) {
@@ -1170,22 +1226,48 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                 // Fallback: Send to General (but with context)
                 try {
                     if (activeTicket || activeOutgoingTopic) {
-                        logger.warn({ userId: user.id, topicId: targetTopicId }, "Support topic forwarding fallback activated");
+                        logger.warn({
+                            userId: user.id,
+                            topicId: targetTopicId,
+                            ticketId: activeTicket?.id,
+                            outgoingTopicId: activeOutgoingTopic?.id,
+                            reason: isTopicError ? "topic_unavailable" : (isNotForwardable ? "message_not_forwardable" : "copy_failed"),
+                        }, "Support topic forwarding fallback activated");
+
+                        const fallbackReasonText = isTopicError
+                            ? "Топік не знайдений або недоступний, дублюю в General"
+                            : isNotForwardable
+                                ? "Telegram не дозволив переслати цей тип повідомлення, дублюю в General"
+                                : "Не вдалося доставити повідомлення в топік, дублюю в General";
                         const fallbackIntro = activeTicket
                             ? `🆘 <b>Повідомлення від фотографа до тікету #${activeTicket.id}</b>\n` +
                             `👤 <b>${user.staffProfile.fullName}</b>\n` +
-                            `<i>(Топік був не знайдений або виникла помилка, пересилаю в General)</i>`
+                            `<i>(${fallbackReasonText})</i>`
                             : `🆘 <b>Відповідь фотографа (Outgoing Topic conversation)</b>\n` +
                             `👤 <b>${user.staffProfile.fullName}</b>\n` +
-                            `<i>(Топік був не знайдений або виникла помилка, пересилаю в General)</i>`;
+                            `<i>(${fallbackReasonText})</i>`;
 
                         await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, fallbackIntro, { parse_mode: "HTML" });
                         if (ctx.message) {
-                            await ctx.api.forwardMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id);
+                            if (isNotForwardable) {
+                                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, buildSupportFallbackBody(ctx.message), { parse_mode: "HTML" });
+                            } else {
+                                try {
+                                    await ctx.api.forwardMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id);
+                                } catch {
+                                    await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, buildSupportFallbackBody(ctx.message), { parse_mode: "HTML" });
+                                }
+                            }
                         }
                     }
                 } catch (fallbackErr: any) {
-                    logger.error({ err: fallbackErr, userId: user.id, topicId: targetTopicId }, "Support fallback forwarding failed");
+                    logger.error({
+                        err: fallbackErr,
+                        userId: user.id,
+                        topicId: targetTopicId,
+                        ticketId: activeTicket?.id,
+                        outgoingTopicId: activeOutgoingTopic?.id,
+                    }, "Support fallback forwarding failed");
                 }
                 return true;
             }
