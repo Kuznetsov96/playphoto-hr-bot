@@ -202,6 +202,26 @@ enum LeadStatus {
   CLOSED
 }
 
+enum TaskCompletionMode {
+  QUICK
+  PROOF_REQUIRED
+}
+
+enum TaskProofSubmissionStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum TaskProofItemType {
+  TEXT
+  PHOTO
+  VIDEO
+  DOCUMENT
+  VOICE
+  AUDIO
+  ANIMATION
+}
+
 model Location {
   id                     String         @id @default(cuid())
   name                   String
@@ -344,6 +364,7 @@ model StaffProfile {
   location             Location?   @relation(fields: [locationId], references: [id])
   user                 User        @relation(fields: [userId], references: [id])
   tasks                Task[]
+  taskProofSubmissions TaskProofSubmission[]
   shifts               WorkShift[]
   firstShiftCandidates Candidate[] @relation("CandidateFirstShift")
   parcels              Parcel[]    @relation("ResponsibleStaff")
@@ -420,7 +441,9 @@ model Task {
   taskText               String
   workDate               DateTime?
   deadlineTime           String?
+  completionMode         TaskCompletionMode @default(QUICK)
   isCompleted            Boolean      @default(false)
+  completedAt            DateTime?
   city                   String?
   locationName           String?
   fileId                 String?
@@ -430,10 +453,41 @@ model Task {
   reminderSentAt         DateTime?
   overdueAdminNotifiedAt DateTime?
   staff                  StaffProfile @relation(fields: [staffId], references: [id])
+  proofSubmission        TaskProofSubmission?
 
   @@index([workDate])
   @@index([isCompleted])
   @@index([staffId])
+}
+
+model TaskProofSubmission {
+  id          String                    @id @default(cuid())
+  taskId       String                    @unique
+  staffId      String
+  status       TaskProofSubmissionStatus @default(DRAFT)
+  submittedAt  DateTime?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  lastItemAt   DateTime?
+  task         Task                      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  staff        StaffProfile              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  items        TaskProofItem[]
+
+  @@index([staffId])
+  @@index([status])
+}
+
+model TaskProofItem {
+  id             String              @id @default(cuid())
+  submissionId   String
+  type           TaskProofItemType
+  text           String?
+  telegramFileId String?
+  caption        String?
+  createdAt      DateTime            @default(now())
+  submission     TaskProofSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId, createdAt])
 }
 
 model SupportTicket {

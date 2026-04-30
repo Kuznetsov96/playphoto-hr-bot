@@ -23,6 +23,8 @@ export interface TaskAttachmentItem {
     fileId: string;
 }
 
+export type TaskCompletionModeValue = 'QUICK' | 'PROOF_REQUIRED';
+
 export interface SessionData {
     step: string;
     navStack: StackEntry[]; // Smart navigation history with state preservation
@@ -78,6 +80,7 @@ export interface SessionData {
         locationName?: string;
         workDate?: string;
         deadlineTime?: string | null;
+        completionMode?: TaskCompletionModeValue;
         text?: string;
         fileId?: string | null;
         mediaType?: TaskAttachmentItem["type"];
@@ -122,6 +125,10 @@ export interface SessionData {
         lastPhotoAt?: number;
     };
 
+    taskProofFlow?: {
+        taskId: string;
+    };
+
     // Legacy / Other module fields
     lastMenuMessageId?: number;
     staffSeenWelcome?: boolean;
@@ -152,7 +159,23 @@ export interface SessionData {
     statsView?: "overview" | "losses";
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
-    taskCreation?: any;
+    taskCreation?: {
+        step?: string;
+        date?: string;
+        city?: string;
+        locationId?: string;
+        locationName?: string;
+        selectedStaffIds?: string[];
+        staffId?: string;
+        staffName?: string;
+        taskText?: string;
+        deadlineTime?: string | null;
+        fileId?: string | null;
+        mediaType?: TaskAttachmentItem["type"];
+        sourceChatId?: number;
+        sourceMessageId?: number;
+        completionMode?: TaskCompletionModeValue;
+    };
     adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;

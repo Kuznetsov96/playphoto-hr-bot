@@ -1247,7 +1247,10 @@ async function processAutoCloseTasks() {
                 isCompleted: false,
                 workDate: { lte: cutoff, not: null },
             },
-            data: { isCompleted: true },
+            data: {
+                isCompleted: true,
+                completedAt: new Date(),
+            },
         });
         if (result.count > 0) {
             logBusinessEvent({

@@ -46,6 +46,22 @@ function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "locatio
     return `⚠️ <i>Showing all active staff for this location</i>`;
 }
 
+async function renderTaskModeSelection(ctx: MyContext, backCallback: string) {
+    const keyboard = new InlineKeyboard()
+        .text("⚡ Швидке виконання", "tas_mode_quick").row()
+        .text("📎 Потрібне підтвердження", "tas_mode_proof").row()
+        .text("⬅️ Back", backCallback);
+
+    await ScreenManager.renderScreen(
+        ctx,
+        "✅ <b>Оберіть тип виконання завдання:</b>\n\n" +
+        "⚡ <b>Швидке виконання</b> — фотограф просто натискає «Виконати».\n\n" +
+        "📎 <b>Потрібне підтвердження</b> — фотограф спочатку надсилає текст/фото/файли, а потім окремо завершує завдання.",
+        keyboard,
+        { pushToStack: true }
+    );
+}
+
 // Обробник початку створення завдання
 composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
     ctx.session.adminFlow = 'TASK';
@@ -118,15 +134,8 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
 
     // Check if staff is already selected (Direct Task Assignment)
     if (ctx.session.taskCreation.selectedStaffIds && ctx.session.taskCreation.selectedStaffIds.length > 0) {
-        ctx.session.taskCreation.step = "entering_text";
-        const keyboard = new InlineKeyboard().text("⬅️ Back", `task_add_by_date`);
-
-        await ScreenManager.renderScreen(
-            ctx,
-            `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>`,
-            keyboard,
-            { pushToStack: true }
-        );
+        ctx.session.taskCreation.step = "selecting_mode";
+        await renderTaskModeSelection(ctx, "task_add_by_date");
         await ctx.answerCallbackQuery();
         return;
     }
@@ -265,12 +274,26 @@ composer.callbackQuery("tas_st_done", async (ctx) => {
     const selectedStaff = await staffRepository.findManyByIds(ctx.session.taskCreation.selectedStaffIds);
     const names = selectedStaff.map(s => formatStaffName(s.fullName)).join(", ");
     ctx.session.taskCreation.staffName = names.length > 30 ? `${selectedStaff.length} photographers` : names;
+    ctx.session.taskCreation.step = "selecting_mode";
+    await renderTaskModeSelection(ctx, `tas_loc_${ctx.session.taskCreation.locationId}`);
+    await ctx.answerCallbackQuery();
+});
+
+composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost");
+
+    ctx.session.taskCreation.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskCreation.step = "entering_text";
 
-    const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+    const backCallback = ctx.session.taskCreation.locationId
+        ? `tas_loc_${ctx.session.taskCreation.locationId}`
+        : "task_add_by_date";
+    const keyboard = new InlineKeyboard().text("⬅️ Back", backCallback);
     await ScreenManager.renderScreen(
         ctx,
-        `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>`,
+        `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n` +
+        `<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>\n\n` +
+        `Тип виконання: <b>${ctx.session.taskCreation.completionMode === "PROOF_REQUIRED" ? "Потрібне підтвердження" : "Швидке виконання"}</b>`,
         keyboard,
         { pushToStack: true }
     );
@@ -299,8 +322,8 @@ async function handleTaskInput(
     if (options.fileId) {
         ctx.session.taskCreation.fileId = options.fileId;
         ctx.session.taskCreation.mediaType = options.mediaType || "photo";
-        ctx.session.taskCreation.sourceChatId = options.sourceChatId;
-        ctx.session.taskCreation.sourceMessageId = options.sourceMessageId;
+        if (options.sourceChatId !== undefined) ctx.session.taskCreation.sourceChatId = options.sourceChatId;
+        if (options.sourceMessageId !== undefined) ctx.session.taskCreation.sourceMessageId = options.sourceMessageId;
     }
 
     if (!taskText) {
@@ -365,6 +388,7 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
                 locationName: locationName,
                 fileId: ctx.session.taskCreation.fileId || null,
                 createdById: ctx.from!.id.toString(),
+                completionMode: ctx.session.taskCreation.completionMode || "QUICK",
             });
 
             const staffTelegramId = currentStaff?.user?.telegramId;
@@ -374,7 +398,10 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
             }
 
             const deadlineText = task.deadlineTime ? `\n⏰ Дедлайн: ${task.deadlineTime}` : "";
-            const taskMessage = `✨ <b>Нове завдання!</b> 📋\n\n${task.taskText}\n\n📅 Дата: ${new Date(task.workDate!).toLocaleDateString("uk-UA")}${deadlineText}\n\nБажаю успіхів! Ти впораєшся! 💖`;
+            const completionHint = task.completionMode === "PROOF_REQUIRED"
+                ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
+                : "";
+            const taskMessage = `✨ <b>Нове завдання!</b> 📋\n\n${task.taskText}\n\n📅 Дата: ${new Date(task.workDate!).toLocaleDateString("uk-UA")}${deadlineText}${completionHint}\n\nБажаю успіхів! Ти впораєшся! 💖`;
             const staffKb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
 
             try {
@@ -553,7 +580,7 @@ composer.callbackQuery("tas_edit_done_back", async (ctx) => {
     const dateStr = ctx.session.taskCreation.date!;
     const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
     const keyboard = new InlineKeyboard();
-    keyboard.text("🌑 End of day", "tas_time_23:59").text("⏩ No time", "task_time_none").row();
+    keyboard.text("🌑 End of day", "tas_time_23:59").text("⏩ No time", "tas_time_none").row();
     keyboard.text("📝 Edit text", "tas_edit_text").text("📅 Change date", "tas_change_date").row();
     keyboard.text("❌ Cancel", "task_creation_cancel");
     await ScreenManager.renderScreen(
