@@ -44,9 +44,33 @@ async function renderDateSelection(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
+async function renderCompletionModeSelection(ctx: MyContext) {
+    if (!ctx.session.taskData) return;
+
+    const kb = new InlineKeyboard()
+        .text("⚡ Швидке виконання", "task_mode_quick").row()
+        .text("📎 Потрібне підтвердження", "task_mode_proof").row()
+        .text("⬅️ Back", "task_back_date");
+
+    const text =
+        `✅ <b>Тип виконання для ${ctx.session.taskData.staffName}</b>\n\n` +
+        `⚡ <b>Швидке виконання</b> — фотограф просто натискає «Виконати».\n\n` +
+        `📎 <b>Потрібне підтвердження</b> — фотограф надсилає будь-який контент і потім окремо завершує завдання.`;
+
+    await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
+}
+
 taskFlowHandlers.callbackQuery(/^task_date_(.+)$/, async (ctx) => {
     if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
     ctx.session.taskData.workDate = ctx.match![1]!;
+    ctx.session.taskData.step = 'SELECT_MODE';
+    await renderCompletionModeSelection(ctx);
+    await ctx.answerCallbackQuery();
+});
+
+taskFlowHandlers.callbackQuery(/^task_mode_(quick|proof)$/, async (ctx) => {
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    ctx.session.taskData.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskData.step = 'AWAITING_TEXT';
     await renderTextPrompt(ctx);
     await ctx.answerCallbackQuery();
@@ -56,7 +80,8 @@ async function renderTextPrompt(ctx: MyContext) {
     const data = ctx.session.taskData;
     if (!data) return;
     const attachmentLine = data.fileId ? `\n📎 <b>Attachment saved:</b> ${data.mediaType || "media"}` : "";
-    const text = `📝 <b>Task Content</b>\n👤 Staff: ${data.staffName}${attachmentLine}\n\n👇 <b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
+    const modeLabel = data.completionMode === "PROOF_REQUIRED" ? "Потрібне підтвердження" : "Швидке виконання";
+    const text = `📝 <b>Task Content</b>\n👤 Staff: ${data.staffName}\n⚙️ Type: <b>${modeLabel}</b>${attachmentLine}\n\n👇 <b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
     const kb = new InlineKeyboard().text("⬅️ Back", "task_back_date").text("❌ Cancel", "task_cancel_flow");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
@@ -215,7 +240,8 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
             workDate: new Date(data.workDate!),
             deadlineTime: data.deadlineTime || null,
             fileId: data.fileId || null,
-            createdById: ctx.from!.id.toString()
+            createdById: ctx.from!.id.toString(),
+            completionMode: data.completionMode || "QUICK",
         });
 
         delete ctx.session.taskData;
@@ -229,9 +255,12 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                     ? new Date(task.workDate).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" })
                     : "";
                 const deadlineStr = task.deadlineTime ? ` (до ${task.deadlineTime})` : "";
+                const completionHint = task.completionMode === "PROOF_REQUIRED"
+                    ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
+                    : "";
                 const notifText =
                     `📋 <b>Нове завдання${dateStr ? ` на ${dateStr}` : ""}!</b>\n\n` +
-                    `${task.taskText}${deadlineStr}`;
+                    `${task.taskText}${deadlineStr}${completionHint}`;
 
                 const notificationOptions: {
                     replyMarkup: InlineKeyboard;

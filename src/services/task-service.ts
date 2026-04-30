@@ -1,4 +1,5 @@
 
+import { TaskCompletionMode } from "@prisma/client";
 import { z } from "zod";
 import { taskRepository, type TaskWithRelations } from "../repositories/task-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
@@ -14,6 +15,7 @@ const CreateTaskSchema = z.object({
     locationName: z.string().nullable().optional(),
     fileId: z.string().nullable().optional(),
     createdById: z.string(),
+    completionMode: z.nativeEnum(TaskCompletionMode).default(TaskCompletionMode.QUICK),
 });
 
 const UpdateTaskStatusSchema = z.object({
@@ -88,7 +90,9 @@ export class TaskService {
             locationName: resolvedLocation.locationName,
             fileId: validated.fileId ?? null,
             createdById: validated.createdById,
-            isCompleted: false
+            completionMode: validated.completionMode,
+            isCompleted: false,
+            completedAt: null,
         });
     }
 
@@ -125,7 +129,8 @@ export class TaskService {
         }
 
         return taskRepository.update(taskId, {
-            isCompleted: !task.isCompleted
+            isCompleted: !task.isCompleted,
+            completedAt: task.isCompleted ? null : new Date(),
         });
     }
 
@@ -234,7 +239,10 @@ export class TaskService {
      * Complete task
      */
     async completeTask(taskId: string) {
-        return taskRepository.update(taskId, { isCompleted: true });
+        return taskRepository.update(taskId, {
+            isCompleted: true,
+            completedAt: new Date(),
+        });
     }
 }
 

@@ -1,41 +1,46 @@
 
 import { Prisma } from "@prisma/client";
 import prisma from "../db/core.js";
-import type { Task, StaffProfile, User, Location } from "@prisma/client";
+import type { Task, StaffProfile, User, Location, TaskProofSubmission, TaskProofItem } from "@prisma/client";
 
 export type TaskWithRelations = Task & {
     staff: StaffProfile & {
         user: User;
         location: Location | null;
     };
+    proofSubmission?: (TaskProofSubmission & {
+        items: TaskProofItem[];
+    }) | null;
 };
+
+const taskInclude = {
+    staff: {
+        include: {
+            user: true,
+            location: true,
+        },
+    },
+    proofSubmission: {
+        include: {
+            items: {
+                orderBy: { createdAt: "asc" },
+            },
+        },
+    },
+} satisfies Prisma.TaskInclude;
 
 export class TaskRepository {
     async create(data: Prisma.TaskCreateInput): Promise<TaskWithRelations> {
         return prisma.task.create({
             data,
-            include: {
-                staff: {
-                    include: {
-                        user: true,
-                        location: true
-                    }
-                }
-            }
+            include: taskInclude,
         });
     }
 
     async findById(id: string): Promise<TaskWithRelations | null> {
         return prisma.task.findUnique({
             where: { id },
-            include: {
-                staff: {
-                    include: {
-                        user: true,
-                        location: true
-                    }
-                }
-            }
+            include: taskInclude,
         });
     }
 
@@ -55,14 +60,7 @@ export class TaskRepository {
                 ],
                 ...(hideCompleted ? { isCompleted: false } : {}),
             },
-            include: {
-                staff: {
-                    include: {
-                        user: true,
-                        location: true,
-                    },
-                },
-            },
+            include: taskInclude,
             orderBy: [
                 { isCompleted: "asc" },
                 { deadlineTime: "asc" },
@@ -75,16 +73,8 @@ export class TaskRepository {
         return prisma.task.update({
             where: { id },
             data,
-            include: {
-                staff: {
-                    include: {
-                        user: true,
-                    },
-                },
-            },
-        }) as unknown as Promise<TaskWithRelations>; // Cast because location might be missing in this include if not requested, but type expects it. Let's fix type or include.
-        // Actually for toggleStatus we just need user. Let's keep it simple or align with return type.
-        // The service uses return value for UI updates.
+            include: taskInclude,
+        });
     }
 
     async delete(id: string): Promise<Task> {
@@ -121,12 +111,7 @@ export class TaskRepository {
                 reminderSentAt: null,
             },
             include: {
-                staff: {
-                    include: {
-                        user: true,
-                        location: true
-                    },
-                },
+                ...taskInclude,
             },
         });
     }
@@ -145,12 +130,7 @@ export class TaskRepository {
                 overdueAdminNotifiedAt: null,
             },
             include: {
-                staff: {
-                    include: {
-                        user: true,
-                        location: true
-                    },
-                },
+                ...taskInclude,
             },
         });
     }
