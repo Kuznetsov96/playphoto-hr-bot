@@ -48,14 +48,14 @@ async function renderCompletionModeSelection(ctx: MyContext) {
     if (!ctx.session.taskData) return;
 
     const kb = new InlineKeyboard()
-        .text("⚡ Швидке виконання", "task_mode_quick").row()
-        .text("📎 Потрібне підтвердження", "task_mode_proof").row()
+        .text("⚡ Quick Completion", "task_mode_quick").row()
+        .text("📎 Proof Required", "task_mode_proof").row()
         .text("⬅️ Back", "task_back_date");
 
     const text =
-        `✅ <b>Тип виконання для ${ctx.session.taskData.staffName}</b>\n\n` +
-        `⚡ <b>Швидке виконання</b> — фотограф просто натискає «Виконати».\n\n` +
-        `📎 <b>Потрібне підтвердження</b> — фотограф надсилає будь-який контент і потім окремо завершує завдання.`;
+        `✅ <b>Completion type for ${ctx.session.taskData.staffName}</b>\n\n` +
+        `⚡ <b>Quick Completion</b> — the photographer just taps "Complete".\n\n` +
+        `📎 <b>Proof Required</b> — the photographer can send any content and then completes the task separately.`;
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
@@ -80,7 +80,7 @@ async function renderTextPrompt(ctx: MyContext) {
     const data = ctx.session.taskData;
     if (!data) return;
     const attachmentLine = data.fileId ? `\n📎 <b>Attachment saved:</b> ${data.mediaType || "media"}` : "";
-    const modeLabel = data.completionMode === "PROOF_REQUIRED" ? "Потрібне підтвердження" : "Швидке виконання";
+    const modeLabel = data.completionMode === "PROOF_REQUIRED" ? "Proof Required" : "Quick Completion";
     const text = `📝 <b>Task Content</b>\n👤 Staff: ${data.staffName}\n⚙️ Type: <b>${modeLabel}</b>${attachmentLine}\n\n👇 <b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
     const kb = new InlineKeyboard().text("⬅️ Back", "task_back_date").text("❌ Cancel", "task_cancel_flow");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
