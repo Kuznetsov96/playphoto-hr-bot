@@ -26,6 +26,7 @@ import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
+import { startHireOnboardingSyncLoop } from "./services/mentor-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 
 let runner: RunnerHandle | undefined;
@@ -135,6 +136,7 @@ async function bootstrap() {
         startAuditCleanupLoop();
         startSecurityCleanupLoop();
         startFirstShiftOnboardingLoop(bot as any);
+        startHireOnboardingSyncLoop();
         remindersService.startRemindersLoop(bot.api);
         
         webhookService.listen(bot.api);

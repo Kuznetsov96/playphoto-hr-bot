@@ -14,7 +14,7 @@ vi.mock('grammy', () => {
 vi.mock('../../db/core.js', () => ({
     default: {
         candidate: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]) },
-        staffProfile: { findUnique: vi.fn().mockResolvedValue(null) },
+        staffProfile: { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
         trainingSlot: { count: vi.fn().mockResolvedValue(0) }
     }
 }));
@@ -446,6 +446,46 @@ describe('MentorService', () => {
                 relocked: false,
                 refreshed: true,
             }));
+        });
+
+        it('should sync all staff with upcoming first shifts in the background loop query', async () => {
+            vi.mocked((prisma as any).staffProfile.findMany).mockResolvedValue([
+                { id: 'staff-1' },
+                { id: 'staff-2' },
+            ] as any);
+
+            const syncSpy = vi.spyOn(mentorService, 'syncHireOnboardingStateForStaff')
+                .mockResolvedValueOnce({
+                    candidateId: 'cand-1',
+                    relocked: true,
+                    refreshed: true,
+                    nextShift: { date: new Date('2026-05-03T00:00:00.000Z'), locationId: 'loc-1', locationName: 'Drive City', time: '12:00-21:00' }
+                } as any)
+                .mockResolvedValueOnce({
+                    candidateId: 'cand-2',
+                    relocked: false,
+                    refreshed: false,
+                    nextShift: { date: new Date('2026-05-04T00:00:00.000Z'), locationId: 'loc-2', locationName: 'Smile Park', time: '10:00-19:00' }
+                } as any);
+
+            const result = await mentorService.syncAllHireOnboardingStates(new Date('2026-05-01T00:00:00.000Z'));
+
+            expect(prisma.staffProfile.findMany).toHaveBeenCalledWith(expect.objectContaining({
+                where: expect.objectContaining({
+                    isActive: true,
+                    shifts: { some: { date: { gte: new Date('2026-05-01T00:00:00.000Z') } } },
+                }),
+                select: { id: true },
+            }));
+            expect(syncSpy).toHaveBeenCalledTimes(2);
+            expect(syncSpy).toHaveBeenNthCalledWith(1, 'staff-1');
+            expect(syncSpy).toHaveBeenNthCalledWith(2, 'staff-2');
+            expect(result).toEqual({
+                scannedCount: 2,
+                refreshedCount: 1,
+                relockedCount: 1,
+                errorCount: 0,
+            });
         });
     });
 });

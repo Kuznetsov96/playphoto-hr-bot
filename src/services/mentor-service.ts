@@ -534,6 +534,51 @@ export class MentorService {
         };
     }
 
+    async syncAllHireOnboardingStates(fromDate: Date = this.getKyivStartOfToday()) {
+        const staffRows = await prisma.staffProfile.findMany({
+            where: {
+                isActive: true,
+                user: {
+                    is: {
+                        candidate: {
+                            is: {
+                                status: { in: [CandidateStatus.AWAITING_FIRST_SHIFT, CandidateStatus.HIRED] },
+                            },
+                        },
+                    },
+                },
+                shifts: {
+                    some: {
+                        date: { gte: fromDate },
+                    },
+                },
+            },
+            select: { id: true },
+        });
+
+        let refreshedCount = 0;
+        let relockedCount = 0;
+        let errorCount = 0;
+
+        for (const staff of staffRows) {
+            try {
+                const result = await this.syncHireOnboardingStateForStaff(staff.id);
+                if (result?.refreshed) refreshedCount++;
+                if (result?.relocked) relockedCount++;
+            } catch (err) {
+                errorCount++;
+                logger.error({ err, staffId: staff.id }, "Hire onboarding background sync failed for staff");
+            }
+        }
+
+        return {
+            scannedCount: staffRows.length,
+            refreshedCount,
+            relockedCount,
+            errorCount,
+        };
+    }
+
     async completeOnboarding(candId: string, success: boolean) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
@@ -861,3 +906,19 @@ export class MentorService {
 }
 
 export const mentorService = new MentorService();
+
+export function startHireOnboardingSyncLoop() {
+    const run = async () => {
+        try {
+            const summary = await mentorService.syncAllHireOnboardingStates();
+            if (summary.refreshedCount > 0 || summary.relockedCount > 0 || summary.errorCount > 0) {
+                logger.info({ summary }, "Hire onboarding background sync completed");
+            }
+        } catch (err) {
+            logger.error({ err }, "Hire onboarding background sync loop failed");
+        }
+    };
+
+    setTimeout(run, 60_000);
+    setInterval(run, 15 * 60 * 1000);
+}
