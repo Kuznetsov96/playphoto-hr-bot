@@ -36,6 +36,12 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
             } else if (msg.video) {
                 contentType = "video";
                 mediaFileId = msg.video.file_id;
+            } else if (msg.animation) {
+                contentType = "animation";
+                mediaFileId = msg.animation.file_id;
+            } else if (msg.audio) {
+                contentType = "audio";
+                mediaFileId = msg.audio.file_id;
             } else if (msg.document) {
                 contentType = "document";
                 mediaFileId = msg.document.file_id;
@@ -54,6 +60,18 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
             } else if (msg.location) {
                 contentType = "location";
                 text = "[LOCATION_REDACTED]";
+            } else if (msg.poll) {
+                contentType = "poll";
+                text = sanitizeTextForLogs(msg.poll.question) || "[POLL]";
+            } else if (msg.dice) {
+                contentType = "dice";
+                text = `[DICE:${msg.dice.emoji}:${msg.dice.value}]`;
+            } else if (msg.venue) {
+                contentType = "venue";
+                text = "[VENUE_REDACTED]";
+            } else if (!text) {
+                contentType = "unsupported";
+                text = "[UNSUPPORTED_MESSAGE_TYPE]";
             }
         } else {
             // Not a message or callback — skip logging
