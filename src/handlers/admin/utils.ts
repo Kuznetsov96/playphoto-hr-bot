@@ -104,6 +104,10 @@ export async function sendAdminOutboundMessage(
     }
 
     const text = getAdminOutboundText(message);
+    const formattedHtmlText = msgToHtml(
+        text,
+        (message.text ? message.entities : message.caption_entities) || []
+    );
     const hasMedia = Boolean(
         message.photo || message.video || message.document || message.voice || message.video_note || message.audio || message.animation
     );
@@ -122,8 +126,8 @@ export async function sendAdminOutboundMessage(
     }
 
     const htmlText = options?.prefixText === false
-        ? escapeHtml(text)
-        : `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(text)}`;
+        ? formattedHtmlText
+        : `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${formattedHtmlText}`;
 
     const sendOptions: Record<string, unknown> = {
         parse_mode: "HTML",
