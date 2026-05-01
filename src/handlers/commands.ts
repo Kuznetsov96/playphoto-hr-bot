@@ -214,8 +214,31 @@ commandHandlers.command("start", async (ctx) => {
             logger.error({ err: adminErr, userId }, "Failed to load admin header in /start");
         }
 
-        // 2. Staff Logic
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
+        const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
+        const onboardingCandidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
+        const resumedFirstShiftOnboarding = await firstShiftOnboardingService.resumeCandidateFlowFromStart(ctx.api, userId);
+
+        if (resumedFirstShiftOnboarding) {
+            await updateUserCommands(ctx, "CANDIDATE");
+            logBusinessEvent({
+                event: "user.start_routed",
+                telegramId: userId,
+                actorType: "candidate",
+                actorRole: "candidate",
+                result: "success",
+                module: "commands",
+                operation: "start",
+                updateId: ctx.update.update_id,
+                userId: user?.id,
+                candidateId: onboardingCandidate?.id,
+                stage: onboardingCandidate?.status,
+                safeContext: { targetHub: "FIRST_SHIFT_ONBOARDING" },
+            });
+            return;
+        }
+
+        // 2. Staff Logic
 
         if (user?.staffProfile) {
             if (user.staffProfile.isActive) {
@@ -244,29 +267,9 @@ commandHandlers.command("start", async (ctx) => {
 
         // 3. Candidate Logic
         await updateUserCommands(ctx, "CANDIDATE");
-        const candidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
+        const candidate = onboardingCandidate;
 
         if (candidate) {
-            const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
-            const resumedFirstShiftOnboarding = await firstShiftOnboardingService.resumeCandidateFlowFromStart(ctx.api, userId);
-            if (resumedFirstShiftOnboarding) {
-                logBusinessEvent({
-                    event: "user.start_routed",
-                    telegramId: userId,
-                    actorType: "candidate",
-                    actorRole: "candidate",
-                    result: "success",
-                    module: "commands",
-                    operation: "start",
-                    updateId: ctx.update.update_id,
-                    userId: user?.id,
-                    candidateId: candidate.id,
-                    stage: candidate.status,
-                    safeContext: { targetHub: "FIRST_SHIFT_ONBOARDING" },
-                });
-                return;
-            }
-
             if (candidate.status === CandidateStatus.BLOCKER && clearedBlockedUsers.count > 0) {
                 logBusinessEvent({
                     event: "candidate.recovery.started",
