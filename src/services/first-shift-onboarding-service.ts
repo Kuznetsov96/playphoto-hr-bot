@@ -69,18 +69,7 @@ export class FirstShiftOnboardingService {
 
     async notifyCandidate(api: Api, candidateId: string) {
         const onboardingCase = await this.openCaseForCandidate(api, candidateId);
-        const candidate = onboardingCase.candidate;
-        await api.sendMessage(Number(candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.notifyCandidate(
-            this.formatDate(candidate.firstShiftDate),
-            candidate.firstShiftTime || "",
-            candidate.location?.name || candidate.city || "",
-        ), {
-            parse_mode: "HTML",
-            reply_markup: new InlineKeyboard()
-                .text(FIRST_SHIFT_ONBOARDING_TEXTS.startButton, `fso_start_${onboardingCase.id}`)
-                .row()
-                .text(FIRST_SHIFT_ONBOARDING_TEXTS.askMentorButton, `fso_ask_${onboardingCase.id}`),
-        });
+        await this.sendEntryMessage(api, onboardingCase);
 
         logBusinessEvent({
             event: "first_shift_onboarding.candidate_notified",
@@ -92,6 +81,27 @@ export class FirstShiftOnboardingService {
         });
 
         return onboardingCase;
+    }
+
+    async resumeCandidateFlowFromStart(api: Api, telegramId: number) {
+        const candidate = await candidateRepository.findByTelegramId(telegramId);
+        if (!candidate) return false;
+
+        const onboardingCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
+        if (!onboardingCase) return false;
+
+        if (onboardingCase.status === "OPEN") {
+            await this.sendEntryMessage(api, onboardingCase);
+            return true;
+        }
+
+        if (onboardingCase.status === "PENDING_FINAL") {
+            await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.waitingFinal, { parse_mode: "HTML" });
+            return true;
+        }
+
+        await this.sendCurrentStepToCandidate(api, onboardingCase);
+        return true;
     }
 
     async startCandidateFlow(api: Api, caseId: string, telegramId: number) {
@@ -439,6 +449,21 @@ export class FirstShiftOnboardingService {
 
         await api.sendMessage(Number(onboardingCase.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.submittedNoApproval, { parse_mode: "HTML" });
         return this.approveStep(api, step.id);
+    }
+
+    private async sendEntryMessage(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        const candidate = onboardingCase.candidate;
+        await api.sendMessage(Number(candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.notifyCandidate(
+            this.formatDate(candidate.firstShiftDate),
+            candidate.firstShiftTime || "",
+            candidate.location?.name || candidate.city || "",
+        ), {
+            parse_mode: "HTML",
+            reply_markup: new InlineKeyboard()
+                .text(FIRST_SHIFT_ONBOARDING_TEXTS.startButton, `fso_start_${onboardingCase.id}`)
+                .row()
+                .text(FIRST_SHIFT_ONBOARDING_TEXTS.askMentorButton, `fso_ask_${onboardingCase.id}`),
+        });
     }
 
     private async getCaseForCandidateCallback(caseId: string, telegramId: number) {
