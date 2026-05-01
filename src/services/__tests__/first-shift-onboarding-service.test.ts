@@ -36,6 +36,11 @@ vi.mock("../../constants/first-shift-onboarding-texts.js", () => ({
         completed: "completed",
         startButton: "start",
         askMentorButton: "ask",
+        submittedNoApproval: "submittedNoApproval",
+        approved: "approved",
+        setupCompleted: "setupCompleted",
+        topicSetupCompleted: "topicSetupCompleted",
+        topicAllStepsApproved: "topicAllStepsApproved",
         topicClosed: "topicClosed",
         waitingFinal: "waitingFinal",
     },
@@ -228,6 +233,77 @@ describe("FirstShiftOnboardingService", () => {
         const result = await firstShiftOnboardingService.resumeCandidateFlowFromStart(api as any, 123);
 
         expect(result).toBe(true);
+        expect(api.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining("Підготувати ноутбук"), expect.any(Object));
+    });
+
+    it("auto-advances non-approved button steps to the next candidate step", async () => {
+        const initialCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "stand_opening",
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+            },
+            steps: [
+                {
+                    id: "step-1",
+                    key: "stand_opening",
+                    order: 1,
+                    block: "Відкриття стійки",
+                    title: "Відкрити стійку",
+                    prompt: "prompt 1",
+                    status: "ACTIVE",
+                    inputType: "BUTTON",
+                    requiresMentorApproval: false,
+                },
+                {
+                    id: "step-2",
+                    key: "laptop_start",
+                    order: 2,
+                    block: "Ноутбук",
+                    title: "Підготувати ноутбук",
+                    prompt: "prompt 2",
+                    status: "LOCKED",
+                    inputType: "SCREENSHOT",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any;
+
+        const advancedCase = {
+            ...initialCase,
+            currentStepKey: "laptop_start",
+            steps: [
+                { ...initialCase.steps[0], status: "APPROVED" },
+                { ...initialCase.steps[1], status: "ACTIVE" },
+            ],
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue(initialCase);
+        vi.mocked(firstShiftOnboardingRepository.updateStep)
+            .mockResolvedValueOnce({ ...initialCase.steps[0], status: "APPROVED" } as any)
+            .mockResolvedValueOnce({ ...initialCase.steps[1], status: "ACTIVE" } as any);
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue(advancedCase);
+        vi.mocked(firstShiftOnboardingRepository.updateCase).mockResolvedValue(advancedCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.submitButtonStep(api as any, "case-1", 123);
+
+        expect(result).toBe(advancedCase);
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenNthCalledWith(1, "step-1", expect.objectContaining({
+            status: "APPROVED",
+        }));
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenNthCalledWith(2, "step-2", { status: "ACTIVE" });
+        expect(firstShiftOnboardingRepository.updateCase).toHaveBeenCalledWith("case-1", {
+            currentStepKey: "laptop_start",
+            status: "IN_PROGRESS",
+        });
         expect(api.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining("Підготувати ноутбук"), expect.any(Object));
     });
 });
