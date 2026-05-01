@@ -43,6 +43,8 @@ vi.mock("../../constants/first-shift-onboarding-texts.js", () => ({
         topicAllStepsApproved: "topicAllStepsApproved",
         topicClosed: "topicClosed",
         waitingFinal: "waitingFinal",
+        questionForwarded: "questionForwarded",
+        mentorObservedCandidate: "mentorObservedCandidate",
     },
 }));
 
@@ -99,6 +101,7 @@ import { firstShiftOnboardingService } from "../first-shift-onboarding-service.j
 describe("FirstShiftOnboardingService", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useRealTimers();
     });
 
     it("should unlock mentor onboarding when first-shift onboarding passes", async () => {
@@ -305,5 +308,87 @@ describe("FirstShiftOnboardingService", () => {
             status: "IN_PROGRESS",
         });
         expect(api.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining("Підготувати ноутбук"), expect.any(Object));
+    });
+
+    it("does not auto-open first-shift onboarding after shift start has already passed", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-05-01T15:40:00.000Z"));
+
+        vi.mocked(firstShiftOnboardingRepository.findUpcomingCandidatesForAutoOpen).mockResolvedValue([
+            {
+                id: "cand-past",
+                firstShiftDate: new Date("2026-05-01T00:00:00.000Z"),
+                firstShiftTime: "15:00-17:00",
+                location: null,
+            },
+            {
+                id: "cand-upcoming",
+                firstShiftDate: new Date("2026-05-01T00:00:00.000Z"),
+                firstShiftTime: "19:00-21:00",
+                location: null,
+            },
+        ] as any);
+
+        const notifySpy = vi.spyOn(firstShiftOnboardingService, "notifyCandidate").mockResolvedValue({} as any);
+
+        await firstShiftOnboardingService.autoOpenUpcomingCases({ api: {} } as any);
+
+        expect(notifySpy).toHaveBeenCalledTimes(1);
+        expect(notifySpy).toHaveBeenCalledWith({}, "cand-upcoming");
+    });
+
+    it("does not copy plain text candidate messages into the onboarding topic twice", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue({
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "photoshop_practice",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-1",
+                    key: "photoshop_practice",
+                    order: 11,
+                    block: "Photoshop + макети",
+                    title: "Практика в макетах",
+                    prompt: "prompt",
+                    status: "ACTIVE",
+                    inputType: "MENTOR_OBSERVED",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            copyMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            text: "Потрібна допомога",
+            messageId: 99,
+            chatId: 123,
+        });
+
+        expect(handled).toBe(true);
+        expect(api.copyMessage).not.toHaveBeenCalled();
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            expect.stringContaining("Потрібна допомога"),
+            expect.objectContaining({ message_thread_id: 42 })
+        );
     });
 });
