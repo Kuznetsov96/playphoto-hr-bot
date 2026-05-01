@@ -32,8 +32,12 @@ vi.mock("../../config.js", () => ({
 vi.mock("../../constants/first-shift-onboarding-texts.js", () => ({
     FIRST_SHIFT_ONBOARDING_STEPS: [],
     FIRST_SHIFT_ONBOARDING_TEXTS: {
+        notifyCandidate: () => "notifyCandidate",
         completed: "completed",
+        startButton: "start",
+        askMentorButton: "ask",
         topicClosed: "topicClosed",
+        waitingFinal: "waitingFinal",
     },
 }));
 
@@ -51,6 +55,7 @@ vi.mock("../../repositories/first-shift-onboarding-repository.js", () => ({
 
 vi.mock("../../repositories/candidate-repository.js", () => ({
     candidateRepository: {
+        findByTelegramId: vi.fn(),
         update: vi.fn(),
     }
 }));
@@ -189,5 +194,40 @@ describe("FirstShiftOnboardingService", () => {
 
         expect(result).toBeNull();
         expect(firstShiftOnboardingRepository.updateStep).not.toHaveBeenCalled();
+    });
+
+    it("resumes active first-shift onboarding from /start", async () => {
+        vi.mocked(candidateRepository.findByTelegramId).mockResolvedValue({
+            id: "cand-1",
+        } as any);
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue({
+            id: "case-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "laptop_start",
+            candidate: {
+                user: { telegramId: 123n },
+            },
+            steps: [
+                {
+                    id: "step-2",
+                    key: "laptop_start",
+                    order: 2,
+                    block: "Ноутбук",
+                    title: "Підготувати ноутбук",
+                    prompt: "prompt",
+                    status: "ACTIVE",
+                    inputType: "SCREENSHOT",
+                },
+            ],
+        } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.resumeCandidateFlowFromStart(api as any, 123);
+
+        expect(result).toBe(true);
+        expect(api.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining("Підготувати ноутбук"), expect.any(Object));
     });
 });
