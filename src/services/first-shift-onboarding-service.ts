@@ -590,15 +590,7 @@ export class FirstShiftOnboardingService {
             `👤 <b>Фотограф:</b> ${escapeHtml(candidate.fullName || candidate.user.firstName || "Candidate")}\n` +
             `🔗 <b>Telegram:</b> ${candidate.user.username ? `@${escapeHtml(candidate.user.username)}` : "—"}\n` +
             `📍 <b>Локація:</b> ${escapeHtml(candidate.location?.name || candidate.city || "—")}\n` +
-            `🗓 <b>Зміна:</b> ${escapeHtml(this.formatDate(candidate.firstShiftDate))} ${escapeHtml(candidate.firstShiftTime || "")}\n\n` +
-            this.buildProgressText(onboardingCase);
-    }
-
-    private buildProgressText(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
-        const done = onboardingCase.steps.filter(step => ["APPROVED", "SKIPPED"].includes(step.status)).length;
-        const total = onboardingCase.steps.length;
-        return `<b>Прогрес:</b> ${done}/${total}\n` +
-            onboardingCase.steps.map(step => `${this.statusIcon(step.status)} ${step.order}. ${escapeHtml(step.title)}`).join("\n");
+            `🗓 <b>Зміна:</b> ${escapeHtml(this.formatDate(candidate.firstShiftDate))} ${escapeHtml(candidate.firstShiftTime || "")}`;
     }
 
     private buildMentorCaseKeyboard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
