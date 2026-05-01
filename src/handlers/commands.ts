@@ -247,6 +247,26 @@ commandHandlers.command("start", async (ctx) => {
         const candidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
 
         if (candidate) {
+            const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
+            const resumedFirstShiftOnboarding = await firstShiftOnboardingService.resumeCandidateFlowFromStart(ctx.api, userId);
+            if (resumedFirstShiftOnboarding) {
+                logBusinessEvent({
+                    event: "user.start_routed",
+                    telegramId: userId,
+                    actorType: "candidate",
+                    actorRole: "candidate",
+                    result: "success",
+                    module: "commands",
+                    operation: "start",
+                    updateId: ctx.update.update_id,
+                    userId: user?.id,
+                    candidateId: candidate.id,
+                    stage: candidate.status,
+                    safeContext: { targetHub: "FIRST_SHIFT_ONBOARDING" },
+                });
+                return;
+            }
+
             if (candidate.status === CandidateStatus.BLOCKER && clearedBlockedUsers.count > 0) {
                 logBusinessEvent({
                     event: "candidate.recovery.started",
