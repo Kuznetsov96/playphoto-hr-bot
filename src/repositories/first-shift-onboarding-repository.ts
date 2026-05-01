@@ -1,6 +1,7 @@
 import type { FirstShiftOnboardingCase, FirstShiftOnboardingStep, Prisma } from "@prisma/client";
 import prisma from "../db/core.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
+import { createKyivDate } from "../utils/bot-utils.js";
 
 export type FirstShiftOnboardingCaseWithRelations = FirstShiftOnboardingCase & {
     candidate: Prisma.CandidateGetPayload<{
@@ -79,10 +80,7 @@ export class FirstShiftOnboardingRepository {
     }
 
     async findUpcomingCandidatesForAutoOpen(now: Date, windowEnd: Date) {
-        const startOfDay = new Date(now);
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date(now);
-        endOfDay.setHours(23, 59, 59, 999);
+        const { startOfDay, endOfDay } = this.getKyivDayRange(now);
 
         return prisma.candidate.findMany({
             where: {
@@ -106,11 +104,34 @@ export class FirstShiftOnboardingRepository {
     private resolveShiftStart(date?: Date | null, time?: string | null) {
         if (!date) return null;
         const match = time?.match(/(\d{1,2})[:.](\d{2})?/);
-        const result = new Date(date);
+        const { year, month, day } = this.getKyivCalendarParts(date);
         if (match) {
-            result.setHours(Number(match[1]), Number(match[2] || 0), 0, 0);
+            return createKyivDate(year, month - 1, day, Number(match[1]), Number(match[2] || 0));
         }
-        return result;
+        return createKyivDate(year, month - 1, day, 0, 0);
+    }
+
+    private getKyivDayRange(date: Date) {
+        const { year, month, day } = this.getKyivCalendarParts(date);
+        return {
+            startOfDay: createKyivDate(year, month - 1, day, 0, 0),
+            endOfDay: createKyivDate(year, month - 1, day, 23, 59),
+        };
+    }
+
+    private getKyivCalendarParts(date: Date) {
+        const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Europe/Kyiv",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        }).formatToParts(date);
+
+        return {
+            year: Number(parts.find((part) => part.type === "year")?.value),
+            month: Number(parts.find((part) => part.type === "month")?.value),
+            day: Number(parts.find((part) => part.type === "day")?.value),
+        };
     }
 }
 

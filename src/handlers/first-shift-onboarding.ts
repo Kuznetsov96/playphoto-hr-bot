@@ -39,8 +39,8 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_ap_(.+)$/, async (ctx) => {
         await ctx.answerCallbackQuery("Unavailable.");
         return;
     }
-    await ctx.answerCallbackQuery("Step approved.");
-    await firstShiftOnboardingService.approveStep(ctx.api, stepId, ctx.from?.id);
+    const result = await firstShiftOnboardingService.approveStep(ctx.api, stepId, ctx.from?.id);
+    await ctx.answerCallbackQuery(result ? "Step approved." : "Step is no longer awaiting approval.");
 });
 
 firstShiftOnboardingHandlers.callbackQuery(/^fso_rj_(.+)$/, async (ctx) => {
@@ -51,8 +51,8 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_rj_(.+)$/, async (ctx) => {
         await ctx.answerCallbackQuery("Unavailable.");
         return;
     }
-    await ctx.answerCallbackQuery("Step returned for redo.");
-    await firstShiftOnboardingService.rejectStep(ctx.api, stepId);
+    const result = await firstShiftOnboardingService.rejectStep(ctx.api, stepId);
+    await ctx.answerCallbackQuery(result ? "Step returned for redo." : "Step is no longer awaiting review.");
 });
 
 firstShiftOnboardingHandlers.callbackQuery(/^fso_close_(.+)$/, async (ctx) => {
