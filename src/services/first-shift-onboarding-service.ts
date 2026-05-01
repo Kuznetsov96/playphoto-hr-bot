@@ -250,6 +250,17 @@ export class FirstShiftOnboardingService {
             completedAt: new Date(),
         });
 
+        return this.advanceFromResolvedStep(api, onboardingCase, step, FIRST_SHIFT_ONBOARDING_TEXTS.approved, "✅ Step approved.");
+    }
+
+    private async advanceFromResolvedStep(
+        api: Api,
+        onboardingCase: FirstShiftOnboardingCaseWithRelations,
+        step: FirstShiftOnboardingStep,
+        candidateMessage?: string,
+        topicMessage?: string,
+    ) {
+
         const refreshed = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
         if (!refreshed) return null;
         const next = this.getNextStep(refreshed, step.order);
@@ -280,9 +291,13 @@ export class FirstShiftOnboardingService {
             status: next.block === CLOSING_BLOCK ? "CLOSING" : "IN_PROGRESS",
         });
 
-        await api.sendMessage(Number(updated.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.approved, { parse_mode: "HTML" });
+        if (candidateMessage) {
+            await api.sendMessage(Number(updated.candidate.user.telegramId), candidateMessage, { parse_mode: "HTML" });
+        }
         await this.sendCurrentStepToCandidate(api, updated);
-        await this.postTopicStatus(api, updated, "✅ Step approved.");
+        if (topicMessage) {
+            await this.postTopicStatus(api, updated, topicMessage);
+        }
         return updated;
     }
 
@@ -448,7 +463,7 @@ export class FirstShiftOnboardingService {
         }
 
         await api.sendMessage(Number(onboardingCase.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.submittedNoApproval, { parse_mode: "HTML" });
-        return this.approveStep(api, step.id);
+        return this.advanceFromResolvedStep(api, onboardingCase, step);
     }
 
     private async sendEntryMessage(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations) {
