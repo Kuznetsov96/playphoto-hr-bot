@@ -12,6 +12,7 @@ import { timelineRepository } from "../repositories/timeline-repository.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
+import { createKyivDate } from "../utils/bot-utils.js";
 
 const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "CLOSING", "PENDING_FINAL"] as const;
 const CLOSING_BLOCK = "Закриття зміни";
@@ -177,7 +178,16 @@ export class FirstShiftOnboardingService {
                 status: step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS ? "ACTIVE" : "SUBMITTED",
             });
 
-            await this.forwardCandidateMessageToTopic(api, onboardingCase, message, `📤 ${step.block}: ${step.title}`);
+            await this.forwardCandidateMessageToTopic(
+                api,
+                onboardingCase,
+                message,
+                `📤 ${step.block}: ${step.title}`,
+                {
+                    ...step,
+                    status: step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS ? "ACTIVE" : "SUBMITTED",
+                } as FirstShiftOnboardingStep
+            );
 
             if (step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS) {
                 await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.multiplePhotosHint, {
@@ -209,6 +219,20 @@ export class FirstShiftOnboardingService {
         if (!onboardingCase) return null;
         const step = onboardingCase.steps.find(s => s.id === stepId);
         if (!step) return null;
+        const currentStep = this.getCurrentStep(onboardingCase);
+
+        if (currentStep?.id !== stepId || !this.canMentorResolveStep(step)) {
+            logger.warn({
+                stepId,
+                mentorTelegramId,
+                caseId: onboardingCase.id,
+                currentStepId: currentStep?.id || null,
+                currentStepKey: currentStep?.key || null,
+                stepStatus: step.status,
+                stepInputType: step.inputType,
+            }, "Ignored invalid first-shift onboarding approve action");
+            return null;
+        }
 
         await firstShiftOnboardingRepository.updateStep(step.id, {
             status: "APPROVED",
@@ -282,6 +306,19 @@ export class FirstShiftOnboardingService {
         if (!onboardingCase) return null;
         const step = onboardingCase.steps.find(s => s.id === stepId);
         if (!step) return null;
+        const currentStep = this.getCurrentStep(onboardingCase);
+
+        if (currentStep?.id !== stepId || !this.canMentorResolveStep(step)) {
+            logger.warn({
+                stepId,
+                caseId: onboardingCase.id,
+                currentStepId: currentStep?.id || null,
+                currentStepKey: currentStep?.key || null,
+                stepStatus: step.status,
+                stepInputType: step.inputType,
+            }, "Ignored invalid first-shift onboarding reject action");
+            return null;
+        }
 
         await firstShiftOnboardingRepository.updateStep(step.id, {
             status: "REJECTED",
@@ -390,7 +427,9 @@ export class FirstShiftOnboardingService {
             api,
             onboardingCase,
             `📤 <b>${escapeHtml(step.block)}: ${escapeHtml(step.title)}</b>\n${submission.text ? escapeHtml(submission.text) : "Кандидат підтвердила виконання."}`,
-            step.requiresMentorApproval ? this.buildMentorStepKeyboard(step) : new InlineKeyboard()
+            step.requiresMentorApproval
+                ? this.buildMentorStepKeyboard({ ...step, status: "SUBMITTED" } as FirstShiftOnboardingStep)
+                : new InlineKeyboard()
         );
 
         if (step.requiresMentorApproval) {
@@ -465,12 +504,18 @@ export class FirstShiftOnboardingService {
         });
     }
 
-    private async forwardCandidateMessageToTopic(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations, message: { text?: string; photoId?: string | null; messageId?: number; chatId?: number }, label: string) {
+    private async forwardCandidateMessageToTopic(
+        api: Api,
+        onboardingCase: FirstShiftOnboardingCaseWithRelations,
+        message: { text?: string; photoId?: string | null; messageId?: number; chatId?: number },
+        label: string,
+        stepForKeyboard?: FirstShiftOnboardingStep | null
+    ) {
         if (!onboardingCase.chatId || !onboardingCase.topicId) return;
         await api.sendMessage(Number(onboardingCase.chatId), `<b>${escapeHtml(label)}</b>${message.text ? `\n\n${escapeHtml(message.text)}` : ""}`, {
             parse_mode: "HTML",
             message_thread_id: onboardingCase.topicId,
-            reply_markup: this.buildMentorStepKeyboard(this.getCurrentStep(onboardingCase)),
+            reply_markup: this.buildMentorStepKeyboard(stepForKeyboard || this.getCurrentStep(onboardingCase)),
         });
         if (message.chatId && message.messageId) {
             await api.copyMessage(Number(onboardingCase.chatId), message.chatId, message.messageId, {
@@ -508,7 +553,7 @@ export class FirstShiftOnboardingService {
     private buildMentorCaseKeyboard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         const keyboard = new InlineKeyboard();
         const step = this.getCurrentStep(onboardingCase);
-        if (step) {
+        if (step && this.canMentorResolveStep(step)) {
             keyboard.text("✅ Approve", `fso_ap_${step.id}`)
                 .text("🔁 Redo", `fso_rj_${step.id}`)
                 .row();
@@ -526,7 +571,7 @@ export class FirstShiftOnboardingService {
 
     private buildMentorStepKeyboard(step?: FirstShiftOnboardingStep | null) {
         const keyboard = new InlineKeyboard();
-        if (!step) return keyboard;
+        if (!step || !this.canMentorResolveStep(step)) return keyboard;
         keyboard.text("✅ Approve", `fso_ap_${step.id}`)
             .text("🔁 Redo", `fso_rj_${step.id}`);
         return keyboard;
@@ -557,6 +602,14 @@ export class FirstShiftOnboardingService {
     private isTextInput(inputType: FirstShiftOnboardingInputType) {
         return inputType === FirstShiftOnboardingInputType.TEXT ||
             inputType === FirstShiftOnboardingInputType.LINK;
+    }
+
+    private canMentorResolveStep(step?: FirstShiftOnboardingStep | null) {
+        if (!step) return false;
+        if (step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
+            return step.status === "ACTIVE" || step.status === "SUBMITTED";
+        }
+        return step.status === "SUBMITTED";
     }
 
     private statusIcon(status: string) {
@@ -592,9 +645,18 @@ export class FirstShiftOnboardingService {
         const last = matches[matches.length - 1];
         if (!last) return null;
 
-        const result = new Date(date);
-        result.setHours(Number(last[1] || 0), Number(last[2] || 0), 0, 0);
-        return result;
+        const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Europe/Kyiv",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        }).formatToParts(date);
+
+        const year = Number(parts.find((part) => part.type === "year")?.value);
+        const month = Number(parts.find((part) => part.type === "month")?.value);
+        const day = Number(parts.find((part) => part.type === "day")?.value);
+
+        return createKyivDate(year, month - 1, day, Number(last[1] || 0), Number(last[2] || 0));
     }
 }
 
