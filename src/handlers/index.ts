@@ -264,6 +264,11 @@ handlers.use(async (ctx, next) => {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
 
     if (user?.staffProfile) {
+        if (ctx.chat?.type === "private" && ctx.message) {
+            const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
+            if (firstShiftHandled) return;
+        }
+
         // --- STAFF CONTEXT ---
 
         // Shield: Block deactivated staff from accessing any staff features
