@@ -127,6 +127,59 @@ export class ScheduleSyncService {
         if (!this.sheets) throw new Error("Google Sheets not configured (missing google-service-account.json)");
     }
 
+    private async clearObsoletePreferenceRemindersForScheduledStaff(
+        shiftsToCreate: Array<{ staffId: string; locationId: string; date: Date }>,
+        allUsersWithStaff: Array<{ telegramId: bigint; staffProfile: { id: string } | null }>,
+        nextMonthDate: Date,
+        enabled: boolean
+    ) {
+        if (!enabled) return 0;
+
+        const nextMonthStaffIds = new Set(
+            shiftsToCreate
+                .filter((shift) =>
+                    shift.date.getFullYear() === nextMonthDate.getFullYear() &&
+                    shift.date.getMonth() === nextMonthDate.getMonth()
+                )
+                .map((shift) => shift.staffId)
+        );
+
+        if (nextMonthStaffIds.size === 0) return 0;
+
+        const affectedTelegramIds = allUsersWithStaff
+            .filter((user) => user.staffProfile && nextMonthStaffIds.has(user.staffProfile.id))
+            .map((user) => user.telegramId);
+
+        if (affectedTelegramIds.length === 0) return 0;
+
+        const result = await pendingReplyRepository.deleteMany({
+            userId: { in: affectedTelegramIds },
+            status: "pending",
+            trackedMessage: {
+                broadcast: {
+                    messageText: { contains: "Побажання" }
+                }
+            }
+        });
+
+        logBusinessEvent({
+            event: "staff.preferences_reminders_autoclosed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "schedule-sync",
+            operation: "clearObsoletePreferenceRemindersForScheduledStaff",
+            safeContext: {
+                affectedStaffCount: nextMonthStaffIds.size,
+                affectedTelegramCount: affectedTelegramIds.length,
+                deletedPendingReplies: result.count,
+                targetMonth: `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth() + 1).padStart(2, "0")}`,
+            },
+        });
+
+        return result.count;
+    }
+
     private interpretEmploymentStatus(status: string): EmploymentSyncStatus {
         const normalized = status.trim().toLowerCase();
         if (normalized === "працює") return "active";
@@ -1114,6 +1167,13 @@ export class ScheduleSyncService {
             logger.debug({ completed: Math.min(i + batch.length, shiftsToCreate.length), total: shiftsToCreate.length }, "Schedule sync batch inserted");
         }
 
+        const clearedPreferenceReminders = await this.clearObsoletePreferenceRemindersForScheduledStaff(
+            shiftsToCreate,
+            allUsersWithStaff,
+            nextMonthDate,
+            containsNextMonthSchedule
+        );
+
         logBusinessEvent({
             event: "schedule.sync.completed",
             actorType: "system",
@@ -1125,6 +1185,7 @@ export class ScheduleSyncService {
                 sheetName,
                 shiftsBefore,
                 shiftsAfter: syncCount,
+                clearedPreferenceReminders,
                 skippedUnknownCodeCount,
                 skippedSectionMismatchCount,
             },

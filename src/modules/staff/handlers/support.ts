@@ -19,6 +19,10 @@ import { audit } from "../../../core/audit-logger.js";
 import { logAuditEvent, logBusinessEvent } from "../../../core/log-events.js";
 import { getAdminRoleByTelegramId } from "../../../config/roles.js";
 import { ActionDedupeWindow } from "../../../utils/action-dedupe.js";
+import { taskProofService } from "../../../services/task-proof-service.js";
+import { shortenName } from "../../../utils/string-utils.js";
+import { getLocationShortcut } from "../../../utils/ticket-card.js";
+import { truncateText } from "../../../utils/task-helpers.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -36,6 +40,7 @@ adminSupportCallbacks
             /^ticket_reply_close_\d+$/.test(ctx.callbackQuery.data) ||
             /^ticket_urgent_\d+$/.test(ctx.callbackQuery.data) ||
             /^ticket_close_\d+$/.test(ctx.callbackQuery.data) ||
+            /^task_proof_close_[a-zA-Z0-9]+$/.test(ctx.callbackQuery.data) ||
             /^close_topic_\d+$/.test(ctx.callbackQuery.data) ||
             /^recovery_reopen_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
             /^ticket_force_close_\d+$/.test(ctx.callbackQuery.data) ||
@@ -107,6 +112,21 @@ function classifySupportForwardingError(error: any) {
         isTopicError,
         isNotForwardable,
     };
+}
+
+function buildTaskProofTopicBaseTitle(submission: Awaited<ReturnType<typeof taskProofService.getSubmission>>) {
+    if (!submission) return "Task Proof";
+
+    const task = submission.task;
+    const staffName = shortenName(submission.staff.fullName);
+    const locationName = task.locationName || submission.staff.location?.name || null;
+    const locationCity = task.city || submission.staff.location?.city || null;
+    const locationCode = locationName ? getLocationShortcut(locationName, locationCity) : "Task";
+    const topicDate = task.workDate
+        ? task.workDate.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" })
+        : "??.??";
+
+    return `📎 ${locationCode} | ${staffName} | ${topicDate}`;
 }
 
 // 1. Start Ticket Creation Flow
@@ -283,6 +303,46 @@ staffSupportHandlers.callbackQuery(/^ticket_urgent_(\d+)$/, async (ctx) => {
 staffSupportHandlers.callbackQuery(/^ticket_close_(\d+)$/, async (ctx) => {
     const ticketId = Number(ctx.match[1]);
     await closeTicket(ctx, ticketId, "ADMIN");
+});
+
+staffSupportHandlers.callbackQuery(/^task_proof_close_([a-zA-Z0-9]+)$/, async (ctx) => {
+    const submissionId = ctx.match[1]!;
+    const submission = await taskProofService.getSubmissionById(submissionId);
+    if (!submission || !submission.supportTopicId || !submission.supportChatId) {
+        await ctx.answerCallbackQuery("Уточнення вже закрито або topic не знайдено.");
+        return;
+    }
+
+    await taskProofService.closeSupportTopic(submission.id);
+
+    const baseTitle = buildTaskProofTopicBaseTitle(submission);
+    await finalizeTopicUIClosure(ctx, String(submission.supportChatId), submission.supportTopicId, baseTitle);
+
+    const targetTelegramId = Number(submission.staff.user.telegramId);
+    const keyboard = new InlineKeyboard().text(STAFF_TEXTS["staff-btn-home"], "staff_hub_nav");
+    await sendSupportStatus(
+        ctx,
+        `✅ <b>Уточнення по завданню закрито.</b>\n\nЯкщо буде потрібно, ми напишемо ще раз окремо.`,
+        { parse_mode: "HTML", reply_markup: keyboard },
+        targetTelegramId
+    );
+
+    logBusinessEvent({
+        event: "task_proof.topic.closed",
+        actorType: "admin",
+        actorRole: "admin",
+        telegramId: ctx.from?.id,
+        result: "success",
+        module: "staff-support-handler",
+        operation: "task_proof_close",
+        updateId: ctx.update.update_id,
+        safeContext: {
+            submissionId,
+            topicId: submission.supportTopicId,
+            chatId: String(submission.supportChatId),
+            taskId: submission.taskId,
+        },
+    });
 });
 
 // 7. Close Outgoing Topic (Admin)
@@ -795,6 +855,60 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
         return true;
     }
 
+    const explicitProofReplySubmissionId = ctx.session.step?.startsWith("awaiting_task_proof_topic_reply_")
+        ? ctx.session.step.replace("awaiting_task_proof_topic_reply_", "")
+        : null;
+    const waitingProofSubmission = explicitProofReplySubmissionId
+        ? await taskProofService.getSubmissionById(explicitProofReplySubmissionId)
+        : await taskProofService.findLatestWaitingForStaffByStaffId(user.staffProfile.id);
+
+    if (
+        explicitProofReplySubmissionId &&
+        waitingProofSubmission?.supportTopicId &&
+        waitingProofSubmission.supportChatId &&
+        waitingProofSubmission.supportTopicStatus !== "CLOSED"
+    ) {
+        try {
+            await ctx.api.copyMessage(Number(waitingProofSubmission.supportChatId), ctx.chat.id, ctx.message!.message_id, {
+                message_thread_id: waitingProofSubmission.supportTopicId,
+            });
+
+            await taskProofService.markWaitingForSupport(waitingProofSubmission.id);
+            ctx.session.step = "idle";
+            if (ctx.session.taskProofFlow?.replySubmissionId === waitingProofSubmission.id) {
+                delete ctx.session.taskProofFlow.replySubmissionId;
+            }
+
+            logBusinessEvent({
+                event: "task_proof.staff_reply_forwarded",
+                actorType: "staff",
+                actorRole: "staff",
+                telegramId,
+                result: "success",
+                module: "staff-support-handler",
+                operation: "handleStaffMessage",
+                updateId: ctx.update.update_id,
+                userId: user.id,
+                safeContext: {
+                    submissionId: waitingProofSubmission.id,
+                    topicId: waitingProofSubmission.supportTopicId,
+                    taskId: waitingProofSubmission.taskId,
+                },
+            });
+
+            return true;
+        } catch (err) {
+            logger.error({
+                err,
+                userId: user.id,
+                submissionId: waitingProofSubmission.id,
+                topicId: waitingProofSubmission.supportTopicId,
+            }, "Task proof clarification forwarding failed");
+            await ctx.reply("Не вдалося доставити відповідь у topic support. Спробуй ще раз або натисни підтримку.");
+            return true;
+        }
+    }
+
     // Check Active Ticket
     const activeTicket = await supportRepository.findActiveTicketByUser(user.id);
     logger.debug({
@@ -860,6 +974,37 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
     const activeOutgoingTopic = !activeTicket ? await supportRepository.findActiveOutgoingTopicByUser(user.id) : null;
     if (activeOutgoingTopic) {
         logger.debug({ userId: user.id, topicId: activeOutgoingTopic.topicId }, "Active outgoing support topic found");
+    }
+
+    if (!explicitProofReplySubmissionId && !activeTicket && !activeOutgoingTopic && waitingProofSubmission?.supportTopicId && waitingProofSubmission.supportChatId) {
+        try {
+            await ctx.api.copyMessage(Number(waitingProofSubmission.supportChatId), ctx.chat.id, ctx.message!.message_id, {
+                message_thread_id: waitingProofSubmission.supportTopicId,
+            });
+            await taskProofService.markWaitingForSupport(waitingProofSubmission.id);
+            logBusinessEvent({
+                event: "task_proof.staff_reply_forwarded",
+                actorType: "staff",
+                actorRole: "staff",
+                telegramId,
+                result: "success",
+                module: "staff-support-handler",
+                operation: "handleStaffMessage",
+                updateId: ctx.update.update_id,
+                userId: user.id,
+                safeContext: {
+                    submissionId: waitingProofSubmission.id,
+                    topicId: waitingProofSubmission.supportTopicId,
+                    taskId: waitingProofSubmission.taskId,
+                    routing: "implicit_latest_waiting_topic",
+                },
+            });
+            return true;
+        } catch (err) {
+            logger.error({ err, userId: user.id, submissionId: waitingProofSubmission.id }, "Implicit task proof clarification forwarding failed");
+            await ctx.reply("Не вдалося доставити відповідь у topic support. Спробуй ще раз або натисни кнопку «Відповісти» у повідомленні від support.");
+            return true;
+        }
     }
 
     // A. If Step is 'reply_and_close' -> Send reply and close ticket
@@ -1306,6 +1451,49 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
     const ticket = await supportRepository.findTicketByTopicId(topicId);
 
     if (!ticket || ticket.status === TicketStatus.CLOSED) {
+        const proofSubmission = await taskProofService.findBySupportTopic(BigInt(ctx.chat!.id), topicId);
+        if (proofSubmission && proofSubmission.supportTopicStatus !== "CLOSED") {
+            try {
+                const targetTelegramId = Number(proofSubmission.staff.user.telegramId);
+                await ctx.copyMessage(targetTelegramId);
+                await taskProofService.markWaitingForStaff(proofSubmission.id);
+
+                const task = proofSubmission.task;
+                const keyboard = new InlineKeyboard().text("💬 Відповісти", `staff_task_proof_reply_${proofSubmission.id}`);
+                const hintText =
+                    `💬 <b>Уточнення від support по завданню</b>\n` +
+                    `📍 ${escapeHtml(task.locationName || proofSubmission.staff.location?.name || "Локація не вказана")}\n` +
+                    `<i>${escapeHtml(truncateText(task.taskText, 180))}</i>\n\n` +
+                    `Натисни кнопку нижче і надішли відповідь сюди. Я передам її в правильний topic.`;
+                await sendSupportStatus(ctx, hintText, { parse_mode: "HTML", reply_markup: keyboard }, targetTelegramId);
+
+                logBusinessEvent({
+                    event: "task_proof.support_reply_forwarded",
+                    actorType: "admin",
+                    actorRole: "admin",
+                    telegramId: ctx.from?.id,
+                    result: "success",
+                    module: "staff-support-handler",
+                    operation: "handleSupportGroupMessage",
+                    updateId: ctx.update.update_id,
+                    userId: proofSubmission.staff.userId,
+                    safeContext: {
+                        submissionId: proofSubmission.id,
+                        topicId,
+                        taskId: proofSubmission.taskId,
+                    },
+                });
+                return true;
+            } catch (e: any) {
+                logger.error({ err: e, topicId, submissionId: proofSubmission.id }, "Task proof support reply forwarding failed");
+                const errorMsg = e.description?.includes("blocked")
+                    ? "❌ Не вдалося доставити уточнення: фотограф заблокував бота."
+                    : "❌ Не вдалося доставити уточнення фотографу.";
+                await ctx.reply(errorMsg, { message_thread_id: topicId });
+                return true;
+            }
+        }
+
         // Not a standard ticket — check if it's an OutgoingTopic (admin-initiated conversation)
         const outgoingTopic = await supportRepository.findOutgoingTopicByTopicId(topicId);
         if (!outgoingTopic || !outgoingTopic.userId) return false;
