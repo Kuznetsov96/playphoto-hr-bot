@@ -45,7 +45,7 @@ function stripTrailingCitySuffix(name: string, city: string | null): string {
     return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
 }
 
-function formatLocationLabel(name: string, city: string | null): string {
+export function formatLocationLabel(name: string, city: string | null): string {
     if (!city) return name;
     return name.endsWith(`(${city})`) ? name : `${name} (${city})`;
 }
@@ -53,7 +53,7 @@ function formatLocationLabel(name: string, city: string | null): string {
 /**
  * Helper to get the best shortcut for a location
  */
-function getLocationShortcut(name: string, city: string | null): string {
+export function getLocationShortcut(name: string, city: string | null): string {
     const normalizedName = stripTrailingCitySuffix(name, city);
 
     // 1. Try composite key match (name|city)

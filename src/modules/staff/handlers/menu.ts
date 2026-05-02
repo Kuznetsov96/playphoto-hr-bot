@@ -13,6 +13,8 @@ import { escapeHtml } from "../../../handlers/admin/utils.js";
 import logger from "../../../core/logger.js";
 import { buildSignedCallback } from "../../../utils/signed-callback.js";
 import { TEAM_CHATS } from "../../../config.js";
+import { shortenName } from "../../../utils/string-utils.js";
+import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
 
 export const staffHandlers = new Composer<MyContext>();
 
@@ -342,20 +344,55 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
 
     const task = submission.task;
     const staff = submission.staff;
-    const header =
-        `📎 <b>Task Proof Submission</b>\n` +
-        `👤 ${escapeHtml(staff.fullName)}\n` +
-        `🆔 <code>${task.id}</code>\n\n` +
-        `<i>${escapeHtml(truncateText(task.taskText, 250))}</i>`;
+    const shortStaffName = shortenName(staff.fullName);
+    const locationName = task.locationName || staff.location?.name || null;
+    const locationCity = task.city || staff.location?.city || null;
+    const locationLabel = locationName ? formatLocationLabel(locationName, locationCity) : "Локація не вказана";
+    const workDateLabel = task.workDate
+        ? task.workDate.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" })
+        : "Без дати";
+    const topicDateLabel = task.workDate
+        ? task.workDate.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" })
+        : "??.??";
+    const locationCode = locationName ? getLocationShortcut(locationName, locationCity) : "Task";
+    const topicTitle = `📎 ${locationCode} | ${shortStaffName} | ${topicDateLabel}`;
 
-    await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, header, { parse_mode: "HTML" }).catch((err) => {
-        logger.warn({ err, taskId: task.id }, "Task proof summary delivery to support chat failed");
+    let topicId = submission.supportTopicId ?? null;
+    if (!topicId || submission.supportTopicStatus === "CLOSED") {
+        try {
+            const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
+            topicId = topic.message_thread_id;
+            await taskProofService.attachSupportTopic(submission.id, BigInt(TEAM_CHATS.SUPPORT), topicId);
+        } catch (err) {
+            logger.warn({ err, taskId: task.id }, "Task proof topic creation failed");
+            return;
+        }
+    }
+
+    const topicHeader =
+        `📎 <b>Task Proof</b>\n` +
+        `👤 <b>${escapeHtml(shortStaffName)}</b>\n` +
+        `📍 <b>${escapeHtml(locationLabel)}</b>\n` +
+        `📅 <b>${escapeHtml(workDateLabel)}</b>\n` +
+        (task.deadlineTime ? `🕐 <b>До ${escapeHtml(task.deadlineTime)}</b>\n` : "") +
+        `\n<i>${escapeHtml(truncateText(task.taskText, 250))}</i>\n\n` +
+        `<i>Відповідь у цьому треді буде доставлена фотографу.</i>`;
+
+    await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, topicHeader, {
+        parse_mode: "HTML",
+        message_thread_id: topicId,
+        reply_markup: new InlineKeyboard().text("✅ Закрити уточнення", `task_proof_close_${submission.id}`),
+    }).catch((err) => {
+        logger.warn({ err, taskId: task.id, topicId }, "Task proof summary delivery to support topic failed");
     });
 
     for (const item of submission.items) {
         try {
             if (item.type === "TEXT" && item.text) {
-                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `📝 ${escapeHtml(item.text)}`, { parse_mode: "HTML" });
+                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `📝 ${escapeHtml(item.text)}`, {
+                    parse_mode: "HTML",
+                    message_thread_id: topicId,
+                });
                 continue;
             }
 
@@ -363,20 +400,37 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
             if (!item.telegramFileId) continue;
 
             if (item.type === "PHOTO") {
-                await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+                await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                    ...(caption ? { caption, parse_mode: "HTML" } : {}),
+                    message_thread_id: topicId,
+                });
             } else if (item.type === "VIDEO") {
-                await ctx.api.sendVideo(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+                await ctx.api.sendVideo(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                    ...(caption ? { caption, parse_mode: "HTML" } : {}),
+                    message_thread_id: topicId,
+                });
             } else if (item.type === "DOCUMENT") {
-                await ctx.api.sendDocument(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+                await ctx.api.sendDocument(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                    ...(caption ? { caption, parse_mode: "HTML" } : {}),
+                    message_thread_id: topicId,
+                });
             } else if (item.type === "VOICE") {
-                await ctx.api.sendVoice(TEAM_CHATS.SUPPORT, item.telegramFileId);
+                await ctx.api.sendVoice(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                    message_thread_id: topicId,
+                });
             } else if (item.type === "AUDIO") {
-                await ctx.api.sendAudio(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+                await ctx.api.sendAudio(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                    ...(caption ? { caption, parse_mode: "HTML" } : {}),
+                    message_thread_id: topicId,
+                });
             } else if (item.type === "ANIMATION") {
-                await ctx.api.sendAnimation(TEAM_CHATS.SUPPORT, item.telegramFileId, caption ? { caption, parse_mode: "HTML" } : undefined);
+                await ctx.api.sendAnimation(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                    ...(caption ? { caption, parse_mode: "HTML" } : {}),
+                    message_thread_id: topicId,
+                });
             }
         } catch (err) {
-            logger.warn({ err, taskId: task.id, proofItemId: item.id }, "Task proof item delivery to support chat failed");
+            logger.warn({ err, taskId: task.id, proofItemId: item.id, topicId }, "Task proof item delivery to support topic failed");
         }
     }
 }
@@ -389,7 +443,8 @@ export async function handleTaskProofMessage(ctx: MyContext): Promise<boolean> {
     const staffId = user?.staffProfile?.id;
     if (!staffId) return false;
 
-    const stepTaskId = ctx.session.step?.startsWith("awaiting_task_proof_")
+    const stepTaskId = ctx.session.step?.startsWith("awaiting_task_proof_") &&
+        !ctx.session.step.startsWith("awaiting_task_proof_topic_reply_")
         ? ctx.session.step.replace("awaiting_task_proof_", "")
         : null;
     const activeDraft = stepTaskId
@@ -551,6 +606,32 @@ staffHandlers.callbackQuery(/^staff_task_proof_cancel_(.+)$/, async (ctx) => {
     delete ctx.session.taskProofFlow;
     await showStaffTasks(ctx, true);
     await ctx.answerCallbackQuery("Надсилання скасовано");
+});
+
+staffHandlers.callbackQuery(/^staff_task_proof_reply_(.+)$/, async (ctx) => {
+    const submissionId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery("Користувача не знайдено");
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    const submission = await taskProofService.getSubmissionById(submissionId);
+    if (!user?.staffProfile || !submission || submission.staffId !== user.staffProfile.id || submission.supportTopicStatus === "CLOSED") {
+        return ctx.answerCallbackQuery("Це уточнення вже недоступне");
+    }
+
+    ctx.session.step = `awaiting_task_proof_topic_reply_${submissionId}`;
+    ctx.session.taskProofFlow = {
+        ...(ctx.session.taskProofFlow || {}),
+        taskId: submission.taskId,
+        replySubmissionId: submissionId,
+    };
+    await ctx.answerCallbackQuery("Можна відповідати");
+    await ScreenManager.renderScreen(
+        ctx,
+        `💬 <b>Напиши відповідь для команди support</b>\n\nМожна надіслати текст, фото, відео, файл або кілька повідомлень підряд. Я передам їх у правильний topic.`,
+        new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
+        { forceNew: true }
+    );
 });
 
 staffHandlers.callbackQuery(/^staff_task_toggle_(.+)$/, async (ctx) => {

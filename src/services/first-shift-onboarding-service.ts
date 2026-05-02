@@ -431,6 +431,10 @@ export class FirstShiftOnboardingService {
         const windowEnd = new Date(now.getTime() + 60 * 60 * 1000);
         const candidates = await firstShiftOnboardingRepository.findUpcomingCandidatesForAutoOpen(now, windowEnd);
         for (const candidate of candidates) {
+            const shiftStart = this.getShiftStartAt(candidate.firstShiftDate, candidate.firstShiftTime, candidate.location?.schedule);
+            if (shiftStart && (shiftStart.getTime() < now.getTime() || shiftStart.getTime() > windowEnd.getTime())) {
+                continue;
+            }
             try {
                 await this.notifyCandidate(bot.api, candidate.id);
             } catch (err) {
@@ -552,13 +556,20 @@ export class FirstShiftOnboardingService {
         stepForKeyboard?: FirstShiftOnboardingStep | null
     ) {
         if (!onboardingCase.chatId || !onboardingCase.topicId) return;
-        await api.sendMessage(Number(onboardingCase.chatId), `<b>${escapeHtml(label)}</b>${message.text ? `\n\n${escapeHtml(message.text)}` : ""}`, {
+        const sourceChatId = message.chatId;
+        const sourceMessageId = message.messageId;
+        const shouldCopyOriginal = Boolean(
+            message.photoId &&
+            sourceChatId !== undefined &&
+            sourceMessageId !== undefined
+        );
+        await api.sendMessage(Number(onboardingCase.chatId), `<b>${escapeHtml(label)}</b>${message.text && !shouldCopyOriginal ? `\n\n${escapeHtml(message.text)}` : ""}`, {
             parse_mode: "HTML",
             message_thread_id: onboardingCase.topicId,
             reply_markup: this.buildMentorStepKeyboard(stepForKeyboard || this.getCurrentStep(onboardingCase)),
         });
-        if (message.chatId && message.messageId) {
-            await api.copyMessage(Number(onboardingCase.chatId), message.chatId, message.messageId, {
+        if (shouldCopyOriginal && sourceChatId !== undefined && sourceMessageId !== undefined) {
+            await api.copyMessage(Number(onboardingCase.chatId), sourceChatId, sourceMessageId, {
                 message_thread_id: onboardingCase.topicId,
             } as any).catch(err => logger.warn({ err }, "Failed to copy first-shift onboarding candidate message to topic"));
         }
@@ -579,15 +590,7 @@ export class FirstShiftOnboardingService {
             `👤 <b>Фотограф:</b> ${escapeHtml(candidate.fullName || candidate.user.firstName || "Candidate")}\n` +
             `🔗 <b>Telegram:</b> ${candidate.user.username ? `@${escapeHtml(candidate.user.username)}` : "—"}\n` +
             `📍 <b>Локація:</b> ${escapeHtml(candidate.location?.name || candidate.city || "—")}\n` +
-            `🗓 <b>Зміна:</b> ${escapeHtml(this.formatDate(candidate.firstShiftDate))} ${escapeHtml(candidate.firstShiftTime || "")}\n\n` +
-            this.buildProgressText(onboardingCase);
-    }
-
-    private buildProgressText(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
-        const done = onboardingCase.steps.filter(step => ["APPROVED", "SKIPPED"].includes(step.status)).length;
-        const total = onboardingCase.steps.length;
-        return `<b>Прогрес:</b> ${done}/${total}\n` +
-            onboardingCase.steps.map(step => `${this.statusIcon(step.status)} ${step.order}. ${escapeHtml(step.title)}`).join("\n");
+            `🗓 <b>Зміна:</b> ${escapeHtml(this.formatDate(candidate.firstShiftDate))} ${escapeHtml(candidate.firstShiftTime || "")}`;
     }
 
     private buildMentorCaseKeyboard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
@@ -697,6 +700,26 @@ export class FirstShiftOnboardingService {
         const day = Number(parts.find((part) => part.type === "day")?.value);
 
         return createKyivDate(year, month - 1, day, Number(last[1] || 0), Number(last[2] || 0));
+    }
+
+    private getShiftStartAt(date?: Date | null, explicitTime?: string | null, schedule?: string | null) {
+        if (!date) return null;
+        const time = explicitTime || getShiftTimeFromLocationSchedule(schedule, date);
+        const match = time?.match(/(\d{1,2})[:.](\d{2})?/);
+        if (!match) return null;
+
+        const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone: "Europe/Kyiv",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+        }).formatToParts(date);
+
+        const year = Number(parts.find((part) => part.type === "year")?.value);
+        const month = Number(parts.find((part) => part.type === "month")?.value);
+        const day = Number(parts.find((part) => part.type === "day")?.value);
+
+        return createKyivDate(year, month - 1, day, Number(match[1] || 0), Number(match[2] || 0));
     }
 }
 
