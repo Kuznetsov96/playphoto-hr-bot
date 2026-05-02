@@ -1,4 +1,4 @@
-import { TaskCompletionMode, TaskProofItemType, TaskProofSubmissionStatus } from "@prisma/client";
+import { TaskCompletionMode, TaskProofItemType, TaskProofSubmissionStatus, TaskProofSupportTopicStatus } from "@prisma/client";
 import type { Message } from "grammy/types";
 import logger from "../core/logger.js";
 import { taskProofRepository } from "../repositories/task-proof-repository.js";
@@ -106,6 +106,48 @@ class TaskProofService {
 
     async getSubmission(taskId: string) {
         return taskProofRepository.findByTaskId(taskId);
+    }
+
+    async getSubmissionById(submissionId: string) {
+        return taskProofRepository.findById(submissionId);
+    }
+
+    async attachSupportTopic(submissionId: string, chatId: bigint, topicId: number) {
+        return taskProofRepository.attachSupportTopic(submissionId, {
+            supportChatId: chatId,
+            supportTopicId: topicId,
+            supportTopicStatus: TaskProofSupportTopicStatus.OPEN,
+        });
+    }
+
+    async markWaitingForStaff(submissionId: string) {
+        return taskProofRepository.updateSupportTopicState(submissionId, {
+            supportTopicStatus: TaskProofSupportTopicStatus.WAITING_FOR_STAFF,
+            supportLastMessageAt: new Date(),
+        });
+    }
+
+    async markWaitingForSupport(submissionId: string) {
+        return taskProofRepository.updateSupportTopicState(submissionId, {
+            supportTopicStatus: TaskProofSupportTopicStatus.WAITING_FOR_SUPPORT,
+            supportLastMessageAt: new Date(),
+        });
+    }
+
+    async closeSupportTopic(submissionId: string) {
+        return taskProofRepository.updateSupportTopicState(submissionId, {
+            supportTopicStatus: TaskProofSupportTopicStatus.CLOSED,
+            supportTopicClosedAt: new Date(),
+            supportLastMessageAt: new Date(),
+        });
+    }
+
+    async findBySupportTopic(chatId: bigint, topicId: number) {
+        return taskProofRepository.findBySupportTopic(chatId, topicId);
+    }
+
+    async findLatestWaitingForStaffByStaffId(staffId: string) {
+        return taskProofRepository.findLatestWaitingForStaffByStaffId(staffId);
     }
 }
 

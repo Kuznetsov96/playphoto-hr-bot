@@ -1,4 +1,4 @@
-import { Prisma, TaskProofItemType, TaskProofSubmissionStatus } from "@prisma/client";
+import { Prisma, TaskProofItemType, TaskProofSubmissionStatus, TaskProofSupportTopicStatus } from "@prisma/client";
 import prisma from "../db/core.js";
 
 const proofInclude = {
@@ -24,6 +24,13 @@ const proofInclude = {
 } satisfies Prisma.TaskProofSubmissionInclude;
 
 export class TaskProofRepository {
+    async findById(submissionId: string) {
+        return prisma.taskProofSubmission.findUnique({
+            where: { id: submissionId },
+            include: proofInclude,
+        });
+    }
+
     async findByTaskId(taskId: string) {
         return prisma.taskProofSubmission.findUnique({
             where: { taskId },
@@ -104,6 +111,68 @@ export class TaskProofRepository {
                 submittedAt: new Date(),
             },
             include: proofInclude,
+        });
+    }
+
+    async attachSupportTopic(
+        submissionId: string,
+        data: {
+            supportChatId: bigint;
+            supportTopicId: number;
+            supportTopicStatus: TaskProofSupportTopicStatus;
+        },
+    ) {
+        return prisma.taskProofSubmission.update({
+            where: { id: submissionId },
+            data: {
+                supportChatId: data.supportChatId,
+                supportTopicId: data.supportTopicId,
+                supportTopicStatus: data.supportTopicStatus,
+                supportTopicOpenedAt: new Date(),
+                supportTopicClosedAt: null,
+                supportLastMessageAt: new Date(),
+            },
+            include: proofInclude,
+        });
+    }
+
+    async updateSupportTopicState(
+        submissionId: string,
+        data: {
+            supportTopicStatus?: TaskProofSupportTopicStatus;
+            supportLastMessageAt?: Date;
+            supportTopicClosedAt?: Date | null;
+        },
+    ) {
+        return prisma.taskProofSubmission.update({
+            where: { id: submissionId },
+            data,
+            include: proofInclude,
+        });
+    }
+
+    async findBySupportTopic(chatId: bigint, topicId: number) {
+        return prisma.taskProofSubmission.findFirst({
+            where: {
+                supportChatId: chatId,
+                supportTopicId: topicId,
+            },
+            include: proofInclude,
+        });
+    }
+
+    async findLatestWaitingForStaffByStaffId(staffId: string) {
+        return prisma.taskProofSubmission.findFirst({
+            where: {
+                staffId,
+                status: TaskProofSubmissionStatus.SUBMITTED,
+                supportTopicStatus: TaskProofSupportTopicStatus.WAITING_FOR_STAFF,
+            },
+            include: proofInclude,
+            orderBy: [
+                { supportLastMessageAt: "desc" },
+                { updatedAt: "desc" },
+            ],
         });
     }
 }

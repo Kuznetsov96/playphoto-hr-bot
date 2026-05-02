@@ -109,6 +109,17 @@ vi.mock("../../../../config/roles.js", () => ({
     getAdminRoleByTelegramId: vi.fn(),
 }));
 
+vi.mock("../../../../services/task-proof-service.js", () => ({
+    taskProofService: {
+        getSubmissionById: vi.fn(),
+        findBySupportTopic: vi.fn(),
+        findLatestWaitingForStaffByStaffId: vi.fn().mockResolvedValue(null),
+        markWaitingForStaff: vi.fn(),
+        markWaitingForSupport: vi.fn(),
+        closeSupportTopic: vi.fn(),
+    }
+}));
+
 describe("staff support forwarding fallback", () => {
     beforeEach(() => {
         vi.clearAllMocks();

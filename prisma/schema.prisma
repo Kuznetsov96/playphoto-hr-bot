@@ -465,6 +465,12 @@ model TaskProofSubmission {
   taskId       String                    @unique
   staffId      String
   status       TaskProofSubmissionStatus @default(DRAFT)
+  supportChatId BigInt?
+  supportTopicId Int?
+  supportTopicStatus TaskProofSupportTopicStatus?
+  supportTopicOpenedAt DateTime?
+  supportTopicClosedAt DateTime?
+  supportLastMessageAt DateTime?
   submittedAt  DateTime?
   createdAt    DateTime                  @default(now())
   updatedAt    DateTime                  @updatedAt
@@ -475,6 +481,8 @@ model TaskProofSubmission {
 
   @@index([staffId])
   @@index([status])
+  @@index([supportChatId, supportTopicId])
+  @@index([supportTopicStatus, supportLastMessageAt])
 }
 
 model TaskProofItem {
@@ -650,6 +658,13 @@ enum FirstShiftOnboardingInputType {
   TEXT
   LINK
   MENTOR_OBSERVED
+}
+
+enum TaskProofSupportTopicStatus {
+  OPEN
+  WAITING_FOR_STAFF
+  WAITING_FOR_SUPPORT
+  CLOSED
 }
 
 enum MagnetCountConfidence {

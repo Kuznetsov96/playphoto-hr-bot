@@ -99,6 +99,17 @@ vi.mock("../../../../core/log-events.js", () => ({
     logBusinessEvent: vi.fn(),
 }));
 
+vi.mock("../../../../services/task-proof-service.js", () => ({
+    taskProofService: {
+        getSubmissionById: vi.fn(),
+        findBySupportTopic: vi.fn(),
+        findLatestWaitingForStaffByStaffId: vi.fn(),
+        markWaitingForStaff: vi.fn(),
+        markWaitingForSupport: vi.fn(),
+        closeSupportTopic: vi.fn(),
+    }
+}));
+
 describe("support group impersonation guard", () => {
     beforeEach(() => {
         vi.clearAllMocks();

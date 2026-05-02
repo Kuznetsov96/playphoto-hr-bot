@@ -127,6 +127,7 @@ export interface SessionData {
 
     taskProofFlow?: {
         taskId: string;
+        replySubmissionId?: string;
     };
 
     // Legacy / Other module fields
