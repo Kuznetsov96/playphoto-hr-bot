@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("grammy", () => {
     class MockInlineKeyboard {
-        text() { return this; }
+        buttons: string[] = [];
+        text(label: string) {
+            this.buttons.push(label);
+            return this;
+        }
         row() { return this; }
     }
     return {
@@ -390,5 +394,72 @@ describe("FirstShiftOnboardingService", () => {
             expect.stringContaining("Потрібна допомога"),
             expect.objectContaining({ message_thread_id: 42 })
         );
+    });
+
+    it("keeps routing messages to the onboarding topic while waiting for the final mentor decision", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue({
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "PENDING_FINAL",
+            currentStepKey: null,
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [],
+        } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            copyMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            text: "Потрібна допомога",
+            messageId: 99,
+            chatId: 123,
+        });
+
+        expect(handled).toBe(true);
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            expect.stringContaining("Потрібна допомога"),
+            expect.objectContaining({ message_thread_id: 42 })
+        );
+        expect(api.sendMessage).toHaveBeenLastCalledWith(
+            123,
+            expect.stringContaining("waitingFinal"),
+            expect.any(Object)
+        );
+    });
+
+    it("does not show final decision buttons on regular mentor case updates", () => {
+        const keyboard = (firstShiftOnboardingService as any).buildMentorCaseKeyboard({
+            id: "case-1",
+            steps: [
+                {
+                    id: "step-1",
+                    key: "laptop_start",
+                    order: 1,
+                    status: "SUBMITTED",
+                    inputType: "SCREENSHOT",
+                },
+            ],
+        });
+
+        expect(keyboard.buttons).toContain("✅ Approve");
+        expect(keyboard.buttons).toContain("🔁 Redo");
+        expect(keyboard.buttons).not.toContain("✅ Complete Successfully");
+        expect(keyboard.buttons).not.toContain("❌ Mark as Failed");
     });
 });
