@@ -23,6 +23,7 @@ import { taskProofService } from "../../../services/task-proof-service.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { getLocationShortcut } from "../../../utils/ticket-card.js";
 import { truncateText } from "../../../utils/task-helpers.js";
+import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -133,6 +134,18 @@ function buildTaskProofTopicBaseTitle(submission: Awaited<ReturnType<typeof task
 staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
+
+    const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
+    if (activeOnboardingCase) {
+        await ctx.answerCallbackQuery("Під час онбордінгу питання йдуть у спеціальний topic.").catch(() => { });
+        await ScreenManager.renderScreen(
+            ctx,
+            "🚀 <b>Онбордінг першої зміни ще відкритий.</b>\n\nПросто напиши повідомлення сюди, і я передам його в onboarding-topic ментора.",
+            new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
+            { forceNew: true }
+        );
+        return;
+    }
 
     // Check if user has active ticket
     const user = await userRepository.findByTelegramId(BigInt(telegramId));
@@ -1125,6 +1138,24 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             ctx.session.step = "idle";
             // Allow this to fall through to forwarding logic below (Section C)
         } else {
+            const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
+            if (activeOnboardingCase) {
+                const onboardingPayload: { text?: string; photoId?: string | null; messageId?: number; chatId?: number } = {
+                    photoId: ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null,
+                };
+                const onboardingText = ctx.message?.text || ctx.message?.caption;
+                if (onboardingText !== undefined) onboardingPayload.text = onboardingText;
+                if (ctx.message?.message_id !== undefined) onboardingPayload.messageId = ctx.message.message_id;
+                if (ctx.chat?.id !== undefined) onboardingPayload.chatId = ctx.chat.id;
+
+                const forwardedToOnboarding = await firstShiftOnboardingService.handleCandidateMessage(ctx.api, telegramId, onboardingPayload);
+                if (forwardedToOnboarding) {
+                    ctx.session.step = "idle";
+                    delete ctx.session.clarificationTaskId;
+                    return true;
+                }
+            }
+
             try {
                 let text = ctx.message?.text || ctx.message?.caption || "[Медіа]";
 

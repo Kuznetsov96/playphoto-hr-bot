@@ -18,6 +18,14 @@ const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "CLOSING", "PENDING_FINAL"] as c
 const CLOSING_BLOCK = "Закриття зміни";
 
 export class FirstShiftOnboardingService {
+    async findActiveCaseByTelegramId(telegramId: number) {
+        const candidate = await prisma.candidate.findFirst({
+            where: { user: { telegramId: BigInt(telegramId) } },
+        });
+        if (!candidate) return null;
+        return firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
+    }
+
     async ensureCase(candidateId: string) {
         const existing = await firstShiftOnboardingRepository.findCaseByCandidateId(candidateId);
         if (existing) return existing;
@@ -145,17 +153,22 @@ export class FirstShiftOnboardingService {
         messageId?: number;
         chatId?: number;
     }) {
-        const candidate = await prisma.candidate.findFirst({
-            where: { user: { telegramId: BigInt(telegramId) } },
-            include: { user: true, location: true },
-        });
-        if (!candidate) return false;
-
-        const onboardingCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
+        const onboardingCase = await this.findActiveCaseByTelegramId(telegramId);
         if (!onboardingCase) return false;
 
         const step = this.getCurrentStep(onboardingCase);
-        if (!step) return false;
+        if (!step) {
+            const label = onboardingCase.status === "PENDING_FINAL"
+                ? "💬 Повідомлення від фотографа під час очікування фінального рішення"
+                : "💬 Повідомлення від фотографа";
+            const replyText = onboardingCase.status === "PENDING_FINAL"
+                ? `${FIRST_SHIFT_ONBOARDING_TEXTS.waitingFinal}\n\n${FIRST_SHIFT_ONBOARDING_TEXTS.questionForwarded}`
+                : FIRST_SHIFT_ONBOARDING_TEXTS.questionForwarded;
+
+            await this.forwardCandidateMessageToTopic(api, onboardingCase, message, label);
+            await api.sendMessage(telegramId, replyText, { parse_mode: "HTML" });
+            return true;
+        }
 
         if (step.status === "SUBMITTED") {
             await this.forwardCandidateMessageToTopic(api, onboardingCase, message, "💬 Повідомлення від фотографа під час очікування підтвердження");
@@ -606,9 +619,6 @@ export class FirstShiftOnboardingService {
             keyboard.text("🔒 Open Closing", `fso_close_${onboardingCase.id}`).row();
         }
 
-        keyboard.text("✅ Complete Successfully", `fso_pass_${onboardingCase.id}`)
-            .row()
-            .text("❌ Mark as Failed", `fso_fail_${onboardingCase.id}`);
         return keyboard;
     }
 
