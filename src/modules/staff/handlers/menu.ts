@@ -15,6 +15,7 @@ import { buildSignedCallback } from "../../../utils/signed-callback.js";
 import { TEAM_CHATS } from "../../../config.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
+import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
 
 export const staffHandlers = new Composer<MyContext>();
 
@@ -473,6 +474,20 @@ export async function handleTaskProofMessage(ctx: MyContext): Promise<boolean> {
 export async function startSupportFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
+
+    const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
+    if (activeOnboardingCase) {
+        if (ctx.callbackQuery) {
+            await ctx.answerCallbackQuery("Під час онбордінгу питання йдуть у спеціальний topic.").catch(() => { });
+        }
+        await ScreenManager.renderScreen(
+            ctx,
+            "🚀 <b>Онбордінг першої зміни ще відкритий.</b>\n\nПросто напиши повідомлення сюди, і я передам його в onboarding-topic ментора.",
+            new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
+            { forceNew: true }
+        );
+        return;
+    }
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
 
