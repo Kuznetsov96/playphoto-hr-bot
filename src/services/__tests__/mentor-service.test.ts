@@ -15,7 +15,8 @@ vi.mock('../../db/core.js', () => ({
     default: {
         candidate: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]) },
         staffProfile: { findUnique: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
-        trainingSlot: { count: vi.fn().mockResolvedValue(0) }
+        trainingSlot: { count: vi.fn().mockResolvedValue(0) },
+        trainingSession: { findFirst: vi.fn().mockResolvedValue(null), deleteMany: vi.fn().mockResolvedValue({ count: 0 }) }
     }
 }));
 
@@ -35,7 +36,9 @@ vi.mock('../../repositories/candidate-repository.js', () => ({
 
 vi.mock('../../repositories/training-repository.js', () => ({
     trainingRepository: {
-        countBookedSlotsByDateRange: vi.fn().mockResolvedValue(0)
+        countBookedSlotsByDateRange: vi.fn().mockResolvedValue(0),
+        createSession: vi.fn(),
+        createSlot: vi.fn()
     }
 }));
 
@@ -81,7 +84,9 @@ vi.mock('../../utils/string-utils.js', () => ({
 
 vi.mock('../../constants/candidate-texts.js', () => ({
     CANDIDATE_TEXTS: {
-        "discovery-invite": () => "Test discovery invite text"
+        "discovery-invite": () => "Test discovery invite text",
+        "training-manual-invite": () => "training invite",
+        "mentor-manual-discovery-assigned": () => "discovery invite"
     }
 }));
 
@@ -92,7 +97,9 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
 import { mentorService } from '../mentor-service.js';
 import { candidateRepository } from '../../repositories/candidate-repository.js';
 import { accessService } from '../access-service.js';
+import { trainingRepository } from '../../repositories/training-repository.js';
 import prisma from '../../db/core.js';
+import { createKyivDate } from '../../utils/bot-utils.js';
 
 describe('MentorService', () => {
     beforeEach(() => {
@@ -288,6 +295,54 @@ describe('MentorService', () => {
             expect(count).toBe(0);
             expect(mockApi.sendMessage).not.toHaveBeenCalled();
             expect(candidateRepository.update).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('manual slot overlap guards', () => {
+        it('should block training booking text when an overlapping slot is already booked by a HIRED candidate', async () => {
+            const start = new Date('2026-05-04T08:30:00.000Z');
+            vi.mocked(createKyivDate).mockReturnValue(start as any);
+            vi.mocked((prisma as any).trainingSession.findFirst).mockResolvedValue({
+                slots: [
+                    {
+                        isBooked: true,
+                        candidate: { id: 'cand-existing', status: CandidateStatus.HIRED },
+                        candidateDiscovery: null,
+                    }
+                ]
+            } as any);
+
+            const result = await mentorService.bookTrainingSlotFromText('cand-new', '04.05 11:30');
+
+            expect(result).toEqual({
+                success: false,
+                error: '✨ This time slot is already occupied. Please choose another window. 📅'
+            });
+            expect(prisma.trainingSession.deleteMany).not.toHaveBeenCalled();
+            expect(trainingRepository.createSession).not.toHaveBeenCalled();
+        });
+
+        it('should block discovery booking text when an overlapping discovery slot is already booked', async () => {
+            const start = new Date('2026-05-04T08:30:00.000Z');
+            vi.mocked(createKyivDate).mockReturnValue(start as any);
+            vi.mocked((prisma as any).trainingSession.findFirst).mockResolvedValue({
+                slots: [
+                    {
+                        isBooked: true,
+                        candidate: null,
+                        candidateDiscovery: { id: 'cand-existing' },
+                    }
+                ]
+            } as any);
+
+            const result = await mentorService.bookDiscoverySlotFromText('cand-new', '04.05 11:30');
+
+            expect(result).toEqual({
+                success: false,
+                error: '✨ This time slot is already occupied. Please choose another window. 📅'
+            });
+            expect(prisma.trainingSession.deleteMany).not.toHaveBeenCalled();
+            expect(trainingRepository.createSession).not.toHaveBeenCalled();
         });
     });
 

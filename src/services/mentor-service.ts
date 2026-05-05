@@ -20,6 +20,18 @@ import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 
 export class MentorService {
+    private hasBookedOverlap(overlap: {
+        slots?: Array<{
+            isBooked?: boolean;
+            candidate?: { id?: string | null } | null;
+            candidateDiscovery?: { id?: string | null } | null;
+        }>;
+    } | null) {
+        return Boolean(overlap?.slots?.some((slot) =>
+            slot.isBooked && (slot.candidate || slot.candidateDiscovery)
+        ));
+    }
+
     private getKyivStartOfToday() {
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         kyivNow.setHours(0, 0, 0, 0);
@@ -661,13 +673,10 @@ export class MentorService {
                     { endTime: { gt: new Date(start.getTime() + 1000) } }
                 ]
             },
-            include: { slots: { include: { candidate: true } } }
+            include: { slots: { include: { candidate: true, candidateDiscovery: true } } }
         });
 
-        // Only block if there's an active booking
-        const isStrictlyOccupied = overlap && overlap.slots.some(s =>
-            s.isBooked && s.candidate && !["HIRED", "REJECTED"].includes(s.candidate.status)
-        );
+        const isStrictlyOccupied = this.hasBookedOverlap(overlap);
 
         if (isStrictlyOccupied) {
             return { success: false, error: `✨ This time slot is already occupied. Please choose another window. 📅` };
@@ -736,13 +745,10 @@ export class MentorService {
                     { endTime: { gt: start } }
                 ]
             },
-            include: { slots: { include: { candidate: true } } }
+            include: { slots: { include: { candidate: true, candidateDiscovery: true } } }
         });
 
-        // Only block if there's an active booking
-        const isStrictlyOccupied = overlap && overlap.slots.some(s =>
-            s.isBooked && s.candidate && !["HIRED", "REJECTED"].includes(s.candidate.status)
-        );
+        const isStrictlyOccupied = this.hasBookedOverlap(overlap);
 
         if (isStrictlyOccupied) {
             return { success: false, error: `✨ This time slot is already occupied. Please choose another window. 📅` };
@@ -810,12 +816,10 @@ export class MentorService {
                     { endTime: { gt: start } }
                 ]
             },
-            include: { slots: { include: { candidate: true } } }
+            include: { slots: { include: { candidate: true, candidateDiscovery: true } } }
         });
 
-        const isStrictlyOccupied = overlap && overlap.slots.some(s =>
-            s.isBooked && s.candidate && !["HIRED", "REJECTED"].includes(s.candidate.status)
-        );
+        const isStrictlyOccupied = this.hasBookedOverlap(overlap);
 
         if (isStrictlyOccupied) {
             return { success: false, error: `✨ This time slot is already occupied. Please choose another window. 📅` };
@@ -862,19 +866,6 @@ export class MentorService {
                 text: CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](dateStr, timeStr)
             }
         };
-    }
-
-    async createTrainingSessionDirect(start: Date, end: Date) {
-        return trainingRepository.createSession({ startTime: start, endTime: end });
-    }
-
-    async createTrainingSlotDirect(start: Date, end: Date, sessionId: string) {
-        return trainingRepository.createSlot({
-            startTime: start,
-            endTime: end,
-            isBooked: false,
-            trainingSession: { connect: { id: sessionId } }
-        });
     }
 
     async deleteTrainingSlot(slotId: string) {

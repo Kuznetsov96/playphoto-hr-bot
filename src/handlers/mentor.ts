@@ -39,40 +39,23 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
         }
 
         try {
-            const { bookingService } = await import("../services/booking-service.js");
-            const { accessService } = await import("../services/access-service.js");
-            const { PHOTOGRAPHER_GUIDE_LINK } = await import("../config.js");
-            const { createKyivDate } = await import("../utils/bot-utils.js");
-
             const cand = await candidateRepository.findById(candId!);
             if (!cand) return await ScreenManager.renderScreen(ctx, "❌ Candidate not found.");
 
-            const [day, month, year] = date!.split('.').map(Number);
-            const [hour, min] = text.split(':').map(Number);
-            const start = createKyivDate(year || new Date().getFullYear(), month! - 1, day!, hour!, min!);
-            const end = new Date(start.getTime() + 20 * 60 * 1000);
+            const result = type === 'discovery'
+                ? await mentorService.bookDiscoverySlotFromText(candId!, `${date} ${text}`)
+                : await mentorService.bookTrainingSlotFromText(candId!, `${date} ${text}`);
 
-            const session = await mentorService.createTrainingSessionDirect(start, end);
-            const slot = await mentorService.createTrainingSlotDirect(start, end, session.id);
+            if (!result.success) {
+                await ScreenManager.renderScreen(ctx, (result as any).error || "❌ Format error. Try again (HH:MM):");
+                return;
+            }
 
-            const tid = Number(cand.user.telegramId);
-            if (type === 'discovery') {
-                await bookingService.bookDiscoverySlot(tid, slot.id);
-                const discoveryKb = new InlineKeyboard()
-                    .text("🗓️ Перенести", buildSignedCallback("rt", slot.id)).row()
-                    .text("❌ Скасувати запис", buildSignedCallback("ct", slot.id)).row()
-                    .text("🚫 Відмовитись від вакансії", buildSignedCallback("wm", slot.id)).row()
-                    .text("👩‍🏫 Написати наставниці", "contact_mentor");
-                await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](date!, text), { parse_mode: "HTML", reply_markup: discoveryKb });
-            } else {
-                await bookingService.bookTrainingSlot(tid, slot.id);
-                const channelLink = await accessService.createInviteLink(cand.user.telegramId) || "https://t.me/+FuFRMGsvMktkNGFi";
-                const trainingKb = new InlineKeyboard()
-                    .text("🗓️ Перенести", buildSignedCallback("rt", slot.id)).row()
-                    .text("❌ Скасувати запис", buildSignedCallback("ct", slot.id)).row()
-                    .text("🚫 Відмовитись від вакансії", buildSignedCallback("wm", slot.id)).row()
-                    .text("👩‍🏫 Написати наставниці", "contact_mentor");
-                await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["training-manual-invite"](date!, text, channelLink, PHOTOGRAPHER_GUIDE_LINK), { parse_mode: "HTML", link_preview_options: { is_disabled: true }, reply_markup: trainingKb });
+            if (result.notification) {
+                await ctx.api.sendMessage(result.notification.telegramId, result.notification.text, {
+                    parse_mode: "HTML",
+                    link_preview_options: { is_disabled: true }
+                }).catch(() => {});
             }
 
             await ScreenManager.renderScreen(ctx, `✅ <b>Scheduled for ${date} ${text}!</b>\n\nCandidate has been notified.`, "mentor-action-success");
