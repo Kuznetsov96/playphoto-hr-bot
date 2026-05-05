@@ -234,6 +234,11 @@ export class FirstShiftOnboardingService {
                 } as FirstShiftOnboardingStep
             );
 
+            const refreshedCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
+            if (refreshedCase) {
+                await this.syncStatusCard(api, refreshedCase);
+            }
+
             if (step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS) {
                 await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.multiplePhotosHint, {
                     parse_mode: "HTML",
