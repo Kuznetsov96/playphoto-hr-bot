@@ -1,6 +1,6 @@
 import type { Api, Bot } from "grammy";
 import { InlineKeyboard } from "grammy";
-import type { FirstShiftOnboardingStep } from "@prisma/client";
+import { Prisma, type FirstShiftOnboardingStep } from "@prisma/client";
 import { FirstShiftOnboardingInputType } from "@prisma/client";
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
@@ -16,6 +16,8 @@ import { createKyivDate } from "../utils/bot-utils.js";
 
 const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "CLOSING", "PENDING_FINAL"] as const;
 const CLOSING_BLOCK = "Закриття зміни";
+const ENTRY_MESSAGE_LEASE_MS = 10 * 60 * 1000;
+const CLOSING_OPEN_LEAD_MS = 30 * 60 * 1000;
 
 export class FirstShiftOnboardingService {
     async findActiveCaseByTelegramId(telegramId: number) {
@@ -41,7 +43,15 @@ export class FirstShiftOnboardingService {
             status: index === 0 ? "ACTIVE" as const : "LOCKED" as const,
         }));
 
-        return firstShiftOnboardingRepository.createCase(candidateId, steps);
+        try {
+            return await firstShiftOnboardingRepository.createCase(candidateId, steps);
+        } catch (err) {
+            if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+                const concurrent = await firstShiftOnboardingRepository.findCaseByCandidateId(candidateId);
+                if (concurrent) return concurrent;
+            }
+            throw err;
+        }
     }
 
     async openCaseForCandidate(api: Api, candidateId: string) {
@@ -77,7 +87,25 @@ export class FirstShiftOnboardingService {
 
     async notifyCandidate(api: Api, candidateId: string) {
         const onboardingCase = await this.openCaseForCandidate(api, candidateId);
-        await this.sendEntryMessage(api, onboardingCase);
+        if (onboardingCase.entryMessageSentAt) {
+            return onboardingCase;
+        }
+
+        const now = new Date();
+        const leaseUntil = new Date(now.getTime() + ENTRY_MESSAGE_LEASE_MS);
+        const claimed = await firstShiftOnboardingRepository.claimEntryMessageDelivery(onboardingCase.id, now, leaseUntil);
+        if (!claimed) {
+            return (await firstShiftOnboardingRepository.findCaseByCandidateId(candidateId)) || onboardingCase;
+        }
+
+        let deliveredCase: FirstShiftOnboardingCaseWithRelations | null = null;
+        try {
+            await this.sendEntryMessage(api, onboardingCase);
+            deliveredCase = await firstShiftOnboardingRepository.markEntryMessageDelivered(onboardingCase.id, new Date());
+        } catch (err) {
+            await firstShiftOnboardingRepository.releaseEntryMessageDelivery(onboardingCase.id).catch(() => undefined);
+            throw err;
+        }
 
         logBusinessEvent({
             event: "first_shift_onboarding.candidate_notified",
@@ -85,10 +113,10 @@ export class FirstShiftOnboardingService {
             result: "success",
             module: "first-shift-onboarding",
             candidateId,
-            safeContext: { caseId: onboardingCase.id, topicId: onboardingCase.topicId },
+            safeContext: { caseId: deliveredCase.id, topicId: deliveredCase.topicId },
         });
 
-        return onboardingCase;
+        return deliveredCase;
     }
 
     async resumeCandidateFlowFromStart(api: Api, telegramId: number) {
@@ -99,7 +127,7 @@ export class FirstShiftOnboardingService {
         if (!onboardingCase) return false;
 
         if (onboardingCase.status === "OPEN") {
-            await this.sendEntryMessage(api, onboardingCase);
+            await this.notifyCandidate(api, candidate.id);
             return true;
         }
 
@@ -684,7 +712,7 @@ export class FirstShiftOnboardingService {
     private canOpenClosingNow(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         const shiftEnd = this.getShiftEndAt(onboardingCase);
         if (!shiftEnd) return false;
-        return new Date().getTime() >= shiftEnd.getTime() - 60 * 60 * 1000;
+        return new Date().getTime() >= shiftEnd.getTime() - CLOSING_OPEN_LEAD_MS;
     }
 
     private getShiftEndAt(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
