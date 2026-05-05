@@ -41,6 +41,11 @@ export function getShortLocationName(name?: string | null, city?: string | null)
     if (n.includes('leoland') || n.includes('leolend')) return 'Leo';
     if (n.includes('fantasy town')) return 'FT';
     if (n.includes('karamel')) return 'Карамель';
+    if (n.includes('volkland')) {
+        if (/\b3\b/.test(n)) return 'Volkland 3';
+        if (/\b2\b/.test(n)) return 'Volkland 2';
+        return 'Volkland 1';
+    }
     
     return name.split(' ')[0] || name;
 }
