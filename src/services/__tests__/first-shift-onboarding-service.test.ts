@@ -513,6 +513,92 @@ describe("FirstShiftOnboardingService", () => {
         );
     });
 
+    it("refreshes the pinned status card and exposes mentor buttons after a photo step is submitted", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+
+        const initialCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "CLOSING",
+            currentStepKey: "closing_printer",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            statusMessageId: 777,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n, firstName: "Надія", username: "honijx54" },
+                fullName: "Шмагай Надія Олександрівна",
+                location: { name: "Dytyache Horyshche" },
+                city: "Київ",
+                firstShiftDate: new Date("2026-05-05T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-13",
+                    key: "closing_printer",
+                    order: 13,
+                    block: "Закриття зміни",
+                    title: "Закрити принтер",
+                    prompt: "Вимкни принтер кнопкою, вийми папір і закрий всі слоти. Надішли фото принтера.",
+                    status: "ACTIVE",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                    updatedAt: new Date("2026-05-05T16:31:00.000Z"),
+                },
+            ],
+        } as any;
+
+        const submittedCase = {
+            ...initialCase,
+            steps: [
+                {
+                    ...initialCase.steps[0],
+                    status: "SUBMITTED",
+                    submittedAt: new Date("2026-05-05T16:33:00.000Z"),
+                    updatedAt: new Date("2026-05-05T16:33:00.000Z"),
+                },
+            ],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId)
+            .mockResolvedValueOnce(initialCase)
+            .mockResolvedValueOnce(submittedCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            copyMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            photoId: "photo-file-id",
+            messageId: 99,
+            chatId: 123,
+        });
+
+        expect(handled).toBe(true);
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenCalledWith("step-13", expect.objectContaining({
+            status: "SUBMITTED",
+        }));
+        expect(api.editMessageText).toHaveBeenCalledWith(
+            -1001234567890,
+            777,
+            expect.stringContaining("Стан:</b> 👀 Очікує ментора"),
+            expect.objectContaining({
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+    });
+
     it("keeps routing messages to the onboarding topic while waiting for the final mentor decision", async () => {
         vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
             id: "cand-1",
