@@ -132,7 +132,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             } else text = `🌸 <b>${firstName}</b>, ти записана на співбесіду!`;
             kb.text("🗓️ Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
                 .text("❌ Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).row()
-                .text("🚫 Відмовитись від вакансії", buildSignedCallback("wi", candidate.interviewSlotId || "none"));
+                .text("🚫 Не планую продовжувати", buildSignedCallback("wi", candidate.interviewSlotId || "none"));
             if (canContactStaff) kb.row().text("👩‍💼 Написати HR", "contact_hr");
             break;
         }
@@ -163,7 +163,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
             kb.text("🗓️ Перенести", buildSignedCallback("rt", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
                 .text("❌ Скасувати запис", buildSignedCallback("ct", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
-                .text("🚫 Відмовитись від вакансії", buildSignedCallback("wm", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
+                .text("🚫 Не планую продовжувати", buildSignedCallback("wm", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
                 .text("👩‍🏫 Написати наставниці", "contact_mentor");
             break;
         }
