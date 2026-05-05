@@ -76,13 +76,7 @@ export class FirstShiftOnboardingService {
             topicId: topic.message_thread_id,
         });
 
-        await api.sendMessage(FIRST_SHIFT_ONBOARDING_CHAT_ID, this.buildTopicCard(updated), {
-            parse_mode: "HTML",
-            message_thread_id: topic.message_thread_id,
-            reply_markup: this.buildMentorCaseKeyboard(updated),
-        });
-
-        return updated;
+        return this.syncStatusCard(api, updated);
     }
 
     async notifyCandidate(api: Api, candidateId: string) {
@@ -607,7 +601,6 @@ export class FirstShiftOnboardingService {
         await api.sendMessage(Number(onboardingCase.chatId), `<b>${escapeHtml(label)}</b>${message.text && !shouldCopyOriginal ? `\n\n${escapeHtml(message.text)}` : ""}`, {
             parse_mode: "HTML",
             message_thread_id: onboardingCase.topicId,
-            reply_markup: this.buildMentorStepKeyboard(stepForKeyboard || this.getCurrentStep(onboardingCase)),
         });
         if (shouldCopyOriginal && sourceChatId !== undefined && sourceMessageId !== undefined) {
             await api.copyMessage(Number(onboardingCase.chatId), sourceChatId, sourceMessageId, {
@@ -618,11 +611,13 @@ export class FirstShiftOnboardingService {
 
     private async postTopicStatus(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations, text: string, replyMarkup?: InlineKeyboard) {
         if (!onboardingCase.chatId || !onboardingCase.topicId) return;
-        await api.sendMessage(Number(onboardingCase.chatId), text, {
-            parse_mode: "HTML",
+        await this.syncStatusCard(api, onboardingCase);
+        const extra = {
+            parse_mode: "HTML" as const,
             message_thread_id: onboardingCase.topicId,
-            reply_markup: replyMarkup || this.buildMentorCaseKeyboard(onboardingCase),
-        });
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        };
+        await api.sendMessage(Number(onboardingCase.chatId), text, extra);
     }
 
     private buildTopicCard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
@@ -634,17 +629,46 @@ export class FirstShiftOnboardingService {
             `🗓 <b>Зміна:</b> ${escapeHtml(this.formatDate(candidate.firstShiftDate))} ${escapeHtml(candidate.firstShiftTime || "")}`;
     }
 
+    private buildStatusCard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        const currentStep = this.getCurrentStep(onboardingCase);
+        const total = onboardingCase.steps.length;
+        const stepLine = currentStep
+            ? `${currentStep.order}/${total}`
+            : `—/${total}`;
+        const mentorState = this.getMentorStateLabel(onboardingCase, currentStep);
+        const mentorAction = this.getMentorActionText(onboardingCase, currentStep);
+        const timingLabel = this.getTimingLabel(onboardingCase, currentStep);
+        const lastAction = this.getLastActionLabel(onboardingCase, currentStep);
+        const progressLabel = this.getProgressLabel(onboardingCase);
+        const stepTask = currentStep
+            ? `${escapeHtml(currentStep.prompt)}`
+            : escapeHtml(this.getNoStepTaskText(onboardingCase));
+
+        return `${this.buildTopicCard(onboardingCase)}\n\n` +
+            `━━━━━━━━━━━━━━\n` +
+            `📌 <b>Поточний стан:</b> ${mentorState}\n` +
+            `🔢 <b>Крок:</b> ${stepLine}\n` +
+            `📊 <b>Прогрес:</b> ${escapeHtml(progressLabel)}\n` +
+            `🧩 <b>Блок:</b> ${escapeHtml(currentStep?.block || "Очікування")}\n` +
+            `🎯 <b>Поточне завдання:</b> ${escapeHtml(currentStep?.title || "Очікування наступної дії")}\n\n` +
+            `📝 <b>Що робить фотограф:</b>\n${stepTask}\n\n` +
+            `👩‍🏫 <b>Що має зробити ментор:</b>\n${escapeHtml(mentorAction)}\n\n` +
+            `⏱ <b>Таймер:</b> ${escapeHtml(timingLabel)}\n` +
+            `🪵 <b>Остання дія:</b> ${escapeHtml(lastAction)}\n` +
+            `🕒 <b>Оновлено:</b> ${escapeHtml(this.formatDateTime(new Date()))}`;
+    }
+
     private buildMentorCaseKeyboard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         const keyboard = new InlineKeyboard();
         const step = this.getCurrentStep(onboardingCase);
         if (step && this.canMentorResolveStep(step)) {
-            keyboard.text("✅ Approve", `fso_ap_${step.id}`)
-                .text("🔁 Redo", `fso_rj_${step.id}`)
+            keyboard.text("✅ Підтвердити", `fso_ap_${step.id}`)
+                .text("🔁 На переробку", `fso_rj_${step.id}`)
                 .row();
         }
 
         if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
-            keyboard.text("🔒 Open Closing", `fso_close_${onboardingCase.id}`).row();
+            keyboard.text("🔓 Відкрити закриття", `fso_close_${onboardingCase.id}`).row();
         }
 
         return keyboard;
@@ -653,16 +677,16 @@ export class FirstShiftOnboardingService {
     private buildMentorStepKeyboard(step?: FirstShiftOnboardingStep | null) {
         const keyboard = new InlineKeyboard();
         if (!step || !this.canMentorResolveStep(step)) return keyboard;
-        keyboard.text("✅ Approve", `fso_ap_${step.id}`)
-            .text("🔁 Redo", `fso_rj_${step.id}`);
+        keyboard.text("✅ Підтвердити", `fso_ap_${step.id}`)
+            .text("🔁 На переробку", `fso_rj_${step.id}`);
         return keyboard;
     }
 
     private buildFinalKeyboard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         return new InlineKeyboard()
-            .text("✅ Complete Successfully", `fso_pass_${onboardingCase.id}`)
+            .text("✅ Завершити успішно", `fso_pass_${onboardingCase.id}`)
             .row()
-            .text("❌ Mark as Failed", `fso_fail_${onboardingCase.id}`);
+            .text("❌ Не пройшла", `fso_fail_${onboardingCase.id}`);
     }
 
     private getCurrentStep(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
@@ -707,6 +731,217 @@ export class FirstShiftOnboardingService {
     private formatDate(date?: Date | null) {
         if (!date) return "—";
         return new Date(date).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Kyiv" });
+    }
+
+    private formatDateTime(date?: Date | null) {
+        if (!date) return "—";
+        return new Date(date).toLocaleString("uk-UA", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "Europe/Kyiv",
+        });
+    }
+
+    private getMentorStateLabel(onboardingCase: FirstShiftOnboardingCaseWithRelations, step?: FirstShiftOnboardingStep | null) {
+        if (onboardingCase.status === "OPEN") return "⏳ Очікує старту фотографа";
+        if (onboardingCase.status === "PENDING_FINAL") return "✅ Очікує фінального рішення";
+        if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            return "⏳ Очікує відкриття блоку закриття";
+        }
+        if (step?.status === "SUBMITTED" || step?.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
+            return "👀 Очікує ментора";
+        }
+        return "▶️ Фотограф виконує крок";
+    }
+
+    private getMentorActionText(onboardingCase: FirstShiftOnboardingCaseWithRelations, step?: FirstShiftOnboardingStep | null) {
+        if (onboardingCase.status === "OPEN") {
+            return "Дочекатися натискання кнопки старту фотографом і тримати topic під рукою для швидкої відповіді.";
+        }
+        if (onboardingCase.status === "PENDING_FINAL") {
+            return "Перевірити, що зміна завершена коректно, і прийняти фінальне рішення нижче.";
+        }
+        if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            return "Коли до кінця зміни лишиться 30 хвилин або раніше за потреби, відкрити блок закриття.";
+        }
+        if (!step) {
+            return "Слідкувати за topic і відповісти фотографу, якщо надійде питання.";
+        }
+        if (step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
+            return "Підключитися віддалено, перевірити виконання вживу та натиснути потрібне рішення.";
+        }
+        if (step.status === "SUBMITTED") {
+            if (this.isPhotoInput(step.inputType)) {
+                return "Переглянути фото або скрін вище й підтвердити крок або повернути його на переробку.";
+            }
+            if (this.isTextInput(step.inputType)) {
+                return "Перевірити текст або посилання вище й підтвердити крок або повернути його на переробку.";
+            }
+            return "Перевірити результат кроку й підтвердити його або повернути на переробку.";
+        }
+        return "Дочекатися матеріалів або питання від фотографа. Кнопки рішення з'являться, коли крок буде готовий до перевірки.";
+    }
+
+    private getNoStepTaskText(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        if (onboardingCase.status === "OPEN") {
+            return "Онбординг ще не стартував. Після натискання кнопки старту тут з'явиться перший активний крок.";
+        }
+        if (onboardingCase.status === "PENDING_FINAL") {
+            return "Усі кроки пройдено, фотограф очікує фінального рішення.";
+        }
+        if (onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            return "Фотограф завершила блок відкриття та працює у звичайному режимі до старту закриття зміни.";
+        }
+        return "Очікування наступної дії у флоу.";
+    }
+
+    private getProgressLabel(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        const approved = onboardingCase.steps.filter(step => step.status === "APPROVED").length;
+        const total = onboardingCase.steps.length;
+        const currentStep = this.getCurrentStep(onboardingCase);
+        if (!currentStep) {
+            return `${approved}/${total} завершено`;
+        }
+
+        const blockSteps = onboardingCase.steps.filter(step => step.block === currentStep.block);
+        const approvedInBlock = blockSteps.filter(step => step.status === "APPROVED").length;
+        return `${approved}/${total} завершено · ${currentStep.block}: ${approvedInBlock}/${blockSteps.length}`;
+    }
+
+    private getTimingLabel(onboardingCase: FirstShiftOnboardingCaseWithRelations, step?: FirstShiftOnboardingStep | null) {
+        const now = new Date();
+        if (onboardingCase.status === "OPEN") {
+            return `очікує старту ${this.formatRelativeDuration(onboardingCase.createdAt, now)}`;
+        }
+        if (onboardingCase.status === "PENDING_FINAL") {
+            const waitingSince = this.getLatestResolvedAt(onboardingCase) || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return `чекає фінального рішення ${this.formatRelativeDuration(waitingSince, now)}`;
+        }
+        if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            const waitingSince = this.getLatestResolvedAt(onboardingCase) || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return `очікує відкриття closing ${this.formatRelativeDuration(waitingSince, now)}`;
+        }
+        if (!step) {
+            return `активний кейс ${this.formatRelativeDuration(onboardingCase.updatedAt || onboardingCase.createdAt, now)}`;
+        }
+        if (step.status === "SUBMITTED" || step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
+            const waitingSince = step.submittedAt || step.updatedAt || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return `чекає ментора ${this.formatRelativeDuration(waitingSince, now)}`;
+        }
+        const inProgressSince = step.updatedAt || onboardingCase.updatedAt || onboardingCase.createdAt;
+        return `у роботі ${this.formatRelativeDuration(inProgressSince, now)}`;
+    }
+
+    private getLastActionLabel(onboardingCase: FirstShiftOnboardingCaseWithRelations, step?: FirstShiftOnboardingStep | null) {
+        if (onboardingCase.status === "OPEN") {
+            return `Кейс відкрито ${this.formatDateTime(onboardingCase.createdAt)}`;
+        }
+        if (onboardingCase.status === "PENDING_FINAL") {
+            const latestApproved = this.getLatestResolvedStep(onboardingCase);
+            if (latestApproved?.approvedAt || latestApproved?.completedAt) {
+                const resolvedAt = latestApproved.approvedAt || latestApproved.completedAt;
+                return `Ментор підтвердила «${latestApproved.title}» о ${this.formatDateTime(resolvedAt)}`;
+            }
+            return "Усі кроки завершені, кейс очікує фінального рішення";
+        }
+        if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            const latestApproved = this.getLatestResolvedStep(onboardingCase);
+            if (latestApproved?.approvedAt || latestApproved?.completedAt) {
+                const resolvedAt = latestApproved.approvedAt || latestApproved.completedAt;
+                return `Завершено блок відкриття на кроці «${latestApproved.title}» о ${this.formatDateTime(resolvedAt)}`;
+            }
+            return "Фотограф завершила відкриття і працює до блоку закриття";
+        }
+        if (!step) {
+            return `Останнє оновлення кейса о ${this.formatDateTime(onboardingCase.updatedAt || onboardingCase.createdAt)}`;
+        }
+        if (step.status === "SUBMITTED" && step.submittedAt) {
+            return `Фотограф надіслала результат по кроку «${step.title}» о ${this.formatDateTime(step.submittedAt)}`;
+        }
+        if (step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
+            return `Фотограф дійшла до live-перевірки «${step.title}» о ${this.formatDateTime(step.updatedAt || onboardingCase.updatedAt || onboardingCase.createdAt)}`;
+        }
+        if (step.mentorComment) {
+            return `Ментор залишила коментар до кроку «${step.title}»: ${step.mentorComment}`;
+        }
+        return `Крок «${step.title}» активний з ${this.formatDateTime(step.updatedAt || onboardingCase.updatedAt || onboardingCase.createdAt)}`;
+    }
+
+    private getLatestResolvedAt(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        const timestamps = onboardingCase.steps
+            .flatMap(step => [step.approvedAt, step.completedAt])
+            .filter((value): value is Date => value instanceof Date);
+
+        if (!timestamps.length) return null;
+        return timestamps.sort((a, b) => b.getTime() - a.getTime())[0] || null;
+    }
+
+    private getLatestResolvedStep(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        const resolved = onboardingCase.steps
+            .filter(step => step.approvedAt || step.completedAt)
+            .sort((a, b) => {
+                const aTime = (a.approvedAt || a.completedAt || a.updatedAt).getTime();
+                const bTime = (b.approvedAt || b.completedAt || b.updatedAt).getTime();
+                return bTime - aTime;
+            });
+
+        return resolved[0] || null;
+    }
+
+    private formatRelativeDuration(from?: Date | null, to = new Date()) {
+        if (!from) return "щойно";
+        const diffMs = Math.max(0, to.getTime() - from.getTime());
+        const totalMinutes = Math.floor(diffMs / 60000);
+        if (totalMinutes < 1) return "менше хвилини";
+        if (totalMinutes < 60) return `${totalMinutes} хв`;
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        if (hours < 24) {
+            return minutes > 0 ? `${hours} год ${minutes} хв` : `${hours} год`;
+        }
+        const days = Math.floor(hours / 24);
+        const remHours = hours % 24;
+        return remHours > 0 ? `${days} д ${remHours} год` : `${days} д`;
+    }
+
+    private async syncStatusCard(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        if (!onboardingCase.chatId || !onboardingCase.topicId) return onboardingCase;
+
+        const text = this.buildStatusCard(onboardingCase);
+        const replyMarkup = onboardingCase.status === "PENDING_FINAL"
+            ? this.buildFinalKeyboard(onboardingCase)
+            : this.buildMentorCaseKeyboard(onboardingCase);
+
+        if (onboardingCase.statusMessageId) {
+            try {
+                await api.editMessageText(Number(onboardingCase.chatId), onboardingCase.statusMessageId, text, {
+                    parse_mode: "HTML",
+                    reply_markup: replyMarkup,
+                });
+                return onboardingCase;
+            } catch (err) {
+                logger.warn({ err, caseId: onboardingCase.id, statusMessageId: onboardingCase.statusMessageId }, "Failed to update first-shift onboarding status card, sending a new one");
+            }
+        }
+
+        const sent = await api.sendMessage(Number(onboardingCase.chatId), text, {
+            parse_mode: "HTML",
+            message_thread_id: onboardingCase.topicId,
+            reply_markup: replyMarkup,
+        });
+
+        if (typeof (api as any).pinChatMessage === "function" && typeof sent.message_id === "number") {
+            await (api as any).pinChatMessage(Number(onboardingCase.chatId), sent.message_id, {
+                disable_notification: true,
+            }).catch((err: unknown) => logger.warn({ err, caseId: onboardingCase.id, messageId: sent.message_id }, "Failed to pin first-shift onboarding status card"));
+        }
+
+        return firstShiftOnboardingRepository.updateCase(onboardingCase.id, {
+            statusMessageId: sent.message_id,
+        });
     }
 
     private canOpenClosingNow(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
