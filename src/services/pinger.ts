@@ -63,11 +63,11 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
             const adminId = ADMIN_IDS[0];
             if (adminId) {
                 const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
-                    `👤 <b>${staffName}</b> заблокувала бот.\n\n` +
-                    `Виконано автоматично:\n` +
-                    `• Статус → <b>Закінчення роботи</b>\n` +
-                    `• Доступ до каналу — знято\n` +
-                    `• Таблиця персоналу — оновлено`;
+                    `👤 <b>${staffName}</b> blocked the bot.\n\n` +
+                    `Automatic actions completed:\n` +
+                    `• Status → <b>Offboarded</b>\n` +
+                    `• Channel access — removed\n` +
+                    `• Staff sheet — updated`;
                 await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => { });
             }
             return;
