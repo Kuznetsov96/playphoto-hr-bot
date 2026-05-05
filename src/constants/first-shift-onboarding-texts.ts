@@ -37,7 +37,7 @@ export const FIRST_SHIFT_ONBOARDING_TEXTS = {
     topicClosed: "✅ <b>First shift onboarding completed successfully.</b>",
     topicFailed: "❌ <b>First shift onboarding marked as failed.</b>",
     topicStarted: "▶️ Photographer started onboarding.",
-    topicSetupCompleted: "✅ Opening checklist is approved. Closing checklist will open one hour before shift end or by mentor command.",
+    topicSetupCompleted: "✅ Opening checklist is approved. Closing checklist will open 30 minutes before shift end or by mentor command.",
     topicClosingOpened: "🔒 Closing checklist opened.",
     topicAllStepsApproved: "✅ All checklist steps are approved. Waiting for final mentor decision.",
 };

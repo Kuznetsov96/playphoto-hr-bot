@@ -546,6 +546,8 @@ model FirstShiftOnboardingCase {
   status      FirstShiftOnboardingStatus @default(OPEN)
   chatId      BigInt?
   topicId     Int?
+  entryMessageLeaseUntil DateTime?
+  entryMessageSentAt DateTime?
   currentStepKey String?
   startedAt   DateTime?
   completedAt DateTime?

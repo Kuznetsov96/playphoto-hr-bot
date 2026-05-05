@@ -60,6 +60,9 @@ vi.mock("../../repositories/first-shift-onboarding-repository.js", () => ({
         findActiveCaseByCandidateId: vi.fn(),
         findActiveCaseByTopicId: vi.fn(),
         createCase: vi.fn(),
+        claimEntryMessageDelivery: vi.fn(),
+        markEntryMessageDelivered: vi.fn(),
+        releaseEntryMessageDelivery: vi.fn(),
         findUpcomingCandidatesForAutoOpen: vi.fn().mockResolvedValue([]),
     }
 }));
@@ -162,6 +165,24 @@ describe("FirstShiftOnboardingService", () => {
         expect(shiftEnd).toEqual(new Date("2026-05-01T17:00:00.000Z"));
     });
 
+    it("opens the closing flow 30 minutes before shift end, not earlier", () => {
+        vi.useFakeTimers();
+
+        const onboardingCase = {
+            candidate: {
+                firstShiftDate: new Date("2026-05-01T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                location: null,
+            },
+        } as any;
+
+        vi.setSystemTime(new Date("2026-05-01T16:29:59.000Z"));
+        expect((firstShiftOnboardingService as any).canOpenClosingNow(onboardingCase)).toBe(false);
+
+        vi.setSystemTime(new Date("2026-05-01T16:30:00.000Z"));
+        expect((firstShiftOnboardingService as any).canOpenClosingNow(onboardingCase)).toBe(true);
+    });
+
     it("ignores approve for a non-submitted active step", async () => {
         const onboardingCase = {
             id: "case-1",
@@ -241,6 +262,90 @@ describe("FirstShiftOnboardingService", () => {
 
         expect(result).toBe(true);
         expect(api.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining("Підготувати ноутбук"), expect.any(Object));
+    });
+
+    it("does not resend the entry message when notifyCandidate is called repeatedly for the same case", async () => {
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            topicId: 137,
+            chatId: BigInt(-1001234567890),
+            entryMessageSentAt: new Date("2026-05-05T10:00:00.000Z"),
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                fullName: "Бачук Вікторія Вікторівна",
+                firstName: "Вікторія",
+                username: "vvvbach",
+                location: { name: "Karamel" },
+                city: "Коломия",
+                firstShiftDate: new Date("2026-05-05T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                firstShiftPartner: null,
+            },
+            steps: [],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.findCaseByCandidateId).mockResolvedValue(onboardingCase);
+
+        const api = {
+            createForumTopic: vi.fn(),
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.notifyCandidate(api as any, "cand-1");
+
+        expect(result).toBe(onboardingCase);
+        expect(api.sendMessage).not.toHaveBeenCalledWith(123, "notifyCandidate", expect.anything());
+        expect(firstShiftOnboardingRepository.claimEntryMessageDelivery).not.toHaveBeenCalled();
+        expect(firstShiftOnboardingRepository.markEntryMessageDelivered).not.toHaveBeenCalled();
+    });
+
+    it("claims and records entry delivery only once for open cases resumed from /start", async () => {
+        vi.mocked(candidateRepository.findByTelegramId).mockResolvedValue({
+            id: "cand-1",
+        } as any);
+
+        const openCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "OPEN",
+            topicId: 137,
+            chatId: BigInt(-1001234567890),
+            entryMessageSentAt: null,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n, firstName: "Вікторія", username: "vvvbach" },
+                fullName: "Бачук Вікторія Вікторівна",
+                location: { name: "Karamel" },
+                city: "Коломия",
+                firstShiftDate: new Date("2026-05-05T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                firstShiftPartner: null,
+            },
+            steps: [],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue(openCase);
+        vi.mocked(firstShiftOnboardingRepository.findCaseByCandidateId).mockResolvedValue(openCase);
+        vi.mocked(firstShiftOnboardingRepository.claimEntryMessageDelivery).mockResolvedValue(true);
+        vi.mocked(firstShiftOnboardingRepository.markEntryMessageDelivered).mockResolvedValue({
+            ...openCase,
+            entryMessageSentAt: new Date("2026-05-05T10:01:00.000Z"),
+        } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.resumeCandidateFlowFromStart(api as any, 123);
+
+        expect(result).toBe(true);
+        expect(firstShiftOnboardingRepository.claimEntryMessageDelivery).toHaveBeenCalledTimes(1);
+        expect(firstShiftOnboardingRepository.markEntryMessageDelivered).toHaveBeenCalledTimes(1);
+        expect(api.sendMessage).toHaveBeenCalledWith(123, "notifyCandidate", expect.any(Object));
     });
 
     it("auto-advances non-approved button steps to the next candidate step", async () => {
