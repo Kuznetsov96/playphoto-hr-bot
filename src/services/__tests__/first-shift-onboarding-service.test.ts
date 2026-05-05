@@ -580,7 +580,7 @@ describe("FirstShiftOnboardingService", () => {
         expect(keyboard.buttons).not.toContain("❌ Не пройшла");
     });
 
-    it("builds a mentor status card with progress, timer, and last action", () => {
+    it("builds a compact mentor status card", () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-05-05T12:30:00.000Z"));
 
@@ -627,8 +627,10 @@ describe("FirstShiftOnboardingService", () => {
             ],
         });
 
-        expect(text).toContain("Прогрес:</b> 1/2 завершено");
-        expect(text).toContain("Таймер:</b> чекає ментора 20 хв");
-        expect(text).toContain("Остання дія:</b> Фотограф надіслала результат по кроку");
+        expect(text).toContain("Стан:</b> 👀 Очікує ментора");
+        expect(text).toContain("Зараз:</b> 2/2 · Налаштування камери");
+        expect(text).toContain("Що робить фотограф:</b> Надішли фото екрану камери.");
+        expect(text).toContain("Дія ментора:</b> Перевірити виконання і натиснути Підтвердити або На переробку.");
+        expect(text).toContain("Очікує:</b> 20 хв");
     });
 });

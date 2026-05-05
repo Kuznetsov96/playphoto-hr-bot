@@ -636,25 +636,22 @@ export class FirstShiftOnboardingService {
             ? `${currentStep.order}/${total}`
             : `—/${total}`;
         const mentorState = this.getMentorStateLabel(onboardingCase, currentStep);
-        const mentorAction = this.getMentorActionText(onboardingCase, currentStep);
-        const timingLabel = this.getTimingLabel(onboardingCase, currentStep);
-        const lastAction = this.getLastActionLabel(onboardingCase, currentStep);
-        const progressLabel = this.getProgressLabel(onboardingCase);
-        const stepTask = currentStep
-            ? `${escapeHtml(currentStep.prompt)}`
+        const mentorAction = this.getMentorActionCompact(onboardingCase, currentStep);
+        const waitingLabel = this.getWaitingCompactLabel(onboardingCase, currentStep);
+        const photographerTask = currentStep
+            ? escapeHtml(currentStep.prompt)
             : escapeHtml(this.getNoStepTaskText(onboardingCase));
+        const currentLabel = currentStep
+            ? `${stepLine} · ${escapeHtml(currentStep.title)}`
+            : stepLine;
 
         return `${this.buildTopicCard(onboardingCase)}\n\n` +
             `━━━━━━━━━━━━━━\n` +
-            `📌 <b>Поточний стан:</b> ${mentorState}\n` +
-            `🔢 <b>Крок:</b> ${stepLine}\n` +
-            `📊 <b>Прогрес:</b> ${escapeHtml(progressLabel)}\n` +
-            `🧩 <b>Блок:</b> ${escapeHtml(currentStep?.block || "Очікування")}\n` +
-            `🎯 <b>Поточне завдання:</b> ${escapeHtml(currentStep?.title || "Очікування наступної дії")}\n\n` +
-            `📝 <b>Що робить фотограф:</b>\n${stepTask}\n\n` +
-            `👩‍🏫 <b>Що має зробити ментор:</b>\n${escapeHtml(mentorAction)}\n\n` +
-            `⏱ <b>Таймер:</b> ${escapeHtml(timingLabel)}\n` +
-            `🪵 <b>Остання дія:</b> ${escapeHtml(lastAction)}\n` +
+            `📌 <b>Стан:</b> ${mentorState}\n` +
+            `🔢 <b>Зараз:</b> ${currentLabel}\n` +
+            `📝 <b>Що робить фотограф:</b> ${photographerTask}\n` +
+            `👩‍🏫 <b>Дія ментора:</b> ${escapeHtml(mentorAction)}\n` +
+            `⏱ <b>Очікує:</b> ${escapeHtml(waitingLabel)}\n` +
             `🕒 <b>Оновлено:</b> ${escapeHtml(this.formatDateTime(new Date()))}`;
     }
 
@@ -796,6 +793,43 @@ export class FirstShiftOnboardingService {
             return "Фотограф завершила блок відкриття та працює у звичайному режимі до старту закриття зміни.";
         }
         return "Очікування наступної дії у флоу.";
+    }
+
+    private getMentorActionCompact(onboardingCase: FirstShiftOnboardingCaseWithRelations, step?: FirstShiftOnboardingStep | null) {
+        if (onboardingCase.status === "PENDING_FINAL") {
+            return "Перевірити завершення зміни і прийняти фінальне рішення.";
+        }
+        if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            return "Відкрити блок закриття, коли це доречно.";
+        }
+        if (!step) {
+            return "Слідкувати за повідомленнями фотографа у topic.";
+        }
+        if (step.status === "SUBMITTED" || step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
+            return "Перевірити виконання і натиснути Підтвердити або На переробку.";
+        }
+        return "Очікувати матеріали від фотографа.";
+    }
+
+    private getWaitingCompactLabel(onboardingCase: FirstShiftOnboardingCaseWithRelations, step?: FirstShiftOnboardingStep | null) {
+        const now = new Date();
+        if (onboardingCase.status === "PENDING_FINAL") {
+            const waitingSince = this.getLatestResolvedAt(onboardingCase) || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return this.formatRelativeDuration(waitingSince, now);
+        }
+        if (!step && onboardingCase.steps.some(item => item.block === CLOSING_BLOCK && item.status === "LOCKED")) {
+            const waitingSince = this.getLatestResolvedAt(onboardingCase) || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return this.formatRelativeDuration(waitingSince, now);
+        }
+        if (step && (step.status === "SUBMITTED" || step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED)) {
+            const waitingSince = step.submittedAt || step.updatedAt || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return this.formatRelativeDuration(waitingSince, now);
+        }
+        if (step) {
+            const inProgressSince = step.updatedAt || onboardingCase.updatedAt || onboardingCase.createdAt;
+            return this.formatRelativeDuration(inProgressSince, now);
+        }
+        return this.formatRelativeDuration(onboardingCase.updatedAt || onboardingCase.createdAt, now);
     }
 
     private getProgressLabel(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
