@@ -40,15 +40,27 @@ vi.mock("../../constants/first-shift-onboarding-texts.js", () => ({
         completed: "completed",
         startButton: "start",
         askMentorButton: "ask",
+        topicOpened: "topicOpened",
+        topicStarted: "topicStarted",
         submittedNoApproval: "submittedNoApproval",
+        submitted: "submitted",
         approved: "approved",
+        rejected: () => "rejected",
+        closingOpened: "closingOpened",
         setupCompleted: "setupCompleted",
         topicSetupCompleted: "topicSetupCompleted",
         topicAllStepsApproved: "topicAllStepsApproved",
         topicClosed: "topicClosed",
+        topicFailed: "topicFailed",
+        topicClosingOpened: "topicClosingOpened",
         waitingFinal: "waitingFinal",
         questionForwarded: "questionForwarded",
         mentorObservedCandidate: "mentorObservedCandidate",
+        sendPhotoExpected: "sendPhotoExpected",
+        sendTextExpected: "sendTextExpected",
+        multiplePhotosHint: "multiplePhotosHint",
+        multiplePhotosDoneButton: "multiplePhotosDoneButton",
+        failed: "failed",
     },
 }));
 
@@ -562,9 +574,61 @@ describe("FirstShiftOnboardingService", () => {
             ],
         });
 
-        expect(keyboard.buttons).toContain("✅ Approve");
-        expect(keyboard.buttons).toContain("🔁 Redo");
-        expect(keyboard.buttons).not.toContain("✅ Complete Successfully");
-        expect(keyboard.buttons).not.toContain("❌ Mark as Failed");
+        expect(keyboard.buttons).toContain("✅ Підтвердити");
+        expect(keyboard.buttons).toContain("🔁 На переробку");
+        expect(keyboard.buttons).not.toContain("✅ Завершити успішно");
+        expect(keyboard.buttons).not.toContain("❌ Не пройшла");
+    });
+
+    it("builds a mentor status card with progress, timer, and last action", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-05-05T12:30:00.000Z"));
+
+        const text = (firstShiftOnboardingService as any).buildStatusCard({
+            id: "case-1",
+            status: "IN_PROGRESS",
+            createdAt: new Date("2026-05-05T09:00:00.000Z"),
+            updatedAt: new Date("2026-05-05T12:20:00.000Z"),
+            candidate: {
+                fullName: "Бачук Вікторія",
+                city: "Коломия",
+                firstShiftDate: new Date("2026-05-05T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                location: { name: "Karamel" },
+                user: { firstName: "Вікторія", username: "vvvbach" },
+                firstShiftPartner: { fullName: "Марія Коваль", user: { firstName: "Марія", username: "mentor_maria" } },
+            },
+            steps: [
+                {
+                    id: "step-1",
+                    key: "laptop_start",
+                    order: 1,
+                    block: "Ноутбук",
+                    title: "Підготувати ноутбук",
+                    prompt: "Надішли скрін робочого столу.",
+                    status: "APPROVED",
+                    inputType: "SCREENSHOT",
+                    approvedAt: new Date("2026-05-05T11:50:00.000Z"),
+                    completedAt: new Date("2026-05-05T11:50:00.000Z"),
+                    updatedAt: new Date("2026-05-05T11:50:00.000Z"),
+                },
+                {
+                    id: "step-2",
+                    key: "camera_settings",
+                    order: 2,
+                    block: "Камера",
+                    title: "Налаштування камери",
+                    prompt: "Надішли фото екрану камери.",
+                    status: "SUBMITTED",
+                    inputType: "PHOTO",
+                    submittedAt: new Date("2026-05-05T12:10:00.000Z"),
+                    updatedAt: new Date("2026-05-05T12:10:00.000Z"),
+                },
+            ],
+        });
+
+        expect(text).toContain("Прогрес:</b> 1/2 завершено");
+        expect(text).toContain("Таймер:</b> чекає ментора 20 хв");
+        expect(text).toContain("Остання дія:</b> Фотограф надіслала результат по кроку");
     });
 });
