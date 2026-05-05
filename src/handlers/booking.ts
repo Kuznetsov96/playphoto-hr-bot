@@ -199,7 +199,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rb", result.slot.id)).row()
             .text("❌ Скасувати запис", buildSignedCallback("cb", result.slot.id)).row()
-            .text("🚫 Відмовитись від вакансії", buildSignedCallback("wi", result.slot.id));
+            .text("🚫 Не планую продовжувати", buildSignedCallback("wi", result.slot.id));
         if ((result as any).candidate?.gender !== "male") {
             kb.row().text("👩‍💼 Написати HR", "contact_hr");
         }
@@ -329,12 +329,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, відмовитись", buildSignedCallback("cwi", slotId)).row()
+        .text("🚫 Так, завершити заявку", buildSignedCallback("cwi", slotId)).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що хочеш відмовитись від вакансії?</b>\n\n` +
-        `Ми закриємо твою заявку та скасуємо запис на співбесіду. Якщо просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        `⚠️ <b>Ти впевнена, що не плануєш продовжувати?</b>\n\n` +
+        `Ми закриємо твою заявку та скасуємо запис на співбесіду. Якщо тобі просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
@@ -780,7 +780,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rt", slotId)).row()
             .text("❌ Скасувати запис", buildSignedCallback("ct", slotId)).row()
-            .text("🚫 Відмовитись від вакансії", buildSignedCallback("wm", slotId)).row()
+            .text("🚫 Не планую продовжувати", buildSignedCallback("wm", slotId)).row()
             .text("👩‍🏫 Написати наставниці", "contact_mentor");
 
         await cleanupMessages(ctx);
@@ -931,12 +931,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, відмовитись", buildSignedCallback("cwm", slotId)).row()
+        .text("🚫 Так, завершити заявку", buildSignedCallback("cwm", slotId)).row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що хочеш відмовитись від вакансії?</b>\n\n` +
-        `Ми закриємо твою заявку та скасуємо запис. Якщо просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        `⚠️ <b>Ти впевнена, що не плануєш продовжувати?</b>\n\n` +
+        `Ми закриємо твою заявку та скасуємо запис. Якщо тобі просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
