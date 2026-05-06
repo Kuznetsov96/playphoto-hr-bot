@@ -211,24 +211,24 @@ hrFinalStepMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, "📑 <b>NDA Pending</b>", "hr-final-step-nda", { pushToStack: true });
     }).row();
 
-    range.text(`📝 Knowledge Test (${stats.testPending})`, async (ctx) => {
+    range.text(`📝 Knowledge Test Legacy (${stats.testPending})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "📝 <b>Knowledge Test</b>", "hr-final-step-test", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "📝 <b>Knowledge Test</b>\nLegacy candidates only.", "hr-final-step-test", { pushToStack: true });
     }).row();
 
-    range.text(`📸 Staging Setup (${stats.stagingSetup})`, async (ctx) => {
+    range.text(`📸 Staging Setup Legacy (${stats.stagingSetup})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "📸 <b>Staging Setup</b>", "hr-final-step-setup", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "📸 <b>Staging Setup</b>\nLegacy candidates only.", "hr-final-step-setup", { pushToStack: true });
     }).row();
 
-    range.text(`⌛ Active Staging (${stats.activeStaging})`, async (ctx) => {
+    range.text(`⌛ Active Staging Legacy (${stats.activeStaging})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "⌛ <b>Active Staging</b>", "hr-final-step-active", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "⌛ <b>Active Staging</b>\nLegacy candidates only.", "hr-final-step-active", { pushToStack: true });
     }).row();
 
     range.text(`📝 Filling Data (${stats.fillingData})`, async (ctx) => {
         ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "📝 <b>Filling Documents</b>\nWaiting for candidates to submit their data.", "hr-final-step-filling", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "📝 <b>Filling Documents</b>\nWaiting for candidates to submit their data, documents, and schedule preferences.", "hr-final-step-filling", { pushToStack: true });
     }).row();
 
     range.text(`⏳ Ready for Schedule (${stats.readyForSchedule})`, async (ctx) => {

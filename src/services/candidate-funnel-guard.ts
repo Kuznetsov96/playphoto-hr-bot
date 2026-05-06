@@ -237,6 +237,7 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
             ] as CandidateStatus[]).includes(oldState.status);
         case CandidateStatus.READY_FOR_HIRE:
             return ([
+                CandidateStatus.NDA,
                 CandidateStatus.STAGING_ACTIVE,
                 CandidateStatus.OFFLINE_STAGING,
                 CandidateStatus.READY_FOR_HIRE,

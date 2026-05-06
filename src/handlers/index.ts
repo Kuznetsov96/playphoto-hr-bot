@@ -16,7 +16,7 @@ import { firstShiftOnboardingHandlers, handleFirstShiftOnboardingCandidateMessag
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
-import { quizHandlers, startQuiz } from "./quiz-handler.js";
+import { quizHandlers } from "./quiz-handler.js";
 import { onboardingHandlers } from "./onboarding-handler.js";
 import { accessHandlers } from "./access.js";
 import { broadcastService } from "../services/broadcast.js";
@@ -154,10 +154,15 @@ handlers.on("callback_query:data", async (ctx, next) => {
     }
     await candidateRepository.update(candId, {
         ndaConfirmedAt: new Date(),
-        status: CandidateStatus.KNOWLEDGE_TEST
+        status: CandidateStatus.READY_FOR_HIRE
     });
-    await ctx.answerCallbackQuery("Дякуємо! NDA підписано. ✅");
-    await startQuiz(ctx);
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery("Дякуємо! NDA підтверджено. ✅");
+    await ScreenManager.renderScreen(
+        ctx,
+        CANDIDATE_TEXTS["nda-confirmed-start-onboarding"],
+        new InlineKeyboard().text("📝 Почати оформлення", "start_onboarding_data")
+    );
 });
 
 // Global Broadcast Receipt Confirmation

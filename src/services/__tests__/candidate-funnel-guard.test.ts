@@ -150,7 +150,22 @@ describe("candidate funnel guard", () => {
         expect(() => validateCandidateFunnelTransition(context)).toThrow(InvalidCandidateTransitionError);
     });
 
-    it("allows nda to knowledge test progression", () => {
+    it("allows nda to ready for hire progression for the new final flow", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.NDA,
+            currentStep: FunnelStep.TRAINING,
+            hrDecision: "ACCEPTED",
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.READY_FOR_HIRE,
+            currentStep: FunnelStep.FIRST_SHIFT,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
+
+    it("keeps legacy nda to knowledge test progression valid", () => {
         const oldState = makeCandidate({
             status: CandidateStatus.NDA,
             currentStep: FunnelStep.TRAINING,
