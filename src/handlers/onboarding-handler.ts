@@ -10,6 +10,7 @@ import { menuRegistry } from "../utils/menu-registry.js";
 import { Menu } from "@grammyjs/menu";
 import { CandidateStatus } from "@prisma/client";
 import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
+import { getOnboardingResumeAction } from "../utils/final-step-flow.js";
 
 export const onboardingHandlers = new Composer<MyContext>();
 
@@ -114,11 +115,17 @@ onboardingHandlers.callbackQuery("start_onboarding_data", async (ctx) => {
 
     // Resume from first missing field instead of starting over
     const resumeStep = getFirstMissingStep(candidate);
+    const resumeAction = getOnboardingResumeAction(candidate.status, resumeStep, STEPS.FINAL);
 
-    if (resumeStep === STEPS.FINAL) {
-        // All data already collected — go straight to finish
+    if (resumeAction === "finish_onboarding") {
+        // All data already collected — finish the handoff exactly once
         ctx.session.candidateData = { step: STEPS.FINAL, passportPhotoIds: [] };
         await finishOnboarding(ctx, candidate);
+        return;
+    }
+
+    if (resumeAction === "prompt_preferences") {
+        await renderPreferencesPrompt(ctx);
         return;
     }
 
@@ -459,6 +466,21 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
         });
         await ScreenManager.renderScreen(ctx, "❌ <b>Сталася помилка при завершенні.</b>\n\nЗв'яжись, будь ласка, з адміном.");
     }
+}
+
+async function renderPreferencesPrompt(ctx: MyContext) {
+    const { accessService } = await import("../services/access-service.js");
+    const teamChannelLink = accessService.staticJoinLink || "https://t.me/+FuFRMGsvMktkNGFi";
+
+    const text = `✨ <b>Майже готово!</b>\n\n` +
+        `Твої дані успішно прийняті. Поки ми їх перевіряємо, залишився останній крок — обрати твої вихідні дні для складання графіка. 🗓️\n\n` +
+        `📸 <b>Також:</b> Приєднуйся до нашої <a href="${teamChannelLink}">Бази знань</a>, якщо ти ще не там. ✨`;
+
+    const kb = new InlineKeyboard()
+        .text("🗓️ Обрати вихідні", "onb_to_prefs").row()
+        .url("📖 База знань", teamChannelLink);
+
+    await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
 }
 
 onboardingHandlers.callbackQuery("onb_to_prefs", async (ctx) => {

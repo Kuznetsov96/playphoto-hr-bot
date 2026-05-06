@@ -27,6 +27,7 @@ import { leadsHandlers } from "./leads.js";
 import { blockShield } from "../middleware/block-shield.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { ScreenManager } from "../utils/screen-manager.js";
+import { canConfirmNDA } from "../utils/final-step-flow.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -152,6 +153,11 @@ handlers.on("callback_query:data", async (ctx, next) => {
     const cand = await candidateRepository.findById(candId);
     if (!cand || Number(cand.user.telegramId) !== ctx.from?.id) {
         await ctx.answerCallbackQuery("Ця дія недоступна.");
+        return;
+    }
+    if (!canConfirmNDA(cand)) {
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+        await ctx.answerCallbackQuery("Цей крок уже пройдено ✨");
         return;
     }
     await candidateRepository.update(candId, {
