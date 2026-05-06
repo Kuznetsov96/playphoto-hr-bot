@@ -1,5 +1,5 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { Composer } from "grammy";
+import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { hrHandlers } from "./hr.js";
 import { adminMenu, adminHandlers } from "./admin/index.js";
@@ -20,11 +20,13 @@ import { quizHandlers } from "./quiz-handler.js";
 import { onboardingHandlers } from "./onboarding-handler.js";
 import { accessHandlers } from "./access.js";
 import { broadcastService } from "../services/broadcast.js";
+import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { slotBuilderHandlers } from "./slot-builder.js";
 import { leadsHandlers } from "./leads.js";
 import { blockShield } from "../middleware/block-shield.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
+import { ScreenManager } from "../utils/screen-manager.js";
 
 export const handlers = new Composer<MyContext>();
 
