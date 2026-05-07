@@ -161,7 +161,7 @@ export class FirstShiftOnboardingService {
         const onboardingCase = await this.getCaseForCandidateCallback(caseId, telegramId);
         if (!onboardingCase) return null;
         const step = this.getCurrentStep(onboardingCase);
-        if (!step || step.inputType !== FirstShiftOnboardingInputType.BUTTON) return null;
+        if (!step || !this.canCandidateSubmitByButton(step)) return null;
         return this.submitStep(api, onboardingCase, step, { text: "Кандидат підтвердила виконання." });
     }
 
@@ -202,8 +202,24 @@ export class FirstShiftOnboardingService {
         }
 
         if (step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
-            await this.forwardCandidateMessageToTopic(api, onboardingCase, message, "💬 Повідомлення від фотографа");
-            await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.mentorObservedCandidate, { parse_mode: "HTML" });
+            await firstShiftOnboardingRepository.updateStep(step.id, {
+                status: "SUBMITTED",
+                submittedText: message.text || step.submittedText || null,
+                submittedAt: new Date(),
+            });
+
+            const submittedStep = {
+                ...step,
+                status: "SUBMITTED",
+                submittedText: message.text || step.submittedText || null,
+            } as FirstShiftOnboardingStep;
+
+            await this.forwardCandidateMessageToTopic(api, onboardingCase, message, `📤 ${step.block}: ${step.title}`, submittedStep);
+            const refreshedCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
+            if (refreshedCase) {
+                await this.syncStatusCard(api, refreshedCase);
+            }
+            await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.submitted, { parse_mode: "HTML" });
             return true;
         }
 
@@ -323,7 +339,7 @@ export class FirstShiftOnboardingService {
                 currentStepKey: null,
             });
             await api.sendMessage(Number(pending.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.waitingFinal, { parse_mode: "HTML" });
-            await this.postTopicStatus(api, pending, FIRST_SHIFT_ONBOARDING_TEXTS.topicAllStepsApproved, this.buildFinalKeyboard(pending));
+            await this.postTopicStatus(api, pending, this.buildFinalReviewText(pending), this.buildFinalKeyboard(pending));
             return pending;
         }
 
@@ -587,7 +603,7 @@ export class FirstShiftOnboardingService {
             `${escapeHtml(step.prompt)}`;
 
         const keyboard = new InlineKeyboard();
-        if (step.inputType === FirstShiftOnboardingInputType.BUTTON) {
+        if (this.canCandidateSubmitByButton(step)) {
             keyboard.text("✅ Виконано", `fso_btn_${onboardingCase.id}`);
         } else if (step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS) {
             keyboard.text(FIRST_SHIFT_ONBOARDING_TEXTS.multiplePhotosDoneButton, `fso_done_${onboardingCase.id}`);
@@ -764,6 +780,13 @@ export class FirstShiftOnboardingService {
             .text("❌ Не пройшла", `fso_fail_${onboardingCase.id}`);
     }
 
+    private buildFinalReviewText(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+        const total = onboardingCase.steps.length;
+        return `${FIRST_SHIFT_ONBOARDING_TEXTS.topicAllStepsApproved}\n\n` +
+            `<b>Прогрес:</b> ${total}/${total} кроків підтверджено\n` +
+            `<b>Дія ментора:</b> перевірити підсумок першої зміни і натиснути фінальне рішення нижче.`;
+    }
+
     private getCurrentStep(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         return onboardingCase.steps.find(step => step.status === "ACTIVE" || step.status === "SUBMITTED" || step.key === onboardingCase.currentStepKey && !["APPROVED", "SKIPPED"].includes(step.status))
             || onboardingCase.steps.find(step => step.status === "REJECTED");
@@ -801,6 +824,11 @@ export class FirstShiftOnboardingService {
     private isTextInput(inputType: FirstShiftOnboardingInputType) {
         return inputType === FirstShiftOnboardingInputType.TEXT ||
             inputType === FirstShiftOnboardingInputType.LINK;
+    }
+
+    private canCandidateSubmitByButton(step: FirstShiftOnboardingStep) {
+        return step.inputType === FirstShiftOnboardingInputType.BUTTON ||
+            step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED;
     }
 
     private canMentorResolveStep(step?: FirstShiftOnboardingStep | null) {

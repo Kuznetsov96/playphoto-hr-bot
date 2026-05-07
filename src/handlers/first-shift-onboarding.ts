@@ -40,7 +40,9 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_ap_(.+)$/, async (ctx) => {
         return;
     }
     const result = await firstShiftOnboardingService.approveStep(ctx.api, stepId, ctx.from?.id);
-    await ctx.answerCallbackQuery(result ? "Step approved." : "Step is no longer awaiting approval.");
+    await ctx.answerCallbackQuery(result?.status === "PENDING_FINAL"
+        ? "All steps approved. Choose the final decision below."
+        : result ? "Step approved. Next action is in the topic." : "Step is no longer awaiting approval.");
 });
 
 firstShiftOnboardingHandlers.callbackQuery(/^fso_rj_(.+)$/, async (ctx) => {

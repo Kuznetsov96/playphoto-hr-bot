@@ -690,6 +690,91 @@ describe("FirstShiftOnboardingService", () => {
         );
     });
 
+    it("turns mentor-observed candidate messages into mentor review actions", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+
+        const activeCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "photoshop_practice",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            statusMessageId: 777,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-photoshop",
+                    key: "photoshop_practice",
+                    order: 11,
+                    block: "Photoshop + макети",
+                    title: "Практика в макетах",
+                    prompt: "Перевірити через віддалений доступ.",
+                    status: "ACTIVE",
+                    inputType: "MENTOR_OBSERVED",
+                    requiresMentorApproval: true,
+                    updatedAt: new Date("2026-05-05T12:00:00.000Z"),
+                },
+            ],
+        } as any;
+        const submittedCase = {
+            ...activeCase,
+            steps: [{ ...activeCase.steps[0], status: "SUBMITTED", submittedText: "Зробила" }],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId)
+            .mockResolvedValueOnce(activeCase)
+            .mockResolvedValueOnce(submittedCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            text: "Зробила",
+            messageId: 99,
+            chatId: 123,
+        });
+
+        expect(handled).toBe(true);
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenCalledWith("step-photoshop", expect.objectContaining({
+            status: "SUBMITTED",
+            submittedText: "Зробила",
+        }));
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            expect.stringContaining("Зробила"),
+            expect.objectContaining({
+                message_thread_id: 42,
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+        expect(api.editMessageText).toHaveBeenCalledWith(
+            -1001234567890,
+            777,
+            expect.stringContaining("Стан:</b> 👀 Очікує ментора"),
+            expect.objectContaining({
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(123, "submitted", expect.any(Object));
+    });
+
     it("forwards voice or video-note messages to the onboarding topic during a photo step", async () => {
         vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
             id: "cand-1",
@@ -797,6 +882,82 @@ describe("FirstShiftOnboardingService", () => {
                 message_thread_id: 42,
                 reply_markup: expect.objectContaining({
                     buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+    });
+
+    it("shows final decision buttons after approving the last onboarding step", async () => {
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "CLOSING",
+            currentStepKey: "finish_script",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            statusMessageId: 777,
+            createdAt: new Date("2026-05-05T09:00:00.000Z"),
+            updatedAt: new Date("2026-05-05T18:00:00.000Z"),
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n, firstName: "Надія", username: "honijx54" },
+                fullName: "Шмагай Надія Олександрівна",
+                location: { name: "Dytyache Horyshche" },
+                city: "Київ",
+                firstShiftDate: new Date("2026-05-05T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-finish",
+                    key: "finish_script",
+                    order: 19,
+                    block: "Закриття зміни",
+                    title: "FINISH",
+                    prompt: "Запусти скрипт FINISH.",
+                    status: "SUBMITTED",
+                    inputType: "BUTTON",
+                    requiresMentorApproval: true,
+                    submittedAt: new Date("2026-05-05T18:00:00.000Z"),
+                    updatedAt: new Date("2026-05-05T18:00:00.000Z"),
+                },
+            ],
+        } as any;
+        const pendingCase = {
+            ...onboardingCase,
+            status: "PENDING_FINAL",
+            currentStepKey: null,
+            steps: [{ ...onboardingCase.steps[0], status: "APPROVED" }],
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingStep.findUnique).mockResolvedValue({
+            id: "step-finish",
+            caseId: "case-1",
+        });
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue({
+            id: "case-1",
+            candidateId: "cand-1",
+        });
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue(onboardingCase);
+        vi.mocked(firstShiftOnboardingRepository.updateCase).mockResolvedValue(pendingCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.approveStep(api as any, "step-finish", 111);
+
+        expect(result).toBe(pendingCase);
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            expect.stringContaining("Дія ментора"),
+            expect.objectContaining({
+                message_thread_id: 42,
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Завершити успішно", "❌ Не пройшла"]),
                 }),
             })
         );
