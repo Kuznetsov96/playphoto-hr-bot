@@ -51,7 +51,38 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_rj_(.+)$/, async (ctx) => {
         await ctx.answerCallbackQuery("Unavailable.");
         return;
     }
-    const result = await firstShiftOnboardingService.rejectStep(ctx.api, stepId);
+    ctx.session.step = `fso_reject_reason_${stepId}`;
+    await ctx.answerCallbackQuery("Choose or write the redo reason.");
+    await ctx.reply("🔁 <b>Що саме потрібно переробити?</b>\n\nОбери швидку причину або напиши свою відповідь у цей topic.", {
+        parse_mode: "HTML",
+        reply_markup: firstShiftOnboardingService.buildRejectReasonKeyboard(stepId),
+    });
+});
+
+firstShiftOnboardingHandlers.callbackQuery(/^fso_rjc_(.+)_(bad_photo|incomplete|custom|none)$/, async (ctx) => {
+    const stepId = ctx.match[1];
+    const reasonCode = ctx.match[2];
+    if (!stepId || !reasonCode) return;
+    const role = ctx.from?.id ? getAdminRoleByTelegramId(BigInt(ctx.from.id)) : null;
+    if (!role) {
+        await ctx.answerCallbackQuery("Unavailable.");
+        return;
+    }
+
+    if (reasonCode === "custom") {
+        ctx.session.step = `fso_reject_reason_${stepId}`;
+        await ctx.answerCallbackQuery("Write the reason in this topic.");
+        return;
+    }
+
+    const reason = reasonCode === "bad_photo"
+        ? "Не видно потрібні деталі або невдалий ракурс. Надішли, будь ласка, чіткіше фото."
+        : reasonCode === "incomplete"
+            ? "Надіслано не всі потрібні матеріали. Додай, будь ласка, повний комплект."
+            : null;
+
+    ctx.session.step = "idle";
+    const result = await firstShiftOnboardingService.rejectStep(ctx.api, stepId, reason);
     await ctx.answerCallbackQuery(result ? "Step returned for redo." : "Step is no longer awaiting review.");
 });
 
@@ -115,6 +146,19 @@ export async function handleFirstShiftOnboardingGroupMessage(ctx: MyContext): Pr
 
     const role = ctx.from?.id ? getAdminRoleByTelegramId(BigInt(ctx.from.id)) : null;
     if (!role) return false;
+
+    if (ctx.session.step?.startsWith("fso_reject_reason_")) {
+        const stepId = ctx.session.step.replace("fso_reject_reason_", "");
+        const reason = ctx.message.text || ctx.message.caption;
+        if (!reason) {
+            await ctx.reply("Напиши причину текстом або обери швидку причину з кнопок вище.", { parse_mode: "HTML" });
+            return true;
+        }
+
+        ctx.session.step = "idle";
+        await firstShiftOnboardingService.rejectStep(ctx.api, stepId, reason);
+        return true;
+    }
 
     return firstShiftOnboardingService.handleTopicReply(
         ctx.api,
