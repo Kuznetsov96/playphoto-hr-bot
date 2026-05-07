@@ -702,6 +702,93 @@ describe("FirstShiftOnboardingService", () => {
         );
     });
 
+    it("treats candidate media on approval button steps as a mentor-review submission", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+
+        const activeCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "camera_import_test",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            statusMessageId: 777,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-import",
+                    key: "camera_import_test",
+                    order: 7,
+                    block: "Камера",
+                    title: "Тестовий імпорт",
+                    prompt: "Зроби тестовий знімок і скинь фото.",
+                    status: "ACTIVE",
+                    inputType: "BUTTON",
+                    requiresMentorApproval: true,
+                    updatedAt: new Date("2026-05-05T12:00:00.000Z"),
+                },
+            ],
+        } as any;
+        const submittedCase = {
+            ...activeCase,
+            steps: [{ ...activeCase.steps[0], status: "SUBMITTED" }],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId)
+            .mockResolvedValueOnce(activeCase)
+            .mockResolvedValueOnce(submittedCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            copyMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            photoId: "photo-file-id",
+            messageId: 99,
+            chatId: 123,
+            hasCopyableOriginal: true,
+        });
+
+        expect(handled).toBe(true);
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenCalledWith("step-import", expect.objectContaining({
+            status: "SUBMITTED",
+        }));
+        expect(api.copyMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            123,
+            99,
+            expect.objectContaining({
+                message_thread_id: 42,
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+        expect(api.editMessageText).toHaveBeenCalledWith(
+            -1001234567890,
+            777,
+            expect.stringContaining("Стан:</b> 👀 Очікує ментора"),
+            expect.objectContaining({
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(123, "submitted", expect.any(Object));
+    });
+
     it("copies each multiple-photo upload without sending a mentor review card per photo", async () => {
         vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
             id: "cand-1",

@@ -203,24 +203,12 @@ export class FirstShiftOnboardingService {
         }
 
         if (step.inputType === FirstShiftOnboardingInputType.MENTOR_OBSERVED) {
-            await firstShiftOnboardingRepository.updateStep(step.id, {
-                status: "SUBMITTED",
-                submittedText: message.text || step.submittedText || null,
-                submittedAt: new Date(),
-            });
+            await this.submitCandidateMessageForMentorReview(api, onboardingCase, step, message);
+            return true;
+        }
 
-            const submittedStep = {
-                ...step,
-                status: "SUBMITTED",
-                submittedText: message.text || step.submittedText || null,
-            } as FirstShiftOnboardingStep;
-
-            await this.forwardCandidateMessageToTopic(api, onboardingCase, message, `📤 ${step.block}: ${step.title}`, submittedStep);
-            const refreshedCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
-            if (refreshedCase) {
-                await this.syncStatusCard(api, refreshedCase);
-            }
-            await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.submitted, { parse_mode: "HTML" });
+        if (step.inputType === FirstShiftOnboardingInputType.BUTTON && step.requiresMentorApproval) {
+            await this.submitCandidateMessageForMentorReview(api, onboardingCase, step, message);
             return true;
         }
 
@@ -574,6 +562,32 @@ export class FirstShiftOnboardingService {
         return firstShiftOnboardingRepository.findActiveCaseByCandidateId(
             (await prisma.firstShiftOnboardingCase.findUnique({ where: { id: step.caseId } }))?.candidateId || ""
         );
+    }
+
+    private async submitCandidateMessageForMentorReview(
+        api: Api,
+        onboardingCase: FirstShiftOnboardingCaseWithRelations,
+        step: FirstShiftOnboardingStep,
+        message: FirstShiftOnboardingCandidateMessage,
+    ) {
+        await firstShiftOnboardingRepository.updateStep(step.id, {
+            status: "SUBMITTED",
+            submittedText: message.text || step.submittedText || null,
+            submittedAt: new Date(),
+        });
+
+        const submittedStep = {
+            ...step,
+            status: "SUBMITTED",
+            submittedText: message.text || step.submittedText || null,
+        } as FirstShiftOnboardingStep;
+
+        await this.forwardCandidateMessageToTopic(api, onboardingCase, message, `📤 ${step.block}: ${step.title}`, submittedStep);
+        const refreshedCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
+        if (refreshedCase) {
+            await this.syncStatusCard(api, refreshedCase);
+        }
+        await api.sendMessage(Number(onboardingCase.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.submitted, { parse_mode: "HTML" });
     }
 
     private async autoOpenClosingSteps(api: Api) {
