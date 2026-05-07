@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { FIRST_SHIFT_ONBOARDING_CHAT_ID } from "../config.js";
 import { getAdminRoleByTelegramId } from "../config/roles.js";
-import { firstShiftOnboardingService } from "../services/first-shift-onboarding-service.js";
+import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../services/first-shift-onboarding-service.js";
 
 export const firstShiftOnboardingHandlers = new Composer<MyContext>();
 
@@ -125,17 +125,32 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_fail_(.+)$/, async (ctx) => {
 export async function handleFirstShiftOnboardingCandidateMessage(ctx: MyContext): Promise<boolean> {
     if (!ctx.from?.id || ctx.chat?.type !== "private" || !ctx.message) return false;
 
-    const text = ctx.message.text || ctx.message.caption || undefined;
-    const photoId = ctx.message.photo?.[ctx.message.photo.length - 1]?.file_id || null;
+    return firstShiftOnboardingService.handleCandidateMessage(ctx.api, ctx.from.id, buildFirstShiftOnboardingPayload(ctx));
+}
 
-    const payload: { text?: string; photoId?: string | null; messageId?: number; chatId?: number } = {
+export function buildFirstShiftOnboardingPayload(ctx: MyContext): FirstShiftOnboardingCandidateMessage {
+    const text = ctx.message?.text || ctx.message?.caption || undefined;
+    const photoId = ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null;
+    const hasMedia = Boolean(
+        photoId ||
+        ctx.message?.voice ||
+        ctx.message?.video_note ||
+        ctx.message?.video ||
+        ctx.message?.document ||
+        ctx.message?.audio ||
+        ctx.message?.animation ||
+        ctx.message?.sticker,
+    );
+    const hasFormattedText = Boolean(ctx.message?.entities?.length || ctx.message?.caption_entities?.length);
+
+    const payload: FirstShiftOnboardingCandidateMessage = {
         photoId,
-        messageId: ctx.message.message_id,
-        chatId: ctx.chat.id,
+        hasCopyableOriginal: hasMedia || hasFormattedText,
     };
+    if (ctx.message?.message_id !== undefined) payload.messageId = ctx.message.message_id;
+    if (ctx.chat?.id !== undefined) payload.chatId = ctx.chat.id;
     if (text !== undefined) payload.text = text;
-
-    return firstShiftOnboardingService.handleCandidateMessage(ctx.api, ctx.from.id, payload);
+    return payload;
 }
 
 export async function handleFirstShiftOnboardingGroupMessage(ctx: MyContext): Promise<boolean> {

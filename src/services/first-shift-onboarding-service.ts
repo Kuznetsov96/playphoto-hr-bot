@@ -19,6 +19,14 @@ const CLOSING_BLOCK = "Закриття зміни";
 const ENTRY_MESSAGE_LEASE_MS = 10 * 60 * 1000;
 const CLOSING_OPEN_LEAD_MS = 30 * 60 * 1000;
 
+export type FirstShiftOnboardingCandidateMessage = {
+    text?: string;
+    photoId?: string | null;
+    messageId?: number;
+    chatId?: number;
+    hasCopyableOriginal?: boolean;
+};
+
 export class FirstShiftOnboardingService {
     async findActiveCaseByTelegramId(telegramId: number) {
         const candidate = await prisma.candidate.findFirst({
@@ -169,12 +177,7 @@ export class FirstShiftOnboardingService {
         return this.submitStep(api, onboardingCase, step, { text: "Усі фото надіслано." });
     }
 
-    async handleCandidateMessage(api: Api, telegramId: number, message: {
-        text?: string;
-        photoId?: string | null;
-        messageId?: number;
-        chatId?: number;
-    }) {
+    async handleCandidateMessage(api: Api, telegramId: number, message: FirstShiftOnboardingCandidateMessage) {
         const onboardingCase = await this.findActiveCaseByTelegramId(telegramId);
         if (!onboardingCase) return false;
 
@@ -211,6 +214,11 @@ export class FirstShiftOnboardingService {
                     await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.questionForwarded, { parse_mode: "HTML" });
                     return true;
                 }
+                if (message.hasCopyableOriginal) {
+                    await this.forwardCandidateMessageToTopic(api, onboardingCase, message, "💬 Повідомлення від фотографа");
+                    await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.questionForwarded, { parse_mode: "HTML" });
+                    return true;
+                }
                 await api.sendMessage(telegramId, FIRST_SHIFT_ONBOARDING_TEXTS.sendPhotoExpected, { parse_mode: "HTML" });
                 return true;
             }
@@ -223,19 +231,23 @@ export class FirstShiftOnboardingService {
                 status: step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS ? "ACTIVE" : "SUBMITTED",
             });
 
-            await this.forwardCandidateMessageToTopic(
-                api,
-                onboardingCase,
-                message,
-                `📤 ${step.block}: ${step.title}`,
-                {
-                    ...step,
-                    status: step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS ? "ACTIVE" : "SUBMITTED",
-                } as FirstShiftOnboardingStep
-            );
-
             const refreshedCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
-            if (refreshedCase) {
+            if (step.inputType === FirstShiftOnboardingInputType.MULTIPLE_PHOTOS) {
+                await this.copyOriginalMessageToTopic(api, onboardingCase, message, `📷 Фото до кроку: ${step.block}: ${step.title}`);
+            } else {
+                await this.forwardCandidateMessageToTopic(
+                    api,
+                    onboardingCase,
+                    message,
+                    `📤 ${step.block}: ${step.title}`,
+                    {
+                        ...step,
+                        status: "SUBMITTED",
+                    } as FirstShiftOnboardingStep
+                );
+            }
+
+            if (refreshedCase && step.inputType !== FirstShiftOnboardingInputType.MULTIPLE_PHOTOS) {
                 await this.syncStatusCard(api, refreshedCase);
             }
 
@@ -591,7 +603,7 @@ export class FirstShiftOnboardingService {
     private async forwardCandidateMessageToTopic(
         api: Api,
         onboardingCase: FirstShiftOnboardingCaseWithRelations,
-        message: { text?: string; photoId?: string | null; messageId?: number; chatId?: number },
+        message: FirstShiftOnboardingCandidateMessage,
         label: string,
         stepForKeyboard?: FirstShiftOnboardingStep | null
     ) {
@@ -602,11 +614,7 @@ export class FirstShiftOnboardingService {
         const sourceMessageId = message.messageId;
         const reviewKeyboard = this.buildMentorStepKeyboard(stepForKeyboard);
         const hasReviewButtons = Boolean(stepForKeyboard && this.canMentorResolveStep(stepForKeyboard));
-        const shouldCopyOriginal = Boolean(
-            message.photoId &&
-            sourceChatId !== undefined &&
-            sourceMessageId !== undefined
-        );
+        const shouldCopyOriginal = this.canCopyOriginalMessage(message);
 
         const reviewText = stepForKeyboard
             ? this.buildMentorReviewText(onboardingCase, stepForKeyboard, label, message.text, shouldCopyOriginal)
@@ -627,10 +635,7 @@ export class FirstShiftOnboardingService {
         });
 
         if (shouldCopyOriginal && sourceChatId !== undefined && sourceMessageId !== undefined) {
-            await api.copyMessage(targetChatId, sourceChatId, sourceMessageId, {
-                message_thread_id: targetTopicId,
-                ...(hasReviewButtons ? { reply_markup: reviewKeyboard } : {}),
-            } as any).catch(async err => {
+            await this.copyOriginalMessageToTopic(api, onboardingCase, message, undefined, hasReviewButtons ? reviewKeyboard : undefined).catch(async err => {
                 logger.warn({ err }, "Failed to copy first-shift onboarding candidate message to topic");
                 if (hasReviewButtons) {
                     await api.sendMessage(targetChatId, "⬆️ Review the submitted media above and choose an action.", {
@@ -641,6 +646,35 @@ export class FirstShiftOnboardingService {
                 }
             });
         }
+    }
+
+    private async copyOriginalMessageToTopic(
+        api: Api,
+        onboardingCase: FirstShiftOnboardingCaseWithRelations,
+        message: FirstShiftOnboardingCandidateMessage,
+        fallbackLabel?: string,
+        replyMarkup?: InlineKeyboard,
+    ) {
+        if (!onboardingCase.chatId || !onboardingCase.topicId) return;
+        if (!this.canCopyOriginalMessage(message)) {
+            if (fallbackLabel) {
+                await api.sendMessage(Number(onboardingCase.chatId), `<b>${escapeHtml(fallbackLabel)}</b>`, {
+                    parse_mode: "HTML",
+                    message_thread_id: onboardingCase.topicId,
+                    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+                });
+            }
+            return;
+        }
+
+        await api.copyMessage(Number(onboardingCase.chatId), message.chatId!, message.messageId!, {
+            message_thread_id: onboardingCase.topicId,
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        } as any);
+    }
+
+    private canCopyOriginalMessage(message: FirstShiftOnboardingCandidateMessage) {
+        return Boolean(message.hasCopyableOriginal && message.chatId !== undefined && message.messageId !== undefined);
     }
 
     private async postTopicStatus(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations, text: string, replyMarkup?: InlineKeyboard) {

@@ -581,6 +581,7 @@ describe("FirstShiftOnboardingService", () => {
             photoId: "photo-file-id",
             messageId: 99,
             chatId: 123,
+            hasCopyableOriginal: true,
         });
 
         expect(handled).toBe(true);
@@ -608,6 +609,142 @@ describe("FirstShiftOnboardingService", () => {
                 }),
             })
         );
+    });
+
+    it("copies each multiple-photo upload without sending a mentor review card per photo", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "drawers_order",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            statusMessageId: 777,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-drawers",
+                    key: "drawers_order",
+                    order: 3,
+                    block: "Стійка",
+                    title: "Порядок у шухлядах",
+                    prompt: "Надішли фото кожної шухляди.",
+                    status: "ACTIVE",
+                    inputType: "MULTIPLE_PHOTOS",
+                    requiresMentorApproval: true,
+                    photoIds: null,
+                },
+            ],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId)
+            .mockResolvedValueOnce(onboardingCase)
+            .mockResolvedValueOnce({
+                ...onboardingCase,
+                steps: [{ ...onboardingCase.steps[0], photoIds: "photo-file-id" }],
+            } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            copyMessage: vi.fn().mockResolvedValue({}),
+            editMessageText: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            photoId: "photo-file-id",
+            messageId: 99,
+            chatId: 123,
+            hasCopyableOriginal: true,
+        });
+
+        expect(handled).toBe(true);
+        expect(api.copyMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            123,
+            99,
+            expect.objectContaining({ message_thread_id: 42 })
+        );
+        expect(api.copyMessage.mock.calls[0]?.[3]).not.toHaveProperty("reply_markup");
+        expect(api.editMessageText).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalledWith(
+            -1001234567890,
+            expect.stringContaining("Крок:"),
+            expect.any(Object)
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            123,
+            "multiplePhotosHint",
+            expect.any(Object)
+        );
+    });
+
+    it("forwards voice or video-note messages to the onboarding topic during a photo step", async () => {
+        vi.mocked((prisma as any).candidate.findFirst).mockResolvedValue({
+            id: "cand-1",
+            user: { telegramId: 123n },
+            location: null,
+        } as any);
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue({
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "camera_settings",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-camera",
+                    key: "camera_settings",
+                    order: 4,
+                    block: "Камера",
+                    title: "Налаштування камери",
+                    prompt: "Надішли фото головного екрану камери.",
+                    status: "ACTIVE",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+            copyMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const handled = await firstShiftOnboardingService.handleCandidateMessage(api as any, 123, {
+            messageId: 100,
+            chatId: 123,
+            hasCopyableOriginal: true,
+        });
+
+        expect(handled).toBe(true);
+        expect(api.copyMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            123,
+            100,
+            expect.objectContaining({ message_thread_id: 42 })
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(123, "questionForwarded", expect.any(Object));
+        expect(api.sendMessage).not.toHaveBeenCalledWith(123, "sendPhotoExpected", expect.any(Object));
     });
 
     it("adds review buttons to text submissions that wait for mentor approval", async () => {
