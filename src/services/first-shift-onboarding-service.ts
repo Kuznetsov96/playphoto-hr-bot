@@ -400,7 +400,7 @@ export class FirstShiftOnboardingService {
 
         await api.sendMessage(Number(updated.candidate.user.telegramId), FIRST_SHIFT_ONBOARDING_TEXTS.rejected(comment), { parse_mode: "HTML" });
         await this.sendCurrentStepToCandidate(api, updated);
-        await this.postTopicStatus(api, updated, `🔁 Step returned for redo: ${escapeHtml(step.title)}.`);
+        await this.postTopicStatus(api, updated, `🔁 Step returned for redo: ${escapeHtml(step.title)}.${comment ? `\nReason: ${escapeHtml(comment)}` : ""}`);
         return updated;
     }
 
@@ -596,21 +596,50 @@ export class FirstShiftOnboardingService {
         stepForKeyboard?: FirstShiftOnboardingStep | null
     ) {
         if (!onboardingCase.chatId || !onboardingCase.topicId) return;
+        const targetChatId = Number(onboardingCase.chatId);
+        const targetTopicId = onboardingCase.topicId;
         const sourceChatId = message.chatId;
         const sourceMessageId = message.messageId;
+        const reviewKeyboard = this.buildMentorStepKeyboard(stepForKeyboard);
+        const hasReviewButtons = Boolean(stepForKeyboard && this.canMentorResolveStep(stepForKeyboard));
         const shouldCopyOriginal = Boolean(
             message.photoId &&
             sourceChatId !== undefined &&
             sourceMessageId !== undefined
         );
-        await api.sendMessage(Number(onboardingCase.chatId), `<b>${escapeHtml(label)}</b>${message.text && !shouldCopyOriginal ? `\n\n${escapeHtml(message.text)}` : ""}`, {
+
+        const reviewText = stepForKeyboard
+            ? this.buildMentorReviewText(onboardingCase, stepForKeyboard, label, message.text, shouldCopyOriginal)
+            : `<b>${escapeHtml(label)}</b>${message.text && !shouldCopyOriginal ? `\n\n${escapeHtml(message.text)}` : ""}`;
+
+        if (!shouldCopyOriginal) {
+            await api.sendMessage(targetChatId, reviewText, {
+                parse_mode: "HTML",
+                message_thread_id: targetTopicId,
+                ...(hasReviewButtons ? { reply_markup: reviewKeyboard } : {}),
+            });
+            return;
+        }
+
+        await api.sendMessage(targetChatId, reviewText, {
             parse_mode: "HTML",
-            message_thread_id: onboardingCase.topicId,
+            message_thread_id: targetTopicId,
         });
+
         if (shouldCopyOriginal && sourceChatId !== undefined && sourceMessageId !== undefined) {
-            await api.copyMessage(Number(onboardingCase.chatId), sourceChatId, sourceMessageId, {
-                message_thread_id: onboardingCase.topicId,
-            } as any).catch(err => logger.warn({ err }, "Failed to copy first-shift onboarding candidate message to topic"));
+            await api.copyMessage(targetChatId, sourceChatId, sourceMessageId, {
+                message_thread_id: targetTopicId,
+                ...(hasReviewButtons ? { reply_markup: reviewKeyboard } : {}),
+            } as any).catch(async err => {
+                logger.warn({ err }, "Failed to copy first-shift onboarding candidate message to topic");
+                if (hasReviewButtons) {
+                    await api.sendMessage(targetChatId, "⬆️ Review the submitted media above and choose an action.", {
+                        parse_mode: "HTML",
+                        message_thread_id: targetTopicId,
+                        reply_markup: reviewKeyboard,
+                    }).catch(fallbackErr => logger.warn({ err: fallbackErr }, "Failed to send first-shift onboarding review fallback"));
+                }
+            });
         }
     }
 
@@ -684,6 +713,16 @@ export class FirstShiftOnboardingService {
         return keyboard;
     }
 
+    buildRejectReasonKeyboard(stepId: string) {
+        return new InlineKeyboard()
+            .text("📷 Не видно / ракурс", `fso_rjc_${stepId}_bad_photo`)
+            .row()
+            .text("🧩 Не все надіслано", `fso_rjc_${stepId}_incomplete`)
+            .row()
+            .text("✍️ Напишу причину", `fso_rjc_${stepId}_custom`)
+            .text("Без коментаря", `fso_rjc_${stepId}_none`);
+    }
+
     private buildFinalKeyboard(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         return new InlineKeyboard()
             .text("✅ Завершити успішно", `fso_pass_${onboardingCase.id}`)
@@ -694,6 +733,25 @@ export class FirstShiftOnboardingService {
     private getCurrentStep(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
         return onboardingCase.steps.find(step => step.status === "ACTIVE" || step.status === "SUBMITTED" || step.key === onboardingCase.currentStepKey && !["APPROVED", "SKIPPED"].includes(step.status))
             || onboardingCase.steps.find(step => step.status === "REJECTED");
+    }
+
+    private buildMentorReviewText(
+        onboardingCase: FirstShiftOnboardingCaseWithRelations,
+        step: FirstShiftOnboardingStep,
+        label: string,
+        messageText?: string,
+        mediaCopied = false,
+    ) {
+        const total = onboardingCase.steps.length;
+        const submittedText = messageText && !mediaCopied ? `\n\n<b>Відповідь:</b> ${escapeHtml(messageText)}` : "";
+        const materialLine = mediaCopied
+            ? "\n<b>Матеріал:</b> фото/скрін нижче"
+            : "";
+
+        return `<b>${escapeHtml(label)}</b>\n` +
+            `<b>Крок:</b> ${step.order}/${total} · ${escapeHtml(step.block)} · ${escapeHtml(step.title)}\n` +
+            `<b>Очікується:</b> ${escapeHtml(step.prompt)}${materialLine}${submittedText}\n` +
+            `<b>Дія ментора:</b> перевірити і натиснути Підтвердити або На переробку.`;
     }
 
     private getNextStep(onboardingCase: FirstShiftOnboardingCaseWithRelations, currentOrder: number) {

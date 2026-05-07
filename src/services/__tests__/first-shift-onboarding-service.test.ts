@@ -597,6 +597,72 @@ describe("FirstShiftOnboardingService", () => {
                 }),
             })
         );
+        expect(api.copyMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            123,
+            99,
+            expect.objectContaining({
+                message_thread_id: 42,
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
+    });
+
+    it("adds review buttons to text submissions that wait for mentor approval", async () => {
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "export_test",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-link",
+                    key: "export_test",
+                    order: 12,
+                    block: "Photoshop + макети",
+                    title: "Тестовий експорт",
+                    prompt: "Надішли лінк.",
+                    status: "ACTIVE",
+                    inputType: "LINK",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any;
+
+        vi.mocked(firstShiftOnboardingRepository.updateStep).mockResolvedValue({
+            ...onboardingCase.steps[0],
+            status: "SUBMITTED",
+        } as any);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        await (firstShiftOnboardingService as any).submitStep(api as any, onboardingCase, onboardingCase.steps[0], {
+            text: "https://example.com/export",
+        });
+
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            -1001234567890,
+            expect.stringContaining("https://example.com/export"),
+            expect.objectContaining({
+                message_thread_id: 42,
+                reply_markup: expect.objectContaining({
+                    buttons: expect.arrayContaining(["✅ Підтвердити", "🔁 На переробку"]),
+                }),
+            })
+        );
     });
 
     it("keeps routing messages to the onboarding topic while waiting for the final mentor decision", async () => {
