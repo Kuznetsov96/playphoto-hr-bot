@@ -18,6 +18,7 @@ const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "CLOSING", "PENDING_FINAL"] as c
 const CLOSING_BLOCK = "Закриття зміни";
 const ENTRY_MESSAGE_LEASE_MS = 10 * 60 * 1000;
 const CLOSING_OPEN_LEAD_MS = 30 * 60 * 1000;
+const CLOSING_AUTO_OPEN_GRACE_MS = 2 * 60 * 60 * 1000;
 
 export type FirstShiftOnboardingCandidateMessage = {
     text?: string;
@@ -343,7 +344,7 @@ export class FirstShiftOnboardingService {
             return pending;
         }
 
-        if (next.block === CLOSING_BLOCK && !this.canOpenClosingNow(refreshed)) {
+        if (next.block === CLOSING_BLOCK && !this.canAutoOpenClosingNow(refreshed)) {
             const paused = await firstShiftOnboardingRepository.updateCase(refreshed.id, {
                 status: "IN_PROGRESS",
                 currentStepKey: null,
@@ -589,7 +590,7 @@ export class FirstShiftOnboardingService {
 
         for (const onboardingCase of cases) {
             const closingStep = onboardingCase.steps.find(step => step.block === CLOSING_BLOCK && step.status === "LOCKED");
-            if (!closingStep || !this.canOpenClosingNow(onboardingCase)) continue;
+            if (!closingStep || !this.canAutoOpenClosingNow(onboardingCase)) continue;
             await this.openClosing(api, onboardingCase.id);
         }
     }
@@ -1103,10 +1104,12 @@ export class FirstShiftOnboardingService {
         });
     }
 
-    private canOpenClosingNow(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
+    private canAutoOpenClosingNow(onboardingCase: FirstShiftOnboardingCaseWithRelations, now = new Date()) {
         const shiftEnd = this.getShiftEndAt(onboardingCase);
         if (!shiftEnd) return false;
-        return new Date().getTime() >= shiftEnd.getTime() - CLOSING_OPEN_LEAD_MS;
+        const nowMs = now.getTime();
+        return nowMs >= shiftEnd.getTime() - CLOSING_OPEN_LEAD_MS &&
+            nowMs <= shiftEnd.getTime() + CLOSING_AUTO_OPEN_GRACE_MS;
     }
 
     private getShiftEndAt(onboardingCase: FirstShiftOnboardingCaseWithRelations) {
