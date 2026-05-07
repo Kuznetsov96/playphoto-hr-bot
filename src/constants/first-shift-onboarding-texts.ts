@@ -28,7 +28,7 @@ export const FIRST_SHIFT_ONBOARDING_TEXTS = {
     approved: "✅ Крок підтверджено ментором.",
     rejected: (comment?: string | null) =>
         `🔁 Ментор попросив переробити цей крок.${comment ? `\n\nКоментар: ${comment}` : ""}`,
-    setupCompleted: "Основні кроки підготовки завершені. Далі працюй у звичайному режимі, а якщо виникнуть питання — пиши сюди, ментор побачить повідомлення.\n\nБлок закриття зміни відкриється ближче до кінця зміни або за командою ментора.",
+    setupCompleted: "✅ Підготовка завершена.\n\nГарної зміни! Підходь до людей, фотографуй, друкуй магніти, допомагай з вибором і продавай. Якщо щось незрозуміло — пиши сюди, ментор побачить повідомлення.\n\nБлок закриття зміни відкриється за 30 хвилин до кінця зміни або за командою ментора.",
     closingOpened: "Починаємо закриття зміни. Виконуй кроки по черзі.",
     waitingFinal: "Усі кроки виконані. Очікуємо фінальне підтвердження ментора.",
     completed: "🎉 Вітаємо з першою зміною в PlayPhoto!\n\nТи пройшла онбординг першої зміни: підготувала стійку, техніку, робочі файли, попрацювала з макетами, перевірила друк фото та правильно закрила зміну.\n\nДалі працюємо за цими ж стандартами кожну зміну:\n- на початку перевіряємо техніку, порядок і готовність до роботи;\n- під час зміни уважно обслуговуємо клієнтів, допомагаємо з вибором і працюємо над продажами;\n- у кінці зміни закриваємо стійку, відправляємо звітність і залишаємо охайне робоче місце.\n\nЯкщо виникають питання — пиши в бот. Після першої зміни звернення вже будуть іти у стандартну підтримку.",
@@ -37,7 +37,7 @@ export const FIRST_SHIFT_ONBOARDING_TEXTS = {
     topicClosed: "✅ <b>First shift onboarding completed successfully.</b>",
     topicFailed: "❌ <b>First shift onboarding marked as failed.</b>",
     topicStarted: "▶️ Photographer started onboarding.",
-    topicSetupCompleted: "✅ Opening checklist is approved. Closing checklist will open 30 minutes before shift end or by mentor command.",
+    topicSetupCompleted: "✅ Opening checklist is approved. Photographer is in shift mode. Closing checklist will open 30 minutes before shift end or by mentor command.",
     topicClosingOpened: "🔒 Closing checklist opened.",
     topicAllStepsApproved: "✅ All checklist steps are approved. Waiting for final mentor decision.",
 };

@@ -177,7 +177,7 @@ describe("FirstShiftOnboardingService", () => {
         expect(shiftEnd).toEqual(new Date("2026-05-01T17:00:00.000Z"));
     });
 
-    it("opens the closing flow 30 minutes before shift end, not earlier", () => {
+    it("auto-opens the closing flow only near shift end, not for stale past shifts", () => {
         vi.useFakeTimers();
 
         const onboardingCase = {
@@ -189,10 +189,19 @@ describe("FirstShiftOnboardingService", () => {
         } as any;
 
         vi.setSystemTime(new Date("2026-05-01T16:29:59.000Z"));
-        expect((firstShiftOnboardingService as any).canOpenClosingNow(onboardingCase)).toBe(false);
+        expect((firstShiftOnboardingService as any).canAutoOpenClosingNow(onboardingCase)).toBe(false);
 
         vi.setSystemTime(new Date("2026-05-01T16:30:00.000Z"));
-        expect((firstShiftOnboardingService as any).canOpenClosingNow(onboardingCase)).toBe(true);
+        expect((firstShiftOnboardingService as any).canAutoOpenClosingNow(onboardingCase)).toBe(true);
+
+        vi.setSystemTime(new Date("2026-05-01T18:59:59.000Z"));
+        expect((firstShiftOnboardingService as any).canAutoOpenClosingNow(onboardingCase)).toBe(true);
+
+        vi.setSystemTime(new Date("2026-05-01T19:00:01.000Z"));
+        expect((firstShiftOnboardingService as any).canAutoOpenClosingNow(onboardingCase)).toBe(false);
+
+        vi.setSystemTime(new Date("2026-05-07T09:17:00.000Z"));
+        expect((firstShiftOnboardingService as any).canAutoOpenClosingNow(onboardingCase)).toBe(false);
     });
 
     it("ignores approve for a non-submitted active step", async () => {
@@ -429,6 +438,88 @@ describe("FirstShiftOnboardingService", () => {
             status: "IN_PROGRESS",
         });
         expect(api.sendMessage).toHaveBeenCalledWith(123, expect.stringContaining("Підготувати ноутбук"), expect.any(Object));
+    });
+
+    it("pauses after the opening checklist instead of auto-opening stale closing steps", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-05-07T09:17:00.000Z"));
+
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "export_test",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n, firstName: "Надія", username: "honijx54" },
+                fullName: "Шмагай Надія Олександрівна",
+                location: null,
+                city: "Київ",
+                firstShiftDate: new Date("2026-05-01T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-export",
+                    key: "export_test",
+                    order: 12,
+                    block: "Photoshop + макети",
+                    title: "Тестовий експорт",
+                    prompt: "Надішли лінк.",
+                    status: "SUBMITTED",
+                    inputType: "LINK",
+                    requiresMentorApproval: true,
+                },
+                {
+                    id: "step-closing",
+                    key: "closing_printer",
+                    order: 13,
+                    block: "Закриття зміни",
+                    title: "Закрити принтер",
+                    prompt: "Надішли фото принтера.",
+                    status: "LOCKED",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any;
+        const pausedCase = {
+            ...onboardingCase,
+            currentStepKey: null,
+            status: "IN_PROGRESS",
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingStep.findUnique).mockResolvedValue({
+            id: "step-export",
+            caseId: "case-1",
+        });
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue({
+            id: "case-1",
+            candidateId: "cand-1",
+        });
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue(onboardingCase);
+        vi.mocked(firstShiftOnboardingRepository.updateCase).mockResolvedValue(pausedCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 555 }),
+        };
+
+        const result = await firstShiftOnboardingService.approveStep(api as any, "step-export", 111);
+
+        expect(result).toBe(pausedCase);
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenCalledWith("step-export", expect.objectContaining({
+            status: "APPROVED",
+        }));
+        expect(firstShiftOnboardingRepository.updateStep).not.toHaveBeenCalledWith("step-closing", { status: "ACTIVE" });
+        expect(firstShiftOnboardingRepository.updateCase).toHaveBeenCalledWith("case-1", {
+            status: "IN_PROGRESS",
+            currentStepKey: null,
+        });
+        expect(api.sendMessage).toHaveBeenCalledWith(123, "setupCompleted", expect.any(Object));
     });
 
     it("does not auto-open first-shift onboarding after shift start has already passed", async () => {
