@@ -34,7 +34,50 @@ export class FirstShiftOnboardingService {
             where: { user: { telegramId: BigInt(telegramId) } },
         });
         if (!candidate) return null;
-        return firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
+
+        const onboardingCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
+        if (!onboardingCase) return null;
+
+        if (!(await this.isEligibleFirstShiftCandidate(candidate))) {
+            await firstShiftOnboardingRepository.updateCase(onboardingCase.id, { status: "CANCELLED" });
+            logBusinessEvent({
+                event: "first_shift_onboarding.case_cancelled",
+                actorType: "system",
+                result: "success",
+                module: "first-shift-onboarding",
+                candidateId: candidate.id,
+                safeContext: { caseId: onboardingCase.id, reason: "staff_has_prior_shifts" },
+            });
+            return null;
+        }
+
+        return onboardingCase;
+    }
+
+    private async isEligibleFirstShiftCandidate(candidate: { id: string; userId: string; firstShiftDate: Date | null }) {
+        if (!candidate.firstShiftDate) return false;
+
+        const activeStaff = await prisma.staffProfile.findFirst({
+            where: { userId: candidate.userId, isActive: true },
+            select: { id: true },
+        });
+        if (!activeStaff) return true;
+
+        const firstShiftDayStart = createKyivDate(
+            candidate.firstShiftDate.getUTCFullYear(),
+            candidate.firstShiftDate.getUTCMonth(),
+            candidate.firstShiftDate.getUTCDate(),
+            0,
+            0,
+        );
+        const priorShiftCount = await prisma.workShift.count({
+            where: {
+                staffId: activeStaff.id,
+                date: { lt: firstShiftDayStart },
+            },
+        });
+
+        return priorShiftCount === 0;
     }
 
     async ensureCase(candidateId: string) {
@@ -126,7 +169,7 @@ export class FirstShiftOnboardingService {
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (!candidate) return false;
 
-        const onboardingCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
+        const onboardingCase = await this.findActiveCaseByTelegramId(telegramId);
         if (!onboardingCase) return false;
 
         if (onboardingCase.status === "OPEN") {
@@ -489,6 +532,10 @@ export class FirstShiftOnboardingService {
         const windowEnd = new Date(now.getTime() + 60 * 60 * 1000);
         const candidates = await firstShiftOnboardingRepository.findUpcomingCandidatesForAutoOpen(now, windowEnd);
         for (const candidate of candidates) {
+            if (!(await this.isEligibleFirstShiftCandidate(candidate))) {
+                continue;
+            }
+
             const shiftStart = this.getShiftStartAt(candidate.firstShiftDate, candidate.firstShiftTime, candidate.location?.schedule);
             if (shiftStart && (shiftStart.getTime() < now.getTime() || shiftStart.getTime() > windowEnd.getTime())) {
                 continue;

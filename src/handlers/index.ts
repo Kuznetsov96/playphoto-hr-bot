@@ -278,8 +278,11 @@ handlers.use(async (ctx, next) => {
 
     if (user?.staffProfile) {
         if (ctx.chat?.type === "private" && ctx.message) {
-            const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
-            if (firstShiftHandled) return;
+            const supportSteps = ["support_chat", "create_ticket", "broadcast_decline_reason", "reply_and_close"];
+            if (!supportSteps.includes(ctx.session.step || "")) {
+                const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
+                if (firstShiftHandled) return;
+            }
         }
 
         // --- STAFF CONTEXT ---
