@@ -215,6 +215,28 @@ commandHandlers.command("start", async (ctx) => {
         }
 
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
+
+        // Active staff must always land in the staff hub. A stale active candidate
+        // onboarding case should never take over /start for someone already working.
+        if (user?.staffProfile?.isActive) {
+            logBusinessEvent({
+                event: "user.start_routed",
+                telegramId: userId,
+                actorType: "staff",
+                actorRole: "staff",
+                result: "success",
+                module: "commands",
+                operation: "start",
+                updateId: ctx.update.update_id,
+                userId: user.id,
+                safeContext: { targetHub: "STAFF", bypassedFirstShiftOnboarding: true },
+            });
+            await updateUserCommands(ctx, "STAFF");
+            const { showStaffHub } = await import("../modules/staff/handlers/menu.js");
+            await showStaffHub(ctx, true);
+            return;
+        }
+
         const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
         const onboardingCandidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
         const resumedFirstShiftOnboarding = await firstShiftOnboardingService.resumeCandidateFlowFromStart(ctx.api, userId);
