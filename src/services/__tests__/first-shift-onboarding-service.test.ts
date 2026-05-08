@@ -22,6 +22,7 @@ vi.mock("../../db/core.js", () => ({
         },
         firstShiftOnboardingStep: {
             findUnique: vi.fn(),
+            updateMany: vi.fn(),
         },
         candidate: {
             findFirst: vi.fn(),
@@ -547,6 +548,93 @@ describe("FirstShiftOnboardingService", () => {
 
         expect(notifySpy).toHaveBeenCalledTimes(1);
         expect(notifySpy).toHaveBeenCalledWith({}, "cand-upcoming");
+    });
+
+    it("auto-opens closing near shift end even when a pre-closing step is still submitted", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-05-01T16:30:00.000Z"));
+
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: "export_test",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n, firstName: "Вікторія", username: "vikixxzi" },
+                fullName: "Попик Вікторія Русланівна",
+                location: null,
+                city: "Київ",
+                firstShiftDate: new Date("2026-05-01T00:00:00.000Z"),
+                firstShiftTime: "14:00-20:00",
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-export",
+                    key: "export_test",
+                    order: 12,
+                    block: "Photoshop + макети",
+                    title: "Тестовий експорт",
+                    prompt: "Надішли лінк.",
+                    status: "SUBMITTED",
+                    inputType: "LINK",
+                    requiresMentorApproval: true,
+                },
+                {
+                    id: "step-closing",
+                    key: "closing_printer",
+                    order: 13,
+                    block: "Закриття зміни",
+                    title: "Закрити принтер",
+                    prompt: "Надішли фото принтера.",
+                    status: "LOCKED",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any;
+        const closingCase = {
+            ...onboardingCase,
+            currentStepKey: "closing_printer",
+            status: "CLOSING",
+            steps: [
+                { ...onboardingCase.steps[0], status: "SKIPPED" },
+                { ...onboardingCase.steps[1], status: "ACTIVE" },
+            ],
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findMany).mockResolvedValue([onboardingCase]);
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue(onboardingCase);
+        vi.mocked(firstShiftOnboardingRepository.updateStep).mockResolvedValue({} as any);
+        vi.mocked(firstShiftOnboardingRepository.updateCase).mockResolvedValue(closingCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 555 }),
+        };
+
+        await firstShiftOnboardingService.autoOpenUpcomingCases({ api } as any);
+
+        expect((prisma as any).firstShiftOnboardingStep.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                caseId: "case-1",
+                order: { lt: 13 },
+                block: { not: "Закриття зміни" },
+                status: { in: ["ACTIVE", "SUBMITTED", "REJECTED", "LOCKED"] },
+            }),
+            data: expect.objectContaining({
+                status: "SKIPPED",
+            }),
+        }));
+        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenCalledWith("step-closing", { status: "ACTIVE" });
+        expect(firstShiftOnboardingRepository.updateCase).toHaveBeenCalledWith("case-1", {
+            status: "CLOSING",
+            currentStepKey: "closing_printer",
+        });
+        expect(api.sendMessage).toHaveBeenCalledWith(123, "closingOpened", expect.any(Object));
     });
 
     it("does not copy plain text candidate messages into the onboarding topic twice", async () => {

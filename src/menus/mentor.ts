@@ -687,11 +687,11 @@ mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
     }).row();
 
     range.text("✅ Successful Onboarding", async (ctx) => {
-        await mentorService.completeOnboarding(candId, true);
+        await mentorService.completeOnboarding(candId, true, ctx.api);
         await ScreenManager.renderScreen(ctx, "🚀 <b>Onboarding Successful!</b>", "mentor-onboarding");
     }).row();
     range.text("❌ Failed", async (ctx) => {
-        await mentorService.completeOnboarding(candId, false);
+        await mentorService.completeOnboarding(candId, false, ctx.api);
         await ScreenManager.renderScreen(ctx, "Onboarding failed.", "mentor-onboarding");
     }).row();
     range.text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "🚀 Onboarding Day", "mentor-onboarding-day"));

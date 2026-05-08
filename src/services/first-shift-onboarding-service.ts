@@ -371,6 +371,7 @@ export class FirstShiftOnboardingService {
         const closingStep = onboardingCase.steps.find(step => step.block === CLOSING_BLOCK && !["APPROVED", "SKIPPED"].includes(step.status));
         if (!closingStep) return null;
 
+        await this.skipUnresolvedPreClosingSteps(onboardingCase.id, closingStep.order);
         await firstShiftOnboardingRepository.updateStep(closingStep.id, { status: "ACTIVE" });
         const updated = await firstShiftOnboardingRepository.updateCase(onboardingCase.id, {
             status: "CLOSING",
@@ -594,7 +595,6 @@ export class FirstShiftOnboardingService {
         const cases = await prisma.firstShiftOnboardingCase.findMany({
             where: {
                 status: "IN_PROGRESS",
-                currentStepKey: null,
             },
             include: {
                 candidate: { include: { user: true, location: true, firstShiftPartner: { include: { user: true } } } },
@@ -607,6 +607,22 @@ export class FirstShiftOnboardingService {
             if (!closingStep || !this.canAutoOpenClosingNow(onboardingCase)) continue;
             await this.openClosing(api, onboardingCase.id);
         }
+    }
+
+    private async skipUnresolvedPreClosingSteps(caseId: string, closingOrder: number) {
+        await prisma.firstShiftOnboardingStep.updateMany({
+            where: {
+                caseId,
+                order: { lt: closingOrder },
+                block: { not: CLOSING_BLOCK },
+                status: { in: ["ACTIVE", "SUBMITTED", "REJECTED", "LOCKED"] },
+            },
+            data: {
+                status: "SKIPPED",
+                completedAt: new Date(),
+                mentorComment: "Automatically skipped because closing checklist opened by shift time.",
+            },
+        });
     }
 
     private async sendCurrentStepToCandidate(api: Api, onboardingCase: FirstShiftOnboardingCaseWithRelations) {
