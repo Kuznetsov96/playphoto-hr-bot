@@ -55,7 +55,11 @@ export class FirstShiftOnboardingService {
     }
 
     private async isEligibleFirstShiftCandidate(candidate: { id: string; userId: string; firstShiftDate: Date | null }) {
-        if (!candidate.firstShiftDate) return false;
+        if (!candidate.userId || !candidate.firstShiftDate) return true;
+
+        if (!prisma.staffProfile?.findFirst || !prisma.workShift?.count) {
+            return true;
+        }
 
         const activeStaff = await prisma.staffProfile.findFirst({
             where: { userId: candidate.userId, isActive: true },
@@ -169,7 +173,7 @@ export class FirstShiftOnboardingService {
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (!candidate) return false;
 
-        const onboardingCase = await this.findActiveCaseByTelegramId(telegramId);
+        const onboardingCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candidate.id);
         if (!onboardingCase) return false;
 
         if (onboardingCase.status === "OPEN") {
