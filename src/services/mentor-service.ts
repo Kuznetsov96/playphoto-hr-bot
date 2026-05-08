@@ -1,4 +1,4 @@
-import { InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
@@ -11,7 +11,6 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
 import { cleanupUserSessionMessages } from "../utils/cleanup.js";
-import { Bot } from "grammy";
 import prisma from "../db/core.js";
 import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
@@ -591,7 +590,7 @@ export class MentorService {
         };
     }
 
-    async completeOnboarding(candId: string, success: boolean) {
+    async completeOnboarding(candId: string, success: boolean, api?: Api) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
 
@@ -606,13 +605,34 @@ export class MentorService {
             if (cand.user) {
                 await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: SUCCESS (HIRED)");
             }
+            await this.closeFirstShiftOnboardingFromLegacy(candId, true, api);
             return { candidate: cand, success: true };
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
             if (cand.user) {
                 await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: FAILED");
             }
+            await this.closeFirstShiftOnboardingFromLegacy(candId, false, api);
             return { candidate: cand, success: false };
+        }
+    }
+
+    private async closeFirstShiftOnboardingFromLegacy(candId: string, success: boolean, api?: Api) {
+        if (!api) return;
+
+        try {
+            const { firstShiftOnboardingRepository } = await import("../repositories/first-shift-onboarding-repository.js");
+            const { firstShiftOnboardingService } = await import("./first-shift-onboarding-service.js");
+            const activeCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candId);
+            if (!activeCase) return;
+
+            if (success) {
+                await firstShiftOnboardingService.completeCase(api, activeCase.id);
+            } else {
+                await firstShiftOnboardingService.failCase(api, activeCase.id, "Legacy mentor onboarding marked as failed.");
+            }
+        } catch (err) {
+            logger.error({ err, candId, success }, "Failed to close first-shift onboarding from legacy mentor completion");
         }
     }
 
