@@ -1,6 +1,11 @@
 # ─── Dependencies ───
 node_modules/
 
+# ─── Local runtimes ───
+.venv/
+venv/
+env/
+
 # ─── Environment & Secrets (CRITICAL) ───
 .env
 .env.*
@@ -18,6 +23,15 @@ monobank_cache.json
 # ─── Build output ───
 /dist/
 /src/generated/prisma/
+
+# ─── Test and tool output ───
+coverage/
+.coverage
+.nyc_output/
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
 
 # ─── Compiled TypeScript artifacts ───
 *.d.ts

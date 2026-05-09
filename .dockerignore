@@ -1,7 +1,21 @@
 node_modules
+.git
+.github
+.claude
+.vscode
 npm-debug.log
 /dist_ignore
 # Note: we REMOVED /dist from here to allow SCP deployments to work with 'docker build'
 .env
+.env.*
+!.env.example
+.venv
+venv
+env
+coverage
+.cache
+tmp
+backups
 logs
 *.log
+.DS_Store
