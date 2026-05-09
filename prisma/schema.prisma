@@ -247,6 +247,7 @@ model Location {
   candidates             Candidate[]
   staff                  StaffProfile[]
   shifts                 WorkShift[]
+  replacementRequests    ReplacementRequest[]
   parcels                Parcel[]
 }
 
@@ -366,6 +367,9 @@ model StaffProfile {
   tasks                Task[]
   taskProofSubmissions TaskProofSubmission[]
   shifts               WorkShift[]
+  replacementRequests  ReplacementRequest[]  @relation("ReplacementRequester")
+  acceptedReplacements ReplacementRequest[]  @relation("ReplacementAcceptor")
+  replacementResponses ReplacementResponse[]
   firstShiftCandidates Candidate[] @relation("CandidateFirstShift")
   parcels              Parcel[]    @relation("ResponsibleStaff")
 }
@@ -431,8 +435,90 @@ model WorkShift {
   endTime    DateTime?
   location   Location     @relation(fields: [locationId], references: [id])
   staff      StaffProfile @relation(fields: [staffId], references: [id])
+  replacementRequests ReplacementRequest[]
 
   @@index([date])
+}
+
+enum ReplacementRequestStatus {
+  ACTIVE
+  FOUND
+  CANCELLED
+  EXPIRED
+  FAILED
+  CLOSED_BY_SCHEDULE_SYNC
+}
+
+enum ReplacementSearchWave {
+  SAME_LOCATION_AVAILABLE
+  SAME_LOCATION_LIMITED
+  SAME_CITY_AVAILABLE
+  SAME_CITY_LIMITED
+  URGENT_ALL
+}
+
+enum ReplacementResponseStatus {
+  SENT
+  ACCEPTED
+  DECLINED
+  INACTIVE
+  DELIVERY_FAILED
+}
+
+enum ReplacementAvailabilityKind {
+  AVAILABLE
+  LIMITED
+}
+
+model ReplacementRequest {
+  id                String                   @id @default(cuid())
+  workShiftId       String?
+  requesterStaffId  String
+  replacementStaffId String?
+  locationId        String
+  city              String
+  shiftDate         DateTime
+  shiftStartTime    DateTime?
+  shiftEndTime      DateTime?
+  status            ReplacementRequestStatus @default(ACTIVE)
+  currentWave       ReplacementSearchWave?
+  nextWaveAt        DateTime?
+  completedAt       DateTime?
+  closedReason      String?
+  adminNotifiedAt   DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  workShift         WorkShift?               @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
+  requester         StaffProfile             @relation("ReplacementRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
+  replacement       StaffProfile?            @relation("ReplacementAcceptor", fields: [replacementStaffId], references: [id])
+  location          Location                 @relation(fields: [locationId], references: [id])
+  responses         ReplacementResponse[]
+
+  @@index([status, nextWaveAt])
+  @@index([requesterStaffId, status])
+  @@unique([workShiftId, status])
+}
+
+model ReplacementResponse {
+  id               String                      @id @default(cuid())
+  requestId        String
+  staffId          String
+  wave             ReplacementSearchWave
+  availabilityKind ReplacementAvailabilityKind
+  status           ReplacementResponseStatus   @default(SENT)
+  chatId           BigInt?
+  messageId        Int?
+  sentAt           DateTime                    @default(now())
+  respondedAt      DateTime?
+  deliveryError    String?
+
+  request          ReplacementRequest          @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  staff            StaffProfile                @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, staffId])
+  @@index([requestId, status])
+  @@index([staffId])
 }
 
 model Task {

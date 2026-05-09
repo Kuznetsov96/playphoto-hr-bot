@@ -23,7 +23,11 @@ export const startWorkers = () => {
 
     const defaultWorker = new Worker(QUEUES.DEFAULT, async job => {
         logger.info({ jobId: job.id, name: job.name }, 'Processing job');
-        // TODO: Implement job processing logic
+        if (job.name === 'replacement-dispatch-wave') {
+            const bot = new Bot(process.env.BOT_TOKEN!);
+            const { replacementService } = await import('../services/replacement-service.js');
+            await replacementService.dispatchNextWave(bot.api, job.data.requestId);
+        }
     }, { connection });
 
     const broadcastWorker = new Worker(QUEUES.BROADCAST, async job => {

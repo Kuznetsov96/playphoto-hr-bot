@@ -12,6 +12,7 @@ import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
 import type { Api } from "grammy";
+import { Bot } from "grammy";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 
@@ -21,6 +22,14 @@ interface TeamMember {
     telegramId: string;
     surnameNameDot: string;
     locationName?: string;
+}
+
+export type ScheduleAvailabilityKind = "available" | "limited";
+
+export interface ScheduleAvailabilityEntry {
+    staffId: string;
+    telegramId: bigint;
+    availability: ScheduleAvailabilityKind;
 }
 
 interface ChatRevokeFailure {
@@ -1174,6 +1183,14 @@ export class ScheduleSyncService {
             containsNextMonthSchedule
         );
 
+        try {
+            const { replacementService } = await import("./replacement-service.js");
+            const bot = new Bot(process.env.BOT_TOKEN!);
+            await replacementService.closeActiveRequestsChangedBySchedule(bot.api);
+        } catch (err) {
+            logger.warn({ err }, "Replacement requests schedule-sync reconciliation failed");
+        }
+
         logBusinessEvent({
             event: "schedule.sync.completed",
             actorType: "system",
@@ -1204,6 +1221,62 @@ export class ScheduleSyncService {
             shiftsBefore,
             shiftsAfter: syncCount
         };
+    }
+
+    async getAvailabilityForDate(date: Date, sheetName: string = "Актуальний розклад"): Promise<Map<string, ScheduleAvailabilityKind>> {
+        this.ensureSheets();
+        const [teamMap, { hiddenRows, hiddenColumns }, allUsersWithStaff] = await Promise.all([
+            this.fetchTeamMapping(),
+            this.fetchHiddenScheduleIndexes(sheetName),
+            userRepository.findAllWithStaff()
+        ]);
+        const userStaffMap = new Map(
+            allUsersWithStaff
+                .filter(u => u.staffProfile)
+                .map(u => [u.telegramId.toString(), u.staffProfile!])
+        );
+
+        const res = await this.sheets.spreadsheets.get({
+            spreadsheetId: SPREADSHEET_ID_SCHEDULE,
+            ranges: [`'${sheetName}'!A1:AL500`],
+            includeGridData: true,
+            fields: "sheets(data(rowData(values(formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle)))))"
+        });
+
+        const rowData = res.data.sheets?.[0]?.data?.[0]?.rowData || [];
+        const headerValues = rowData[0]?.values || [];
+        const targetCol = headerValues.findIndex((cell: any, idx: number) => {
+            if (idx === 0 || hiddenColumns.has(idx)) return false;
+            const parsed = this.parseScheduleHeaderDate(String(cell?.formattedValue || ""));
+            return parsed ? this.isSameKyivDay(parsed, date) : false;
+        });
+
+        if (targetCol < 0) return new Map();
+
+        const availability = new Map<string, ScheduleAvailabilityKind>();
+        for (let i = 2; i < rowData.length; i++) {
+            if (hiddenRows.has(i)) continue;
+
+            const values = rowData[i]?.values || [];
+            const label = String(values[0]?.formattedValue || "").trim();
+            if (!label) continue;
+
+            const member = teamMap[label];
+            if (!member) continue;
+
+            const telegramId = this.parseTelegramId(member.telegramId);
+            if (!telegramId) continue;
+
+            const staffProfile = userStaffMap.get(telegramId.toString());
+            if (!staffProfile) continue;
+
+            availability.set(
+                staffProfile.id,
+                this.cellHasVisibleFill(values[targetCol]) ? "limited" : "available"
+            );
+        }
+
+        return availability;
     }
 
     private async fetchHiddenScheduleIndexes(sheetName: string): Promise<{ hiddenRows: Set<number>; hiddenColumns: Set<number> }> {
@@ -1357,6 +1430,46 @@ export class ScheduleSyncService {
             if (monthStr.startsWith(key)) return val;
         }
         return new Date().getMonth();
+    }
+
+    private parseScheduleHeaderDate(value: string): Date | null {
+        const str = value.trim().toLowerCase();
+        if (!str) return null;
+
+        const currentYear = new Date().getFullYear();
+        if (str.includes(',')) {
+            const parts = str.split(',');
+            const day = parseInt(parts[0] || "");
+            const month = this.parseMonth((parts[1] || "").trim());
+            if (!isNaN(day)) return new Date(currentYear, month, day);
+        }
+
+        if (str.includes('.')) {
+            const parts = str.split('.');
+            const day = parseInt(parts[0] || "");
+            const month = parseInt(parts[1] || "");
+            if (!isNaN(day) && !isNaN(month)) return new Date(currentYear, month - 1, day);
+        }
+
+        return null;
+    }
+
+    private isSameKyivDay(left: Date, right: Date): boolean {
+        return left.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" }) ===
+            right.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" });
+    }
+
+    private cellHasVisibleFill(cell: any): boolean {
+        const color = cell?.effectiveFormat?.backgroundColor;
+        const styleColor = cell?.effectiveFormat?.backgroundColorStyle?.rgbColor;
+        const selected = styleColor || color;
+        if (!selected) return false;
+
+        const red = selected.red ?? 0;
+        const green = selected.green ?? 0;
+        const blue = selected.blue ?? 0;
+
+        return !(red >= 0.98 && green >= 0.98 && blue >= 0.98);
     }
 
     private resolveLocationFromHeader(header: string, allLocations: Location[], cityContext?: string): Location | null {
