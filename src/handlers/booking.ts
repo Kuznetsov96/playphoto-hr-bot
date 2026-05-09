@@ -22,7 +22,45 @@ export const bookingHandlers = new Composer<MyContext>();
 const INTERVIEW_WAITLIST_REASON_NO_SLOTS = "NO_SLOTS_AVAILABLE";
 const INTERVIEW_WAITLIST_REASON_NO_DATE_FITS = "NO_DATE_FITS";
 const BOOKING_ACTION_DEBOUNCE_MS = 15_000;
+const KYIV_TIME_ZONE = "Europe/Kyiv";
 const bookingActionDedupe = new ActionDedupeWindow(BOOKING_ACTION_DEBOUNCE_MS);
+
+type SlotButton = {
+    id: string;
+    startTime: Date;
+};
+
+function formatSlotButton(slot: SlotButton) {
+    const dateStr = slot.startTime.toLocaleDateString("uk-UA", {
+        day: "2-digit",
+        month: "2-digit",
+        timeZone: KYIV_TIME_ZONE
+    });
+    const timeStr = slot.startTime.toLocaleTimeString("uk-UA", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: KYIV_TIME_ZONE
+    });
+
+    return `${dateStr} ${timeStr}`;
+}
+
+function buildSlotSelectionKeyboard(
+    slots: SlotButton[],
+    bookCallbackPrefix: string,
+    noFitCallback: string,
+    limit = 40
+) {
+    const keyboard = new InlineKeyboard();
+
+    slots.slice(0, limit).forEach((slot, index) => {
+        keyboard.text(formatSlotButton(slot), `${bookCallbackPrefix}${slot.id}`);
+        if ((index + 1) % 2 === 0) keyboard.row();
+    });
+
+    keyboard.row().text("🙋‍♀️ Не бачу зручного часу", noFitCallback).row();
+    return keyboard;
+}
 
 export function buildMentorReschedulePatch(status: CandidateStatus) {
     const isDiscovery = status === CandidateStatus.DISCOVERY_SCHEDULED;
@@ -438,16 +476,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             return;
         }
 
-        const keyboard = new InlineKeyboard();
-        slots.slice(0, 20).forEach((s: any, index: number) => {
-            const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-            const dateStr = s.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-            keyboard.text(`${dateStr} ${timeStr}`, `book_slot_${s.id}`);
-            if ((index + 1) % 2 === 0) keyboard.row();
-        });
-        keyboard.row().text("🙋‍♀️ Мені не підходить жодна дата", "no_slots_fit").row();
+        const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit", 20);
 
-        await ctx.editMessageText("Добре, давай оберемо інший зручний час: 🗓️✨", { reply_markup: keyboard });
+        await ctx.editMessageText(
+            "Добре, давай оберемо інший зручний час: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+            { reply_markup: keyboard }
+        );
 
     } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Interview reschedule failed");
@@ -508,32 +542,14 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
         return;
     }
 
-    const keyboard = new InlineKeyboard();
-
-    // Групуємо слоти за датами
-    const groupedSlots: Record<string, typeof slots> = {};
-    slots.forEach(slot => {
-        const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-        if (!groupedSlots[dateStr]) groupedSlots[dateStr] = [];
-        groupedSlots[dateStr].push(slot);
-    });
-
-    const dates = Object.keys(groupedSlots);
-    for (const date of dates) {
-        keyboard.text(`📅 --- ${date} ---`, `booking_date_header_${date.replace('.', '_')}`).row();
-        const daySlots = groupedSlots[date]!;
-        daySlots.forEach((slot, idx) => {
-            const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-            keyboard.text(timeStr, `book_slot_${slot.id}`);
-            if ((idx + 1) % 4 === 0) keyboard.row();
-        });
-        keyboard.row();
-    }
-
-    keyboard.text("🙋‍♀️ Мені не підходить жодна дата", "no_slots_fit").row();
+    logger.info({ telegramId, availableSlotCount: slots.length }, "Interview scheduling slots shown");
+    const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit");
 
     await cleanupMessages(ctx);
-    const msg = await ctx.reply("Обери зручний час для співбесіди: 🗓️✨", { reply_markup: keyboard });
+    const msg = await ctx.reply(
+        "Обери зручний час для співбесіди: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+        { reply_markup: keyboard }
+    );
     trackMessage(ctx, msg.message_id);
 });
 
@@ -544,12 +560,13 @@ bookingHandlers.callbackQuery("no_slots_available_ack", async (ctx) => {
 // 6. Немає вільних слотів / не підходять
 bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     if (isDuplicateBookingAction(`no-slots-fit:${ctx.from.id}`)) {
-        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що жодна дата не підходить.");
+        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що зручного часу немає.");
         return;
     }
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
-    logger.debug({ telegramId }, "Interview scheduling no-slots-fit selected");
+    const availableSlots = await interviewRepository.findActiveSlots();
+    logger.info({ telegramId, availableSlotCount: availableSlots.length }, "Interview scheduling no-slots-fit selected");
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
@@ -561,7 +578,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         }
     );
 
-    await ctx.editMessageText(`Домовились! Як тільки з'являться нові вікна — ти дізнаєшся про це першою. ✨`);
+    await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
 
     const { HR_IDS } = await import("../config.js");
     if (HR_IDS && HR_IDS.length > 0) {
@@ -688,31 +705,14 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         return;
     }
 
-    const keyboard = new InlineKeyboard();
-    const groupedSlots: Record<string, typeof slots> = {};
-
-    slots.forEach((slot: any) => {
-        const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-        if (!groupedSlots[dateStr]) groupedSlots[dateStr] = [];
-        groupedSlots[dateStr].push(slot);
-    });
-
-    const dates = Object.keys(groupedSlots);
-    for (const date of dates) {
-        keyboard.text(`📅 --- ${date} ---`, `training_date_header_${date.replace('.', '_')}`).row();
-        const daySlots = groupedSlots[date]!;
-        daySlots.forEach((slot: any, idx: number) => {
-            const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-            keyboard.text(timeStr, `book_training_slot_${slot.id}`);
-            if ((idx + 1) % 4 === 0) keyboard.row();
-        });
-        keyboard.row();
-    }
-
-    keyboard.text("🙋‍♀️ Мені не підходить жодна дата", "training_no_slots_fit").row();
+    logger.info({ telegramId, availableSlotCount: slots.length }, "Training scheduling slots shown");
+    const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit");
 
     await cleanupMessages(ctx);
-    const msg = await ctx.reply(`Обери зручний час для зустрічі-знайомства: 🗓️✨`, { reply_markup: keyboard });
+    const msg = await ctx.reply(
+        `Обери зручний час для зустрічі-знайомства: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.`,
+        { reply_markup: keyboard }
+    );
     trackMessage(ctx, msg.message_id);
 });
 
@@ -821,12 +821,13 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 // 9. Training No Slots Fit
 bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
     if (isDuplicateBookingAction(`training-no-slots-fit:${ctx.from.id}`)) {
-        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що жодна дата не підходить.");
+        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що зручного часу немає.");
         return;
     }
     await ctx.answerCallbackQuery();
     const telegramId = ctx.from.id;
-    logger.debug({ telegramId }, "Training scheduling no-slots-fit selected");
+    const availableSlots = await trainingRepository.findActiveSlots();
+    logger.info({ telegramId, availableSlotCount: availableSlots.length }, "Training scheduling no-slots-fit selected");
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
@@ -837,7 +838,7 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
         }
     );
 
-    await ctx.editMessageText(`Домовились! Як тільки з'являться нові вікна — ти дізнаєшся про це першою. ✨`);
+    await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
 
     const { MENTOR_IDS } = await import("../config.js");
     if (MENTOR_IDS && MENTOR_IDS.length > 0) {
@@ -1060,15 +1061,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             });
         }
 
-        const keyboard = new InlineKeyboard();
-        slots.slice(0, 20).forEach((s: any, index: number) => {
-            const timeStr = s.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-            const dateStr = s.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-            keyboard.text(`${dateStr} ${timeStr}`, `book_training_slot_${s.id}`);
-            if ((index + 1) % 2 === 0) keyboard.row();
-        });
+        const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit", 20);
 
-        await ctx.editMessageText("Добре, давай оберемо інший зручний час для навчання: 🗓️✨", { reply_markup: keyboard });
+        await ctx.editMessageText(
+            "Добре, давай оберемо інший зручний час: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+            { reply_markup: keyboard }
+        );
 
     } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Training reschedule failed");
