@@ -284,6 +284,7 @@ export class ReplacementService {
             distinct: ["wave"]
         });
         const used = new Set(sentWaves.map(r => r.wave));
+        if (request.currentWave) used.add(request.currentWave);
         return sequence.find(wave => !used.has(wave)) ?? null;
     }
 
