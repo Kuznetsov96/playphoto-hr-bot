@@ -22,6 +22,7 @@ const URGENT_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const DAY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const FINAL_WAVE_CLOSE_LEAD_MS = 4 * 60 * 60 * 1000;
 
 type StaffWithUserLocation = StaffProfile & { user: User; location: Location | null };
 type RequestWithRelations = ReplacementRequest & {
@@ -81,6 +82,7 @@ export class ReplacementService {
             }
         });
 
+        await this.notifyAdminStarted(api, request.id);
         await this.dispatchNextWave(api, request.id);
         return request;
     }
@@ -239,7 +241,7 @@ export class ReplacementService {
         }
 
         const intervalMs = this.getIntervalMs(request);
-        const nextWaveAt = nextWave === ReplacementSearchWave.URGENT_ALL ? null : new Date(now.getTime() + intervalMs);
+        const nextWaveAt = await this.getNextWaveAtAfterDispatch(request, nextWave, now, intervalMs);
 
         await prisma.replacementRequest.update({
             where: { id: request.id },
@@ -248,19 +250,11 @@ export class ReplacementService {
 
         await this.sendWave(api, request, nextWave, candidates);
 
-        if (nextWaveAt) {
-            await defaultQueue.add(
-                "replacement-dispatch-wave",
-                { requestId: request.id },
-                { delay: intervalMs, attempts: 3, removeOnComplete: true }
-            );
-        } else {
-            await defaultQueue.add(
-                "replacement-dispatch-wave",
-                { requestId: request.id },
-                { delay: 10 * 60 * 1000, attempts: 3, removeOnComplete: true }
-            );
-        }
+        await defaultQueue.add(
+            "replacement-dispatch-wave",
+            { requestId: request.id },
+            { delay: Math.max(0, nextWaveAt.getTime() - now.getTime()), attempts: 3, removeOnComplete: true }
+        );
     }
 
     async closeActiveRequestsChangedBySchedule(api: Api) {
@@ -459,14 +453,14 @@ export class ReplacementService {
         if (!request?.replacement) return;
 
         const text =
-            `Знайдено підміну.\n\n` +
-            `Дата: ${this.formatDate(request.shiftDate)}\n` +
-            `Час: ${escapeHtml(this.formatShiftTime(request))}\n` +
-            `Локація: ${escapeHtml(request.location.name)}\n` +
-            `Місто: ${escapeHtml(request.city)}\n\n` +
-            `Не виходить: ${escapeHtml(request.requester.fullName)}\n` +
-            `Вийде: ${escapeHtml(request.replacement.fullName)}\n\n` +
-            `Потрібно вручну оновити графік і синхронізувати зміни.`;
+            `Replacement found.\n\n` +
+            `Date: ${this.formatDate(request.shiftDate)}\n` +
+            `Time: ${escapeHtml(this.formatShiftTime(request))}\n` +
+            `Location: ${escapeHtml(request.location.name)}\n` +
+            `City: ${escapeHtml(request.city)}\n\n` +
+            `Original photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n` +
+            `Replacement photographer: ${escapeHtml(this.formatShortName(request.replacement.fullName))}\n\n` +
+            `Please update the schedule manually and sync the changes.`;
 
         await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
             .then(async () => {
@@ -478,18 +472,35 @@ export class ReplacementService {
             .catch((err) => logger.warn({ err, requestId }, "Replacement admin notification failed"));
     }
 
+    private async notifyAdminStarted(api: Api, requestId: string) {
+        const request = await this.getRequest(requestId);
+        if (!request) return;
+
+        const text =
+            `Replacement search started.\n\n` +
+            `Date: ${this.formatDate(request.shiftDate)}\n` +
+            `Time: ${escapeHtml(this.formatShiftTime(request))}\n` +
+            `Location: ${escapeHtml(request.location.name)}\n` +
+            `City: ${escapeHtml(request.city)}\n\n` +
+            `Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n\n` +
+            `The request is open. Search waves will run automatically; please monitor and help manually if needed.`;
+
+        await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
+            .catch((err) => logger.warn({ err, requestId }, "Replacement start admin notification failed"));
+    }
+
     private async notifyAdminFailed(api: Api, requestId: string) {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
         const text =
-            `Підміну не знайдено.\n\n` +
-            `Дата: ${this.formatDate(request.shiftDate)}\n` +
-            `Час: ${escapeHtml(this.formatShiftTime(request))}\n` +
-            `Локація: ${escapeHtml(request.location.name)}\n` +
-            `Місто: ${escapeHtml(request.city)}\n\n` +
-            `Фотограф: ${escapeHtml(request.requester.fullName)}\n\n` +
-            `Усі доступні хвилі пошуку завершені без результату.`;
+            `Replacement not found.\n\n` +
+            `Date: ${this.formatDate(request.shiftDate)}\n` +
+            `Time: ${escapeHtml(this.formatShiftTime(request))}\n` +
+            `Location: ${escapeHtml(request.location.name)}\n` +
+            `City: ${escapeHtml(request.city)}\n\n` +
+            `Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n\n` +
+            `All available search waves finished without a result.`;
 
         await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
             .catch((err) => logger.warn({ err, requestId }, "Replacement failure admin notification failed"));
@@ -604,6 +615,20 @@ export class ReplacementService {
         return msUntilShift > DAY_THRESHOLD_MS ? FOUR_HOURS_MS : ONE_HOUR_MS;
     }
 
+    private async getNextWaveAtAfterDispatch(
+        request: RequestWithRelations,
+        wave: ReplacementSearchWave,
+        now: Date,
+        intervalMs: number
+    ) {
+        const sequence = await this.getWaveSequence(request);
+        const normalNextAt = new Date(now.getTime() + intervalMs);
+        if (sequence[sequence.length - 1] !== wave) return normalNextAt;
+
+        const finalCloseAt = new Date(this.getShiftStartAt(request).getTime() - FINAL_WAVE_CLOSE_LEAD_MS);
+        return finalCloseAt > normalNextAt ? finalCloseAt : normalNextAt;
+    }
+
     private getShiftStartAt(shift: { date?: Date; shiftDate?: Date; startTime?: Date | null; shiftStartTime?: Date | null; location?: Location }) {
         const date = shift.date ?? shift.shiftDate;
         if (!date) return new Date(0);
@@ -656,6 +681,10 @@ export class ReplacementService {
             minute: "2-digit",
             timeZone: KYIV_TIMEZONE
         });
+    }
+
+    private formatShortName(fullName: string) {
+        return fullName.trim().split(/\s+/).slice(0, 2).join(" ");
     }
 
     private kyivStartOfDay(date: Date) {
