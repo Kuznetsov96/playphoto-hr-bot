@@ -17,6 +17,7 @@ import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
 import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
 import { replacementService } from "../../../services/replacement-service.js";
+import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 
 export const staffHandlers = new Composer<MyContext>();
 
@@ -36,6 +37,27 @@ function formatShiftColleague(fullName: string, username?: string | null, telegr
     }
 
     return escapedLabel;
+}
+
+function formatShiftClock(date: Date) {
+    return date.toLocaleTimeString("uk-UA", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/Kyiv"
+    });
+}
+
+function formatStaffShiftTime(shift: {
+    date: Date;
+    startTime?: Date | null;
+    endTime?: Date | null;
+    location?: { schedule?: string | null } | null;
+}) {
+    if (shift.startTime && shift.endTime) {
+        return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
+    }
+
+    return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
 }
 
 function buildTaskProofKeyboard(taskId: string) {
@@ -102,8 +124,9 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     kyivNow.setHours(0, 0, 0, 0);
 
     const staffProfileId = user.staffProfile?.id;
-    const todayShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, kyivNow, 1) : [];
-    const hasShiftToday = todayShifts.length > 0 && todayShifts[0]?.date.getTime() === kyivNow.getTime();
+    const upcomingShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, kyivNow, 10) : [];
+    const todayShifts = upcomingShifts.filter((shift) => shift.date.getTime() === kyivNow.getTime());
+    const hasShiftToday = todayShifts.length > 0;
 
     // Check if it's a completely new user without any schedule yet
     const allShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, new Date(0), 1) : [];
@@ -134,15 +157,10 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     }
 
     if (hasShiftToday) {
-        const s = todayShifts[0]!;
-        const weekday = s.date.toLocaleDateString("uk-UA", { weekday: "short", timeZone: "Europe/Kyiv" });
-        const dateStr = s.date.toLocaleDateString("uk-UA", {
-            day: "2-digit",
-            month: "2-digit",
-            timeZone: "Europe/Kyiv"
-        });
-        const day = weekday.charAt(0).toUpperCase() + weekday.slice(1);
-        shiftLine = `📸 <b>Сьогодні — ${s.location.name}</b>\n${day}, ${dateStr} · Вдалого дня! ✨`;
+        const shift = todayShifts[0]!;
+        shiftLine =
+            `📸 <b>Сьогодні зміна</b>\n` +
+            `${escapeHtml(shift.location.name)} · ${escapeHtml(formatStaffShiftTime(shift))}`;
     } else {
         shiftLine = `🏝 <b>Сьогодні вихідний</b>\nВідпочивай та набирайся сил! ✨`;
     }
@@ -192,7 +210,7 @@ export async function showStaffSchedule(ctx: MyContext) {
     for (const s of shifts) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-        text += `▫️ <code>${dateStr}</code> — ${s.location.name}`;
+        text += `▫️ <code>${dateStr}</code> · ${escapeHtml(formatStaffShiftTime(s))} · ${escapeHtml(s.location.name)}`;
 
         const colleagues = allColleagues.filter(
             (c) => c.locationId === s.locationId && c.date.getTime() === s.date.getTime()
