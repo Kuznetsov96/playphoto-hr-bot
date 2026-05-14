@@ -415,11 +415,25 @@ export class FirstShiftOnboardingService {
         }) as FirstShiftOnboardingCaseWithRelations | null;
         if (!onboardingCase || !ACTIVE_STATUSES.includes(onboardingCase.status as any)) return null;
 
-        const closingStep = onboardingCase.steps.find(step => step.block === CLOSING_BLOCK && !["APPROVED", "SKIPPED"].includes(step.status));
+        const alreadyOpened = onboardingCase.steps.some(step =>
+            step.block === CLOSING_BLOCK && ["ACTIVE", "SUBMITTED", "REJECTED"].includes(step.status)
+        );
+        if (alreadyOpened || onboardingCase.status === "CLOSING" || onboardingCase.status === "PENDING_FINAL") {
+            return onboardingCase;
+        }
+
+        const closingStep = onboardingCase.steps.find(step => step.block === CLOSING_BLOCK && step.status === "LOCKED");
         if (!closingStep) return null;
 
+        const claimed = await prisma.firstShiftOnboardingStep.updateMany({
+            where: { id: closingStep.id, status: "LOCKED" },
+            data: { status: "ACTIVE" },
+        });
+        if (claimed.count !== 1) {
+            return await firstShiftOnboardingRepository.findActiveCaseByCandidateId(onboardingCase.candidateId);
+        }
+
         await this.skipUnresolvedPreClosingSteps(onboardingCase.id, closingStep.order);
-        await firstShiftOnboardingRepository.updateStep(closingStep.id, { status: "ACTIVE" });
         const updated = await firstShiftOnboardingRepository.updateCase(onboardingCase.id, {
             status: "CLOSING",
             currentStepKey: closingStep.key,

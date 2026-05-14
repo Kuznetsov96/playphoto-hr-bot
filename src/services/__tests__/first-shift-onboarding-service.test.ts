@@ -22,7 +22,7 @@ vi.mock("../../db/core.js", () => ({
         },
         firstShiftOnboardingStep: {
             findUnique: vi.fn(),
-            updateMany: vi.fn(),
+            updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
         candidate: {
             findFirst: vi.fn(),
@@ -122,6 +122,7 @@ describe("FirstShiftOnboardingService", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.useRealTimers();
+        vi.mocked((prisma as any).firstShiftOnboardingStep.updateMany).mockResolvedValue({ count: 1 });
     });
 
     it("should unlock mentor onboarding when first-shift onboarding passes", async () => {
@@ -629,12 +630,155 @@ describe("FirstShiftOnboardingService", () => {
                 status: "SKIPPED",
             }),
         }));
-        expect(firstShiftOnboardingRepository.updateStep).toHaveBeenCalledWith("step-closing", { status: "ACTIVE" });
+        expect((prisma as any).firstShiftOnboardingStep.updateMany).toHaveBeenCalledWith({
+            where: { id: "step-closing", status: "LOCKED" },
+            data: { status: "ACTIVE" },
+        });
         expect(firstShiftOnboardingRepository.updateCase).toHaveBeenCalledWith("case-1", {
             status: "CLOSING",
             currentStepKey: "closing_printer",
         });
         expect(api.sendMessage).toHaveBeenCalledWith(123, "closingOpened", expect.any(Object));
+    });
+
+    it("does not reopen closing or resend prompts when closing is already active", async () => {
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "CLOSING",
+            currentStepKey: "closing_printer",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-closing",
+                    key: "closing_printer",
+                    order: 13,
+                    block: "Закриття зміни",
+                    title: "Закрити принтер",
+                    prompt: "Надішли фото принтера.",
+                    status: "ACTIVE",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue(onboardingCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.openClosing(api as any, "case-1");
+
+        expect(result).toBe(onboardingCase);
+        expect((prisma as any).firstShiftOnboardingStep.updateMany).not.toHaveBeenCalled();
+        expect(firstShiftOnboardingRepository.updateCase).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not reopen closing or reset a submitted closing step", async () => {
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "CLOSING",
+            currentStepKey: "closing_printer",
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-closing",
+                    key: "closing_printer",
+                    order: 13,
+                    block: "Закриття зміни",
+                    title: "Закрити принтер",
+                    prompt: "Надішли фото принтера.",
+                    status: "SUBMITTED",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                    photoIds: "photo-file-id",
+                },
+            ],
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue(onboardingCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.openClosing(api as any, "case-1");
+
+        expect(result).toBe(onboardingCase);
+        expect((prisma as any).firstShiftOnboardingStep.updateMany).not.toHaveBeenCalled();
+        expect(firstShiftOnboardingRepository.updateCase).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not send duplicate closing notifications when another worker already claimed the opening step", async () => {
+        const onboardingCase = {
+            id: "case-1",
+            candidateId: "cand-1",
+            status: "IN_PROGRESS",
+            currentStepKey: null,
+            chatId: BigInt(-1001234567890),
+            topicId: 42,
+            candidate: {
+                id: "cand-1",
+                userId: "user-1",
+                user: { telegramId: 123n },
+                location: null,
+                firstShiftPartner: null,
+            },
+            steps: [
+                {
+                    id: "step-closing",
+                    key: "closing_printer",
+                    order: 13,
+                    block: "Закриття зміни",
+                    title: "Закрити принтер",
+                    prompt: "Надішли фото принтера.",
+                    status: "LOCKED",
+                    inputType: "PHOTO",
+                    requiresMentorApproval: true,
+                },
+            ],
+        } as any;
+        const refreshedCase = {
+            ...onboardingCase,
+            status: "CLOSING",
+            currentStepKey: "closing_printer",
+            steps: [{ ...onboardingCase.steps[0], status: "ACTIVE" }],
+        } as any;
+
+        vi.mocked((prisma as any).firstShiftOnboardingCase.findUnique).mockResolvedValue(onboardingCase);
+        vi.mocked((prisma as any).firstShiftOnboardingStep.updateMany).mockResolvedValue({ count: 0 });
+        vi.mocked(firstShiftOnboardingRepository.findActiveCaseByCandidateId).mockResolvedValue(refreshedCase);
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({}),
+        };
+
+        const result = await firstShiftOnboardingService.openClosing(api as any, "case-1");
+
+        expect(result).toBe(refreshedCase);
+        expect(firstShiftOnboardingRepository.updateCase).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
     });
 
     it("does not copy plain text candidate messages into the onboarding topic twice", async () => {
