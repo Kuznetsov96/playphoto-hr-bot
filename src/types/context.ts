@@ -124,6 +124,10 @@ export interface SessionData {
         startedAt: number;
         lastPhotoAt?: number;
     };
+    parcelPhotoCancelledDraft?: {
+        parcelId: string;
+        cancelledAt: number;
+    };
 
     taskProofFlow?: {
         taskId: string;
