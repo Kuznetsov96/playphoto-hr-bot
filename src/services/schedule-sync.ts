@@ -1300,6 +1300,7 @@ export class ScheduleSyncService {
             'sp даринок': { name: 'даринок', city: 'Київ' },
             'sp київ': { name: 'smile park', city: 'Київ', exclude: 'даринок' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
+            'kidlandia': { name: 'kidlandia', city: 'Київ' },
             'dragonp': { name: 'dragon', city: 'Львів' },
             'leoland': { name: 'leoland', city: 'Львів' },
             'sp львів': { name: 'smile park', city: 'Львів' },
@@ -1337,6 +1338,7 @@ export class ScheduleSyncService {
             .replace(/drivecity/g, 'drive city')
             .replace(/sp даринок/g, 'smile park даринок')
             .replace(/^fk\s+/g, 'fly kids ')
+            .replace(/^kd$/g, 'kidlandia')
             .replace(/^sp\s+/g, 'smile park ')
             .replace(/^dp\s+/g, 'dragon park ')
             .replace(/^ft\s+/g, 'fantasy town ')
@@ -1353,6 +1355,7 @@ export class ScheduleSyncService {
             ["даринок", "darynok"],
             ["троєщина", "троещина", "troieshchyna"],
             ["skymall", "скаймол", "sky"],
+            ["kidlandia", "кідландія", "kd"],
             ["leoland", "леоленд", "leo"],
             ["dragon park", "dragonp"],
             ["drive", "дриве", "драйв"],
@@ -1499,6 +1502,8 @@ export class ScheduleSyncService {
             'sp харків': { name: 'smile park', city: 'Харків' },
             'ft черкаси': { name: 'fantasy town', city: 'Черкаси' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
+            'kidlandia': { name: 'kidlandia', city: 'Київ' },
+            'kd': { name: 'kidlandia', city: 'Київ' },
             'fk львів': { name: 'fly kids', city: 'Львів' },
             'fk рівне': { name: 'fly kids', city: 'Рівне' },
             'dh khmelnytskyi': { name: 'dytyache horyshche', city: 'Хмельницький' },
@@ -1551,6 +1556,10 @@ export class ScheduleSyncService {
 
     private resolveLocationFromCode(code: string, currentLocation: Location | null, allLocations: Location[], cityContext?: string): Location | null {
         const codeUpper = code.toUpperCase();
+        if (codeUpper === 'KD' && currentLocation) {
+            const currentName = `${currentLocation.name} ${currentLocation.legacyName || ""}`.toLowerCase();
+            if (currentName.includes('kidlandia')) return currentLocation;
+        }
         const locPattern = LOCATION_CODE_MAP[codeUpper];
         if (!locPattern) return null;
         const candidates = allLocations.filter(l => l.name.toLowerCase().startsWith(locPattern) || l.name.toLowerCase().includes(locPattern));
