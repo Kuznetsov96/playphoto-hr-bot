@@ -16,7 +16,7 @@ import { scheduleAvailabilityService } from "./schedule-availability-service.js"
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 
-const MAIN_ADMIN_ID = 107794048;
+export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
 const URGENT_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const DAY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -32,6 +32,22 @@ type RequestWithRelations = ReplacementRequest & {
 };
 
 export class ReplacementService {
+    async listActiveRequestsForAdmin() {
+        return prisma.replacementRequest.findMany({
+            where: { status: ReplacementRequestStatus.ACTIVE },
+            include: {
+                location: true,
+                requester: { include: { user: true } },
+                replacement: { include: { user: true } },
+                responses: true
+            },
+            orderBy: [
+                { shiftDate: "asc" },
+                { createdAt: "asc" }
+            ]
+        });
+    }
+
     async listSelectableShifts(staffId: string) {
         const today = this.kyivStartOfDay(new Date());
         return prisma.workShift.findMany({
@@ -106,6 +122,38 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (request) {
             await this.inactivateOpenResponses(api, request.id, "Запит вже неактивний.\nПошук скасовано.");
+        }
+
+        return true;
+    }
+
+    async cancelRequestByAdmin(api: Api, requestId: string) {
+        const updated = await prisma.replacementRequest.updateMany({
+            where: {
+                id: requestId,
+                status: ReplacementRequestStatus.ACTIVE
+            },
+            data: {
+                status: ReplacementRequestStatus.CANCELLED,
+                completedAt: new Date(),
+                closedReason: "cancelled_by_admin",
+                nextWaveAt: null
+            }
+        });
+
+        if (updated.count === 0) return false;
+
+        const request = await this.getRequest(requestId);
+        if (request) {
+            await api.sendMessage(
+                Number(request.requester.user.telegramId),
+                "Пошук підміни скасовано адміністратором.\nЯкщо питання ще актуальне, напиши в підтримку.",
+                {
+                    parse_mode: "HTML",
+                    reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
+                }
+            ).catch((err) => logger.warn({ err, requestId }, "Requester replacement admin-cancel notification failed"));
+            await this.inactivateOpenResponses(api, request.id, "Пошук підміни скасовано адміністратором.");
         }
 
         return true;
@@ -452,15 +500,7 @@ export class ReplacementService {
         });
         if (!request?.replacement) return;
 
-        const text =
-            `Replacement found.\n\n` +
-            `Date: ${this.formatDate(request.shiftDate)}\n` +
-            `Time: ${escapeHtml(this.formatShiftTime(request))}\n` +
-            `Location: ${escapeHtml(request.location.name)}\n` +
-            `City: ${escapeHtml(request.city)}\n\n` +
-            `Original photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n` +
-            `Replacement photographer: ${escapeHtml(this.formatShortName(request.replacement.fullName))}\n\n` +
-            `Please update the schedule manually and sync the changes.`;
+        const text = this.formatAdminNotification("found", request);
 
         await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
             .then(async () => {
@@ -476,14 +516,7 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
-        const text =
-            `Replacement search started.\n\n` +
-            `Date: ${this.formatDate(request.shiftDate)}\n` +
-            `Time: ${escapeHtml(this.formatShiftTime(request))}\n` +
-            `Location: ${escapeHtml(request.location.name)}\n` +
-            `City: ${escapeHtml(request.city)}\n\n` +
-            `Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n\n` +
-            `The request is open. Search waves will run automatically; please monitor and help manually if needed.`;
+        const text = this.formatAdminNotification("started", request);
 
         await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
             .catch((err) => logger.warn({ err, requestId }, "Replacement start admin notification failed"));
@@ -493,14 +526,7 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
-        const text =
-            `Replacement not found.\n\n` +
-            `Date: ${this.formatDate(request.shiftDate)}\n` +
-            `Time: ${escapeHtml(this.formatShiftTime(request))}\n` +
-            `Location: ${escapeHtml(request.location.name)}\n` +
-            `City: ${escapeHtml(request.city)}\n\n` +
-            `Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n\n` +
-            `All available search waves finished without a result.`;
+        const text = this.formatAdminNotification("failed", request);
 
         await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
             .catch((err) => logger.warn({ err, requestId }, "Replacement failure admin notification failed"));
@@ -520,8 +546,9 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
-        await api.sendMessage(Number(request.requester.user.telegramId), "Поки що підміну не знайдено.\nАдміністратор отримав повідомлення і допоможе вирішити ситуацію.", {
-            parse_mode: "HTML"
+        await api.sendMessage(Number(request.requester.user.telegramId), this.formatRequesterFailureText(request), {
+            parse_mode: "HTML",
+            reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
         }).catch(() => { });
         await this.notifyAdminFailed(api, requestId);
         await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.");
@@ -667,6 +694,75 @@ export class ReplacementService {
         return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(shift.location.name)}\n${escapeHtml(time)}\n\nПочати пошук?`;
     }
 
+    formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listActiveRequestsForAdmin"]>>) {
+        if (requests.length === 0) {
+            return "🔎 <b>Replacement searches</b>\n\nNo active replacement searches.";
+        }
+
+        let text = `🔎 <b>Replacement searches</b>\n\nOpen requests: <b>${requests.length}</b>\n`;
+
+        requests.forEach((request, index) => {
+            const sent = request.responses.filter((response) => response.status === ReplacementResponseStatus.SENT).length;
+            const accepted = request.responses.filter((response) => response.status === ReplacementResponseStatus.ACCEPTED).length;
+            const declined = request.responses.filter((response) => response.status === ReplacementResponseStatus.DECLINED).length;
+            const failed = request.responses.filter((response) => response.status === ReplacementResponseStatus.DELIVERY_FAILED).length;
+            const nextWave = request.nextWaveAt
+                ? this.formatDateTime(request.nextWaveAt)
+                : "not scheduled";
+
+            text +=
+                `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b>\n` +
+                `📅 ${this.formatDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request))}\n` +
+                `🏙 ${escapeHtml(request.city)}\n` +
+                `👤 Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n` +
+                `🌊 Wave: <code>${escapeHtml(request.currentWave || "not started")}</code>\n` +
+                `⏭ Next check: ${escapeHtml(nextWave)}\n` +
+                `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
+        });
+
+        return text;
+    }
+
+    private formatAdminNotification(kind: "started" | "found" | "failed", request: RequestWithRelations) {
+        const titleByKind = {
+            started: "🔁 <b>Replacement search started.</b>",
+            found: "✅ <b>Replacement found.</b>",
+            failed: "⚠️ <b>Replacement not found.</b>"
+        };
+        const actionByKind = {
+            started: "The request is open. Search waves will run automatically; monitor it and help manually if needed.",
+            found: "Please update the schedule manually and sync the changes.",
+            failed: "All available search waves finished without a result. Please contact the photographer and resolve manually."
+        };
+
+        const replacementLine = request.replacement
+            ? `\n✅ Replacement photographer: ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
+            : "";
+
+        return (
+            `${titleByKind[kind]}\n\n` +
+            `<b>Shift</b>\n` +
+            `📅 Date: <b>${this.formatDate(request.shiftDate)}</b>\n` +
+            `🕒 Time: <b>${escapeHtml(this.formatShiftTime(request))}</b>\n` +
+            `📍 Location: <b>${escapeHtml(request.location.name)}</b>\n` +
+            `🏙 City: ${escapeHtml(request.city)}\n\n` +
+            `<b>People</b>\n` +
+            `👤 Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}${replacementLine}\n\n` +
+            `<b>Next step</b>\n` +
+            `${actionByKind[kind]}`
+        );
+    }
+
+    private formatRequesterFailureText(request: RequestWithRelations) {
+        return (
+            `Поки що підміну не знайдено.\n\n` +
+            `📅 <b>${this.formatDate(request.shiftDate)}</b>\n` +
+            `🕒 <b>${escapeHtml(this.formatShiftTime(request))}</b>\n` +
+            `📍 <b>${escapeHtml(request.location.name)}</b>\n\n` +
+            `Будь ласка, напиши в підтримку, щоб адміністратор допоміг вирішити ситуацію вручну.`
+        );
+    }
+
     private formatDate(date: Date) {
         return date.toLocaleDateString("uk-UA", {
             day: "numeric",
@@ -677,6 +773,16 @@ export class ReplacementService {
 
     private formatTime(date: Date) {
         return date.toLocaleTimeString("uk-UA", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: KYIV_TIMEZONE
+        });
+    }
+
+    private formatDateTime(date: Date) {
+        return date.toLocaleString("uk-UA", {
+            day: "2-digit",
+            month: "2-digit",
             hour: "2-digit",
             minute: "2-digit",
             timeZone: KYIV_TIMEZONE
