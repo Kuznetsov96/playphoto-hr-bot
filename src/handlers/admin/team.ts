@@ -21,6 +21,7 @@ import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
+import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
 
 function formatTeamSyncPreview(preview: any): string {
     const duplicatePreview = (preview.duplicateTelegramIds || [])
@@ -437,6 +438,12 @@ adminScheduleDateMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, report, new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-back"], "back_to_schedule_dates"), { pushToStack: true });
     });
 
+    if (ctx.from?.id === MAIN_ADMIN_ID) {
+        range.text("🔎 Replacement Searches", async (ctx) => {
+            await showAdminReplacementBoard(ctx);
+        });
+    }
+
     // Ensure row before Back
     range.row().text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
@@ -445,6 +452,47 @@ adminScheduleDateMenu.dynamic(async (ctx, range) => {
 
 // Add back button for Gaps view
 export const adminTeamHandlers = new Composer<MyContext>();
+async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = false) {
+    if (ctx.from?.id !== MAIN_ADMIN_ID) {
+        await ctx.answerCallbackQuery("Access denied").catch(() => { });
+        return;
+    }
+
+    const requests = await replacementService.listActiveRequestsForAdmin();
+    const kb = new InlineKeyboard();
+
+    requests.slice(0, 8).forEach((request, index) => {
+        kb.text(`❌ Cancel #${index + 1}`, `admin_repl_cancel_${request.id}`).row();
+    });
+
+    kb.text("🔄 Refresh", "admin_repl_board").row()
+        .text(ADMIN_TEXTS["admin-btn-back"], "back_to_schedule_dates");
+
+    await ScreenManager.renderScreen(
+        ctx,
+        replacementService.formatAdminBoardText(requests),
+        kb,
+        { forceNew, pushToStack: true }
+    );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+adminTeamHandlers.callbackQuery("admin_repl_board", async (ctx) => {
+    await showAdminReplacementBoard(ctx, true);
+});
+
+adminTeamHandlers.callbackQuery(/^admin_repl_cancel_(.+)$/, async (ctx) => {
+    if (ctx.from?.id !== MAIN_ADMIN_ID) {
+        await ctx.answerCallbackQuery("Access denied").catch(() => { });
+        return;
+    }
+
+    const requestId = ctx.match![1]!;
+    const cancelled = await replacementService.cancelRequestByAdmin(ctx.api, requestId);
+    await ctx.answerCallbackQuery(cancelled ? "Search cancelled" : "Search is already inactive").catch(() => { });
+    await showAdminReplacementBoard(ctx, true);
+});
+
 adminTeamHandlers.callbackQuery("back_to_schedule_dates", async (ctx) => {
     await ctx.answerCallbackQuery();
     await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-schedule-select-date"], "admin-schedule-dates");
