@@ -8,7 +8,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { staffService } from "../../modules/staff/services/index.js";
-import { formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
+import { escapeHtml, formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
@@ -272,9 +272,14 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
                 let locationText = '';
                 if (formattedLocation) locationText = `📍 ${formattedLocation}`;
+                const phone = staff?.phone || candidate?.phone;
+                const phoneText = phone
+                    ? `📞 <code>${escapeHtml(phone)}</code>`
+                    : '';
 
                 const infoCard =
                     `👤 <b>${displayName}</b>\n` +
+                    (phoneText ? `${phoneText}\n` : '') +
                     (locationText ? `${locationText}\n` : '') +
                     `🕐 ${new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })}\n\n` +
                     `<i>${ADMIN_TEXTS["admin-topic-info-outgoing"]}</i>`;
