@@ -88,12 +88,14 @@ export async function buildTicketCard(
         username: string | null;
         staffProfile: {
             fullName: string;
+            phone?: string | null;
             location: {
                 name: string;
                 city: string | null;
             } | null;
         } | null;
         candidate: {
+            phone?: string | null;
             location: {
                 name: string;
                 city: string | null;
@@ -115,6 +117,7 @@ export async function buildTicketCard(
     const statusText = statusIcons[ticket.status];
     const username = user.username ? `@${escapeHtml(user.username)}` : null;
     const fullName = escapeHtml(user.staffProfile?.fullName || "Unknown");
+    const phone = user.staffProfile?.phone || user.candidate?.phone || null;
 
     // Location with city
     let locationText = "Unknown";
@@ -148,6 +151,7 @@ export async function buildTicketCard(
     card += `👤 ${shortenName(fullName)}`;
     if (username) card += ` (${username})`;
     card += `\n`;
+    if (phone) card += `📞 <code>${escapeHtml(phone)}</code>\n`;
     card += `📍 ${locationText}\n`;
     card += `🕐 ${createdDate}\n`;
 
