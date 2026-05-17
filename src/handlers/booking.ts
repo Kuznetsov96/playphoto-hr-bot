@@ -75,6 +75,16 @@ export function buildMentorReschedulePatch(status: CandidateStatus) {
     };
 }
 
+export function buildInterviewSlotNeededPatch(reason: string) {
+    return {
+        status: CandidateStatus.SCREENING,
+        isWaitlisted: false,
+        currentStep: FunnelStep.INTERVIEW,
+        notificationSent: false,
+        interviewWaitlistReason: reason
+    };
+}
+
 bookingHandlers.callbackQuery(/^booking_date_header_.+$/, async (ctx) => {
     await ctx.answerCallbackQuery();
 });
@@ -503,15 +513,9 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     if (slots.length === 0) {
         logger.debug({ telegramId }, "Interview scheduling waitlist fallback activated");
 
-        // Auto-move to WAITLIST_HR so HR can see them
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
-            {
-                status: CandidateStatus.WAITLIST_HR,
-                isWaitlisted: true,
-                currentStep: FunnelStep.INTERVIEW,
-                interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
-            }
+            buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_SLOTS)
         );
 
         const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
@@ -531,7 +535,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
             const name = cand?.fullName || ctx.from.first_name || "Candidate";
             const alertMsg = `📥 <b>INBOX: No interview slots available!</b>\n\n` +
                 `👤 <b>${name}</b>\n\n` +
-                `This candidate tried to book an interview but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
+                `This candidate tried to book an interview, but there are no active slots. Please add slots or contact her directly.`;
 
             for (const hrId of HR_IDS) {
                 try {
@@ -570,12 +574,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
 
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        {
-            status: CandidateStatus.WAITLIST_HR,
-            isWaitlisted: true,
-            currentStep: FunnelStep.INTERVIEW,
-            interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_DATE_FITS
-        }
+        buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
     );
 
     await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
@@ -585,7 +584,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         const name = (await candidateRepository.findByTelegramId(telegramId))?.fullName || ctx.from.first_name || "Candidate";
         const alertMsg = `📥 <b>INBOX: Candidate cannot find interview slot!</b>\n\n` +
             `👤 <b>${name}</b>\n\n` +
-            `This candidate clicked "No date fits". She is now in the WAITLIST. Please contact her! 💬`;
+            `This candidate clicked "No date fits". Vacancy is still open; please contact her or add more interview slots.`;
 
         for (const hrId of HR_IDS) {
             try {
