@@ -329,10 +329,17 @@ describe('hrService', () => {
 
             expect(count).toBe(1);
             expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
-                [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                [CandidateStatus.SCREENING, CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
                 {
-                    isWaitlisted: true,
-                    currentStep: FunnelStep.INTERVIEW
+                    currentStep: FunnelStep.INTERVIEW,
+                    OR: [
+                        { isWaitlisted: true },
+                        {
+                            status: CandidateStatus.SCREENING,
+                            isWaitlisted: false,
+                            interviewWaitlistReason: { in: ['NO_SLOTS_AVAILABLE', 'NO_DATE_FITS'] }
+                        }
+                    ]
                 }
             );
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
@@ -357,6 +364,27 @@ describe('hrService', () => {
                     OR: [
                         { interviewWaitlistReason: null },
                         { NOT: { interviewWaitlistReason: { in: ['NO_SLOTS_AVAILABLE', 'NO_DATE_FITS'] } } }
+                    ]
+                }
+            );
+        });
+
+        it('should find active screening candidates who need a different interview slot', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
+
+            await hrService.getWaitlistNoSlot('NO_DATE_FITS');
+
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.SCREENING, CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                {
+                    currentStep: FunnelStep.INTERVIEW,
+                    OR: [
+                        { isWaitlisted: true, interviewWaitlistReason: 'NO_DATE_FITS' },
+                        {
+                            status: CandidateStatus.SCREENING,
+                            isWaitlisted: false,
+                            interviewWaitlistReason: 'NO_DATE_FITS'
+                        }
                     ]
                 }
             );
