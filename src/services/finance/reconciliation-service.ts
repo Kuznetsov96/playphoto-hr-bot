@@ -7,6 +7,7 @@ import logger from "../../core/logger.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
+import { getReportableTerminalAmount } from "./location-rules.js";
 
 interface ReconMatch {
     location: string;
@@ -202,7 +203,8 @@ export class ReconciliationService {
 
                         if (isFopMatch || (isKuz && !!(locCfg as any).searchId)) {
                             const termExpRaw = inc?.totalTerminal || 0;
-                            const termExp = isFopMatch ? termExpRaw : 0;
+                            const reportableTermExp = getReportableTerminalAmount(termExpRaw, locCfg);
+                            const termExp = isFopMatch ? reportableTermExp : 0;
 
                             if (termExpRaw > 0 || (locCfg as any).terminalId || (locCfg as any).searchId) {
                                 const candidates = pool.filter(item => {
