@@ -7,6 +7,7 @@ import { locationRepository } from "../repositories/location-repository.js";
 import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { getReportableTerminalAmount, shouldExcludeTerminalFromFopAccounting } from "./finance/location-rules.js";
 
 // Export for manual testing via command
 export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number, forceSync: boolean = false) {
@@ -47,7 +48,7 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         }
 
         const allLocations = await locationRepository.findAllActive();
-        const locationMap = new Map(allLocations.map(l => [l.name, l]));
+        const locationMap = new Map(allLocations.map(l => [l.id, l]));
 
         // Sort by total income desc
         incomes.sort((a, b) => b.totalIncome - a.totalIncome);
@@ -59,12 +60,15 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         let reportText = `📊 <b>REPORT FOR ${todayStr}</b>\n\n`;
 
         incomes.forEach(inc => {
+            const loc = locationMap.get(inc.locationId);
+            const reportableTerminal = getReportableTerminalAmount(inc.totalTerminal, loc);
+            const reportableIncome = inc.totalCash + reportableTerminal;
             const label = `${inc.locationName} (${inc.city})`;
-            reportText += `📍 ${label}: <b>${inc.totalIncome.toLocaleString()} грн</b>\n`;
+            reportText += `📍 ${label}: <b>${reportableIncome.toLocaleString()} грн</b>\n`;
 
             totalCash += inc.totalCash;
-            totalTerminal += inc.totalTerminal;
-            totalIncome += inc.totalIncome;
+            totalTerminal += reportableTerminal;
+            totalIncome += reportableIncome;
         });
 
         reportText += `--------------------------\n`;
@@ -233,7 +237,11 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                 }
 
                 // Add Terminal Transaction
-                if (inc.totalTerminal > 0) {
+                const terminalExcluded = shouldExcludeTerminalFromFopAccounting(loc);
+                if (terminalExcluded) {
+                    if (dryRun) log += `[SKIP] Terminal for ${fullName} - excluded from FOP accounting\n`;
+                    else logger.debug({ location: fullName, amount: inc.totalTerminal }, "Finance DDS sync skipped terminal excluded from FOP accounting");
+                } else if (inc.totalTerminal > 0) {
                     // Apply acquiring fee if enabled (1.3%)
                     const feeRate = loc?.hasAcquiring ? 0.013 : 0;
                     const netTerminal = Number((inc.totalTerminal * (1 - feeRate)).toFixed(2));
