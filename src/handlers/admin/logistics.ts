@@ -108,7 +108,7 @@ adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_confirm_(?:direct_)?|apc_
     const parcelId = ctx.match[1] as string;
     const isDirect = ctx.callbackQuery.data.includes('_direct_') || ctx.callbackQuery.data.startsWith('apc_');
 
-    await prisma.parcel.update({
+    const parcel = await prisma.parcel.update({
         where: { id: parcelId },
         data: { status: 'COMPLETED' }
     });
@@ -119,7 +119,7 @@ adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_confirm_(?:direct_)?|apc_
 
     if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
         // Safety: if triggered from support chat (even via old menu), stay silent
-        const text = `✅ <b>Parcel confirmed and archived.</b>`;
+        const text = `✅ <b>Parcel confirmed and archived.</b>\n\n<b>TTN:</b> <code>${parcel.ttn}</code>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
         } else {
