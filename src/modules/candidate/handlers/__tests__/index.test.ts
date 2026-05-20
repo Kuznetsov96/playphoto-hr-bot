@@ -30,10 +30,22 @@ describe("candidate screening birth date validation", () => {
         expect(result.success).toBe(true);
     });
 
-    it("still rejects underage candidates at birth date step", async () => {
+    it("allows 16-year-old candidates to continue until location is known", async () => {
         const { CandidateSchema } = await import("../index.js");
+        const now = new Date();
+        const sixteenYearsOld = new Date(now.getFullYear() - 16, now.getMonth(), now.getDate());
 
-        const result = CandidateSchema.shape.birthDate.safeParse(new Date("2012-05-15T00:00:00.000Z"));
+        const result = CandidateSchema.shape.birthDate.safeParse(sixteenYearsOld);
+
+        expect(result.success).toBe(true);
+    });
+
+    it("still rejects candidates under 16 at birth date step", async () => {
+        const { CandidateSchema } = await import("../index.js");
+        const now = new Date();
+        const fifteenYearsOld = new Date(now.getFullYear() - 15, now.getMonth(), now.getDate());
+
+        const result = CandidateSchema.shape.birthDate.safeParse(fifteenYearsOld);
 
         expect(result.success).toBe(false);
     });

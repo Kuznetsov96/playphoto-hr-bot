@@ -9,9 +9,10 @@ import { getCityCode, getShortLocationName } from "../../../utils/location-helpe
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
 import {
-    MIN_CANDIDATE_AGE,
+    MIN_VOLKLAND_2_ZP_CANDIDATE_AGE,
     getAgeRejection,
     getCandidateAge,
+    type CandidateAgeLocation,
 } from "../../../utils/candidate-age.js";
 
 // --- HELPERS ---
@@ -30,8 +31,8 @@ function getLocationIds(candidateData: any): string[] {
     return [];
 }
 
-function getAgeRejectionMeta(age: number) {
-    const rejection = getAgeRejection(age);
+function getAgeRejectionMeta(age: number, location?: CandidateAgeLocation) {
+    const rejection = getAgeRejection(age, location);
     if (rejection === "UNDERAGE") {
         return {
             status: CandidateStatus.REJECTED,
@@ -69,8 +70,8 @@ export const CandidateSchema = z.object({
         .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
     birthDate: z.date()
         .refine(date => {
-            return getCandidateAge(date) >= MIN_CANDIDATE_AGE;
-        }, "Ми приймаємо на роботу лише з 17 років")
+            return getCandidateAge(date) >= MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
+        }, "Ми приймаємо кандидаток тільки з 17 років (або з 16 років для окремих локацій)")
         .refine(date => date > new Date(1950, 0, 1), "Введіть реальну дату народження"),
 });
 
@@ -413,6 +414,24 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](targetLoc?.name || city, city));
         return;
     }
+
+    const ageMeta = getAgeRejectionMeta(getCandidateAge(birthDate), targetLoc);
+    if (ageMeta.status === CandidateStatus.REJECTED) {
+        await persistCandidate(ctx, {
+            fullName,
+            birthDate,
+            gender,
+            city,
+            locationId: finalLocationId,
+            status: CandidateStatus.REJECTED,
+            isWaitlisted: false,
+            hrDecision: ageMeta.hrDecision
+        });
+        ctx.session.step = "idle";
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
+        return;
+    }
+
     await persistCandidate(ctx, { city, locationId: finalLocationId });
     ctx.session.step = "screening_appearance_prompt";
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance");
@@ -440,10 +459,12 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     let status: CandidateStatus = CandidateStatus.SCREENING;
     let isWaitlisted = false;
     let finalLocationId = locationIds.length > 0 ? locationIds[0] : undefined;
+    const selectedLocs = await Promise.all((locationIds || []).map((id: string) => locationRepository.findById(id!)));
 
     let hrDecision: string | null = null;
     const age = getCandidateAge(birthDate);
-    const ageRejection = getAgeRejection(age);
+    const primaryLocationForAge = selectedLocs.find((l: any) => l?.id === finalLocationId) || selectedLocs[0];
+    const ageRejection = getAgeRejection(age, primaryLocationForAge);
 
     if (ageRejection === "UNDERAGE") {
         status = CandidateStatus.REJECTED;
@@ -452,13 +473,13 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
         status = CandidateStatus.REJECTED;
         hrDecision = "AGE_LIMIT";
     } else {
-        const selectedLocs = await Promise.all((locationIds || []).map((id: string) => locationRepository.findById(id!)));
-        const availableLoc = selectedLocs.find((l: any) => l && l.neededCount > 0);
+        const ageEligibleLocs = selectedLocs.filter((l: any) => l && getAgeRejection(age, l) === null);
+        const availableLoc = ageEligibleLocs.find((l: any) => l.neededCount > 0);
         if (availableLoc) {
             finalLocationId = availableLoc.id;
             status = CandidateStatus.SCREENING;
         } else {
-            if (selectedLocs.length > 0 && selectedLocs[0]) finalLocationId = selectedLocs[0].id;
+            if (ageEligibleLocs.length > 0 && ageEligibleLocs[0]) finalLocationId = ageEligibleLocs[0].id;
             status = CandidateStatus.WAITLIST_HR;
             isWaitlisted = true;
         }
