@@ -530,7 +530,7 @@ export const hrService = {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return { ok: false, reason: "not_found" };
 
-        const ageRejection = getBirthDateRejection(cand.birthDate);
+        const ageRejection = getBirthDateRejection(cand.birthDate, cand.location);
         if (ageRejection) {
             await candidateRepository.update(candId, {
                 status: CandidateStatus.REJECTED,

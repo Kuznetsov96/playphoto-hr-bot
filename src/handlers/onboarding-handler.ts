@@ -318,8 +318,8 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     });
 
     try {
-        // Soft age filter: politely decline 26+ candidates
-        if (getBirthDateRejection(existingCandidate.birthDate) === "AGE_LIMIT") {
+        // Soft age filter with location-specific limits.
+        if (getBirthDateRejection(existingCandidate.birthDate, existingCandidate.location) === "AGE_LIMIT") {
             await candidateRepository.update(candidateId, {
                 status: CandidateStatus.REJECTED,
                 hrDecision: "AGE_LIMIT"

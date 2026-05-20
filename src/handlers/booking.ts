@@ -112,7 +112,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     // 1. Interview actions guard
     if (interviewActions.some(a => data.startsWith(a))) {
-        const ageRejection = getBirthDateRejection(candidate.birthDate);
+        const ageRejection = getBirthDateRejection(candidate.birthDate, candidate.location);
         if (ageRejection) {
             if (candidate.status !== CandidateStatus.REJECTED ||
                 (ageRejection === "AGE_LIMIT" && candidate.hrDecision !== "AGE_LIMIT") ||

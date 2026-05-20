@@ -39,7 +39,7 @@ export class BookingService {
             if (candidate.hrDecision === "AGE_LIMIT") {
                 throw new Error("AGE_LIMIT_CANDIDATE");
             }
-            const ageRejection = getBirthDateRejection(candidate.birthDate);
+            const ageRejection = getBirthDateRejection(candidate.birthDate, candidate.location);
             if (ageRejection === "UNDERAGE") {
                 throw new Error("UNDERAGE_CANDIDATE");
             }
