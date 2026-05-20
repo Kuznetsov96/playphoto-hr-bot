@@ -11,7 +11,7 @@ const locationData = [
     { city: "Київ", name: "Smile Park Київ", address: "Київ, вул. Закревського, 22Т", link: "https://maps.app.goo.gl/FaeEDnJqLQcQ2qmX6" },
     { city: "Київ", name: "Smile Park (Darynok)", address: "Київ, вул. Якова Гніздовського, 1а, Маркет-молл Даринок", link: "https://maps.app.goo.gl/ySb4VHQ6WJYsJNkB8" },
     { city: "Київ", name: "Fly Kids Київ", address: "Київ, вул. Петра Вершигори, 1, ТЦ Дніпровський", link: "https://maps.app.goo.gl/3Dho3m8qAeTf6CaYA" },
-    { city: "Запоріжжя", name: "Volkland 1", address: "Запоріжжя, Інженера Приображенського 13", link: "https://maps.app.goo.gl/YYzQwTZvfZA9wvee7" },
+    { city: "Запоріжжя", name: "Volkland 1", address: "Запоріжжя, просп. Інженера Преображенського 13", link: "https://maps.app.goo.gl/YYzQwTZvfZA9wvee7" },
     { city: "Запоріжжя", name: "Volkland 2", address: "Запоріжжя, Чарівна 74 (ТЦ Амстор)", link: "https://maps.app.goo.gl/qNY9sKkm4EEMESzg8" },
     { city: "Запоріжжя", name: "Volkland 3", address: "Запоріжжя, вул. Перемоги 64, ТЦ Амстор", link: "https://maps.app.goo.gl/g81rhmmPfh1BHULL6" },
     { city: "Коломия", name: "Карамель Коломия", address: "Коломия, вул. Валова, 48 (ТЦ Прут)", link: "https://maps.app.goo.gl/PDoDo7Z8JibciaLx6" },
