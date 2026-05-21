@@ -17,6 +17,7 @@ import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
+import { googleCalendar } from "./google-calendar.js";
 
 export class MentorService {
     private hasBookedOverlap(overlap: {
@@ -800,20 +801,37 @@ export class MentorService {
             trainingSession: { connect: { id: session.id } }
         });
 
+        const candidateAfterCancel = await candidateRepository.findById(candId);
+        const googleEvent = await googleCalendar.createEvent({
+            summary: `Навчання: ${candidateAfterCancel?.fullName || "Кандидат"}`,
+            description: `Кандидатка: ${candidateAfterCancel?.fullName || "Кандидат"}\nTelegram: @${candidateAfterCancel?.user?.username || 'немає'}`,
+            startTime: start,
+            endTime: end,
+            calendarType: 'training'
+        }).catch((err) => {
+            logger.error({ err, candidateId: candId, slotId: slot.id }, "Manual training calendar event creation failed");
+            return { eventId: undefined, meetLink: undefined };
+        });
+
         await candidateRepository.update(candId, {
             status: "TRAINING_SCHEDULED",
+            trainingMeetLink: googleEvent.meetLink || null,
             trainingSlot: { connect: { id: slot.id } }
         });
 
+        if (googleEvent.eventId) {
+            await trainingRepository.updateSlot(slot.id, { googleEventId: googleEvent.eventId });
+        }
+
         const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
         const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-        const channelLink = await accessService.createInviteLink((await candidateRepository.findById(candId))?.user.telegramId!) || "https://t.me/+FuFRMGsvMktkNGFi";
+        const channelLink = await accessService.createInviteLink(candidateAfterCancel?.user.telegramId!) || "https://t.me/+FuFRMGsvMktkNGFi";
 
         return {
             success: true,
             message: `✅ Scheduled for ${dateStr} ${timeStr}`,
             notification: {
-                telegramId: Number((await candidateRepository.findById(candId))?.user.telegramId),
+                telegramId: Number(candidateAfterCancel?.user.telegramId),
                 text: CANDIDATE_TEXTS["training-manual-invite"](dateStr, timeStr, channelLink, PHOTOGRAPHER_GUIDE_LINK)
             }
         };
@@ -870,10 +888,27 @@ export class MentorService {
             trainingSession: { connect: { id: session.id } }
         });
 
+        const candidateAfterCancel = await candidateRepository.findById(candId);
+        const googleEvent = await googleCalendar.createEvent({
+            summary: `Знайомство: ${candidateAfterCancel?.fullName || "Кандидат"}`,
+            description: `Кандидатка: ${candidateAfterCancel?.fullName || "Кандидат"}\nЛокація: ${candidateAfterCancel?.location?.name || 'Не вказано'}\nTelegram: @${candidateAfterCancel?.user?.username || 'немає'}`,
+            startTime: start,
+            endTime: end,
+            calendarType: 'training'
+        }).catch((err) => {
+            logger.error({ err, candidateId: candId, slotId: slot.id }, "Manual discovery calendar event creation failed");
+            return { eventId: undefined, meetLink: undefined };
+        });
+
         await candidateRepository.update(candId, {
             status: "DISCOVERY_SCHEDULED",
+            trainingMeetLink: googleEvent.meetLink || null,
             discoverySlot: { connect: { id: slot.id } }
         });
+
+        if (googleEvent.eventId) {
+            await trainingRepository.updateSlot(slot.id, { googleEventId: googleEvent.eventId });
+        }
 
         const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
         const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -882,7 +917,7 @@ export class MentorService {
             success: true,
             message: `✅ Scheduled for ${dateStr} ${timeStr}`,
             notification: {
-                telegramId: Number(cand?.user?.telegramId),
+                telegramId: Number(candidateAfterCancel?.user?.telegramId),
                 text: CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](dateStr, timeStr)
             }
         };
