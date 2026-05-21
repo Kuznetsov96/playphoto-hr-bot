@@ -92,19 +92,19 @@ export const FIRST_SHIFT_ONBOARDING_STEPS: FirstShiftOnboardingStepConfig[] = [
         requiresMentorApproval: true,
     },
     {
-        key: "camera_import_test",
-        block: "Камера",
-        title: "Тестовий імпорт",
-        prompt: "Зроби тестовий знімок, підключи камеру або карту до ноутбука та скинь фото за допомогою скрипта IMPORT на робочому столі.",
-        inputType: "BUTTON",
-        requiresMentorApproval: true,
-    },
-    {
         key: "flash_setup",
         block: "Спалах",
         title: "Налаштувати спалах",
         prompt: "Вистав ручний режим M на спалаху, закріпи спалах на камері та встанови розсіювач. Надішли фото екрану спалаху.",
         inputType: "PHOTO",
+        requiresMentorApproval: true,
+    },
+    {
+        key: "camera_import_test",
+        block: "Камера",
+        title: "Тестовий імпорт",
+        prompt: "Зроби тестовий знімок, підключи камеру або карту до ноутбука та скинь фото за допомогою скрипта IMPORT на робочому столі.",
+        inputType: "BUTTON",
         requiresMentorApproval: true,
     },
     {
