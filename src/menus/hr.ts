@@ -497,6 +497,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
     const candId = ctx.session.candidateData?.id;
     const slotId = ctx.session.selectedSlotId;
     if (!candId) return;
+    ctx.session.candidateProfileMenuId = "hr-candidate-unified";
     const cand = await hrService.getCandidateDetails(candId);
     if (!cand) return;
 

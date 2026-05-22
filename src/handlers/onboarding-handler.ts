@@ -11,6 +11,7 @@ import { Menu } from "@grammyjs/menu";
 import { CandidateStatus } from "@prisma/client";
 import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
 import { getOnboardingResumeAction } from "../utils/final-step-flow.js";
+import { isValidUkrainianIban, normalizeIban } from "../utils/iban-utils.js";
 
 export const onboardingHandlers = new Composer<MyContext>();
 
@@ -235,10 +236,10 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
             await ScreenManager.renderScreen(ctx, "📸 <b>Будь ласка, надішли саме фото документа.</b>\n\nЯкщо у тебе декілька фото, надсилай їх по одному. ✨");
         }
         else if (step === STEPS.IBAN) {
-            const ibanVal = text.toUpperCase().replace(/\s+/g, '');
-            if (!ibanVal.startsWith("UA") || ibanVal.length < 15) {
+            const ibanVal = normalizeIban(text);
+            if (!isValidUkrainianIban(ibanVal)) {
                 logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: "INVALID_IBAN_FORMAT" }, "Onboarding validation failed");
-                await ScreenManager.renderScreen(ctx, "⚠️ <b>Це не схоже на IBAN.</b>\n\nВін має починатися на UA і містити 29 символів. Спробуй ще раз:");
+                await ScreenManager.renderScreen(ctx, "⚠️ <b>Це не схоже на коректний український IBAN.</b>\n\nВін має починатися на UA, містити 29 символів і проходити банківську перевірку. Спробуй ще раз:");
                 return;
             }
             await candidateRepository.update(candidate.id, { iban: ibanVal } as any);

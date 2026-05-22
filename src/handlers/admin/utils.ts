@@ -1,6 +1,8 @@
 import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
 
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+
 export const CITY_MAP: Record<string, string> = {
     // English targets
     "Lviv": "Lviv",
@@ -209,6 +211,59 @@ export function msgToHtml(text: string, entities: any[] = []): string {
     return result;
 }
 
+function splitTelegramHtmlMessage(text: string, maxLength = TELEGRAM_MESSAGE_LIMIT): string[] {
+    if (text.length <= maxLength) return [text];
+
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > maxLength) {
+        const hardLimit = maxLength - 40;
+        const newlineIndex = remaining.lastIndexOf("\n", hardLimit);
+        const spaceIndex = remaining.lastIndexOf(" ", hardLimit);
+        const splitAt = newlineIndex > 500 ? newlineIndex : (spaceIndex > 500 ? spaceIndex : hardLimit);
+
+        chunks.push(remaining.slice(0, splitAt).trimEnd());
+        remaining = remaining.slice(splitAt).trimStart();
+    }
+
+    if (remaining) chunks.push(remaining);
+    return chunks;
+}
+
+export async function sendLongHtmlMessage(
+    ctx: MyContext,
+    targetChatId: number,
+    htmlText: string,
+    options?: {
+        replyMarkup?: InstanceType<typeof InlineKeyboard>;
+        messageThreadId?: number;
+    }
+) {
+    const chunks = splitTelegramHtmlMessage(htmlText);
+
+    for (let i = 0; i < chunks.length; i++) {
+        const sendOptions: Record<string, unknown> = {
+            parse_mode: "HTML",
+        };
+        if (options?.messageThreadId !== undefined) {
+            sendOptions.message_thread_id = options.messageThreadId;
+        }
+        if (options?.replyMarkup && i === chunks.length - 1) {
+            sendOptions.reply_markup = options.replyMarkup;
+        }
+
+        await ctx.api.sendMessage(targetChatId, chunks[i]!, sendOptions as any);
+    }
+}
+
+export function getMessageHtml(message: MyContext["message"] | undefined): string {
+    if (!message) return "";
+    const text = message.text || message.caption || "";
+    const entities = message.text ? message.entities : message.caption_entities;
+    return msgToHtml(text, entities || []);
+}
+
 export async function sendTaskNotification(
     ctx: MyContext,
     targetChatId: number,
@@ -218,29 +273,26 @@ export async function sendTaskNotification(
         sourceChatId?: number;
         sourceMessageId?: number;
         fileId?: string | null;
-        mediaType?: "photo" | "video" | "document";
+        mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
+        textIsHtml?: boolean;
     }
 ) {
-    if (options?.fileId) {
-        if (options.mediaType === "video") {
-            await ctx.api.sendVideo(targetChatId, options.fileId);
-        } else if (options.mediaType === "document") {
-            await ctx.api.sendDocument(targetChatId, options.fileId);
-        } else {
-            await ctx.api.sendPhoto(targetChatId, options.fileId);
-        }
-    } else if (options?.sourceChatId && options?.sourceMessageId) {
+    if (options?.sourceChatId && options?.sourceMessageId) {
         await ctx.api.copyMessage(targetChatId, options.sourceChatId, options.sourceMessageId);
+    } else if (options?.fileId) {
+        if (options.mediaType === "video") await ctx.api.sendVideo(targetChatId, options.fileId);
+        else if (options.mediaType === "document") await ctx.api.sendDocument(targetChatId, options.fileId);
+        else if (options.mediaType === "voice") await ctx.api.sendVoice(targetChatId, options.fileId);
+        else if (options.mediaType === "video_note") await ctx.api.sendVideoNote(targetChatId, options.fileId);
+        else if (options.mediaType === "audio") await ctx.api.sendAudio(targetChatId, options.fileId);
+        else if (options.mediaType === "animation") await ctx.api.sendAnimation(targetChatId, options.fileId);
+        else await ctx.api.sendPhoto(targetChatId, options.fileId);
     }
 
-    const sendOptions: Record<string, unknown> = {
-        parse_mode: "HTML",
-    };
-    if (options?.replyMarkup) {
-        sendOptions.reply_markup = options.replyMarkup;
-    }
-
-    await ctx.api.sendMessage(targetChatId, text, sendOptions as any);
+    const htmlText = options?.textIsHtml ? text : escapeHtml(text);
+    const longMessageOptions: { replyMarkup?: InstanceType<typeof InlineKeyboard> } = {};
+    if (options?.replyMarkup) longMessageOptions.replyMarkup = options.replyMarkup;
+    await sendLongHtmlMessage(ctx, targetChatId, htmlText, longMessageOptions);
 }
 
 /**

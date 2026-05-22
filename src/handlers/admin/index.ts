@@ -89,7 +89,7 @@ adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
 adminHandlers.use(adminMagnetCounterHandlers);
 
-adminHandlers.on(["message:text", "message:photo", "message:video", "message:document"], async (ctx, next) => {
+adminHandlers.on(["message:text", "message:photo", "message:video", "message:document", "message:voice", "message:video_note", "message:audio", "message:animation"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
 
     if (await handleAdminMagnetCounterMessage(ctx)) return;
@@ -266,6 +266,7 @@ protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx
     if (!candidate) return ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-staging-candidate-not-found"], "admin-main");
 
     ctx.session.selectedCandidateId = candidate.id;
+    ctx.session.candidateProfileMenuId = "admin-candidate-details";
 
     const text = await formatCandidateProfile(ctx as any, candidate as any, {
         includeActionLabel: true,
