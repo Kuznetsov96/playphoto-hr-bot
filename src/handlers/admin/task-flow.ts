@@ -8,6 +8,8 @@ import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { sendTaskNotification } from "./utils.js";
+import { getMessageHtml } from "./utils.js";
+import { TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
 
 export const taskFlowHandlers = new Composer<MyContext>();
 
@@ -102,16 +104,28 @@ export async function handleTaskText(ctx: MyContext) {
     if (!message) return false;
 
     if (step === 'AWAITING_TEXT') {
-        const text = message.text?.trim() || message.caption?.trim() || "";
+        const text = getMessageHtml(message).trim();
         const media = message.photo
             ? { type: 'photo' as const, fileId: message.photo[message.photo.length - 1]!.file_id }
             : message.video
                 ? { type: 'video' as const, fileId: message.video.file_id }
                 : message.document
                     ? { type: 'document' as const, fileId: message.document.file_id }
+                    : message.voice
+                        ? { type: 'voice' as const, fileId: message.voice.file_id }
+                        : message.video_note
+                            ? { type: 'video_note' as const, fileId: message.video_note.file_id }
+                            : message.audio
+                                ? { type: 'audio' as const, fileId: message.audio.file_id }
+                                : message.animation
+                                    ? { type: 'animation' as const, fileId: message.animation.file_id }
                     : undefined;
 
         if (!text && !media) return false;
+        if (text.length > TASK_TEXT_MAX_LENGTH) {
+            await ctx.reply(`❌ Task text is too long (${text.length}/${TASK_TEXT_MAX_LENGTH}). Please split it or shorten the instruction.`);
+            return true;
+        }
 
         if (media) {
             ctx.session.taskData.fileId = media.fileId;
@@ -267,9 +281,11 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                     sourceChatId?: number;
                     sourceMessageId?: number;
                     fileId?: string | null;
-                    mediaType?: "photo" | "video" | "document";
+                    mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
+                    textIsHtml?: boolean;
                 } = {
                     replyMarkup: new InlineKeyboard().text("📋 Переглянути завдання", "staff_hub_tasks_redirect"),
+                    textIsHtml: true,
                 };
                 if (data.sourceChatId !== undefined) notificationOptions.sourceChatId = data.sourceChatId;
                 if (data.sourceMessageId !== undefined) notificationOptions.sourceMessageId = data.sourceMessageId;

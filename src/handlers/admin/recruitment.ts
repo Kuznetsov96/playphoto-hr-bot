@@ -376,6 +376,7 @@ adminOfflineStagingMenu.dynamic(async (ctx, range) => {
 adminCandidateMenu.dynamic(async (ctx, range) => {
     const candId = ctx.session.selectedCandidateId;
     if (!candId) return;
+    ctx.session.candidateProfileMenuId = "admin-candidate-details";
 
     const cand = await candidateRepository.findById(candId);
     if (!cand) return;

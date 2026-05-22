@@ -1,13 +1,13 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import type { MyContext } from "../../types/context.js";
-import { taskService } from "../../services/task-service.js";
+import { taskService, TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
-import { sendTaskNotification } from "./utils.js";
+import { getMessageHtml, sendTaskNotification } from "./utils.js";
 
 const composer = new Composer<MyContext>();
 
@@ -306,16 +306,21 @@ async function handleTaskInput(
     options: {
         text?: string;
         fileId?: string;
-        mediaType?: "photo" | "video" | "document";
+        mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
         sourceChatId?: number;
         sourceMessageId?: number;
     }
 ) {
     if (!ctx.session.taskCreation || ctx.session.taskCreation.step !== "entering_text") return;
 
-    const taskText = options.text || ctx.message?.caption || "";
+    const taskText = options.text || getMessageHtml(ctx.message) || "";
     if (!taskText && !options.fileId) {
         await ctx.reply("❌ Task text or file is required.");
+        return;
+    }
+
+    if (taskText.length > TASK_TEXT_MAX_LENGTH) {
+        await ctx.reply(`❌ Task text is too long (${taskText.length}/${TASK_TEXT_MAX_LENGTH}). Please split it or shorten the instruction.`);
         return;
     }
 
@@ -410,9 +415,11 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
                     sourceChatId?: number;
                     sourceMessageId?: number;
                     fileId?: string | null;
-                    mediaType?: "photo" | "video" | "document";
+                    mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
+                    textIsHtml?: boolean;
                 } = {
                     replyMarkup: staffKb,
+                    textIsHtml: true,
                 };
                 if (ctx.session.taskCreation.sourceChatId !== undefined) notificationOptions.sourceChatId = ctx.session.taskCreation.sourceChatId;
                 if (ctx.session.taskCreation.sourceMessageId !== undefined) notificationOptions.sourceMessageId = ctx.session.taskCreation.sourceMessageId;
@@ -472,7 +479,7 @@ composer.on("message:text", async (ctx, next) => {
             return await ScreenManager.renderScreen(ctx, "❌ Access Denied", errKb);
         }
 
-        if (step === "entering_text") await handleTaskInput(ctx, { text: ctx.message.text });
+        if (step === "entering_text") await handleTaskInput(ctx, { text: getMessageHtml(ctx.message) });
         else {
             const timeInput = ctx.message.text.trim();
             if (/^\d{1,2}:\d{2}$/.test(timeInput)) await executeTaskCreation(ctx, timeInput);
@@ -489,7 +496,7 @@ composer.on("message:photo", async (ctx, next) => {
         const input: {
             text?: string;
             fileId?: string;
-            mediaType?: "photo" | "video" | "document";
+            mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
             sourceChatId?: number;
             sourceMessageId?: number;
         } = {
@@ -497,7 +504,7 @@ composer.on("message:photo", async (ctx, next) => {
             sourceChatId: ctx.chat.id,
             sourceMessageId: ctx.message.message_id,
         };
-        if (ctx.message.caption !== undefined) input.text = ctx.message.caption;
+        if (ctx.message.caption !== undefined) input.text = getMessageHtml(ctx.message);
         if (photo?.file_id !== undefined) input.fileId = photo.file_id;
         await handleTaskInput(ctx, input);
     } else await next();
@@ -509,7 +516,7 @@ composer.on("message:video", async (ctx, next) => {
         const input: {
             text?: string;
             fileId?: string;
-            mediaType?: "photo" | "video" | "document";
+            mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
             sourceChatId?: number;
             sourceMessageId?: number;
         } = {
@@ -518,7 +525,7 @@ composer.on("message:video", async (ctx, next) => {
             sourceChatId: ctx.chat.id,
             sourceMessageId: ctx.message.message_id,
         };
-        if (ctx.message.caption !== undefined) input.text = ctx.message.caption;
+        if (ctx.message.caption !== undefined) input.text = getMessageHtml(ctx.message);
         await handleTaskInput(ctx, input);
     } else await next();
 });
@@ -529,7 +536,7 @@ composer.on("message:document", async (ctx, next) => {
         const input: {
             text?: string;
             fileId?: string;
-            mediaType?: "photo" | "video" | "document";
+            mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
             sourceChatId?: number;
             sourceMessageId?: number;
         } = {
@@ -538,7 +545,36 @@ composer.on("message:document", async (ctx, next) => {
             sourceChatId: ctx.chat.id,
             sourceMessageId: ctx.message.message_id,
         };
-        if (ctx.message.caption !== undefined) input.text = ctx.message.caption;
+        if (ctx.message.caption !== undefined) input.text = getMessageHtml(ctx.message);
+        await handleTaskInput(ctx, input);
+    } else await next();
+});
+
+composer.on(["message:voice", "message:video_note", "message:audio", "message:animation"], async (ctx, next) => {
+    if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
+        if (!await checkTaskCreationRole(ctx)) return;
+        const message = ctx.message;
+        const file =
+            message.voice ? { fileId: message.voice.file_id, mediaType: "voice" as const } :
+                message.video_note ? { fileId: message.video_note.file_id, mediaType: "video_note" as const } :
+                    message.audio ? { fileId: message.audio.file_id, mediaType: "audio" as const } :
+                        message.animation ? { fileId: message.animation.file_id, mediaType: "animation" as const } :
+                            null;
+        if (!file) return next();
+
+        const input: {
+            text?: string;
+            fileId?: string;
+            mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
+            sourceChatId?: number;
+            sourceMessageId?: number;
+        } = {
+            fileId: file.fileId,
+            mediaType: file.mediaType,
+            sourceChatId: ctx.chat.id,
+            sourceMessageId: message.message_id,
+        };
+        if (message.caption !== undefined) input.text = getMessageHtml(message);
         await handleTaskInput(ctx, input);
     } else await next();
 });

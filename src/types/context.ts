@@ -19,7 +19,7 @@ export interface BroadcastMediaItem {
 }
 
 export interface TaskAttachmentItem {
-    type: 'photo' | 'video' | 'document';
+    type: 'photo' | 'video' | 'document' | 'voice' | 'video_note' | 'audio' | 'animation';
     fileId: string;
 }
 
@@ -148,6 +148,7 @@ export interface SessionData {
     selectedLocationId?: string;
     selectedUserId?: string;
     selectedUserIdForAdmin?: string;
+    candidateProfileMenuId?: "hr-candidate-unified" | "admin-candidate-details";
     stagingTime?: string;
     stagingLocationId?: string;
     lastConfirmedAt?: number;

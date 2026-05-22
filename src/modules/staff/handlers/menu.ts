@@ -73,7 +73,7 @@ function buildTaskProofText(taskText: string, proofCount: number) {
 
     return (
         `📎 <b>Надішли підтвердження до завдання:</b>\n\n` +
-        `<i>${escapeHtml(truncateText(taskText, 250))}</i>\n\n` +
+        `${taskText}\n\n` +
         `Можна надсилати текст, фото, відео, файли, голосові або кілька повідомлень підряд.` +
         `${proofLine}\n\n` +
         `Коли все надішлеш, натисни <b>«Завершити завдання»</b>.`
@@ -319,7 +319,7 @@ export async function showStaffTasks(ctx: MyContext, forceNew: boolean = false) 
     tasks.forEach((task: any, index: number) => {
         const status = task.isCompleted ? "✅" : "⏳";
         const deadline = task.deadlineTime ? ` (до ${task.deadlineTime})` : "";
-        text += `${index + 1}. ${status} ${truncateText(task.taskText, 100)}${deadline}\n\n`;
+        text += `${index + 1}. ${status}${deadline}\n${task.taskText}\n\n`;
 
         if (!task.isCompleted) {
             if (task.completionMode === "PROOF_REQUIRED") {
