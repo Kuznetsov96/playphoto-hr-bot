@@ -11,6 +11,45 @@ import { redis } from "../core/redis.js";
 
 export const preferencesHandlers = new Composer<MyContext>();
 
+function getKyivNow() {
+    const now = new Date();
+    return new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+}
+
+function getMonthName(date: Date) {
+    return date.toLocaleString('uk-UA', { month: 'long' });
+}
+
+function isFirstShiftCandidate(user: any) {
+    return user?.candidate?.currentStep === "FIRST_SHIFT" && user?.candidate?.status === "AWAITING_FIRST_SHIFT";
+}
+
+async function ensureActiveStaffTargetsNextMonth(ctx: MyContext) {
+    if (!ctx.session.preferencesData || !ctx.from?.id) return false;
+
+    const user = await userRepository.findWithProfilesByTelegramId(BigInt(ctx.from.id));
+    if (!user?.staffProfile?.isActive) return false;
+
+    const kyivNow = getKyivNow();
+    if (kyivNow.getDate() < 23) return false;
+
+    const currentMonthName = getMonthName(kyivNow).toLowerCase();
+    const selectedMonth = ctx.session.preferencesData.month?.toLowerCase();
+    if (selectedMonth !== currentMonthName) return false;
+
+    const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
+    ctx.session.preferencesData = {
+        month: getMonthName(nextMonthDate),
+        year: nextMonthDate.getFullYear(),
+        selectedDays: [],
+        comment: "",
+        step: 'CALENDAR',
+        forceNextMonth: false
+    };
+
+    return true;
+}
+
 preferencesHandlers.callbackQuery("staff_start_prefs", async (ctx) => {
     await ctx.answerCallbackQuery();
     await startPreferencesFlow(ctx);
@@ -62,16 +101,15 @@ export async function startPreferencesFlow(ctx: MyContext) {
     if (!telegramId) return;
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
-    const isEligible = user?.staffProfile?.isActive || (user?.candidate?.currentStep === "FIRST_SHIFT");
+    const isActiveStaff = user?.staffProfile?.isActive === true;
+    const isNewCandidate = !isActiveStaff && isFirstShiftCandidate(user);
+    const isEligible = isActiveStaff || isNewCandidate;
 
     if (!isEligible) {
         return ctx.reply("❌ Ця функція поки що недоступна.");
     }
 
-    const now = new Date();
-    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-
-    const isNewCandidate = user?.candidate?.currentStep === "FIRST_SHIFT";
+    const kyivNow = getKyivNow();
     const isLateInMonth = kyivNow.getDate() >= 23;
 
     // Active staff after 23rd → jump straight to next month
@@ -97,7 +135,7 @@ export async function startPreferencesFlow(ctx: MyContext) {
     delete ctx.session.preferencesData?.forceEdit;
 
     ctx.session.preferencesData = {
-        month: targetMonthDate.toLocaleString('uk-UA', { month: 'long' }),
+        month: getMonthName(targetMonthDate),
         year: targetMonthDate.getFullYear(),
         selectedDays: [],
         comment: "",
@@ -110,10 +148,10 @@ export async function startPreferencesFlow(ctx: MyContext) {
 
 async function renderCalendar(ctx: MyContext) {
     if (!ctx.session.preferencesData) return;
+    await ensureActiveStaffTargetsNextMonth(ctx);
     const { month, selectedDays, year } = ctx.session.preferencesData;
 
-    const now = new Date();
-    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+    const kyivNow = getKyivNow();
 
     const monthsMap: Record<string, number> = {
         'січень': 0, 'лютий': 1, 'березень': 2, 'квітень': 3, 'травень': 4, 'червень': 5,
@@ -177,6 +215,10 @@ preferencesHandlers.callbackQuery(/^pref_toggle_(\d+)$/, async (ctx) => {
 
 preferencesHandlers.callbackQuery(["pref_to_comment", "pref_to_comment_none"], async (ctx) => {
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
+    if (await ensureActiveStaffTargetsNextMonth(ctx)) {
+        await renderCalendar(ctx);
+        return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
+    }
     if (ctx.callbackQuery?.data === "pref_to_comment_none") ctx.session.preferencesData.selectedDays = [];
     ctx.session.preferencesData.step = 'COMMENT';
 
@@ -200,6 +242,10 @@ preferencesHandlers.callbackQuery("pref_back_calendar", async (ctx) => {
 
 preferencesHandlers.callbackQuery("pref_skip_comment", async (ctx) => {
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery();
+    if (await ensureActiveStaffTargetsNextMonth(ctx)) {
+        await renderCalendar(ctx);
+        return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
+    }
     ctx.session.preferencesData.comment = "";
     ctx.session.preferencesData.step = 'CONFIRM';
     await renderConfirmation(ctx);
@@ -246,6 +292,10 @@ preferencesHandlers.callbackQuery("open_support_dialog", async (ctx) => {
 
 preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Помилка.");
+    if (await ensureActiveStaffTargetsNextMonth(ctx)) {
+        await renderCalendar(ctx);
+        return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
+    }
     const { selectedDays, comment, month } = ctx.session.preferencesData;
     const telegramId = ctx.from?.id;
     await ctx.answerCallbackQuery();
@@ -256,7 +306,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         const staffNameForTable = (user?.staffProfile as any)?.surnameNameDot || user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
         const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає побажань";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
-        const wasNewCandidate = user?.candidate?.status === 'AWAITING_FIRST_SHIFT';
+        const wasNewCandidate = !user?.staffProfile?.isActive && isFirstShiftCandidate(user);
         let createdStaffProfile = false;
 
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
@@ -326,7 +376,9 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             delete ctx.session.preferencesData;
             ctx.session.step = "idle";
 
-            if (wasNewCandidate) {
+            if (wasNewCandidate && user?.candidate) {
+                const hireUser = user;
+                const candidate = hireUser.candidate!;
                 // Auto-hire: create StaffProfile + flip role, but DON'T send "schedule ready" yet.
                 // The real welcome ("Графік готовий!") comes later when admin syncs shifts.
                 try {
@@ -334,12 +386,10 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     const { candidateRepository } = await import("../repositories/candidate-repository.js");
                     const { accessService } = await import("../services/access-service.js");
 
-                    const candidate = user.candidate!;
-
                     // Create StaffProfile (isWelcomeSent defaults to false)
-                    if (!user.staffProfile && !createdStaffProfile) {
+                    if (!hireUser.staffProfile && !createdStaffProfile) {
                         const createData: any = {
-                            user: { connect: { id: user.id } },
+                            user: { connect: { id: hireUser.id } },
                             fullName: candidate.fullName || "Фотограф",
                             isActive: true
                         };
@@ -349,14 +399,14 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
 
                     // Update candidate status to HIRED + flip role to STAFF
                     await candidateRepository.update(candidate.id, { status: 'HIRED' as any });
-                    await userRepository.update(user.id, { role: 'STAFF' as any });
+                    await userRepository.update(hireUser.id, { role: 'STAFF' as any });
 
                     // Sync channel access
-                    await accessService.syncUserAccess(user.telegramId, "Auto-hire after onboarding").catch(() => { });
+                    await accessService.syncUserAccess(hireUser.telegramId, "Auto-hire after onboarding").catch(() => { });
 
-                    logger.debug({ userId: user.id }, "Auto-hire completed; waiting for schedule sync");
+                    logger.debug({ userId: hireUser.id }, "Auto-hire completed; waiting for schedule sync");
                 } catch (hireErr) {
-                    logger.error({ err: hireErr, userId: user.id }, "Auto-hire failed; candidate remains awaiting first shift");
+                    logger.error({ err: hireErr, userId: hireUser.id }, "Auto-hire failed; candidate remains awaiting first shift");
                 }
 
                 // Always show "schedule is being prepared" screen
