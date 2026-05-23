@@ -7,6 +7,7 @@ import { pendingReplyRepository } from "../repositories/pending-reply-repository
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
+import { formatSurnameNameDot } from "../utils/string-utils.js";
 
 
 export const preferencesHandlers = new Composer<MyContext>();
@@ -22,6 +23,14 @@ function getMonthName(date: Date) {
 
 function isFirstShiftCandidate(user: any) {
     return user?.candidate?.currentStep === "FIRST_SHIFT" && user?.candidate?.status === "AWAITING_FIRST_SHIFT";
+}
+
+function getPreferenceTableName(user: any, fallback = "Фотограф") {
+    const profile = user?.staffProfile;
+    if (profile?.surnameNameDot) return profile.surnameNameDot;
+
+    const fullName = profile?.fullName || user?.candidate?.fullName || fallback;
+    return formatSurnameNameDot(fullName) || fullName || fallback;
 }
 
 async function ensureActiveStaffTargetsNextMonth(ctx: MyContext) {
@@ -79,7 +88,7 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
     // Log opt-out to Google Sheets so admin sees who refused
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
-        const fullName = (user?.staffProfile as any)?.surnameNameDot || user?.staffProfile?.fullName || user?.candidate?.fullName || "Невідомий";
+        const fullName = getPreferenceTableName(user, "Невідомий");
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
 
         await preferencesService.savePreference({
@@ -303,7 +312,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     const waitMsg = await ctx.reply("⏳ Зберігаю...");
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId!));
-        const staffNameForTable = (user?.staffProfile as any)?.surnameNameDot || user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
+        const staffNameForTable = getPreferenceTableName(user);
         const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає побажань";
         const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
         const wasNewCandidate = !user?.staffProfile?.isActive && isFirstShiftCandidate(user);
