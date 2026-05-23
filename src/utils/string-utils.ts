@@ -71,6 +71,20 @@ export function shortenName(fullName: string): string {
 }
 
 /**
+ * Formats "Surname Name Patronymic" as "Surname N." for schedule tables.
+ */
+export function formatSurnameNameDot(fullName?: string | null): string {
+    if (!fullName) return "";
+
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 2) return parts[0] || "";
+
+    const surname = parts[0]!;
+    const firstName = parts[1]!;
+    return `${surname} ${firstName.charAt(0)}.`;
+}
+
+/**
  * Extracts only the first name from a full name.
  * Handles:
  * - "Surname Name" (returns Name)
