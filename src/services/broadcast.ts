@@ -97,6 +97,46 @@ async function sendBroadcastPayload(api: any, chatId: number, text: string, medi
         return null;
     }
 
+    if (singleMedia?.type === 'document') {
+        await api.sendDocument(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
+    }
+
+    if (singleMedia?.type === 'voice') {
+        await api.sendVoice(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
+    }
+
+    if (singleMedia?.type === 'video_note') {
+        await api.sendVideoNote(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
+    }
+
+    if (singleMedia?.type === 'audio') {
+        await api.sendAudio(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
+    }
+
+    if (singleMedia?.type === 'animation') {
+        await api.sendAnimation(chatId, singleMedia.fileId);
+        if (text || buttonType !== 'none') {
+            return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);
+        }
+        return null;
+    }
+
     return await api.sendMessage(chatId, text, extra);
 }
 

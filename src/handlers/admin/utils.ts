@@ -152,23 +152,23 @@ export function msgToHtml(text: string, entities: any[] = []): string {
         offset: number;
         type: string;
         isClose: boolean;
-        priority: number;
+        length: number;
         url?: string;
     }
 
     const markers: Marker[] = [];
 
     for (const entity of entities) {
-        // Priorities ensure correct nesting: close tags first, then open tags
-        // For same position: closing tags should have higher priority (processed first)
-        markers.push({ offset: entity.offset, type: entity.type, isClose: false, priority: 2, url: entity.url });
-        markers.push({ offset: entity.offset + entity.length, type: entity.type, isClose: true, priority: 1 });
+        markers.push({ offset: entity.offset, type: entity.type, isClose: false, length: entity.length, url: entity.url });
+        markers.push({ offset: entity.offset + entity.length, type: entity.type, isClose: true, length: entity.length });
     }
 
-    // Sort markers by offset, then by priority (close tags at same offset first)
+    // Telegram entities can be nested and may share the same boundary.
+    // Outer tags must open first, while inner tags must close first.
     markers.sort((a, b) => {
         if (a.offset !== b.offset) return a.offset - b.offset;
-        return a.priority - b.priority;
+        if (a.isClose !== b.isClose) return a.isClose ? -1 : 1;
+        return a.isClose ? a.length - b.length : b.length - a.length;
     });
 
     let result = "";

@@ -14,7 +14,7 @@ export interface StackEntry {
 }
 
 export interface BroadcastMediaItem {
-    type: 'photo' | 'video';
+    type: 'photo' | 'video' | 'document' | 'voice' | 'video_note' | 'audio' | 'animation';
     fileId: string;
 }
 

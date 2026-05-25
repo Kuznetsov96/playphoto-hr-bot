@@ -267,7 +267,7 @@ async function renderContentPrompt(ctx: MyContext) {
     const targetLabel = formatTargetLabel(data.targetType!);
     const text = `📢 <b>Broadcast Content</b>\nTarget: <b>${targetLabel}</b>\nButtons: <code>${data.buttonType || 'default'}</code>\n\n` +
         `👇 <b>Please send the message now.</b>\n` +
-        `It can be text, one video, or one/multiple photos with a caption.\n` +
+        `It can be text, one media file, or one/multiple photos with a caption.\n` +
         `For photo collections, send all photos and then tap Continue.\n\n` +
         `<i>Formatting (bold, links, etc.) will be preserved.</i>`;
 
@@ -307,9 +307,17 @@ function getMediaSummary(mediaItems: BroadcastMediaItem[]): string {
     if (mediaItems.length === 0) return '';
 
     if (mediaItems.length === 1) {
-        return mediaItems[0]!.type === 'video'
-            ? '🎬 <b>Attachment:</b> 1 video'
-            : '🖼 <b>Attachment:</b> 1 photo';
+        const type = mediaItems[0]!.type;
+        const labels: Record<BroadcastMediaItem["type"], string> = {
+            photo: "photo",
+            video: "video",
+            document: "document",
+            voice: "voice message",
+            video_note: "video note",
+            audio: "audio",
+            animation: "GIF",
+        };
+        return `📎 <b>Attachment:</b> 1 ${labels[type]}`;
     }
 
     return `🖼 <b>Attachments:</b> ${mediaItems.length} photos`;
@@ -319,20 +327,22 @@ function getMediaSuccessSummary(mediaItems: BroadcastMediaItem[]): string {
     if (mediaItems.length === 0) return '';
 
     if (mediaItems.length === 1) {
-        return mediaItems[0]!.type === 'video'
-            ? '🎬 Attachment: 1 video'
-            : '🖼 Attachment: 1 photo';
+        const type = mediaItems[0]!.type;
+        const labels: Record<BroadcastMediaItem["type"], string> = {
+            photo: "photo",
+            video: "video",
+            document: "document",
+            voice: "voice message",
+            video_note: "video note",
+            audio: "audio",
+            animation: "GIF",
+        };
+        return `📎 Attachment: 1 ${labels[type]}`;
     }
 
     const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
-    const videoCount = mediaItems.filter((item) => item.type === 'video').length;
-
-    if (photoCount > 0 && videoCount === 0) {
+    if (photoCount === mediaItems.length) {
         return `🖼 Attachments: ${photoCount} photos`;
-    }
-
-    if (videoCount > 0 && photoCount === 0) {
-        return `🎬 Attachments: ${videoCount} videos`;
     }
 
     return `📎 Attachments: ${mediaItems.length} files`;
@@ -360,6 +370,11 @@ export async function handleBroadcastContent(ctx: MyContext) {
     let media: BroadcastMediaItem | undefined;
     if (message.photo) media = { type: 'photo', fileId: message.photo[message.photo.length - 1]!.file_id };
     else if (message.video) media = { type: 'video', fileId: message.video.file_id };
+    else if (message.document) media = { type: 'document', fileId: message.document.file_id };
+    else if (message.voice) media = { type: 'voice', fileId: message.voice.file_id };
+    else if (message.video_note) media = { type: 'video_note', fileId: message.video_note.file_id };
+    else if (message.audio) media = { type: 'audio', fileId: message.audio.file_id };
+    else if (message.animation) media = { type: 'animation', fileId: message.animation.file_id };
 
     const textHtml = msgToHtml(message.text || message.caption || "", message.entities || message.caption_entities || []);
 
@@ -372,9 +387,9 @@ export async function handleBroadcastContent(ctx: MyContext) {
         data.text = textHtml;
     }
 
-    if (media?.type === 'video') {
+    if (media && media.type !== 'photo') {
         if ((data.mediaItems || []).length > 0) {
-            await ctx.reply("❌ Videos cannot be combined with a photo set. Clear photos or restart the broadcast.");
+            await ctx.reply("❌ This media type cannot be combined with a photo set. Clear photos or restart the broadcast.");
             return true;
         }
 
