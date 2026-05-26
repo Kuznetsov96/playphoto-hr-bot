@@ -526,9 +526,36 @@ export const hrService = {
         return true;
     },
 
-    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" | "age_ineligible" }> {
+    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" | "age_ineligible" | "gender_ineligible" }> {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return { ok: false, reason: "not_found" };
+
+        if (cand.gender !== "female") {
+            await candidateRepository.update(candId, {
+                status: CandidateStatus.REJECTED,
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: null,
+                hasUnreadMessage: false,
+            });
+
+            audit({
+                event: "candidate_interview_invited",
+                result: "failed",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: {
+                    locationId: cand.locationId,
+                    city: cand.city,
+                    reason: "GENDER_INELIGIBLE",
+                }
+            });
+
+            return { ok: false, reason: "gender_ineligible" };
+        }
 
         const ageRejection = getBirthDateRejection(cand.birthDate, cand.location);
         if (ageRejection) {
@@ -639,6 +666,7 @@ export const hrService = {
         const candidates = await prisma.candidate.findMany({
             where: {
                 city,
+                gender: "female",
                 user: { botBlockedAt: null },
                 OR: [
                     { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
@@ -681,7 +709,8 @@ export const hrService = {
         const candidates = await candidateRepository.findByStatusWithUser(CandidateStatus.SCREENING, {
             interviewSlotId: null,
             appearance: { not: null },
-            isOtherCity: false
+            isOtherCity: false,
+            gender: "female"
         });
         const board = await hiringNeedsService.getBoard().catch(() => null);
         const rankByLocation = new Map((board?.items || []).map((item) => [item.locationId, hiringNeedsService.getUrgencyRank(item.urgency)]));
@@ -1200,6 +1229,7 @@ export const hrService = {
     async notifyWaitlist(api: any, city?: string) {
         const candidates = await candidateRepository.findByStatusWithUser(
             HR_INTERVIEW_SLOT_STATUSES, {
+            gender: "female",
             currentStep: FunnelStep.INTERVIEW,
             OR: [
                 { isWaitlisted: true },

@@ -1,0 +1,1 @@
+ALTER TABLE "Candidate" ALTER COLUMN "gender" DROP DEFAULT;

@@ -112,6 +112,26 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     // 1. Interview actions guard
     if (interviewActions.some(a => data.startsWith(a))) {
+        if (candidate.gender === "male") {
+            await candidateRepository.update(candidate.id, {
+                status: CandidateStatus.REJECTED,
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                hasUnreadMessage: false,
+            });
+
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ScreenManager.renderScreen(
+                ctx,
+                CANDIDATE_TEXTS["candidate-reject-male-location"](
+                    candidate.location?.name || candidate.city || "цій локації",
+                    candidate.city || "вашому місті"
+                )
+            );
+            return;
+        }
+
         const ageRejection = getBirthDateRejection(candidate.birthDate, candidate.location);
         if (ageRejection) {
             if (candidate.status !== CandidateStatus.REJECTED ||
@@ -289,6 +309,9 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         } else if (e.message === "AGE_LIMIT_CANDIDATE") {
             await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-age-limit"]);
+        } else if (e.message === "MALE_CANDIDATE") {
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]("цій локації", "вашому місті"));
         } else {
             await ctx.answerCallbackQuery("Сталася помилка.");
         }
