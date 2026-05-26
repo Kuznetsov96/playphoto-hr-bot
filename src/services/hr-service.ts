@@ -24,6 +24,13 @@ export const HR_INTERVIEW_WAITLIST_REASONS = {
 
 export type HrInterviewWaitlistReason = typeof HR_INTERVIEW_WAITLIST_REASONS[keyof typeof HR_INTERVIEW_WAITLIST_REASONS];
 
+const HR_INTERVIEW_WAITLIST_REASON_VALUES = Object.values(HR_INTERVIEW_WAITLIST_REASONS);
+const HR_INTERVIEW_SLOT_STATUSES = [
+    CandidateStatus.SCREENING,
+    CandidateStatus.WAITLIST_HR,
+    CandidateStatus.WAITLIST
+];
+
 function isUnknownCandidateStatusError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("not found in enum 'CandidateStatus'");
@@ -519,11 +526,38 @@ export const hrService = {
         return true;
     },
 
-    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" | "age_ineligible" }> {
+    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" | "age_ineligible" | "gender_ineligible" }> {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return { ok: false, reason: "not_found" };
 
-        const ageRejection = getBirthDateRejection(cand.birthDate);
+        if (cand.gender !== "female") {
+            await candidateRepository.update(candId, {
+                status: CandidateStatus.REJECTED,
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: null,
+                hasUnreadMessage: false,
+            });
+
+            audit({
+                event: "candidate_interview_invited",
+                result: "failed",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: {
+                    locationId: cand.locationId,
+                    city: cand.city,
+                    reason: "GENDER_INELIGIBLE",
+                }
+            });
+
+            return { ok: false, reason: "gender_ineligible" };
+        }
+
+        const ageRejection = getBirthDateRejection(cand.birthDate, cand.location);
         if (ageRejection) {
             await candidateRepository.update(candId, {
                 status: CandidateStatus.REJECTED,
@@ -632,6 +666,7 @@ export const hrService = {
         const candidates = await prisma.candidate.findMany({
             where: {
                 city,
+                gender: "female",
                 user: { botBlockedAt: null },
                 OR: [
                     { status: CandidateStatus.SCREENING, appearance: { not: null }, isOtherCity: false },
@@ -674,7 +709,8 @@ export const hrService = {
         const candidates = await candidateRepository.findByStatusWithUser(CandidateStatus.SCREENING, {
             interviewSlotId: null,
             appearance: { not: null },
-            isOtherCity: false
+            isOtherCity: false,
+            gender: "female"
         });
         const board = await hiringNeedsService.getBoard().catch(() => null);
         const rankByLocation = new Map((board?.items || []).map((item) => [item.locationId, hiringNeedsService.getUrgencyRank(item.urgency)]));
@@ -758,20 +794,28 @@ export const hrService = {
     // Тип 2: Отримали запрошення, але не знайшли зручного слоту
     async getWaitlistNoSlot(reason?: HrInterviewWaitlistReason | null) {
         const where: Prisma.CandidateWhereInput = {
-            isWaitlisted: true,
             currentStep: FunnelStep.INTERVIEW
         };
         if (reason === null) {
+            where.isWaitlisted = true;
             where.OR = [
                 { interviewWaitlistReason: null },
-                { NOT: { interviewWaitlistReason: { in: Object.values(HR_INTERVIEW_WAITLIST_REASONS) } } }
+                { NOT: { interviewWaitlistReason: { in: HR_INTERVIEW_WAITLIST_REASON_VALUES } } }
             ];
         } else if (reason !== undefined) {
-            where.interviewWaitlistReason = reason;
+            where.OR = [
+                { isWaitlisted: true, interviewWaitlistReason: reason },
+                { status: CandidateStatus.SCREENING, isWaitlisted: false, interviewWaitlistReason: reason }
+            ];
+        } else {
+            where.OR = [
+                { isWaitlisted: true },
+                { status: CandidateStatus.SCREENING, isWaitlisted: false, interviewWaitlistReason: { in: HR_INTERVIEW_WAITLIST_REASON_VALUES } }
+            ];
         }
 
         return candidateRepository.findByStatusWithUser(
-            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+            reason === null ? [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST] : HR_INTERVIEW_SLOT_STATUSES,
             where
         );
     },
@@ -1184,9 +1228,13 @@ export const hrService = {
 
     async notifyWaitlist(api: any, city?: string) {
         const candidates = await candidateRepository.findByStatusWithUser(
-            [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST], {
-            isWaitlisted: true,
+            HR_INTERVIEW_SLOT_STATUSES, {
+            gender: "female",
             currentStep: FunnelStep.INTERVIEW,
+            OR: [
+                { isWaitlisted: true },
+                { status: CandidateStatus.SCREENING, isWaitlisted: false, interviewWaitlistReason: { in: HR_INTERVIEW_WAITLIST_REASON_VALUES } }
+            ],
             ...(city ? { city } : {})
         });
 

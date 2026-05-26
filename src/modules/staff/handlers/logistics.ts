@@ -20,6 +20,7 @@ import {
 export const staffLogisticsHandlers = new Composer<MyContext>();
 
 const PARCEL_PHOTO_REMINDER_MS = 1000 * 60 * 15;
+const PARCEL_PHOTO_CANCEL_GRACE_MS = 1000 * 60 * 5;
 const parcelPhotoReminderTimers = new Map<string, NodeJS.Timeout>();
 
 async function editOrReplyText(
@@ -110,12 +111,33 @@ function scheduleParcelPhotoReminder(ctx: MyContext, parcelId: string) {
     parcelPhotoReminderTimers.set(reminderKey, timer);
 }
 
-function resetParcelPhotoDraft(ctx: MyContext) {
+function resetParcelPhotoDraft(ctx: MyContext, options?: { cancelled?: boolean }) {
+    const draft = ctx.session.parcelPhotoDraft;
     clearParcelPhotoReminder(ctx);
     delete ctx.session.parcelPhotoDraft;
+    if (options?.cancelled && draft) {
+        ctx.session.parcelPhotoCancelledDraft = {
+            parcelId: draft.parcelId,
+            cancelledAt: Date.now(),
+        };
+    } else if (!options?.cancelled) {
+        delete ctx.session.parcelPhotoCancelledDraft;
+    }
     if (ctx.session.step.startsWith('awaiting_parcel_photo_')) {
         ctx.session.step = 'idle';
     }
+}
+
+function getRecentlyCancelledParcelPhotoId(ctx: MyContext) {
+    const cancelled = ctx.session.parcelPhotoCancelledDraft;
+    if (!cancelled) return null;
+
+    if (Date.now() - cancelled.cancelledAt > PARCEL_PHOTO_CANCEL_GRACE_MS) {
+        delete ctx.session.parcelPhotoCancelledDraft;
+        return null;
+    }
+
+    return cancelled.parcelId;
 }
 
 async function getAuthorizedParcelForStaff(ctx: MyContext, parcelId: string, options?: { allowUnassigned?: boolean }) {
@@ -617,6 +639,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
     }
 
     ctx.session.step = `awaiting_parcel_photo_${parcelId}`;
+    delete ctx.session.parcelPhotoCancelledDraft;
     ctx.session.parcelPhotoDraft = {
         parcelId,
         fileIds: [],
@@ -681,7 +704,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
             photoCount: draft.fileIds.length,
         },
     });
-    resetParcelPhotoDraft(ctx);
+    resetParcelPhotoDraft(ctx, { cancelled: true });
     await ctx.answerCallbackQuery("Скасовано.");
     await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled, buildParcelPhotoRestartKeyboard(parcelId));
 });
@@ -693,7 +716,7 @@ staffLogisticsHandlers.callbackQuery("parcel_photo_cancel", async (ctx) => {
         return;
     }
 
-    resetParcelPhotoDraft(ctx);
+    resetParcelPhotoDraft(ctx, { cancelled: true });
     await ctx.answerCallbackQuery("Скасовано.");
     await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled, buildParcelPhotoRestartKeyboard(parcelId));
 });
@@ -786,6 +809,25 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
             });
         }
+        return;
+    }
+
+    const recentlyCancelledParcelId = ctx.message?.photo ? getRecentlyCancelledParcelPhotoId(ctx) : null;
+    if (recentlyCancelledParcelId) {
+        logBusinessEvent({
+            event: "logistics.parcel.photo_after_cancel_ignored",
+            actorType: "staff",
+            actorRole: "staff",
+            telegramId: ctx.from?.id,
+            result: "ignored",
+            module: "staff-logistics-handler",
+            operation: "parcel_photo_message_after_cancel",
+            safeContext: { parcelId: recentlyCancelledParcelId },
+        });
+        await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_cancelled_photo_ignored, {
+            parse_mode: 'HTML',
+            reply_markup: buildParcelPhotoRestartKeyboard(recentlyCancelledParcelId)
+        });
         return;
     }
 

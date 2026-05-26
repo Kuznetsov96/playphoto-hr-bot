@@ -1,4 +1,4 @@
-import { InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
@@ -11,13 +11,13 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
 import { cleanupUserSessionMessages } from "../utils/cleanup.js";
-import { Bot } from "grammy";
 import prisma from "../db/core.js";
 import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
+import { googleCalendar } from "./google-calendar.js";
 
 export class MentorService {
     private hasBookedOverlap(overlap: {
@@ -591,7 +591,7 @@ export class MentorService {
         };
     }
 
-    async completeOnboarding(candId: string, success: boolean) {
+    async completeOnboarding(candId: string, success: boolean, api?: Api) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
 
@@ -606,13 +606,34 @@ export class MentorService {
             if (cand.user) {
                 await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: SUCCESS (HIRED)");
             }
+            await this.closeFirstShiftOnboardingFromLegacy(candId, true, api);
             return { candidate: cand, success: true };
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
             if (cand.user) {
                 await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: FAILED");
             }
+            await this.closeFirstShiftOnboardingFromLegacy(candId, false, api);
             return { candidate: cand, success: false };
+        }
+    }
+
+    private async closeFirstShiftOnboardingFromLegacy(candId: string, success: boolean, api?: Api) {
+        if (!api) return;
+
+        try {
+            const { firstShiftOnboardingRepository } = await import("../repositories/first-shift-onboarding-repository.js");
+            const { firstShiftOnboardingService } = await import("./first-shift-onboarding-service.js");
+            const activeCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candId);
+            if (!activeCase) return;
+
+            if (success) {
+                await firstShiftOnboardingService.completeCase(api, activeCase.id);
+            } else {
+                await firstShiftOnboardingService.failCase(api, activeCase.id, "Legacy mentor onboarding marked as failed.");
+            }
+        } catch (err) {
+            logger.error({ err, candId, success }, "Failed to close first-shift onboarding from legacy mentor completion");
         }
     }
 
@@ -780,20 +801,37 @@ export class MentorService {
             trainingSession: { connect: { id: session.id } }
         });
 
+        const candidateAfterCancel = await candidateRepository.findById(candId);
+        const googleEvent = await googleCalendar.createEvent({
+            summary: `Навчання: ${candidateAfterCancel?.fullName || "Кандидат"}`,
+            description: `Кандидатка: ${candidateAfterCancel?.fullName || "Кандидат"}\nTelegram: @${candidateAfterCancel?.user?.username || 'немає'}`,
+            startTime: start,
+            endTime: end,
+            calendarType: 'training'
+        }).catch((err) => {
+            logger.error({ err, candidateId: candId, slotId: slot.id }, "Manual training calendar event creation failed");
+            return { eventId: undefined, meetLink: undefined };
+        });
+
         await candidateRepository.update(candId, {
             status: "TRAINING_SCHEDULED",
+            trainingMeetLink: googleEvent.meetLink || null,
             trainingSlot: { connect: { id: slot.id } }
         });
 
+        if (googleEvent.eventId) {
+            await trainingRepository.updateSlot(slot.id, { googleEventId: googleEvent.eventId });
+        }
+
         const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
         const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-        const channelLink = await accessService.createInviteLink((await candidateRepository.findById(candId))?.user.telegramId!) || "https://t.me/+FuFRMGsvMktkNGFi";
+        const channelLink = await accessService.createInviteLink(candidateAfterCancel?.user.telegramId!) || "https://t.me/+FuFRMGsvMktkNGFi";
 
         return {
             success: true,
             message: `✅ Scheduled for ${dateStr} ${timeStr}`,
             notification: {
-                telegramId: Number((await candidateRepository.findById(candId))?.user.telegramId),
+                telegramId: Number(candidateAfterCancel?.user.telegramId),
                 text: CANDIDATE_TEXTS["training-manual-invite"](dateStr, timeStr, channelLink, PHOTOGRAPHER_GUIDE_LINK)
             }
         };
@@ -850,10 +888,27 @@ export class MentorService {
             trainingSession: { connect: { id: session.id } }
         });
 
+        const candidateAfterCancel = await candidateRepository.findById(candId);
+        const googleEvent = await googleCalendar.createEvent({
+            summary: `Знайомство: ${candidateAfterCancel?.fullName || "Кандидат"}`,
+            description: `Кандидатка: ${candidateAfterCancel?.fullName || "Кандидат"}\nЛокація: ${candidateAfterCancel?.location?.name || 'Не вказано'}\nTelegram: @${candidateAfterCancel?.user?.username || 'немає'}`,
+            startTime: start,
+            endTime: end,
+            calendarType: 'training'
+        }).catch((err) => {
+            logger.error({ err, candidateId: candId, slotId: slot.id }, "Manual discovery calendar event creation failed");
+            return { eventId: undefined, meetLink: undefined };
+        });
+
         await candidateRepository.update(candId, {
             status: "DISCOVERY_SCHEDULED",
+            trainingMeetLink: googleEvent.meetLink || null,
             discoverySlot: { connect: { id: slot.id } }
         });
+
+        if (googleEvent.eventId) {
+            await trainingRepository.updateSlot(slot.id, { googleEventId: googleEvent.eventId });
+        }
 
         const dateStr = start.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
         const timeStr = start.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
@@ -862,7 +917,7 @@ export class MentorService {
             success: true,
             message: `✅ Scheduled for ${dateStr} ${timeStr}`,
             notification: {
-                telegramId: Number(cand?.user?.telegramId),
+                telegramId: Number(candidateAfterCancel?.user?.telegramId),
                 text: CANDIDATE_TEXTS["mentor-manual-discovery-assigned"](dateStr, timeStr)
             }
         };

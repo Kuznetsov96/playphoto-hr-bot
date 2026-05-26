@@ -2,7 +2,7 @@ import { candidateRepository } from "../../../repositories/candidate-repository.
 import { teamRegistrationService } from "../../../services/team-registration-service.js";
 import { locationRepository } from "../../../repositories/location-repository.js";
 import { ADMIN_IDS, BACKUP_PASSPHRASE, SPREADSHEET_ID_TEAM } from "../../../config.js";
-import { getBankNameByIban } from "../../../utils/iban-utils.js";
+import { resolveBankNameByIban } from "../../../utils/iban-utils.js";
 import logger from "../../../core/logger.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import path from "path";
@@ -105,6 +105,7 @@ export class CandidateService {
         logger.debug({ candidateId: candidate.id }, "Candidate documents archive processing started");
         const fileIds = (candidate.passportPhotoIds || "").split(',').filter(Boolean);
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `onb-${candidate.id}-`));
+        const bankName = await resolveBankNameByIban(candidate.iban);
 
         try {
             const zip = new AdmZip();
@@ -119,7 +120,7 @@ Telegram ID: ${candidate.user.telegramId}
 Username: @${candidate.user.username || '—'}
 Instagram: ${candidate.instagram || '—'}
 IBAN: ${candidate.iban || '—'}
-Bank: ${getBankNameByIban(candidate.iban)}
+Bank: ${bankName}
 City: ${candidate.city || '—'}
 Location: ${candidate.location?.name || '—'}
             `.trim();

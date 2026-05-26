@@ -11,6 +11,7 @@ import { formatCandidateProfile } from "../utils/profile-formatter.js";
 import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import { readCallbackPayload } from "../utils/signed-callback.js";
+import { ScreenManager } from "../utils/screen-manager.js";
 
 export const hrHandlers = new Composer<MyContext>();
 
@@ -22,6 +23,7 @@ async function renderHrCandidateUnified(ctx: MyContext, candId: string) {
     }
 
     ctx.session.candidateData = { id: candidate.id } as any;
+    ctx.session.candidateProfileMenuId = "hr-candidate-unified";
     const text = await formatCandidateProfile(ctx as any, candidate as any, {
         includeActionLabel: true,
         actionLabel: "Please review the profile and make a decision:"
@@ -45,6 +47,13 @@ hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     await ctx.answerCallbackQuery();
     ctx.session.viewingFromInbox = true; // Show 'Mark as Read' since this comes from notification
+    delete ctx.session.selectedSlotId;
+    await renderHrCandidateUnified(ctx, candId);
+});
+
+hrHandlers.callbackQuery(/^hr_back_candidate_(.+)$/, async (ctx) => {
+    const candId = ctx.match[1]!;
+    await ctx.answerCallbackQuery();
     delete ctx.session.selectedSlotId;
     await renderHrCandidateUnified(ctx, candId);
 });
@@ -178,7 +187,12 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
                 await candidateRepository.update(cand.id, { hasUnreadMessage: false });
             }
 
-            await ctx.reply(`✅ Message sent to ${name}! 🕊️`);
+            const successKb = new InlineKeyboard();
+            if (cand) {
+                successKb.text("👤 Back to Profile", `hr_back_candidate_${cand.id}`).row();
+            }
+            successKb.text("🗓 Calendar", "hr_main_calendar");
+            await ScreenManager.renderScreen(ctx, `✅ Message sent to ${name}! 🕊️`, successKb);
             ctx.session.step = "idle";
         } catch (e: any) {
             if (e.description?.includes("forbidden") || e.description?.includes("blocked") || e.error_code === 403) {
@@ -319,6 +333,8 @@ hrHandlers.callbackQuery(/^invite_candidate_(.+)$/, async (ctx) => {
             await ctx.answerCallbackQuery("Candidate blocked the bot.");
         } else if (result.reason === "age_ineligible") {
             await ctx.answerCallbackQuery("Candidate no longer meets age requirements.");
+        } else if (result.reason === "gender_ineligible") {
+            await ctx.answerCallbackQuery("Candidate does not meet gender requirements.");
         } else {
             await ctx.answerCallbackQuery("Invite failed.");
         }

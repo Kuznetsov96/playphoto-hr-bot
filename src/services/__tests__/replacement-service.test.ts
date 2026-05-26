@@ -1,0 +1,421 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ReplacementAvailabilityKind, ReplacementSearchWave } from "@prisma/client";
+
+const prismaMock = {
+    replacementRequest: {
+        findUnique: vi.fn(),
+        findMany: vi.fn(),
+        findFirst: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+    },
+    replacementResponse: {
+        findMany: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+        count: vi.fn(),
+    },
+    location: {
+        count: vi.fn(),
+    },
+    staffProfile: {
+        findMany: vi.fn(),
+    },
+    workShift: {
+        findUnique: vi.fn(),
+        findFirst: vi.fn(),
+        findMany: vi.fn(),
+        count: vi.fn(),
+    },
+};
+
+const scheduleAvailabilityService = {
+    getAvailabilityForDate: vi.fn(),
+    getAvailabilityForDateFromSchedule: vi.fn(),
+    getMonthlyScheduleSheetName: vi.fn(),
+};
+
+const defaultQueue = {
+    add: vi.fn(),
+};
+
+vi.mock("../../db/core.js", () => ({
+    default: prismaMock,
+}));
+
+vi.mock("../schedule-availability-service.js", () => ({
+    scheduleAvailabilityService,
+}));
+
+vi.mock("../../core/queue.js", () => ({
+    defaultQueue,
+}));
+
+vi.mock("../../core/logger.js", () => ({
+    default: {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+    },
+}));
+
+describe("ReplacementService", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        scheduleAvailabilityService.getMonthlyScheduleSheetName.mockReturnValue("Травень 2030");
+    });
+
+    it("advances past an empty wave and sends the next available wave", async () => {
+        const request: any = {
+            id: "request-1",
+            requesterStaffId: "requester-1",
+            locationId: "location-1",
+            city: "Київ",
+            shiftDate: new Date("2030-05-10T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-10T12:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-10T20:00:00.000Z"),
+            status: "ACTIVE",
+            currentWave: null,
+            nextWaveAt: null,
+            location: { id: "location-1", name: "Smile Park (Darynok)", city: "Київ", schedule: null },
+            requester: { id: "requester-1", fullName: "Кравченко Катерина", user: { telegramId: 772086875n } },
+            replacement: null,
+        };
+
+        prismaMock.replacementRequest.findUnique.mockImplementation(async () => ({ ...request }));
+        prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-1" });
+        prismaMock.location.count.mockResolvedValue(2);
+        prismaMock.replacementResponse.findMany.mockResolvedValue([]);
+        prismaMock.replacementRequest.update.mockImplementation(async ({ data }: any) => {
+            Object.assign(request, data);
+            return { ...request };
+        });
+        scheduleAvailabilityService.getAvailabilityForDateFromSchedule.mockResolvedValue(new Map([
+            ["limited-1", "limited"],
+        ]));
+        prismaMock.staffProfile.findMany.mockResolvedValue([
+            {
+                id: "limited-1",
+                fullName: "Прокопʼєва Маріанна",
+                user: { telegramId: 123456789n },
+                location: request.location,
+            },
+        ]);
+        prismaMock.workShift.findMany.mockResolvedValue([]);
+        prismaMock.replacementResponse.create.mockResolvedValue({ id: "response-1" });
+        prismaMock.replacementResponse.update.mockResolvedValue({});
+        prismaMock.replacementResponse.count.mockResolvedValue(1);
+        defaultQueue.add.mockResolvedValue({ id: "job-1" });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ chat: { id: 123456789 }, message_id: 42 }),
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().dispatchNextWave(api as any, request.id);
+
+        expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
+            where: { id: request.id },
+            data: { currentWave: ReplacementSearchWave.SAME_LOCATION_AVAILABLE, nextWaveAt: expect.any(Date) },
+        });
+        expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
+            where: { id: request.id },
+            data: { currentWave: ReplacementSearchWave.SAME_LOCATION_LIMITED, nextWaveAt: expect.any(Date) },
+        });
+        expect(prismaMock.replacementResponse.create).toHaveBeenCalledWith({
+            data: {
+                requestId: request.id,
+                staffId: "limited-1",
+                wave: ReplacementSearchWave.SAME_LOCATION_LIMITED,
+                availabilityKind: ReplacementAvailabilityKind.LIMITED,
+            },
+        });
+        expect(scheduleAvailabilityService.getAvailabilityForDateFromSchedule).toHaveBeenCalledWith(request.shiftDate);
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("notifies the main admin in English with shortened photographer name when replacement is not found", async () => {
+        const request: any = {
+            id: "request-2",
+            requesterStaffId: "requester-2",
+            locationId: "location-2",
+            city: "Львів",
+            shiftDate: new Date("2030-05-11T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-11T11:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-11T18:00:00.000Z"),
+            status: "ACTIVE",
+            currentWave: ReplacementSearchWave.SAME_LOCATION_LIMITED,
+            nextWaveAt: null,
+            location: { id: "location-2", name: "Dragon Park", city: "Львів", schedule: null },
+            requester: { id: "requester-2", fullName: "Бланк Анастасія Тарасівна", user: { telegramId: 1164289764n } },
+            replacement: null,
+        };
+
+        prismaMock.replacementRequest.findUnique.mockResolvedValue(request);
+        prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-2" });
+        prismaMock.location.count.mockResolvedValue(1);
+        prismaMock.replacementResponse.findMany.mockImplementation(async ({ where }: any) => {
+            if (where?.status === "SENT") return [];
+            return [
+                { wave: ReplacementSearchWave.SAME_LOCATION_AVAILABLE },
+                { wave: ReplacementSearchWave.SAME_LOCATION_LIMITED },
+            ];
+        });
+        prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 1 });
+        prismaMock.replacementResponse.updateMany.mockResolvedValue({ count: 0 });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ chat: { id: 107794048 }, message_id: 10 }),
+            editMessageText: vi.fn(),
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().dispatchNextWave(api as any, request.id);
+
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Replacement not found."),
+            { parse_mode: "HTML" }
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Photographer: Бланк Анастасія\n\n"),
+            { parse_mode: "HTML" }
+        );
+        expect(api.sendMessage).not.toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Тарасівна"),
+            expect.anything()
+        );
+    });
+
+    it("keeps the final wave open until four hours before the shift when that is later than the normal interval", async () => {
+        const request: any = {
+            id: "request-3",
+            requesterStaffId: "requester-3",
+            locationId: "location-3",
+            city: "Львів",
+            shiftDate: new Date("2030-05-11T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-11T11:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-11T18:00:00.000Z"),
+            status: "ACTIVE",
+            currentWave: ReplacementSearchWave.SAME_LOCATION_AVAILABLE,
+            nextWaveAt: null,
+            location: { id: "location-3", name: "Dragon Park", city: "Львів", schedule: null },
+            requester: { id: "requester-3", fullName: "Бланк Анастасія Тарасівна", user: { telegramId: 1164289764n } },
+            replacement: null,
+        };
+
+        prismaMock.replacementRequest.findUnique.mockImplementation(async () => ({ ...request }));
+        prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-3" });
+        prismaMock.location.count.mockResolvedValue(1);
+        prismaMock.replacementResponse.findMany.mockResolvedValue([
+            { wave: ReplacementSearchWave.SAME_LOCATION_AVAILABLE },
+        ]);
+        prismaMock.replacementRequest.update.mockImplementation(async ({ data }: any) => {
+            Object.assign(request, data);
+            return { ...request };
+        });
+        scheduleAvailabilityService.getAvailabilityForDateFromSchedule.mockResolvedValue(new Map([
+            ["limited-3", "limited"],
+        ]));
+        prismaMock.staffProfile.findMany.mockResolvedValue([
+            {
+                id: "limited-3",
+                fullName: "Ольхович Леся Ігорівна",
+                user: { telegramId: 5725322763n },
+                location: request.location,
+            },
+        ]);
+        prismaMock.workShift.findMany.mockResolvedValue([]);
+        prismaMock.replacementResponse.create.mockResolvedValue({ id: "response-3" });
+        prismaMock.replacementResponse.update.mockResolvedValue({});
+        prismaMock.replacementResponse.count.mockResolvedValue(1);
+        defaultQueue.add.mockResolvedValue({ id: "job-3" });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ chat: { id: 5725322763 }, message_id: 43 }),
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().dispatchNextWave(api as any, request.id);
+
+        const expectedFinalCloseAt = new Date("2030-05-11T07:00:00.000Z");
+        expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
+            where: { id: request.id },
+            data: {
+                currentWave: ReplacementSearchWave.SAME_LOCATION_LIMITED,
+                nextWaveAt: expectedFinalCloseAt,
+            },
+        });
+        const queueCall = defaultQueue.add.mock.calls.at(-1);
+        expect(queueCall?.[0]).toBe("replacement-dispatch-wave");
+        expect(queueCall?.[1]).toEqual({ requestId: request.id });
+        expect(queueCall?.[2]).toMatchObject({ attempts: 3, removeOnComplete: true });
+        expect(queueCall?.[2].delay).toBeGreaterThan(4 * 60 * 60 * 1000);
+    });
+
+    it("notifies the main admin in English when replacement search starts", async () => {
+        const shift: any = {
+            id: "shift-4",
+            staffId: "requester-4",
+            locationId: "location-4",
+            date: new Date("2030-05-11T00:00:00.000Z"),
+            startTime: new Date("2030-05-11T11:00:00.000Z"),
+            endTime: new Date("2030-05-11T18:00:00.000Z"),
+            location: { id: "location-4", name: "Dragon Park", city: "Львів", schedule: null },
+            staff: { id: "requester-4", fullName: "Бланк Анастасія Тарасівна", user: { telegramId: 1164289764n } },
+        };
+        const createdRequest: any = {
+            id: "request-4",
+            requesterStaffId: "requester-4",
+            locationId: "location-4",
+            city: "Львів",
+            shiftDate: shift.date,
+            shiftStartTime: shift.startTime,
+            shiftEndTime: shift.endTime,
+            status: "ACTIVE",
+            currentWave: null,
+            nextWaveAt: null,
+            location: shift.location,
+            requester: shift.staff,
+            replacement: null,
+        };
+
+        prismaMock.workShift.findUnique.mockResolvedValue(shift);
+        prismaMock.replacementRequest.findFirst.mockResolvedValue(null);
+        prismaMock.replacementRequest.create.mockResolvedValue(createdRequest);
+        prismaMock.replacementRequest.findUnique
+            .mockResolvedValueOnce(createdRequest)
+            .mockResolvedValueOnce({ ...createdRequest, status: "CANCELLED" });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ chat: { id: 107794048 }, message_id: 11 }),
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().startRequest(api as any, "requester-4", "shift-4");
+
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Replacement search started."),
+            { parse_mode: "HTML" }
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Photographer: Бланк Анастасія\n\n"),
+            { parse_mode: "HTML" }
+        );
+    });
+
+    it("blocks a duplicate active search for the same requester, date, and location after a shift resync", async () => {
+        const shift: any = {
+            id: "shift-new",
+            staffId: "requester-5",
+            locationId: "location-5",
+            date: new Date("2030-05-12T00:00:00.000Z"),
+            startTime: new Date("2030-05-12T11:00:00.000Z"),
+            endTime: new Date("2030-05-12T18:00:00.000Z"),
+            location: { id: "location-5", name: "Smile Park", city: "Київ", schedule: null },
+            staff: { id: "requester-5", fullName: "Прокопʼєва Маріанна", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.workShift.findUnique.mockResolvedValue(shift);
+        prismaMock.replacementRequest.findFirst.mockResolvedValue({
+            id: "orphan-request",
+            workShiftId: null,
+            requesterStaffId: "requester-5",
+            locationId: "location-5",
+            shiftDate: shift.date,
+            status: "ACTIVE",
+        });
+
+        const api = { sendMessage: vi.fn() };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await expect(new ReplacementService().startRequest(api as any, "requester-5", "shift-new"))
+            .rejects.toThrow("REQUEST_ALREADY_ACTIVE");
+
+        expect(prismaMock.replacementRequest.findFirst).toHaveBeenCalledWith({
+            where: {
+                status: "ACTIVE",
+                OR: [
+                    { workShiftId: "shift-new" },
+                    {
+                        requesterStaffId: "requester-5",
+                        locationId: "location-5",
+                        shiftDate: { gte: expect.any(Date), lt: expect.any(Date) },
+                    },
+                ],
+            },
+        });
+        expect(prismaMock.replacementRequest.create).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("blocks restarting a search when the same shift already failed to find a replacement", async () => {
+        const shift: any = {
+            id: "shift-failed",
+            staffId: "requester-7",
+            locationId: "location-7",
+            date: new Date("2030-05-14T00:00:00.000Z"),
+            startTime: new Date("2030-05-14T11:00:00.000Z"),
+            endTime: new Date("2030-05-14T18:00:00.000Z"),
+            location: { id: "location-7", name: "Smile Park", city: "Київ", schedule: null },
+            staff: { id: "requester-7", fullName: "Прокопʼєва Маріанна", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.workShift.findUnique.mockResolvedValue(shift);
+        prismaMock.replacementRequest.findFirst
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({
+                id: "failed-request",
+                workShiftId: null,
+                requesterStaffId: "requester-7",
+                locationId: "location-7",
+                shiftDate: shift.date,
+                status: "FAILED",
+            });
+
+        const api = { sendMessage: vi.fn() };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await expect(new ReplacementService().startRequest(api as any, "requester-7", "shift-failed"))
+            .rejects.toThrow("REQUEST_PREVIOUSLY_FAILED");
+
+        expect(prismaMock.replacementRequest.create).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("reattaches an active orphaned replacement request to the resynced work shift", async () => {
+        const request: any = {
+            id: "request-orphan",
+            workShiftId: null,
+            requesterStaffId: "requester-6",
+            locationId: "location-6",
+            shiftDate: new Date("2030-05-13T00:00:00.000Z"),
+            status: "ACTIVE",
+            location: { id: "location-6", name: "Smile Park", city: "Київ", schedule: null },
+            requester: { id: "requester-6", fullName: "Прокопʼєва Маріанна", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.replacementRequest.findMany.mockResolvedValue([request]);
+        prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-resynced" });
+        prismaMock.replacementRequest.update.mockResolvedValue({ ...request, workShiftId: "shift-resynced" });
+
+        const api = { sendMessage: vi.fn(), editMessageText: vi.fn() };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().closeActiveRequestsChangedBySchedule(api as any);
+
+        expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
+            where: { id: "request-orphan" },
+            data: { workShiftId: "shift-resynced" },
+        });
+        expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+});

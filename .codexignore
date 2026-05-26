@@ -1,0 +1,48 @@
+# Dependencies and local runtimes
+node_modules/
+.venv/
+venv/
+env/
+
+# Build, generated, and test output
+dist/
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+src/generated/prisma/
+
+# Runtime data, logs, and local scratch
+logs/
+backups/
+tmp/
+*.log
+*.session
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets and local machine state
+.env
+.env.*
+!.env.example
+google-service-account.json
+monobank_cache.json
+.claude/settings.local.json
+.DS_Store
+Thumbs.db
+
+# Archives and bulky artifacts
+*.zip
+*.tar
+*.gz
+*.7z
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.mp4
+*.mov
+

@@ -72,6 +72,37 @@ export class FirstShiftOnboardingRepository {
         }) as Promise<FirstShiftOnboardingCaseWithRelations>;
     }
 
+    async claimEntryMessageDelivery(id: string, now: Date, leaseUntil: Date) {
+        const result = await prisma.firstShiftOnboardingCase.updateMany({
+            where: {
+                id,
+                entryMessageSentAt: null,
+                OR: [
+                    { entryMessageLeaseUntil: null },
+                    { entryMessageLeaseUntil: { lt: now } },
+                ],
+            },
+            data: {
+                entryMessageLeaseUntil: leaseUntil,
+            },
+        });
+
+        return result.count === 1;
+    }
+
+    async markEntryMessageDelivered(id: string, sentAt: Date) {
+        return this.updateCase(id, {
+            entryMessageSentAt: sentAt,
+            entryMessageLeaseUntil: null,
+        });
+    }
+
+    async releaseEntryMessageDelivery(id: string) {
+        return this.updateCase(id, {
+            entryMessageLeaseUntil: null,
+        });
+    }
+
     async updateStep(id: string, data: Prisma.FirstShiftOnboardingStepUpdateInput) {
         return prisma.firstShiftOnboardingStep.update({
             where: { id },

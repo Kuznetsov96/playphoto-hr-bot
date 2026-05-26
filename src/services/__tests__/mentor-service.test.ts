@@ -38,7 +38,14 @@ vi.mock('../../repositories/training-repository.js', () => ({
     trainingRepository: {
         countBookedSlotsByDateRange: vi.fn().mockResolvedValue(0),
         createSession: vi.fn(),
-        createSlot: vi.fn()
+        createSlot: vi.fn(),
+        updateSlot: vi.fn()
+    }
+}));
+
+vi.mock('../google-calendar.js', () => ({
+    googleCalendar: {
+        createEvent: vi.fn()
     }
 }));
 
@@ -98,6 +105,7 @@ import { mentorService } from '../mentor-service.js';
 import { candidateRepository } from '../../repositories/candidate-repository.js';
 import { accessService } from '../access-service.js';
 import { trainingRepository } from '../../repositories/training-repository.js';
+import { googleCalendar } from '../google-calendar.js';
 import prisma from '../../db/core.js';
 import { createKyivDate } from '../../utils/bot-utils.js';
 
@@ -299,6 +307,71 @@ describe('MentorService', () => {
     });
 
     describe('manual slot overlap guards', () => {
+        it('should create a calendar event and persist meet link for manual training bookings', async () => {
+            const start = new Date('2026-05-04T08:30:00.000Z');
+            const end = new Date('2026-05-04T08:50:00.000Z');
+            vi.mocked(createKyivDate).mockReturnValue(start as any);
+            vi.mocked((prisma as any).trainingSession.findFirst).mockResolvedValue(null);
+            vi.mocked(trainingRepository.createSession).mockResolvedValue({ id: 'session-1' } as any);
+            vi.mocked(trainingRepository.createSlot).mockResolvedValue({ id: 'slot-1', startTime: start, endTime: end } as any);
+            vi.mocked(googleCalendar.createEvent).mockResolvedValue({ eventId: 'event-1', meetLink: 'https://meet.test/training' } as any);
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand-new',
+                fullName: 'Candidate New',
+                trainingSlotId: null,
+                user: { telegramId: 123n, username: 'candidate' }
+            } as any);
+
+            const result = await mentorService.bookTrainingSlotFromText('cand-new', '04.05 11:30');
+
+            expect(result.success).toBe(true);
+            expect(googleCalendar.createEvent).toHaveBeenCalledWith(expect.objectContaining({
+                summary: 'Навчання: Candidate New',
+                startTime: start,
+                endTime: end,
+                calendarType: 'training'
+            }));
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-new', expect.objectContaining({
+                status: 'TRAINING_SCHEDULED',
+                trainingMeetLink: 'https://meet.test/training',
+                trainingSlot: { connect: { id: 'slot-1' } }
+            }));
+            expect(trainingRepository.updateSlot).toHaveBeenCalledWith('slot-1', { googleEventId: 'event-1' });
+        });
+
+        it('should create a calendar event and persist meet link for manual discovery bookings', async () => {
+            const start = new Date('2026-05-04T08:30:00.000Z');
+            const end = new Date('2026-05-04T08:50:00.000Z');
+            vi.mocked(createKyivDate).mockReturnValue(start as any);
+            vi.mocked((prisma as any).trainingSession.findFirst).mockResolvedValue(null);
+            vi.mocked(trainingRepository.createSession).mockResolvedValue({ id: 'session-1' } as any);
+            vi.mocked(trainingRepository.createSlot).mockResolvedValue({ id: 'slot-1', startTime: start, endTime: end } as any);
+            vi.mocked(googleCalendar.createEvent).mockResolvedValue({ eventId: 'event-1', meetLink: 'https://meet.test/discovery' } as any);
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand-new',
+                fullName: 'Candidate New',
+                discoverySlotId: null,
+                location: { name: 'Kyiv' },
+                user: { telegramId: 123n, username: 'candidate' }
+            } as any);
+
+            const result = await mentorService.bookDiscoverySlotFromText('cand-new', '04.05 11:30');
+
+            expect(result.success).toBe(true);
+            expect(googleCalendar.createEvent).toHaveBeenCalledWith(expect.objectContaining({
+                summary: 'Знайомство: Candidate New',
+                startTime: start,
+                endTime: end,
+                calendarType: 'training'
+            }));
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-new', expect.objectContaining({
+                status: 'DISCOVERY_SCHEDULED',
+                trainingMeetLink: 'https://meet.test/discovery',
+                discoverySlot: { connect: { id: 'slot-1' } }
+            }));
+            expect(trainingRepository.updateSlot).toHaveBeenCalledWith('slot-1', { googleEventId: 'event-1' });
+        });
+
         it('should block training booking text when an overlapping slot is already booked by a HIRED candidate', async () => {
             const start = new Date('2026-05-04T08:30:00.000Z');
             vi.mocked(createKyivDate).mockReturnValue(start as any);

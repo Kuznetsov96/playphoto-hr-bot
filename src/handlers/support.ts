@@ -89,6 +89,13 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (user?.staffProfile?.isActive && preferredTarget !== "RECOVERY") {
+        const { startSupportFlow: startStaffSupportFlow } = await import("../modules/staff/handlers/menu.js");
+        await startStaffSupportFlow(ctx);
+        return;
+    }
+
     const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
     if (!candidate) {
         await ctx.answerCallbackQuery("Error: Candidate profile not found.");
@@ -593,4 +600,3 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         return false;
     }
 }
-

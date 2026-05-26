@@ -23,7 +23,7 @@ import { taskProofService } from "../../../services/task-proof-service.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { getLocationShortcut } from "../../../utils/ticket-card.js";
 import { truncateText } from "../../../utils/task-helpers.js";
-import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
+import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../../../services/first-shift-onboarding-service.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -32,6 +32,31 @@ const supportActionDedupe = new ActionDedupeWindow(SUPPORT_ACTION_DEBOUNCE_MS);
 
 export const staffSupportHandlers = new Composer<MyContext>();
 const adminSupportCallbacks = new Composer<MyContext>();
+
+function buildOnboardingPayloadFromSupportMessage(ctx: MyContext): FirstShiftOnboardingCandidateMessage {
+    const text = ctx.message?.text || ctx.message?.caption || undefined;
+    const photoId = ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null;
+    const hasMedia = Boolean(
+        photoId ||
+        ctx.message?.voice ||
+        ctx.message?.video_note ||
+        ctx.message?.video ||
+        ctx.message?.document ||
+        ctx.message?.audio ||
+        ctx.message?.animation ||
+        ctx.message?.sticker,
+    );
+    const hasFormattedText = Boolean(ctx.message?.entities?.length || ctx.message?.caption_entities?.length);
+
+    const payload: FirstShiftOnboardingCandidateMessage = {
+        photoId,
+        hasCopyableOriginal: hasMedia || hasFormattedText,
+    };
+    if (ctx.message?.message_id !== undefined) payload.messageId = ctx.message.message_id;
+    if (ctx.chat?.id !== undefined) payload.chatId = ctx.chat.id;
+    if (text !== undefined) payload.text = text;
+    return payload;
+}
 
 adminSupportCallbacks
     .filter((ctx) =>
@@ -1140,15 +1165,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
         } else {
             const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
             if (activeOnboardingCase) {
-                const onboardingPayload: { text?: string; photoId?: string | null; messageId?: number; chatId?: number } = {
-                    photoId: ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null,
-                };
-                const onboardingText = ctx.message?.text || ctx.message?.caption;
-                if (onboardingText !== undefined) onboardingPayload.text = onboardingText;
-                if (ctx.message?.message_id !== undefined) onboardingPayload.messageId = ctx.message.message_id;
-                if (ctx.chat?.id !== undefined) onboardingPayload.chatId = ctx.chat.id;
-
-                const forwardedToOnboarding = await firstShiftOnboardingService.handleCandidateMessage(ctx.api, telegramId, onboardingPayload);
+                const forwardedToOnboarding = await firstShiftOnboardingService.handleCandidateMessage(ctx.api, telegramId, buildOnboardingPayloadFromSupportMessage(ctx));
                 if (forwardedToOnboarding) {
                     ctx.session.step = "idle";
                     delete ctx.session.clarificationTaskId;

@@ -5,10 +5,14 @@ import { taskRepository, type TaskWithRelations } from "../repositories/task-rep
 import { staffRepository } from "../repositories/staff-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 
+export const TASK_TEXT_MAX_LENGTH = 3000;
+
 // Zod schemas
 const CreateTaskSchema = z.object({
     staffId: z.string().cuid(),
-    taskText: z.string().min(1, "Task text cannot be empty"),
+    taskText: z.string()
+        .min(1, "Task text cannot be empty")
+        .max(TASK_TEXT_MAX_LENGTH, `Task text cannot exceed ${TASK_TEXT_MAX_LENGTH} characters`),
     workDate: z.date().nullable().optional(),
     deadlineTime: z.string().regex(/^\d{1,2}:\d{2}$/, "Time must be HH:MM").nullable().optional(),
     city: z.string().nullable().optional(),

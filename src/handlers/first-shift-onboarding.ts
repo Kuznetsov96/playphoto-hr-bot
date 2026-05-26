@@ -2,7 +2,7 @@ import { Composer } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { FIRST_SHIFT_ONBOARDING_CHAT_ID } from "../config.js";
 import { getAdminRoleByTelegramId } from "../config/roles.js";
-import { firstShiftOnboardingService } from "../services/first-shift-onboarding-service.js";
+import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../services/first-shift-onboarding-service.js";
 
 export const firstShiftOnboardingHandlers = new Composer<MyContext>();
 
@@ -40,7 +40,9 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_ap_(.+)$/, async (ctx) => {
         return;
     }
     const result = await firstShiftOnboardingService.approveStep(ctx.api, stepId, ctx.from?.id);
-    await ctx.answerCallbackQuery(result ? "Step approved." : "Step is no longer awaiting approval.");
+    await ctx.answerCallbackQuery(result?.status === "PENDING_FINAL"
+        ? "All steps approved. Choose the final decision below."
+        : result ? "Step approved. Next action is in the topic." : "Step is no longer awaiting approval.");
 });
 
 firstShiftOnboardingHandlers.callbackQuery(/^fso_rj_(.+)$/, async (ctx) => {
@@ -51,7 +53,38 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_rj_(.+)$/, async (ctx) => {
         await ctx.answerCallbackQuery("Unavailable.");
         return;
     }
-    const result = await firstShiftOnboardingService.rejectStep(ctx.api, stepId);
+    ctx.session.step = `fso_reject_reason_${stepId}`;
+    await ctx.answerCallbackQuery("Choose or write the redo reason.");
+    await ctx.reply("🔁 <b>Що саме потрібно переробити?</b>\n\nОбери швидку причину або напиши свою відповідь у цей topic.", {
+        parse_mode: "HTML",
+        reply_markup: firstShiftOnboardingService.buildRejectReasonKeyboard(stepId),
+    });
+});
+
+firstShiftOnboardingHandlers.callbackQuery(/^fso_rjc_(.+)_(bad_photo|incomplete|custom|none)$/, async (ctx) => {
+    const stepId = ctx.match[1];
+    const reasonCode = ctx.match[2];
+    if (!stepId || !reasonCode) return;
+    const role = ctx.from?.id ? getAdminRoleByTelegramId(BigInt(ctx.from.id)) : null;
+    if (!role) {
+        await ctx.answerCallbackQuery("Unavailable.");
+        return;
+    }
+
+    if (reasonCode === "custom") {
+        ctx.session.step = `fso_reject_reason_${stepId}`;
+        await ctx.answerCallbackQuery("Write the reason in this topic.");
+        return;
+    }
+
+    const reason = reasonCode === "bad_photo"
+        ? "Не видно потрібні деталі або невдалий ракурс. Надішли, будь ласка, чіткіше фото."
+        : reasonCode === "incomplete"
+            ? "Надіслано не всі потрібні матеріали. Додай, будь ласка, повний комплект."
+            : null;
+
+    ctx.session.step = "idle";
+    const result = await firstShiftOnboardingService.rejectStep(ctx.api, stepId, reason);
     await ctx.answerCallbackQuery(result ? "Step returned for redo." : "Step is no longer awaiting review.");
 });
 
@@ -94,17 +127,32 @@ firstShiftOnboardingHandlers.callbackQuery(/^fso_fail_(.+)$/, async (ctx) => {
 export async function handleFirstShiftOnboardingCandidateMessage(ctx: MyContext): Promise<boolean> {
     if (!ctx.from?.id || ctx.chat?.type !== "private" || !ctx.message) return false;
 
-    const text = ctx.message.text || ctx.message.caption || undefined;
-    const photoId = ctx.message.photo?.[ctx.message.photo.length - 1]?.file_id || null;
+    return firstShiftOnboardingService.handleCandidateMessage(ctx.api, ctx.from.id, buildFirstShiftOnboardingPayload(ctx));
+}
 
-    const payload: { text?: string; photoId?: string | null; messageId?: number; chatId?: number } = {
+export function buildFirstShiftOnboardingPayload(ctx: MyContext): FirstShiftOnboardingCandidateMessage {
+    const text = ctx.message?.text || ctx.message?.caption || undefined;
+    const photoId = ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null;
+    const hasMedia = Boolean(
+        photoId ||
+        ctx.message?.voice ||
+        ctx.message?.video_note ||
+        ctx.message?.video ||
+        ctx.message?.document ||
+        ctx.message?.audio ||
+        ctx.message?.animation ||
+        ctx.message?.sticker,
+    );
+    const hasFormattedText = Boolean(ctx.message?.entities?.length || ctx.message?.caption_entities?.length);
+
+    const payload: FirstShiftOnboardingCandidateMessage = {
         photoId,
-        messageId: ctx.message.message_id,
-        chatId: ctx.chat.id,
+        hasCopyableOriginal: hasMedia || hasFormattedText,
     };
+    if (ctx.message?.message_id !== undefined) payload.messageId = ctx.message.message_id;
+    if (ctx.chat?.id !== undefined) payload.chatId = ctx.chat.id;
     if (text !== undefined) payload.text = text;
-
-    return firstShiftOnboardingService.handleCandidateMessage(ctx.api, ctx.from.id, payload);
+    return payload;
 }
 
 export async function handleFirstShiftOnboardingGroupMessage(ctx: MyContext): Promise<boolean> {
@@ -115,6 +163,19 @@ export async function handleFirstShiftOnboardingGroupMessage(ctx: MyContext): Pr
 
     const role = ctx.from?.id ? getAdminRoleByTelegramId(BigInt(ctx.from.id)) : null;
     if (!role) return false;
+
+    if (ctx.session.step?.startsWith("fso_reject_reason_")) {
+        const stepId = ctx.session.step.replace("fso_reject_reason_", "");
+        const reason = ctx.message.text || ctx.message.caption;
+        if (!reason) {
+            await ctx.reply("Напиши причину текстом або обери швидку причину з кнопок вище.", { parse_mode: "HTML" });
+            return true;
+        }
+
+        ctx.session.step = "idle";
+        await firstShiftOnboardingService.rejectStep(ctx.api, stepId, reason);
+        return true;
+    }
 
     return firstShiftOnboardingService.handleTopicReply(
         ctx.api,

@@ -1,6 +1,8 @@
 import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
 
+const TELEGRAM_MESSAGE_LIMIT = 4096;
+
 export const CITY_MAP: Record<string, string> = {
     // English targets
     "Lviv": "Lviv",
@@ -150,23 +152,23 @@ export function msgToHtml(text: string, entities: any[] = []): string {
         offset: number;
         type: string;
         isClose: boolean;
-        priority: number;
+        length: number;
         url?: string;
     }
 
     const markers: Marker[] = [];
 
     for (const entity of entities) {
-        // Priorities ensure correct nesting: close tags first, then open tags
-        // For same position: closing tags should have higher priority (processed first)
-        markers.push({ offset: entity.offset, type: entity.type, isClose: false, priority: 2, url: entity.url });
-        markers.push({ offset: entity.offset + entity.length, type: entity.type, isClose: true, priority: 1 });
+        markers.push({ offset: entity.offset, type: entity.type, isClose: false, length: entity.length, url: entity.url });
+        markers.push({ offset: entity.offset + entity.length, type: entity.type, isClose: true, length: entity.length });
     }
 
-    // Sort markers by offset, then by priority (close tags at same offset first)
+    // Telegram entities can be nested and may share the same boundary.
+    // Outer tags must open first, while inner tags must close first.
     markers.sort((a, b) => {
         if (a.offset !== b.offset) return a.offset - b.offset;
-        return a.priority - b.priority;
+        if (a.isClose !== b.isClose) return a.isClose ? -1 : 1;
+        return a.isClose ? a.length - b.length : b.length - a.length;
     });
 
     let result = "";
@@ -209,6 +211,59 @@ export function msgToHtml(text: string, entities: any[] = []): string {
     return result;
 }
 
+function splitTelegramHtmlMessage(text: string, maxLength = TELEGRAM_MESSAGE_LIMIT): string[] {
+    if (text.length <= maxLength) return [text];
+
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > maxLength) {
+        const hardLimit = maxLength - 40;
+        const newlineIndex = remaining.lastIndexOf("\n", hardLimit);
+        const spaceIndex = remaining.lastIndexOf(" ", hardLimit);
+        const splitAt = newlineIndex > 500 ? newlineIndex : (spaceIndex > 500 ? spaceIndex : hardLimit);
+
+        chunks.push(remaining.slice(0, splitAt).trimEnd());
+        remaining = remaining.slice(splitAt).trimStart();
+    }
+
+    if (remaining) chunks.push(remaining);
+    return chunks;
+}
+
+export async function sendLongHtmlMessage(
+    ctx: MyContext,
+    targetChatId: number,
+    htmlText: string,
+    options?: {
+        replyMarkup?: InstanceType<typeof InlineKeyboard>;
+        messageThreadId?: number;
+    }
+) {
+    const chunks = splitTelegramHtmlMessage(htmlText);
+
+    for (let i = 0; i < chunks.length; i++) {
+        const sendOptions: Record<string, unknown> = {
+            parse_mode: "HTML",
+        };
+        if (options?.messageThreadId !== undefined) {
+            sendOptions.message_thread_id = options.messageThreadId;
+        }
+        if (options?.replyMarkup && i === chunks.length - 1) {
+            sendOptions.reply_markup = options.replyMarkup;
+        }
+
+        await ctx.api.sendMessage(targetChatId, chunks[i]!, sendOptions as any);
+    }
+}
+
+export function getMessageHtml(message: MyContext["message"] | undefined): string {
+    if (!message) return "";
+    const text = message.text || message.caption || "";
+    const entities = message.text ? message.entities : message.caption_entities;
+    return msgToHtml(text, entities || []);
+}
+
 export async function sendTaskNotification(
     ctx: MyContext,
     targetChatId: number,
@@ -218,29 +273,26 @@ export async function sendTaskNotification(
         sourceChatId?: number;
         sourceMessageId?: number;
         fileId?: string | null;
-        mediaType?: "photo" | "video" | "document";
+        mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
+        textIsHtml?: boolean;
     }
 ) {
-    if (options?.fileId) {
-        if (options.mediaType === "video") {
-            await ctx.api.sendVideo(targetChatId, options.fileId);
-        } else if (options.mediaType === "document") {
-            await ctx.api.sendDocument(targetChatId, options.fileId);
-        } else {
-            await ctx.api.sendPhoto(targetChatId, options.fileId);
-        }
-    } else if (options?.sourceChatId && options?.sourceMessageId) {
+    if (options?.sourceChatId && options?.sourceMessageId) {
         await ctx.api.copyMessage(targetChatId, options.sourceChatId, options.sourceMessageId);
+    } else if (options?.fileId) {
+        if (options.mediaType === "video") await ctx.api.sendVideo(targetChatId, options.fileId);
+        else if (options.mediaType === "document") await ctx.api.sendDocument(targetChatId, options.fileId);
+        else if (options.mediaType === "voice") await ctx.api.sendVoice(targetChatId, options.fileId);
+        else if (options.mediaType === "video_note") await ctx.api.sendVideoNote(targetChatId, options.fileId);
+        else if (options.mediaType === "audio") await ctx.api.sendAudio(targetChatId, options.fileId);
+        else if (options.mediaType === "animation") await ctx.api.sendAnimation(targetChatId, options.fileId);
+        else await ctx.api.sendPhoto(targetChatId, options.fileId);
     }
 
-    const sendOptions: Record<string, unknown> = {
-        parse_mode: "HTML",
-    };
-    if (options?.replyMarkup) {
-        sendOptions.reply_markup = options.replyMarkup;
-    }
-
-    await ctx.api.sendMessage(targetChatId, text, sendOptions as any);
+    const htmlText = options?.textIsHtml ? text : escapeHtml(text);
+    const longMessageOptions: { replyMarkup?: InstanceType<typeof InlineKeyboard> } = {};
+    if (options?.replyMarkup) longMessageOptions.replyMarkup = options.replyMarkup;
+    await sendLongHtmlMessage(ctx, targetChatId, htmlText, longMessageOptions);
 }
 
 /**

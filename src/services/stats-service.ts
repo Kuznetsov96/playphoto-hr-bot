@@ -2,9 +2,7 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 
 import prisma from "../db/core.js";
 import { formatLocationName, normalizeCity } from "../handlers/admin/utils.js";
-
-const MIN_CANDIDATE_AGE = 17;
-const MAX_CANDIDATE_AGE = 26;
+import { getAgeRejection } from "../utils/candidate-age.js";
 
 type PipelineHealthReport = {
     staleScreening: number;
@@ -35,6 +33,12 @@ type DashboardCandidate = {
     statusChangedAt: Date | null;
     pipelineTouchedAt: Date;
     locationId: string | null;
+    location: {
+        city: string;
+        name: string;
+        legacyName: string | null;
+        sheet: string | null;
+    } | null;
     user: {
         createdAt: Date;
         botBlockedAt: Date | null;
@@ -237,7 +241,7 @@ function isAgeMismatch(candidate: DashboardCandidate): boolean {
     }
     const age = getCandidateAge(candidate.birthDate);
     if (age === null) return false;
-    return age < MIN_CANDIDATE_AGE || age > MAX_CANDIDATE_AGE;
+    return getAgeRejection(age, candidate.location) !== null;
 }
 
 function isNoDemandCandidate(candidate: DashboardCandidate): boolean {
@@ -511,6 +515,14 @@ export const statsService = {
                     statusChangedAt: true,
                     pipelineTouchedAt: true,
                     locationId: true,
+                    location: {
+                        select: {
+                            city: true,
+                            name: true,
+                            legacyName: true,
+                            sheet: true,
+                        }
+                    },
                     user: {
                         select: {
                             createdAt: true,

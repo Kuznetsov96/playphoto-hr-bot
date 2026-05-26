@@ -8,11 +8,37 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { staffService } from "../../modules/staff/services/index.js";
-import { formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
+import { escapeHtml, formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
 export const adminSearchHandlers = new Composer<MyContext>();
+
+const DIRECT_CANDIDATE_MESSAGE_STATUSES = new Set([
+    "DISCOVERY_SCHEDULED",
+    "DISCOVERY_COMPLETED",
+    "TRAINING_SCHEDULED",
+    "TRAINING_COMPLETED",
+    "NDA",
+    "KNOWLEDGE_TEST",
+    "READY_FOR_HIRE",
+    "STAGING_SETUP",
+    "STAGING_ACTIVE",
+    "OFFLINE_STAGING",
+    "AWAITING_FIRST_SHIFT"
+]);
+
+function shouldUseDirectCandidateMessage(candidate: { status?: string } | null | undefined) {
+    return !!candidate?.status && DIRECT_CANDIDATE_MESSAGE_STATUSES.has(candidate.status);
+}
+
+function getCandidateBackCallback(ctx: MyContext, candidateId: string) {
+    const profileMenuId = ctx.session.candidateProfileMenuId;
+    if (profileMenuId === "hr-candidate-unified" && ctx.session.candidateData?.id === candidateId) {
+        return `hr_back_candidate_${candidateId}`;
+    }
+    return `view_candidate_${candidateId}`;
+}
 
 export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     // MUST answer the callback query first to prevent Telegram loading spinner
@@ -37,7 +63,8 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
-    const canCreateTopic = hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING');
+    const canCreateTopic = !shouldUseDirectCandidateMessage(candidate)
+        && (hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING'));
 
     ctx.session.step = `admin_msg_${userId}`;
 
@@ -155,7 +182,7 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
             }
 
             const kb = new InlineKeyboard();
-            if (candidate) kb.text("👤 Back to Profile", `view_candidate_${candidate.id}`).row();
+            if (candidate) kb.text("👤 Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
             else {
                 const staff = await staffRepository.findByUserId(user.id);
                 if (staff) kb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
@@ -247,7 +274,8 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
-    const canCreateTopic = hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING');
+    const canCreateTopic = !shouldUseDirectCandidateMessage(candidate)
+        && (hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING'));
 
     if (SUPPORT_CHAT_ID && canCreateTopic) {
         try {
@@ -272,9 +300,14 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
                 let locationText = '';
                 if (formattedLocation) locationText = `📍 ${formattedLocation}`;
+                const phone = staff?.phone || candidate?.phone;
+                const phoneText = phone
+                    ? `📞 <code>${escapeHtml(phone)}</code>`
+                    : '';
 
                 const infoCard =
                     `👤 <b>${displayName}</b>\n` +
+                    (phoneText ? `${phoneText}\n` : '') +
                     (locationText ? `${locationText}\n` : '') +
                     `🕐 ${new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })}\n\n` +
                     `<i>${ADMIN_TEXTS["admin-topic-info-outgoing"]}</i>`;
@@ -343,7 +376,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
         if (staff) {
             replyMarkup.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
         } else if (candidate) {
-            replyMarkup.text("👤 Back to Profile", `view_candidate_${candidate.id}`).row();
+            replyMarkup.text("👤 Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
         }
 
         replyMarkup.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
@@ -352,7 +385,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
         logger.error({ err: e, userId: user.id, telegramId: user.telegramId }, "Admin message delivery failed");
         const errKb = new InlineKeyboard();
         if (staff) errKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
-        else if (candidate) errKb.text("👤 Back to Profile", `view_candidate_${candidate.id}`).row();
+        else if (candidate) errKb.text("👤 Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
         errKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
         await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-msg-err-delivery"], errKb);

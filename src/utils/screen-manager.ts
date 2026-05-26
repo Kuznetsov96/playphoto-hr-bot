@@ -16,6 +16,7 @@ export class ScreenManager {
         'selectedUserId',
         'selectedCandidateId',
         'selectedLocationId',
+        'candidateProfileMenuId',
         'selectedSlotId',
         'selectedDate',
         'selectedOnboardingDate',

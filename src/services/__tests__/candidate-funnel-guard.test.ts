@@ -52,6 +52,34 @@ describe("candidate funnel guard", () => {
         expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
     });
 
+    it("allows stale booked interview recovery from screening interview step", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.SCREENING,
+            currentStep: FunnelStep.INTERVIEW,
+            interviewSlotId: "slot-1",
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.INTERVIEW_COMPLETED,
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
+
+    it("blocks direct interview completion from screening without a booked slot", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.SCREENING,
+            currentStep: FunnelStep.INTERVIEW,
+            interviewSlotId: null,
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.INTERVIEW_COMPLETED,
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).toThrow(InvalidCandidateTransitionError);
+    });
+
     it("blocks direct accepted transition from hr waitlist without approval", () => {
         const oldState = makeCandidate({
             status: CandidateStatus.WAITLIST_HR,
@@ -150,7 +178,22 @@ describe("candidate funnel guard", () => {
         expect(() => validateCandidateFunnelTransition(context)).toThrow(InvalidCandidateTransitionError);
     });
 
-    it("allows nda to knowledge test progression", () => {
+    it("allows nda to ready for hire progression for the new final flow", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.NDA,
+            currentStep: FunnelStep.TRAINING,
+            hrDecision: "ACCEPTED",
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.READY_FOR_HIRE,
+            currentStep: FunnelStep.FIRST_SHIFT,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
+
+    it("keeps legacy nda to knowledge test progression valid", () => {
         const oldState = makeCandidate({
             status: CandidateStatus.NDA,
             currentStep: FunnelStep.TRAINING,

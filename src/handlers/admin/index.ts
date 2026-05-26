@@ -89,7 +89,7 @@ adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
 adminHandlers.use(adminMagnetCounterHandlers);
 
-adminHandlers.on(["message:text", "message:photo", "message:video", "message:document"], async (ctx, next) => {
+adminHandlers.on(["message:text", "message:photo", "message:video", "message:document", "message:voice", "message:video_note", "message:audio", "message:animation"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
 
     if (await handleAdminMagnetCounterMessage(ctx)) return;
@@ -133,6 +133,17 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
 
     if (await handleBroadcastContent(ctx)) return;
     if (await handleTaskText(ctx)) return;
+    if (
+        ctx.session.broadcastData &&
+        ctx.session.adminFlow !== 'BROADCAST' &&
+        (ctx.session.broadcastData.step === 'AWAITING_CONTENT' || ctx.session.broadcastData.step === 'CONFIRMATION')
+    ) {
+        await ctx.reply(
+            "⚠️ You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
+            "Open System Settings → Broadcasts → New Broadcast and send the content after the bot asks for it. The message was not queued."
+        );
+        return;
+    }
     await next();
 });
 
@@ -266,6 +277,7 @@ protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx
     if (!candidate) return ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-staging-candidate-not-found"], "admin-main");
 
     ctx.session.selectedCandidateId = candidate.id;
+    ctx.session.candidateProfileMenuId = "admin-candidate-details";
 
     const text = await formatCandidateProfile(ctx as any, candidate as any, {
         includeActionLabel: true,

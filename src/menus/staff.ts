@@ -56,6 +56,11 @@ staffHubMenu.dynamic(async (ctx, range) => {
         await showStaffSchedule(ctx);
     });
 
+    range.text("🔁 Потрібна заміна", async (ctx) => {
+        const { showReplacementShiftPicker } = await import("../modules/staff/handlers/menu.js");
+        await showReplacementShiftPicker(ctx);
+    }).row();
+
     // 2. Preferences (Schedule requests) - only visible 23rd to end of month
     const now = new Date();
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));

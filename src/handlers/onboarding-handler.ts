@@ -10,6 +10,8 @@ import { menuRegistry } from "../utils/menu-registry.js";
 import { Menu } from "@grammyjs/menu";
 import { CandidateStatus } from "@prisma/client";
 import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
+import { getOnboardingResumeAction } from "../utils/final-step-flow.js";
+import { isValidUkrainianIban, normalizeIban } from "../utils/iban-utils.js";
 
 export const onboardingHandlers = new Composer<MyContext>();
 
@@ -114,11 +116,17 @@ onboardingHandlers.callbackQuery("start_onboarding_data", async (ctx) => {
 
     // Resume from first missing field instead of starting over
     const resumeStep = getFirstMissingStep(candidate);
+    const resumeAction = getOnboardingResumeAction(candidate.status, resumeStep, STEPS.FINAL);
 
-    if (resumeStep === STEPS.FINAL) {
-        // All data already collected — go straight to finish
+    if (resumeAction === "finish_onboarding") {
+        // All data already collected — finish the handoff exactly once
         ctx.session.candidateData = { step: STEPS.FINAL, passportPhotoIds: [] };
         await finishOnboarding(ctx, candidate);
+        return;
+    }
+
+    if (resumeAction === "prompt_preferences") {
+        await renderPreferencesPrompt(ctx);
         return;
     }
 
@@ -228,10 +236,10 @@ onboardingHandlers.on("message:text", async (ctx, next) => {
             await ScreenManager.renderScreen(ctx, "📸 <b>Будь ласка, надішли саме фото документа.</b>\n\nЯкщо у тебе декілька фото, надсилай їх по одному. ✨");
         }
         else if (step === STEPS.IBAN) {
-            const ibanVal = text.toUpperCase().replace(/\s+/g, '');
-            if (!ibanVal.startsWith("UA") || ibanVal.length < 15) {
+            const ibanVal = normalizeIban(text);
+            if (!isValidUkrainianIban(ibanVal)) {
                 logger.warn({ event: "candidate.onboarding.validation_failed", candidateId: candidate.id, step, reason: "INVALID_IBAN_FORMAT" }, "Onboarding validation failed");
-                await ScreenManager.renderScreen(ctx, "⚠️ <b>Це не схоже на IBAN.</b>\n\nВін має починатися на UA і містити 29 символів. Спробуй ще раз:");
+                await ScreenManager.renderScreen(ctx, "⚠️ <b>Це не схоже на коректний український IBAN.</b>\n\nВін має починатися на UA, містити 29 символів і проходити банківську перевірку. Спробуй ще раз:");
                 return;
             }
             await candidateRepository.update(candidate.id, { iban: ibanVal } as any);
@@ -311,8 +319,8 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
     });
 
     try {
-        // Soft age filter: politely decline 26+ candidates
-        if (getBirthDateRejection(existingCandidate.birthDate) === "AGE_LIMIT") {
+        // Soft age filter with location-specific limits.
+        if (getBirthDateRejection(existingCandidate.birthDate, existingCandidate.location) === "AGE_LIMIT") {
             await candidateRepository.update(candidateId, {
                 status: CandidateStatus.REJECTED,
                 hrDecision: "AGE_LIMIT"
@@ -459,6 +467,21 @@ async function finishOnboarding(ctx: MyContext, existingCandidate: any) {
         });
         await ScreenManager.renderScreen(ctx, "❌ <b>Сталася помилка при завершенні.</b>\n\nЗв'яжись, будь ласка, з адміном.");
     }
+}
+
+async function renderPreferencesPrompt(ctx: MyContext) {
+    const { accessService } = await import("../services/access-service.js");
+    const teamChannelLink = accessService.staticJoinLink || "https://t.me/+FuFRMGsvMktkNGFi";
+
+    const text = `✨ <b>Майже готово!</b>\n\n` +
+        `Твої дані успішно прийняті. Поки ми їх перевіряємо, залишився останній крок — обрати твої вихідні дні для складання графіка. 🗓️\n\n` +
+        `📸 <b>Також:</b> Приєднуйся до нашої <a href="${teamChannelLink}">Бази знань</a>, якщо ти ще не там. ✨`;
+
+    const kb = new InlineKeyboard()
+        .text("🗓️ Обрати вихідні", "onb_to_prefs").row()
+        .url("📖 База знань", teamChannelLink);
+
+    await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
 }
 
 onboardingHandlers.callbackQuery("onb_to_prefs", async (ctx) => {

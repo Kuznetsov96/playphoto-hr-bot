@@ -14,12 +14,12 @@ export interface StackEntry {
 }
 
 export interface BroadcastMediaItem {
-    type: 'photo' | 'video';
+    type: 'photo' | 'video' | 'document' | 'voice' | 'video_note' | 'audio' | 'animation';
     fileId: string;
 }
 
 export interface TaskAttachmentItem {
-    type: 'photo' | 'video' | 'document';
+    type: 'photo' | 'video' | 'document' | 'voice' | 'video_note' | 'audio' | 'animation';
     fileId: string;
 }
 
@@ -124,6 +124,10 @@ export interface SessionData {
         startedAt: number;
         lastPhotoAt?: number;
     };
+    parcelPhotoCancelledDraft?: {
+        parcelId: string;
+        cancelledAt: number;
+    };
 
     taskProofFlow?: {
         taskId: string;
@@ -144,6 +148,7 @@ export interface SessionData {
     selectedLocationId?: string;
     selectedUserId?: string;
     selectedUserIdForAdmin?: string;
+    candidateProfileMenuId?: "hr-candidate-unified" | "admin-candidate-details";
     stagingTime?: string;
     stagingLocationId?: string;
     lastConfirmedAt?: number;
@@ -160,6 +165,7 @@ export interface SessionData {
     statsView?: "overview" | "losses";
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
+    customSyncPromptMessageId?: number;
     taskCreation?: {
         step?: string;
         date?: string;

@@ -32,6 +32,10 @@ export class BookingService {
                 throw new Error("CANDIDATE_NOT_FOUND");
             }
 
+            if (candidate.gender === "male") {
+                throw new Error("MALE_CANDIDATE");
+            }
+
             // Server-side protection from stale callback buttons and inconsistent states.
             if (candidate.status === "REJECTED" || candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
                 throw new Error("UNDERAGE_CANDIDATE");
@@ -39,7 +43,7 @@ export class BookingService {
             if (candidate.hrDecision === "AGE_LIMIT") {
                 throw new Error("AGE_LIMIT_CANDIDATE");
             }
-            const ageRejection = getBirthDateRejection(candidate.birthDate);
+            const ageRejection = getBirthDateRejection(candidate.birthDate, candidate.location);
             if (ageRejection === "UNDERAGE") {
                 throw new Error("UNDERAGE_CANDIDATE");
             }

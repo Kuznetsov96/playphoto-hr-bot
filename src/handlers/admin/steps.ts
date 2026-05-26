@@ -1,4 +1,4 @@
-import { Composer, type NextFunction } from "grammy";
+import { Composer, InlineKeyboard, type NextFunction } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
@@ -128,10 +128,13 @@ async function handleSetCustomStagingTime(ctx: MyContext, step: string, text: st
 
 async function handleSyncOtherSheet(ctx: MyContext, text: string) {
     const sheetName = text.trim();
+    const resultKeyboard = new InlineKeyboard().text("🏠 Main Menu", "admin_main_menu");
+
     try {
+        await renderCustomSyncStatus(ctx, `⏳ <b>Syncing "${sheetName}"...</b>\n\nPlease wait, this can take a moment.`);
+
         const prisma = (await import("../../db/core.js")).default;
         const { staffRepository } = await import("../../repositories/staff-repository.js");
-        const { InlineKeyboard } = await import("grammy");
 
         // Snapshot BEFORE
         const shiftsBefore = await prisma.workShift.findMany({
@@ -189,10 +192,34 @@ async function handleSyncOtherSheet(ctx: MyContext, text: string) {
         let report = `✅ Sync for "${sheetName}" complete!\n\nProcessed shifts: <b>${schedRes.count || 0}</b>`;
         if (staffNotified > 0) report += `\n📅 <b>${staffNotified}</b> staff notified about schedule changes`;
 
-        await ScreenManager.renderScreen(ctx, report, "admin-system");
+        await renderCustomSyncStatus(ctx, report, resultKeyboard);
     } catch (e: any) {
         logger.error({ err: e, sheetName }, "Custom sync failed");
-        await ScreenManager.renderScreen(ctx, `❌ Error: ${e.message}`, "admin-system");
+        await renderCustomSyncStatus(ctx, `❌ Error: ${e.message}`, resultKeyboard);
     }
+    delete ctx.session.customSyncPromptMessageId;
     ctx.session.step = "idle";
+}
+
+async function renderCustomSyncStatus(ctx: MyContext, text: string, replyMarkup?: InlineKeyboard) {
+    const chatId = ctx.chat?.id;
+    const messageId = ctx.session.customSyncPromptMessageId;
+
+    if (!chatId || !messageId) {
+        await ScreenManager.renderScreen(ctx, text, replyMarkup);
+        return;
+    }
+
+    try {
+        const options: Parameters<typeof ctx.api.editMessageText>[3] = {
+            parse_mode: "HTML",
+            link_preview_options: { is_disabled: true }
+        };
+        if (replyMarkup) options.reply_markup = replyMarkup;
+
+        await ctx.api.editMessageText(chatId, messageId, text, options);
+    } catch (error) {
+        logger.warn({ err: error, messageId }, "Custom sync status edit failed; falling back to renderScreen");
+        await ScreenManager.renderScreen(ctx, text, replyMarkup);
+    }
 }

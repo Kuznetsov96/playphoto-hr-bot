@@ -52,6 +52,12 @@ export class StaffService {
             displayName += ` (@${username})`;
         }
 
+        let phone = profile.phone;
+        if (!phone) {
+            const candidate = await candidateRepository.findByUserId(profile.userId).catch(() => null);
+            phone = candidate?.phone || null;
+        }
+
         const headerKey = isSelfView ? 'admin-profile-title-self' : 'admin-profile-title-other';
         const header = t(headerKey);
         let text = `${header}\n\n`;
@@ -74,7 +80,7 @@ export class StaffService {
         }
 
         text += `<b>${t('admin-profile-name')}</b> ${displayName}\n`;
-        text += `<b>${t('admin-profile-phone')}</b> ${profile.phone || t('admin-tasks-loc-unknown')}\n`;
+        text += `<b>${t('admin-profile-phone')}</b> ${phone || t('admin-tasks-loc-unknown')}\n`;
 
         text += `<b>${t('admin-profile-locations')}</b> ${locStr}\n`;
         return text;

@@ -1,5 +1,5 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { Composer } from "grammy";
+import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { hrHandlers } from "./hr.js";
 import { adminMenu, adminHandlers } from "./admin/index.js";
@@ -16,15 +16,18 @@ import { firstShiftOnboardingHandlers, handleFirstShiftOnboardingCandidateMessag
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
-import { quizHandlers, startQuiz } from "./quiz-handler.js";
+import { quizHandlers } from "./quiz-handler.js";
 import { onboardingHandlers } from "./onboarding-handler.js";
 import { accessHandlers } from "./access.js";
 import { broadcastService } from "../services/broadcast.js";
+import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { slotBuilderHandlers } from "./slot-builder.js";
 import { leadsHandlers } from "./leads.js";
 import { blockShield } from "../middleware/block-shield.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
+import { ScreenManager } from "../utils/screen-manager.js";
+import { canConfirmNDA } from "../utils/final-step-flow.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -152,12 +155,22 @@ handlers.on("callback_query:data", async (ctx, next) => {
         await ctx.answerCallbackQuery("Ця дія недоступна.");
         return;
     }
+    if (!canConfirmNDA(cand)) {
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+        await ctx.answerCallbackQuery("Цей крок уже пройдено ✨");
+        return;
+    }
     await candidateRepository.update(candId, {
         ndaConfirmedAt: new Date(),
-        status: CandidateStatus.KNOWLEDGE_TEST
+        status: CandidateStatus.READY_FOR_HIRE
     });
-    await ctx.answerCallbackQuery("Дякуємо! NDA підписано. ✅");
-    await startQuiz(ctx);
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery("Дякуємо! NDA підтверджено. ✅");
+    await ScreenManager.renderScreen(
+        ctx,
+        CANDIDATE_TEXTS["nda-confirmed-start-onboarding"],
+        new InlineKeyboard().text("📝 Почати оформлення", "start_onboarding_data")
+    );
 });
 
 // Global Broadcast Receipt Confirmation
@@ -265,8 +278,11 @@ handlers.use(async (ctx, next) => {
 
     if (user?.staffProfile) {
         if (ctx.chat?.type === "private" && ctx.message) {
-            const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
-            if (firstShiftHandled) return;
+            const supportSteps = ["support_chat", "create_ticket", "broadcast_decline_reason", "reply_and_close"];
+            if (!supportSteps.includes(ctx.session.step || "")) {
+                const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
+                if (firstShiftHandled) return;
+            }
         }
 
         // --- STAFF CONTEXT ---

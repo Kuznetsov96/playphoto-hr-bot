@@ -1861,11 +1861,11 @@ async function processLegacyAgeLimitCandidates(bot: Bot<MyContext>) {
             },
             birthDate: { not: null },
         },
-        include: { user: true }
+        include: { user: true, location: true }
     });
 
     for (const cand of candidates) {
-        const ageRejection = getBirthDateRejection(cand.birthDate);
+        const ageRejection = getBirthDateRejection(cand.birthDate, cand.location);
         if (!ageRejection) continue;
 
         const hrDecision = ageRejection === "AGE_LIMIT" ? "AGE_LIMIT" : "REJECTED_SYSTEM_UNDERAGE";

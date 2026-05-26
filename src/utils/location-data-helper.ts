@@ -27,7 +27,7 @@ export const LOCATION_DETAILS: Record<string, { address: string, schedule: strin
   },
   "Smile Park Київ": {
     address: "Київ, вул. Закревського, 22Т",
-    schedule: "Пн-Пт — 15:00-21:00, Сб-Нд — 12:00-21:00",
+    schedule: "Пн-Пт — 14:00-21:00, Сб-Нд — 12:00-21:00",
     salary: "Пн-Пт — 1 человек 25%, Сб-Нд — 2 человека 20%, 1 человек — 30%"
   },
   "Fly Kids Львів": {
@@ -42,7 +42,7 @@ export const LOCATION_DETAILS: Record<string, { address: string, schedule: strin
   },
   "Smile Park (Даринок)": {
     address: "Київ, вул. Якова Гніздовського, 1а, Маркет-молл Даринок",
-    schedule: "Пн-Пт — 14:00-21:00, Сб-Нд — 12:00-21:00",
+    schedule: "Пн-Нд — 12:00-21:00",
     salary: "Пн-Пт — 1 человек 20%, Сб-Нд — 2 человека 20%, 1 человек — 30%"
   },
   "Fly Kids Київ": {

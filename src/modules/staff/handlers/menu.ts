@@ -16,6 +16,8 @@ import { TEAM_CHATS } from "../../../config.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
 import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
+import { replacementService } from "../../../services/replacement-service.js";
+import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 
 export const staffHandlers = new Composer<MyContext>();
 
@@ -37,6 +39,27 @@ function formatShiftColleague(fullName: string, username?: string | null, telegr
     return escapedLabel;
 }
 
+function formatShiftClock(date: Date) {
+    return date.toLocaleTimeString("uk-UA", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/Kyiv"
+    });
+}
+
+function formatStaffShiftTime(shift: {
+    date: Date;
+    startTime?: Date | null;
+    endTime?: Date | null;
+    location?: { schedule?: string | null } | null;
+}) {
+    if (shift.startTime && shift.endTime) {
+        return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
+    }
+
+    return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
+}
+
 function buildTaskProofKeyboard(taskId: string) {
     return new InlineKeyboard()
         .text("✅ Завершити завдання", `staff_task_proof_submit_${taskId}`).row()
@@ -50,7 +73,7 @@ function buildTaskProofText(taskText: string, proofCount: number) {
 
     return (
         `📎 <b>Надішли підтвердження до завдання:</b>\n\n` +
-        `<i>${escapeHtml(truncateText(taskText, 250))}</i>\n\n` +
+        `${taskText}\n\n` +
         `Можна надсилати текст, фото, відео, файли, голосові або кілька повідомлень підряд.` +
         `${proofLine}\n\n` +
         `Коли все надішлеш, натисни <b>«Завершити завдання»</b>.`
@@ -101,8 +124,9 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     kyivNow.setHours(0, 0, 0, 0);
 
     const staffProfileId = user.staffProfile?.id;
-    const todayShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, kyivNow, 1) : [];
-    const hasShiftToday = todayShifts.length > 0 && todayShifts[0]?.date.getTime() === kyivNow.getTime();
+    const upcomingShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, kyivNow, 10) : [];
+    const todayShifts = upcomingShifts.filter((shift) => shift.date.getTime() === kyivNow.getTime());
+    const hasShiftToday = todayShifts.length > 0;
 
     // Check if it's a completely new user without any schedule yet
     const allShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, new Date(0), 1) : [];
@@ -133,15 +157,10 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     }
 
     if (hasShiftToday) {
-        const s = todayShifts[0]!;
-        const weekday = s.date.toLocaleDateString("uk-UA", { weekday: "short", timeZone: "Europe/Kyiv" });
-        const dateStr = s.date.toLocaleDateString("uk-UA", {
-            day: "2-digit",
-            month: "2-digit",
-            timeZone: "Europe/Kyiv"
-        });
-        const day = weekday.charAt(0).toUpperCase() + weekday.slice(1);
-        shiftLine = `📸 <b>Сьогодні — ${s.location.name}</b>\n${day}, ${dateStr} · Вдалого дня! ✨`;
+        const shift = todayShifts[0]!;
+        shiftLine =
+            `📸 <b>Сьогодні зміна</b>\n` +
+            `${escapeHtml(shift.location.name)} · ${escapeHtml(formatStaffShiftTime(shift))}`;
     } else {
         shiftLine = `🏝 <b>Сьогодні вихідний</b>\nВідпочивай та набирайся сил! ✨`;
     }
@@ -191,7 +210,7 @@ export async function showStaffSchedule(ctx: MyContext) {
     for (const s of shifts) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-        text += `▫️ <code>${dateStr}</code> — ${s.location.name}`;
+        text += `▫️ <code>${dateStr}</code> · ${escapeHtml(formatStaffShiftTime(s))} · ${escapeHtml(s.location.name)}`;
 
         const colleagues = allColleagues.filter(
             (c) => c.locationId === s.locationId && c.date.getTime() === s.date.getTime()
@@ -211,6 +230,65 @@ export async function showStaffSchedule(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), {
         pushToStack: true
     });
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+export async function showReplacementShiftPicker(ctx: MyContext) {
+    ctx.session.step = "idle";
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) return;
+
+    const shifts = await replacementService.listSelectableShifts(user.staffProfile.id);
+    if (shifts.length === 0) {
+        await ScreenManager.renderScreen(
+            ctx,
+            "У тебе немає майбутніх змін, для яких можна запустити пошук підміни.",
+            new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
+            { pushToStack: true }
+        );
+        await ctx.answerCallbackQuery().catch(() => { });
+        return;
+    }
+
+    const kb = new InlineKeyboard();
+    for (const shift of shifts.slice(0, 8)) {
+        kb.text(replacementService.formatShiftButtonLabel(shift), `staff_repl_pick_${shift.id}`).row();
+    }
+    kb.text("🏠 Меню", "staff_hub_nav");
+
+    await ScreenManager.renderScreen(
+        ctx,
+        "Оберіть дату і локацію.",
+        kb,
+        { pushToStack: true }
+    );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+async function showReplacementConfirmation(ctx: MyContext, shiftId: string) {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) return;
+
+    const shifts = await replacementService.listSelectableShifts(user.staffProfile.id);
+    const shift = shifts.find(s => s.id === shiftId);
+    if (!shift) {
+        await ctx.answerCallbackQuery("Ця зміна вже недоступна.").catch(() => { });
+        await showReplacementShiftPicker(ctx);
+        return;
+    }
+
+    const kb = new InlineKeyboard()
+        .text("Почати пошук", `staff_repl_start_${shift.id}`).row()
+        .text("⬅️ Назад", "staff_repl_open")
+        .text("🏠 Меню", "staff_hub_nav");
+
+    await ScreenManager.renderScreen(ctx, replacementService.formatConfirmationText(shift), kb, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 }
 
@@ -241,7 +319,7 @@ export async function showStaffTasks(ctx: MyContext, forceNew: boolean = false) 
     tasks.forEach((task: any, index: number) => {
         const status = task.isCompleted ? "✅" : "⏳";
         const deadline = task.deadlineTime ? ` (до ${task.deadlineTime})` : "";
-        text += `${index + 1}. ${status} ${truncateText(task.taskText, 100)}${deadline}\n\n`;
+        text += `${index + 1}. ${status}${deadline}\n${task.taskText}\n\n`;
 
         if (!task.isCompleted) {
             if (task.completionMode === "PROOF_REQUIRED") {
@@ -550,6 +628,110 @@ staffHandlers.callbackQuery("open_support_dialog", async (ctx) => {
 staffHandlers.callbackQuery("staff_hub_tasks_redirect", async (ctx) => {
     await ctx.answerCallbackQuery();
     await showStaffTasks(ctx, true);
+});
+
+staffHandlers.callbackQuery("staff_repl_open", async (ctx) => {
+    await showReplacementShiftPicker(ctx);
+});
+
+staffHandlers.callbackQuery(/^staff_repl_pick_(.+)$/, async (ctx) => {
+    await showReplacementConfirmation(ctx, ctx.match![1]!);
+});
+
+staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
+    const shiftId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
+
+    try {
+        await replacementService.startRequest(ctx.api, user.staffProfile.id, shiftId);
+
+        const activeRequest = await (await import("../../../db/core.js")).default.replacementRequest.findFirst({
+            where: { workShiftId: shiftId, requesterStaffId: user.staffProfile.id, status: "ACTIVE" },
+            include: { location: true },
+            orderBy: { createdAt: "desc" }
+        });
+        const locations = activeRequest
+            ? await (await import("../../../repositories/location-repository.js")).locationRepository.findByCity(activeRequest.location.city)
+            : [];
+        const text = locations.length > 1
+            ? "Пошук розпочато.\nСпочатку запитаємо фотографів цієї локації."
+            : "Пошук розпочато.\nЗапитаємо фотографів, які можуть вийти цього дня.";
+
+        const kb = new InlineKeyboard();
+        if (activeRequest) kb.text("Скасувати пошук", `staff_repl_cancel_${activeRequest.id}`).row();
+        kb.text("🏠 Меню", "staff_hub_nav");
+
+        await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
+        await ctx.answerCallbackQuery("Пошук запущено");
+    } catch (error: any) {
+        const message = error?.message === "REQUEST_ALREADY_ACTIVE"
+            ? "Пошук для цієї зміни вже активний."
+            : error?.message === "REQUEST_PREVIOUSLY_FAILED"
+                ? "Ти вже запускала пошук для цієї зміни, але заміну не знайшли. Напиши в підтримку, щоб команда допомогла вручну."
+            : error?.message === "SHIFT_ALREADY_STARTED"
+                ? "Ця зміна вже почалась."
+                : "Не вдалося запустити пошук.";
+        await ctx.answerCallbackQuery({ text: message, show_alert: true });
+    }
+});
+
+staffHandlers.callbackQuery(/^staff_repl_cancel_(.+)$/, async (ctx) => {
+    const requestId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
+
+    const cancelled = await replacementService.cancelRequest(ctx.api, user.staffProfile.id, requestId);
+    await ScreenManager.renderScreen(
+        ctx,
+        cancelled ? "Пошук скасовано." : "Цей пошук вже неактивний.",
+        new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
+        { forceNew: true }
+    );
+    await ctx.answerCallbackQuery(cancelled ? "Скасовано" : "Вже неактивно");
+});
+
+staffHandlers.callbackQuery(/^staff_repl_accept_(.+)$/, async (ctx) => {
+    const requestId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
+
+    const result = await replacementService.accept(ctx.api, user.staffProfile.id, requestId);
+    const messageByResult: Record<typeof result, string> = {
+        accepted: "Дякуємо, підміну прийнято.",
+        already_answered: "Відповідь уже збережено.",
+        closed: "Запит вже закрито.",
+        conflict: "У тебе вже є зміна цього дня.",
+        not_found: "Запит не знайдено."
+    };
+    await ctx.answerCallbackQuery(messageByResult[result]);
+});
+
+staffHandlers.callbackQuery(/^staff_repl_decline_(.+)$/, async (ctx) => {
+    const requestId = ctx.match![1]!;
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
+
+    const result = await replacementService.decline(ctx.api, user.staffProfile.id, requestId);
+    const messageByResult: Record<typeof result, string> = {
+        declined: "Дякуємо за відповідь.",
+        already_answered: "Відповідь уже збережено.",
+        closed: "Запит вже закрито.",
+        not_found: "Запит не знайдено."
+    };
+    await ctx.answerCallbackQuery(messageByResult[result]);
 });
 
 staffHandlers.callbackQuery(/^staff_task_proof_start_(.+)$/, async (ctx) => {

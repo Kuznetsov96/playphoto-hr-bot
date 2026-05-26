@@ -12,8 +12,10 @@ import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
 import type { Api } from "grammy";
+import { Bot } from "grammy";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
+import { parseScheduleHeaderDate, parseScheduleMonth } from "../utils/schedule-sheet-date.js";
 
 interface TeamMember {
     fullName: string;
@@ -21,6 +23,14 @@ interface TeamMember {
     telegramId: string;
     surnameNameDot: string;
     locationName?: string;
+}
+
+export type ScheduleAvailabilityKind = "available" | "limited";
+
+export interface ScheduleAvailabilityEntry {
+    staffId: string;
+    telegramId: bigint;
+    availability: ScheduleAvailabilityKind;
 }
 
 interface ChatRevokeFailure {
@@ -1016,24 +1026,12 @@ export class ScheduleSyncService {
         if (!rows || rows.length < 3) throw new Error("Sheet is empty");
         const dateHeader = rows[0];
         const dateMap: { [col: number]: Date } = {};
-        const currentYear = new Date().getFullYear();
         dateHeader.forEach((cell: any, idx: number) => {
             if (idx === 0) return;
             if (hiddenColumns.has(idx)) return;
             const str = String(cell).trim().toLowerCase();
             if (!str) return;
-            let date: Date | null = null;
-            if (str.includes(',')) {
-                const parts = str.split(',');
-                const day = parseInt(parts[0]!);
-                const month = this.parseMonth((parts[1] || "").trim());
-                date = new Date(currentYear, month, day);
-            } else if (str.includes('.')) {
-                const parts = str.split('.');
-                const d = parseInt(parts[0] || "");
-                const m = parseInt(parts[1] || "");
-                if (!isNaN(d) && !isNaN(m)) date = new Date(currentYear, m - 1, d);
-            }
+            const date = parseScheduleHeaderDate(str, sheetName);
             if (date && !isNaN(date.getTime())) dateMap[idx] = date;
         });
         if (Object.keys(dateMap).length === 0) return { success: false, message: "No dates" };
@@ -1174,6 +1172,14 @@ export class ScheduleSyncService {
             containsNextMonthSchedule
         );
 
+        try {
+            const { replacementService } = await import("./replacement-service.js");
+            const bot = new Bot(process.env.BOT_TOKEN!);
+            await replacementService.closeActiveRequestsChangedBySchedule(bot.api);
+        } catch (err) {
+            logger.warn({ err }, "Replacement requests schedule-sync reconciliation failed");
+        }
+
         logBusinessEvent({
             event: "schedule.sync.completed",
             actorType: "system",
@@ -1206,6 +1212,62 @@ export class ScheduleSyncService {
         };
     }
 
+    async getAvailabilityForDate(date: Date, sheetName: string = "Актуальний розклад"): Promise<Map<string, ScheduleAvailabilityKind>> {
+        this.ensureSheets();
+        const [teamMap, { hiddenRows, hiddenColumns }, allUsersWithStaff] = await Promise.all([
+            this.fetchTeamMapping(),
+            this.fetchHiddenScheduleIndexes(sheetName),
+            userRepository.findAllWithStaff()
+        ]);
+        const userStaffMap = new Map(
+            allUsersWithStaff
+                .filter(u => u.staffProfile)
+                .map(u => [u.telegramId.toString(), u.staffProfile!])
+        );
+
+        const res = await this.sheets.spreadsheets.get({
+            spreadsheetId: SPREADSHEET_ID_SCHEDULE,
+            ranges: [`'${sheetName}'!A1:AL500`],
+            includeGridData: true,
+            fields: "sheets(data(rowData(values(formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle)))))"
+        });
+
+        const rowData = res.data.sheets?.[0]?.data?.[0]?.rowData || [];
+        const headerValues = rowData[0]?.values || [];
+        const targetCol = headerValues.findIndex((cell: any, idx: number) => {
+            if (idx === 0 || hiddenColumns.has(idx)) return false;
+            const parsed = this.parseScheduleHeaderDate(String(cell?.formattedValue || ""));
+            return parsed ? this.isSameKyivDay(parsed, date) : false;
+        });
+
+        if (targetCol < 0) return new Map();
+
+        const availability = new Map<string, ScheduleAvailabilityKind>();
+        for (let i = 2; i < rowData.length; i++) {
+            if (hiddenRows.has(i)) continue;
+
+            const values = rowData[i]?.values || [];
+            const label = String(values[0]?.formattedValue || "").trim();
+            if (!label) continue;
+
+            const member = teamMap[label];
+            if (!member) continue;
+
+            const telegramId = this.parseTelegramId(member.telegramId);
+            if (!telegramId) continue;
+
+            const staffProfile = userStaffMap.get(telegramId.toString());
+            if (!staffProfile) continue;
+
+            availability.set(
+                staffProfile.id,
+                this.cellHasVisibleFill(values[targetCol]) ? "limited" : "available"
+            );
+        }
+
+        return availability;
+    }
+
     private async fetchHiddenScheduleIndexes(sheetName: string): Promise<{ hiddenRows: Set<number>; hiddenColumns: Set<number> }> {
         return this.fetchHiddenIndexes(SPREADSHEET_ID_SCHEDULE, sheetName, "A1:AL500");
     }
@@ -1227,6 +1289,7 @@ export class ScheduleSyncService {
             'sp даринок': { name: 'даринок', city: 'Київ' },
             'sp київ': { name: 'smile park', city: 'Київ', exclude: 'даринок' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
+            'kidlandia': { name: 'kidlandia', city: 'Київ' },
             'dragonp': { name: 'dragon', city: 'Львів' },
             'leoland': { name: 'leoland', city: 'Львів' },
             'sp львів': { name: 'smile park', city: 'Львів' },
@@ -1264,6 +1327,7 @@ export class ScheduleSyncService {
             .replace(/drivecity/g, 'drive city')
             .replace(/sp даринок/g, 'smile park даринок')
             .replace(/^fk\s+/g, 'fly kids ')
+            .replace(/^kd$/g, 'kidlandia')
             .replace(/^sp\s+/g, 'smile park ')
             .replace(/^dp\s+/g, 'dragon park ')
             .replace(/^ft\s+/g, 'fantasy town ')
@@ -1280,6 +1344,7 @@ export class ScheduleSyncService {
             ["даринок", "darynok"],
             ["троєщина", "троещина", "troieshchyna"],
             ["skymall", "скаймол", "sky"],
+            ["kidlandia", "кідландія", "kd"],
             ["leoland", "леоленд", "leo"],
             ["dragon park", "dragonp"],
             ["drive", "дриве", "драйв"],
@@ -1347,16 +1412,29 @@ export class ScheduleSyncService {
     }
 
     private parseMonth(monthStr: string): number {
-        const months: { [key: string]: number } = {
-            'янв': 0, 'фев': 1, 'мар': 2, 'апр': 3, 'май': 4, 'июн': 5,
-            'июл': 6, 'авг': 7, 'сен': 8, 'окт': 9, 'ноя': 10, 'дек': 11,
-            'січ': 0, 'лют': 1, 'бер': 2, 'кві': 3, 'тра': 4, 'чер': 5,
-            'лип': 6, 'сер': 7, 'вер': 8, 'жов': 9, 'лис': 10, 'гру': 11
-        };
-        for (const [key, val] of Object.entries(months)) {
-            if (monthStr.startsWith(key)) return val;
-        }
-        return new Date().getMonth();
+        return parseScheduleMonth(monthStr);
+    }
+
+    private parseScheduleHeaderDate(value: string): Date | null {
+        return parseScheduleHeaderDate(value);
+    }
+
+    private isSameKyivDay(left: Date, right: Date): boolean {
+        return left.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" }) ===
+            right.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" });
+    }
+
+    private cellHasVisibleFill(cell: any): boolean {
+        const color = cell?.effectiveFormat?.backgroundColor;
+        const styleColor = cell?.effectiveFormat?.backgroundColorStyle?.rgbColor;
+        const selected = styleColor || color;
+        if (!selected) return false;
+
+        const red = selected.red ?? 0;
+        const green = selected.green ?? 0;
+        const blue = selected.blue ?? 0;
+
+        return !(red >= 0.98 && green >= 0.98 && blue >= 0.98);
     }
 
     private resolveLocationFromHeader(header: string, allLocations: Location[], cityContext?: string): Location | null {
@@ -1386,6 +1464,8 @@ export class ScheduleSyncService {
             'sp харків': { name: 'smile park', city: 'Харків' },
             'ft черкаси': { name: 'fantasy town', city: 'Черкаси' },
             'fk київ': { name: 'fly kids', city: 'Київ' },
+            'kidlandia': { name: 'kidlandia', city: 'Київ' },
+            'kd': { name: 'kidlandia', city: 'Київ' },
             'fk львів': { name: 'fly kids', city: 'Львів' },
             'fk рівне': { name: 'fly kids', city: 'Рівне' },
             'dh khmelnytskyi': { name: 'dytyache horyshche', city: 'Хмельницький' },
@@ -1438,6 +1518,10 @@ export class ScheduleSyncService {
 
     private resolveLocationFromCode(code: string, currentLocation: Location | null, allLocations: Location[], cityContext?: string): Location | null {
         const codeUpper = code.toUpperCase();
+        if (codeUpper === 'KD' && currentLocation) {
+            const currentName = `${currentLocation.name} ${currentLocation.legacyName || ""}`.toLowerCase();
+            if (currentName.includes('kidlandia')) return currentLocation;
+        }
         const locPattern = LOCATION_CODE_MAP[codeUpper];
         if (!locPattern) return null;
         const candidates = allLocations.filter(l => l.name.toLowerCase().startsWith(locPattern) || l.name.toLowerCase().includes(locPattern));

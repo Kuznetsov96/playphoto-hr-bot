@@ -329,10 +329,18 @@ describe('hrService', () => {
 
             expect(count).toBe(1);
             expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
-                [CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                [CandidateStatus.SCREENING, CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
                 {
-                    isWaitlisted: true,
-                    currentStep: FunnelStep.INTERVIEW
+                    gender: "female",
+                    currentStep: FunnelStep.INTERVIEW,
+                    OR: [
+                        { isWaitlisted: true },
+                        {
+                            status: CandidateStatus.SCREENING,
+                            isWaitlisted: false,
+                            interviewWaitlistReason: { in: ['NO_SLOTS_AVAILABLE', 'NO_DATE_FITS'] }
+                        }
+                    ]
                 }
             );
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
@@ -362,11 +370,33 @@ describe('hrService', () => {
             );
         });
 
+        it('should find active screening candidates who need a different interview slot', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
+
+            await hrService.getWaitlistNoSlot('NO_DATE_FITS');
+
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.SCREENING, CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
+                {
+                    currentStep: FunnelStep.INTERVIEW,
+                    OR: [
+                        { isWaitlisted: true, interviewWaitlistReason: 'NO_DATE_FITS' },
+                        {
+                            status: CandidateStatus.SCREENING,
+                            isWaitlisted: false,
+                            interviewWaitlistReason: 'NO_DATE_FITS'
+                        }
+                    ]
+                }
+            );
+        });
+
         it('should block interview invite for age-ineligible legacy candidates', async () => {
             vi.mocked(candidateRepository.findById).mockResolvedValue({
                 id: 'cand-age',
                 city: 'Kyiv',
                 locationId: 'loc1',
+                gender: 'female',
                 birthDate: new Date('1994-09-23T00:00:00.000Z'),
                 user: { id: 'user-age', telegramId: 123n }
             } as any);
@@ -382,6 +412,34 @@ describe('hrService', () => {
             expect(candidateRepository.update).toHaveBeenCalledWith('cand-age', {
                 status: CandidateStatus.REJECTED,
                 hrDecision: 'AGE_LIMIT',
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: null,
+                hasUnreadMessage: false,
+            });
+        });
+
+        it('should block interview invite for male candidates', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand-male',
+                city: 'Kyiv',
+                locationId: 'loc1',
+                gender: 'male',
+                birthDate: new Date('2004-09-23T00:00:00.000Z'),
+                user: { id: 'user-male', telegramId: 456n }
+            } as any);
+
+            const api = {
+                sendMessage: vi.fn()
+            };
+
+            const result = await hrService.inviteCandidate(api, 'cand-male');
+
+            expect(result).toEqual({ ok: false, reason: 'gender_ineligible' });
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-male', {
+                status: CandidateStatus.REJECTED,
                 isWaitlisted: false,
                 notificationSent: false,
                 interviewWaitlistReason: null,

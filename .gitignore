@@ -1,6 +1,11 @@
 # ─── Dependencies ───
 node_modules/
 
+# ─── Local runtimes ───
+.venv/
+venv/
+env/
+
 # ─── Environment & Secrets (CRITICAL) ───
 .env
 .env.*
@@ -19,6 +24,15 @@ monobank_cache.json
 /dist/
 /src/generated/prisma/
 
+# ─── Test and tool output ───
+coverage/
+.coverage
+.nyc_output/
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+
 # ─── Compiled TypeScript artifacts ───
 *.d.ts
 !src/**/*.d.ts
@@ -29,6 +43,17 @@ monobank_cache.json
 /find_*.js
 /verify_*.js
 /np-*.js
+
+# Root-level debug/test TypeScript scripts (not real tests; tests live in src/**/__tests__)
+/check_*.ts
+/test-*.ts
+/investigate_*.ts
+/get-*.ts
+/list_*.ts
+/fix_*.ts
+/fix_*.py
+/fix_*.js
+/rebuild-*.sh
 prisma/seed.js
 prisma/seed.d.ts
 scripts/assign-roles.js

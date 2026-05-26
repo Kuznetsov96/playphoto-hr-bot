@@ -165,7 +165,12 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
                 CandidateStatus.INTERVIEW_SCHEDULED,
                 CandidateStatus.INTERVIEW_COMPLETED,
                 CandidateStatus.DECISION_PENDING,
-            ] as CandidateStatus[]).includes(oldState.status);
+            ] as CandidateStatus[]).includes(oldState.status) ||
+                (
+                    oldState.status === CandidateStatus.SCREENING &&
+                    oldState.currentStep === FunnelStep.INTERVIEW &&
+                    Boolean(oldState.interviewSlotId)
+                );
         case CandidateStatus.ACCEPTED:
             return ([
                 CandidateStatus.INTERVIEW_COMPLETED,
@@ -237,6 +242,7 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
             ] as CandidateStatus[]).includes(oldState.status);
         case CandidateStatus.READY_FOR_HIRE:
             return ([
+                CandidateStatus.NDA,
                 CandidateStatus.STAGING_ACTIVE,
                 CandidateStatus.OFFLINE_STAGING,
                 CandidateStatus.READY_FOR_HIRE,

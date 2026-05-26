@@ -20,6 +20,7 @@ export const adminBroadcastHubMenu = new Menu<MyContext>("admin-broadcast-hub");
 export const adminBroadcastListMenu = new Menu<MyContext>("admin-broadcast-list");
 export const adminBroadcastArchiveMenu = new Menu<MyContext>("admin-broadcast-archive");
 export const adminBroadcastManageMenu = new Menu<MyContext>("admin-broadcast-manage");
+const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 function getPendingCount(broadcast: any): number {
     return broadcast.trackedMessages?.reduce((acc: number, tracked: any) =>
@@ -267,7 +268,7 @@ async function renderContentPrompt(ctx: MyContext) {
     const targetLabel = formatTargetLabel(data.targetType!);
     const text = `📢 <b>Broadcast Content</b>\nTarget: <b>${targetLabel}</b>\nButtons: <code>${data.buttonType || 'default'}</code>\n\n` +
         `👇 <b>Please send the message now.</b>\n` +
-        `It can be text, one video, or one/multiple photos with a caption.\n` +
+        `It can be text, one media file, or one/multiple photos with a caption.\n` +
         `For photo collections, send all photos and then tap Continue.\n\n` +
         `<i>Formatting (bold, links, etc.) will be preserved.</i>`;
 
@@ -307,9 +308,17 @@ function getMediaSummary(mediaItems: BroadcastMediaItem[]): string {
     if (mediaItems.length === 0) return '';
 
     if (mediaItems.length === 1) {
-        return mediaItems[0]!.type === 'video'
-            ? '🎬 <b>Attachment:</b> 1 video'
-            : '🖼 <b>Attachment:</b> 1 photo';
+        const type = mediaItems[0]!.type;
+        const labels: Record<BroadcastMediaItem["type"], string> = {
+            photo: "photo",
+            video: "video",
+            document: "document",
+            voice: "voice message",
+            video_note: "video note",
+            audio: "audio",
+            animation: "GIF",
+        };
+        return `📎 <b>Attachment:</b> 1 ${labels[type]}`;
     }
 
     return `🖼 <b>Attachments:</b> ${mediaItems.length} photos`;
@@ -319,20 +328,22 @@ function getMediaSuccessSummary(mediaItems: BroadcastMediaItem[]): string {
     if (mediaItems.length === 0) return '';
 
     if (mediaItems.length === 1) {
-        return mediaItems[0]!.type === 'video'
-            ? '🎬 Attachment: 1 video'
-            : '🖼 Attachment: 1 photo';
+        const type = mediaItems[0]!.type;
+        const labels: Record<BroadcastMediaItem["type"], string> = {
+            photo: "photo",
+            video: "video",
+            document: "document",
+            voice: "voice message",
+            video_note: "video note",
+            audio: "audio",
+            animation: "GIF",
+        };
+        return `📎 Attachment: 1 ${labels[type]}`;
     }
 
     const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
-    const videoCount = mediaItems.filter((item) => item.type === 'video').length;
-
-    if (photoCount > 0 && videoCount === 0) {
+    if (photoCount === mediaItems.length) {
         return `🖼 Attachments: ${photoCount} photos`;
-    }
-
-    if (videoCount > 0 && photoCount === 0) {
-        return `🎬 Attachments: ${videoCount} videos`;
     }
 
     return `📎 Attachments: ${mediaItems.length} files`;
@@ -344,8 +355,9 @@ adminBroadcastHandlers.callbackQuery("br_confirm_buttons", async (ctx) => {
 });
 
 export async function handleBroadcastContent(ctx: MyContext) {
-    if (!ctx.session.broadcastData || ctx.session.broadcastData.step !== 'AWAITING_CONTENT') return false;
+    if (!ctx.session.broadcastData) return false;
     if (ctx.session.adminFlow !== 'BROADCAST') return false;
+    if (ctx.session.broadcastData.step !== 'AWAITING_CONTENT' && ctx.session.broadcastData.step !== 'CONFIRMATION') return false;
     if (ctx.chat?.type !== "private") return false;
 
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
@@ -357,9 +369,21 @@ export async function handleBroadcastContent(ctx: MyContext) {
     if (!message) return false;
 
     const data = ctx.session.broadcastData;
+    if (data.step === 'CONFIRMATION') {
+        delete ctx.session.broadcastDraft;
+        delete data.media;
+        delete data.mediaItems;
+        delete data.text;
+    }
+
     let media: BroadcastMediaItem | undefined;
     if (message.photo) media = { type: 'photo', fileId: message.photo[message.photo.length - 1]!.file_id };
     else if (message.video) media = { type: 'video', fileId: message.video.file_id };
+    else if (message.document) media = { type: 'document', fileId: message.document.file_id };
+    else if (message.voice) media = { type: 'voice', fileId: message.voice.file_id };
+    else if (message.video_note) media = { type: 'video_note', fileId: message.video_note.file_id };
+    else if (message.audio) media = { type: 'audio', fileId: message.audio.file_id };
+    else if (message.animation) media = { type: 'animation', fileId: message.animation.file_id };
 
     const textHtml = msgToHtml(message.text || message.caption || "", message.entities || message.caption_entities || []);
 
@@ -369,12 +393,19 @@ export async function handleBroadcastContent(ctx: MyContext) {
     }
 
     if (textHtml) {
+        if (textHtml.length > TELEGRAM_MESSAGE_LIMIT) {
+            await ctx.reply(
+                `❌ Broadcast text is too long: ${textHtml.length}/${TELEGRAM_MESSAGE_LIMIT} characters.\n\n` +
+                `Please shorten it or split it into multiple broadcasts. This broadcast was not queued.`
+            );
+            return true;
+        }
         data.text = textHtml;
     }
 
-    if (media?.type === 'video') {
+    if (media && media.type !== 'photo') {
         if ((data.mediaItems || []).length > 0) {
-            await ctx.reply("❌ Videos cannot be combined with a photo set. Clear photos or restart the broadcast.");
+            await ctx.reply("❌ This media type cannot be combined with a photo set. Clear photos or restart the broadcast.");
             return true;
         }
 
@@ -448,6 +479,16 @@ async function renderReview(ctx: MyContext) {
     const mediaItems = getBroadcastMediaItems(data);
     const mediaSummary = getMediaSummary(mediaItems);
     const preview = getBroadcastPreview(data.text || "", data.targetType as any, stats, false, false, data.buttonType || 'default', mediaSummary);
+    if (preview.length > TELEGRAM_MESSAGE_LIMIT) {
+        data.step = 'AWAITING_CONTENT';
+        delete ctx.session.broadcastDraft;
+        await ctx.reply(
+            `❌ Broadcast preview is too long: ${preview.length}/${TELEGRAM_MESSAGE_LIMIT} characters.\n\n` +
+            `The message itself may fit, but the preview adds target/button details. Please shorten the message a little or split it into multiple broadcasts. This broadcast was not queued.`
+        );
+        return;
+    }
+
     const kb = getBroadcastKb(false, false, stats);
 
     kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
@@ -462,8 +503,18 @@ async function renderReview(ctx: MyContext) {
     if (mediaItems.length === 1) ctx.session.broadcastDraft.media = mediaItems[0];
     if (mediaItems.length > 1) ctx.session.broadcastDraft.media = mediaItems;
     (ctx.session as any).broadcastValue = data.targetValue;
-    const msg = await ctx.reply(preview, { parse_mode: "HTML", reply_markup: kb });
-    data.menuMessageId = msg.message_id;
+    try {
+        const msg = await ctx.reply(preview, { parse_mode: "HTML", reply_markup: kb });
+        data.menuMessageId = msg.message_id;
+    } catch (e: any) {
+        logger.error({ err: e }, "Broadcast preview failed");
+        data.step = 'AWAITING_CONTENT';
+        delete ctx.session.broadcastDraft;
+        await ctx.reply(
+            `❌ Broadcast preview failed: ${e.message}\n\n` +
+            `The broadcast was not queued. Please remove unusual formatting or split the message, then send it again.`
+        );
+    }
 }
 
 adminBroadcastHandlers.callbackQuery("br_cancel", async (ctx) => {

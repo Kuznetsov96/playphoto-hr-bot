@@ -149,7 +149,8 @@ export async function formatCandidateProfile(
             const pending = checks.filter(c => !c.ok);
             if (done.length > 0) text += `✅ ${done.map(c => c.label).join(", ")}\n`;
             if (pending.length > 0) text += `⏳ ${pending.map(c => c.label).join(", ")}\n`;
-            if (pending.length === 0) text += `\n<i>All documents submitted — waiting for auto-hire</i>\n`;
+            text += `📅 Schedule prefs: <i>candidate fills after documents</i>\n`;
+            if (pending.length === 0) text += `\n<i>All onboarding data is filled. Waiting for final preferences and schedule handoff.</i>\n`;
         } else {
             const FINAL_LABELS: Record<string, string> = {
                 NDA: "📑 NDA",
