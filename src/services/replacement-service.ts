@@ -388,7 +388,10 @@ export class ReplacementService {
     }
 
     private async findCandidatesForWave(request: RequestWithRelations, wave: ReplacementSearchWave) {
-        const availability = await scheduleAvailabilityService.getAvailabilityForDate(request.shiftDate);
+        const availability = await scheduleAvailabilityService.getAvailabilityForDate(
+            request.shiftDate,
+            scheduleAvailabilityService.getMonthlyScheduleSheetName(request.shiftDate)
+        );
         const kindByStaff = new Map<string, ReplacementAvailabilityKind>();
         for (const [staffId, kind] of availability.entries()) {
             kindByStaff.set(staffId, kind === "available" ? ReplacementAvailabilityKind.AVAILABLE : ReplacementAvailabilityKind.LIMITED);

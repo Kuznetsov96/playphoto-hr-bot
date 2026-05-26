@@ -13,6 +13,20 @@ interface TeamMember {
 
 export class ScheduleAvailabilityService {
     private sheets: any;
+    private readonly scheduleSheetMonths = [
+        "Січень",
+        "Лютий",
+        "Березень",
+        "Квітень",
+        "Травень",
+        "Червень",
+        "Липень",
+        "Серпень",
+        "Вересень",
+        "Жовтень",
+        "Листопад",
+        "Грудень",
+    ];
 
     constructor() {
         const keyPath = path.join(process.cwd(), "google-service-account.json");
@@ -83,6 +97,11 @@ export class ScheduleAvailabilityService {
         }
 
         return availability;
+    }
+
+    getMonthlyScheduleSheetName(date: Date): string {
+        const kyivDate = new Date(date.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+        return `${this.scheduleSheetMonths[kyivDate.getMonth()]} ${kyivDate.getFullYear()}`;
     }
 
     private ensureSheets() {

@@ -33,6 +33,7 @@ const prismaMock = {
 
 const scheduleAvailabilityService = {
     getAvailabilityForDate: vi.fn(),
+    getMonthlyScheduleSheetName: vi.fn(),
 };
 
 const defaultQueue = {
@@ -63,6 +64,7 @@ vi.mock("../../core/logger.js", () => ({
 describe("ReplacementService", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        scheduleAvailabilityService.getMonthlyScheduleSheetName.mockReturnValue("Травень 2030");
     });
 
     it("advances past an empty wave and sends the next available wave", async () => {
@@ -130,6 +132,10 @@ describe("ReplacementService", () => {
                 availabilityKind: ReplacementAvailabilityKind.LIMITED,
             },
         });
+        expect(scheduleAvailabilityService.getAvailabilityForDate).toHaveBeenCalledWith(
+            request.shiftDate,
+            "Травень 2030"
+        );
         expect(api.sendMessage).toHaveBeenCalledTimes(1);
     });
 
