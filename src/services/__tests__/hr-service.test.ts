@@ -331,6 +331,7 @@ describe('hrService', () => {
             expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
                 [CandidateStatus.SCREENING, CandidateStatus.WAITLIST_HR, CandidateStatus.WAITLIST],
                 {
+                    gender: "female",
                     currentStep: FunnelStep.INTERVIEW,
                     OR: [
                         { isWaitlisted: true },
@@ -395,6 +396,7 @@ describe('hrService', () => {
                 id: 'cand-age',
                 city: 'Kyiv',
                 locationId: 'loc1',
+                gender: 'female',
                 birthDate: new Date('1994-09-23T00:00:00.000Z'),
                 user: { id: 'user-age', telegramId: 123n }
             } as any);
@@ -410,6 +412,34 @@ describe('hrService', () => {
             expect(candidateRepository.update).toHaveBeenCalledWith('cand-age', {
                 status: CandidateStatus.REJECTED,
                 hrDecision: 'AGE_LIMIT',
+                isWaitlisted: false,
+                notificationSent: false,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: null,
+                hasUnreadMessage: false,
+            });
+        });
+
+        it('should block interview invite for male candidates', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand-male',
+                city: 'Kyiv',
+                locationId: 'loc1',
+                gender: 'male',
+                birthDate: new Date('2004-09-23T00:00:00.000Z'),
+                user: { id: 'user-male', telegramId: 456n }
+            } as any);
+
+            const api = {
+                sendMessage: vi.fn()
+            };
+
+            const result = await hrService.inviteCandidate(api, 'cand-male');
+
+            expect(result).toEqual({ ok: false, reason: 'gender_ineligible' });
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-male', {
+                status: CandidateStatus.REJECTED,
                 isWaitlisted: false,
                 notificationSent: false,
                 interviewWaitlistReason: null,

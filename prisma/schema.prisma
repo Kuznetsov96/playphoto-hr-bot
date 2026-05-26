@@ -73,7 +73,7 @@ model Candidate {
   fullName             String?
   phone                String?
   birthDate            DateTime?
-  gender               String?         @default("female")
+  gender               String?
   city                 String?
   source               String?
   clickSource          String? // Технічне джерело з deep-link (start=source_...)

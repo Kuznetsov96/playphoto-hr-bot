@@ -91,9 +91,13 @@ export async function persistCandidate(ctx: MyContext, data: any) {
         data.currentStep = FunnelStep.INITIAL_TEST;
     }
 
+    const createData = data.gender === undefined
+        ? { userId: user.id, gender: null, ...data }
+        : { userId: user.id, ...data };
+
     return await candidateRepository.upsert({
         where: { userId: user.id },
-        create: { userId: user.id, ...data },
+        create: createData,
         update: { ...data }
     });
 }
@@ -163,6 +167,21 @@ async function renderLocationSelection(ctx: MyContext) {
 export async function handleNoVacancies(ctx: MyContext, city: string) {
     const bdStr = ctx.session.candidateData.birthDate;
     const birthDate = bdStr ? new Date(bdStr) : new Date();
+
+    if (ctx.session.candidateData.gender === "male") {
+        await persistCandidate(ctx, {
+            fullName: ctx.session.candidateData.fullName,
+            birthDate,
+            gender: ctx.session.candidateData.gender,
+            city,
+            status: CandidateStatus.REJECTED,
+            isWaitlisted: false
+        });
+        ctx.session.step = "idle";
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](city, city));
+        return;
+    }
+
     const ageMeta = getAgeRejectionMeta(getCandidateAge(birthDate));
 
     await persistCandidate(ctx, {
@@ -342,6 +361,21 @@ candidateHandlers.on("message:text", async (ctx, next) => {
         const bdStr = ctx.session.candidateData.birthDate;
         const birthDate = bdStr ? new Date(bdStr) : new Date();
 
+        if (ctx.session.candidateData.gender === "male") {
+            await persistCandidate(ctx, {
+                fullName: ctx.session.candidateData.fullName,
+                birthDate,
+                gender: ctx.session.candidateData.gender,
+                city: normalizedCity,
+                status: CandidateStatus.REJECTED,
+                isWaitlisted: false,
+                isOtherCity: true
+            });
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](normalizedCity, normalizedCity));
+            ctx.session.step = "idle";
+            return;
+        }
+
         const ageMeta = getAgeRejectionMeta(getCandidateAge(birthDate));
 
         await persistCandidate(ctx, {
@@ -493,6 +527,32 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
         const l = await locationRepository.findById(id);
         return l?.name;
     }))).filter(Boolean).join(', ');
+
+    if (gender === "male") {
+        await persistCandidate(ctx, {
+            fullName,
+            birthDate,
+            gender,
+            city,
+            locationId: finalLocationId,
+            source,
+            clickSource,
+            appearance: appearance + (locationIds && locationIds.length > 1 ? `\n(Обрані локації: ${locNames})` : ""),
+            tattooPhotoId: finalTattooId,
+            status: CandidateStatus.REJECTED,
+            isWaitlisted: false,
+            hrDecision: null
+        });
+        ctx.session.step = "idle";
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS["candidate-reject-male-location"](
+                primaryLocationForAge?.name || city || "цій локації",
+                city || "вашому місті"
+            )
+        );
+        return;
+    }
 
     await persistCandidate(ctx, {
         fullName,
