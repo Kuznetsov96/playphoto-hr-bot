@@ -165,6 +165,7 @@ export interface SessionData {
     statsView?: "overview" | "losses";
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
+    customSyncPromptMessageId?: number;
     taskCreation?: {
         step?: string;
         date?: string;

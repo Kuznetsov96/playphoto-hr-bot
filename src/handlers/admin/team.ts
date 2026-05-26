@@ -372,7 +372,9 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         });
         range.text("📂 Custom Sync", async (ctx) => {
             ctx.session.step = "sync_other_sheet";
-            await ctx.reply(ADMIN_TEXTS["admin-sync-enter-sheet"]);
+            const prompt = await ctx.reply(ADMIN_TEXTS["admin-sync-enter-sheet"]);
+            ctx.session.customSyncPromptMessageId = prompt.message_id;
+            ctx.session.messagesToDelete.push(prompt.message_id);
         }).row();
     }
 
