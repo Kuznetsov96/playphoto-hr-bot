@@ -80,11 +80,39 @@ export class ReplacementService {
 
         const existing = await prisma.replacementRequest.findFirst({
             where: {
-                workShiftId: shift.id,
-                status: ReplacementRequestStatus.ACTIVE
+                status: ReplacementRequestStatus.ACTIVE,
+                OR: [
+                    { workShiftId: shift.id },
+                    {
+                        requesterStaffId,
+                        locationId: shift.locationId,
+                        shiftDate: {
+                            gte: this.kyivStartOfDay(shift.date),
+                            lt: this.nextKyivDay(shift.date)
+                        }
+                    }
+                ]
             }
         });
         if (existing) throw new Error("REQUEST_ALREADY_ACTIVE");
+
+        const previouslyFailed = await prisma.replacementRequest.findFirst({
+            where: {
+                status: ReplacementRequestStatus.FAILED,
+                OR: [
+                    { workShiftId: shift.id },
+                    {
+                        requesterStaffId,
+                        locationId: shift.locationId,
+                        shiftDate: {
+                            gte: this.kyivStartOfDay(shift.date),
+                            lt: this.nextKyivDay(shift.date)
+                        }
+                    }
+                ]
+            }
+        });
+        if (previouslyFailed) throw new Error("REQUEST_PREVIOUSLY_FAILED");
 
         const request = await prisma.replacementRequest.create({
             data: {
@@ -312,8 +340,14 @@ export class ReplacementService {
         });
 
         for (const request of active) {
-            if (await this.isRequestObsoleteAfterScheduleChange(request)) {
+            const currentShift = await this.findSameScheduledShift(request);
+            if (!currentShift) {
                 await this.closeByScheduleSync(api, request.id);
+            } else if (request.workShiftId !== currentShift.id) {
+                await prisma.replacementRequest.update({
+                    where: { id: request.id },
+                    data: { workShiftId: currentShift.id }
+                });
             }
         }
     }
@@ -602,7 +636,11 @@ export class ReplacementService {
     }
 
     private async isRequestObsoleteAfterScheduleChange(request: RequestWithRelations) {
-        const sameDayShift = await prisma.workShift.findFirst({
+        return !(await this.findSameScheduledShift(request));
+    }
+
+    private async findSameScheduledShift(request: RequestWithRelations) {
+        return prisma.workShift.findFirst({
             where: {
                 staffId: request.requesterStaffId,
                 locationId: request.locationId,
@@ -612,8 +650,6 @@ export class ReplacementService {
                 }
             }
         });
-
-        return !sameDayShift;
     }
 
     private async hasShiftOnDate(staffId: string, date: Date) {

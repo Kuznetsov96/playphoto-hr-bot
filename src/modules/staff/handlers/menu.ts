@@ -670,6 +670,8 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
     } catch (error: any) {
         const message = error?.message === "REQUEST_ALREADY_ACTIVE"
             ? "Пошук для цієї зміни вже активний."
+            : error?.message === "REQUEST_PREVIOUSLY_FAILED"
+                ? "Ти вже запускала пошук для цієї зміни, але заміну не знайшли. Напиши в підтримку, щоб команда допомогла вручну."
             : error?.message === "SHIFT_ALREADY_STARTED"
                 ? "Ця зміна вже почалась."
                 : "Не вдалося запустити пошук.";
