@@ -99,6 +99,17 @@ export class ScheduleAvailabilityService {
         return availability;
     }
 
+    async getAvailabilityForDateFromSchedule(date: Date): Promise<Map<string, ScheduleAvailabilityKind>> {
+        const monthlySheet = this.getMonthlyScheduleSheetName(date);
+        const monthlyAvailability = await this.getAvailabilityForDate(date, monthlySheet).catch((err) => {
+            logger.warn({ err, sheetName: monthlySheet }, "Monthly schedule availability lookup failed");
+            return new Map<string, ScheduleAvailabilityKind>();
+        });
+        if (monthlyAvailability.size > 0) return monthlyAvailability;
+
+        return this.getAvailabilityForDate(date, "Актуальний розклад");
+    }
+
     getMonthlyScheduleSheetName(date: Date): string {
         const kyivDate = new Date(date.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         return `${this.scheduleSheetMonths[kyivDate.getMonth()]} ${kyivDate.getFullYear()}`;

@@ -33,6 +33,7 @@ const prismaMock = {
 
 const scheduleAvailabilityService = {
     getAvailabilityForDate: vi.fn(),
+    getAvailabilityForDateFromSchedule: vi.fn(),
     getMonthlyScheduleSheetName: vi.fn(),
 };
 
@@ -92,7 +93,7 @@ describe("ReplacementService", () => {
             Object.assign(request, data);
             return { ...request };
         });
-        scheduleAvailabilityService.getAvailabilityForDate.mockResolvedValue(new Map([
+        scheduleAvailabilityService.getAvailabilityForDateFromSchedule.mockResolvedValue(new Map([
             ["limited-1", "limited"],
         ]));
         prismaMock.staffProfile.findMany.mockResolvedValue([
@@ -132,10 +133,7 @@ describe("ReplacementService", () => {
                 availabilityKind: ReplacementAvailabilityKind.LIMITED,
             },
         });
-        expect(scheduleAvailabilityService.getAvailabilityForDate).toHaveBeenCalledWith(
-            request.shiftDate,
-            "Травень 2030"
-        );
+        expect(scheduleAvailabilityService.getAvailabilityForDateFromSchedule).toHaveBeenCalledWith(request.shiftDate);
         expect(api.sendMessage).toHaveBeenCalledTimes(1);
     });
 
@@ -221,7 +219,7 @@ describe("ReplacementService", () => {
             Object.assign(request, data);
             return { ...request };
         });
-        scheduleAvailabilityService.getAvailabilityForDate.mockResolvedValue(new Map([
+        scheduleAvailabilityService.getAvailabilityForDateFromSchedule.mockResolvedValue(new Map([
             ["limited-3", "limited"],
         ]));
         prismaMock.staffProfile.findMany.mockResolvedValue([
