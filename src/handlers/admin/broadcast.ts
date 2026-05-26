@@ -20,6 +20,7 @@ export const adminBroadcastHubMenu = new Menu<MyContext>("admin-broadcast-hub");
 export const adminBroadcastListMenu = new Menu<MyContext>("admin-broadcast-list");
 export const adminBroadcastArchiveMenu = new Menu<MyContext>("admin-broadcast-archive");
 export const adminBroadcastManageMenu = new Menu<MyContext>("admin-broadcast-manage");
+const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 function getPendingCount(broadcast: any): number {
     return broadcast.trackedMessages?.reduce((acc: number, tracked: any) =>
@@ -354,8 +355,9 @@ adminBroadcastHandlers.callbackQuery("br_confirm_buttons", async (ctx) => {
 });
 
 export async function handleBroadcastContent(ctx: MyContext) {
-    if (!ctx.session.broadcastData || ctx.session.broadcastData.step !== 'AWAITING_CONTENT') return false;
+    if (!ctx.session.broadcastData) return false;
     if (ctx.session.adminFlow !== 'BROADCAST') return false;
+    if (ctx.session.broadcastData.step !== 'AWAITING_CONTENT' && ctx.session.broadcastData.step !== 'CONFIRMATION') return false;
     if (ctx.chat?.type !== "private") return false;
 
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
@@ -367,6 +369,13 @@ export async function handleBroadcastContent(ctx: MyContext) {
     if (!message) return false;
 
     const data = ctx.session.broadcastData;
+    if (data.step === 'CONFIRMATION') {
+        delete ctx.session.broadcastDraft;
+        delete data.media;
+        delete data.mediaItems;
+        delete data.text;
+    }
+
     let media: BroadcastMediaItem | undefined;
     if (message.photo) media = { type: 'photo', fileId: message.photo[message.photo.length - 1]!.file_id };
     else if (message.video) media = { type: 'video', fileId: message.video.file_id };
@@ -384,6 +393,13 @@ export async function handleBroadcastContent(ctx: MyContext) {
     }
 
     if (textHtml) {
+        if (textHtml.length > TELEGRAM_MESSAGE_LIMIT) {
+            await ctx.reply(
+                `❌ Broadcast text is too long: ${textHtml.length}/${TELEGRAM_MESSAGE_LIMIT} characters.\n\n` +
+                `Please shorten it or split it into multiple broadcasts. This broadcast was not queued.`
+            );
+            return true;
+        }
         data.text = textHtml;
     }
 
@@ -463,6 +479,16 @@ async function renderReview(ctx: MyContext) {
     const mediaItems = getBroadcastMediaItems(data);
     const mediaSummary = getMediaSummary(mediaItems);
     const preview = getBroadcastPreview(data.text || "", data.targetType as any, stats, false, false, data.buttonType || 'default', mediaSummary);
+    if (preview.length > TELEGRAM_MESSAGE_LIMIT) {
+        data.step = 'AWAITING_CONTENT';
+        delete ctx.session.broadcastDraft;
+        await ctx.reply(
+            `❌ Broadcast preview is too long: ${preview.length}/${TELEGRAM_MESSAGE_LIMIT} characters.\n\n` +
+            `The message itself may fit, but the preview adds target/button details. Please shorten the message a little or split it into multiple broadcasts. This broadcast was not queued.`
+        );
+        return;
+    }
+
     const kb = getBroadcastKb(false, false, stats);
 
     kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
@@ -477,8 +503,18 @@ async function renderReview(ctx: MyContext) {
     if (mediaItems.length === 1) ctx.session.broadcastDraft.media = mediaItems[0];
     if (mediaItems.length > 1) ctx.session.broadcastDraft.media = mediaItems;
     (ctx.session as any).broadcastValue = data.targetValue;
-    const msg = await ctx.reply(preview, { parse_mode: "HTML", reply_markup: kb });
-    data.menuMessageId = msg.message_id;
+    try {
+        const msg = await ctx.reply(preview, { parse_mode: "HTML", reply_markup: kb });
+        data.menuMessageId = msg.message_id;
+    } catch (e: any) {
+        logger.error({ err: e }, "Broadcast preview failed");
+        data.step = 'AWAITING_CONTENT';
+        delete ctx.session.broadcastDraft;
+        await ctx.reply(
+            `❌ Broadcast preview failed: ${e.message}\n\n` +
+            `The broadcast was not queued. Please remove unusual formatting or split the message, then send it again.`
+        );
+    }
 }
 
 adminBroadcastHandlers.callbackQuery("br_cancel", async (ctx) => {

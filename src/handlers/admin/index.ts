@@ -133,6 +133,17 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
 
     if (await handleBroadcastContent(ctx)) return;
     if (await handleTaskText(ctx)) return;
+    if (
+        ctx.session.broadcastData &&
+        ctx.session.adminFlow !== 'BROADCAST' &&
+        (ctx.session.broadcastData.step === 'AWAITING_CONTENT' || ctx.session.broadcastData.step === 'CONFIRMATION')
+    ) {
+        await ctx.reply(
+            "⚠️ You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
+            "Open System Settings → Broadcasts → New Broadcast and send the content after the bot asks for it. The message was not queued."
+        );
+        return;
+    }
     await next();
 });
 
