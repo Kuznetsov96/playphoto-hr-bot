@@ -4,6 +4,7 @@ import fs from "fs";
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM } from "../config.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
+import { parseScheduleHeaderDate } from "../utils/schedule-sheet-date.js";
 
 export type ScheduleAvailabilityKind = "available" | "limited";
 
@@ -67,7 +68,7 @@ export class ScheduleAvailabilityService {
         const headerValues = rowData[0]?.values || [];
         const targetCol = headerValues.findIndex((cell: any, idx: number) => {
             if (idx === 0 || hiddenColumns.has(idx)) return false;
-            const parsed = this.parseScheduleHeaderDate(String(cell?.formattedValue || ""));
+            const parsed = parseScheduleHeaderDate(String(cell?.formattedValue || ""), sheetName);
             return parsed ? this.isSameKyivDay(parsed, date) : false;
         });
 
@@ -174,41 +175,6 @@ export class ScheduleAvailabilityService {
         } catch {
             return null;
         }
-    }
-
-    private parseMonth(monthStr: string): number {
-        const months: Record<string, number> = {
-            "янв": 0, "фев": 1, "мар": 2, "апр": 3, "май": 4, "июн": 5,
-            "июл": 6, "авг": 7, "сен": 8, "окт": 9, "ноя": 10, "дек": 11,
-            "січ": 0, "лют": 1, "бер": 2, "кві": 3, "тра": 4, "чер": 5,
-            "лип": 6, "сер": 7, "вер": 8, "жов": 9, "лис": 10, "гру": 11
-        };
-        for (const [key, val] of Object.entries(months)) {
-            if (monthStr.startsWith(key)) return val;
-        }
-        return new Date().getMonth();
-    }
-
-    private parseScheduleHeaderDate(value: string): Date | null {
-        const str = value.trim().toLowerCase();
-        if (!str) return null;
-
-        const currentYear = new Date().getFullYear();
-        if (str.includes(",")) {
-            const parts = str.split(",");
-            const day = parseInt(parts[0] || "");
-            const month = this.parseMonth((parts[1] || "").trim());
-            if (!isNaN(day)) return new Date(currentYear, month, day);
-        }
-
-        if (str.includes(".")) {
-            const parts = str.split(".");
-            const day = parseInt(parts[0] || "");
-            const month = parseInt(parts[1] || "");
-            if (!isNaN(day) && !isNaN(month)) return new Date(currentYear, month - 1, day);
-        }
-
-        return null;
     }
 
     private isSameKyivDay(left: Date, right: Date): boolean {
