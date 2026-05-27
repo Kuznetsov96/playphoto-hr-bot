@@ -122,14 +122,6 @@ export class StaffService {
         return shortenName(fullName);
     }
 
-    async getInactiveStaffReport() {
-        const inactive = await staffRepository.findInactiveWithUser();
-        if (inactive.length === 0) return "All staff members are active! ✨";
-
-        const list = inactive.map((p: any) => `• ${this.shortenName(p.fullName)}`).join('\n');
-        return `<b>⚠️ INACTIVE STAFF:</b>\n\n${list}`;
-    }
-
     async searchStaff(query: string) {
         return staffRepository.findByQuery(query);
     }
