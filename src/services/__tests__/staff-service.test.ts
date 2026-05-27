@@ -8,7 +8,6 @@ import { locationRepository } from '../../repositories/location-repository.js';
 vi.mock('../../repositories/staff-repository.js', () => ({
     staffRepository: {
         countActive: vi.fn(),
-        findInactiveWithUser: vi.fn(),
         findByQuery: vi.fn()
     }
 }));
@@ -64,23 +63,4 @@ describe('StaffService', () => {
         expect(header).toContain('Admin Panel');
     });
 
-    describe('getInactiveStaffReport', () => {
-        it('should return "all active" message if no inactive staff', async () => {
-            vi.mocked(staffRepository.findInactiveWithUser).mockResolvedValue([]);
-            const report = await staffService.getInactiveStaffReport();
-            expect(report).toBe('All staff members are active! ✨');
-        });
-
-        it('should return a list of shortened names of inactive staff', async () => {
-            vi.mocked(staffRepository.findInactiveWithUser).mockResolvedValue([
-                { fullName: 'Ivanov Ivan Ivanovich' },
-                { fullName: 'Petrov Peter' }
-            ] as any);
-
-            const report = await staffService.getInactiveStaffReport();
-            expect(report).toContain('⚠️ INACTIVE STAFF:');
-            expect(report).toContain('• Ivanov Ivan');
-            expect(report).toContain('• Petrov Peter');
-        });
-    });
 });

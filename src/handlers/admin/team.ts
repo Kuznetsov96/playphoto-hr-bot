@@ -381,11 +381,6 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
     if (userRole !== 'SUPPORT') {
         range.text("🎂 Birthdays", async (ctx) => {
             await showBirthdayMenu(ctx);
-        });
-
-        range.text("⚠️ Inactive", async (ctx) => {
-            const report = await staffService.getInactiveStaffReport();
-            await ctx.reply(report, { parse_mode: "HTML" });
         }).row();
     }
 

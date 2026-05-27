@@ -201,16 +201,6 @@ export class StaffRepository {
         });
     }
 
-    async findInactiveWithUser(): Promise<StaffProfile[]> {
-        const activeStaff = await prisma.staffProfile.findMany({
-            where: { isActive: true },
-            include: { user: true }
-        });
-
-        // Return staff where there's no connected user, or the user's telegram ID is essentially empty/0
-        return activeStaff.filter(s => !s.user || s.user.telegramId === 0n);
-    }
-
     async findForMorningDigest(start: Date, end: Date) {
         return prisma.staffProfile.findMany({
             where: {
