@@ -19,4 +19,21 @@ describe("msgToHtml", () => {
 
         expect(html).toBe("<b>Hello <u>world</u></b>");
     });
+
+    it("normalizes crossing Telegram entities into valid HTML", () => {
+        const html = msgToHtml("abcdefg", [
+            { type: "underline", offset: 0, length: 5 },
+            { type: "bold", offset: 2, length: 5 },
+        ]);
+
+        expect(html).toBe("<u>ab<b>cde</b></u><b>fg</b>");
+    });
+
+    it("escapes text link URLs inside HTML attributes", () => {
+        const html = msgToHtml("Open", [
+            { type: "text_link", offset: 0, length: 4, url: 'https://example.com/?a=1&b="<x>"' },
+        ]);
+
+        expect(html).toBe('<a href="https://example.com/?a=1&amp;b=&quot;&lt;x&gt;&quot;">Open</a>');
+    });
 });
