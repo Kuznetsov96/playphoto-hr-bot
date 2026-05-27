@@ -87,6 +87,10 @@ export function escapeHtml(text: string): string {
         .replace(/>/g, "&gt;");
 }
 
+function escapeHtmlAttribute(text: string): string {
+    return escapeHtml(text).replace(/"/g, "&quot;");
+}
+
 export function getAdminOutboundText(message: MyContext["message"] | undefined): string {
     return message?.text || message?.caption || "";
 }
@@ -147,67 +151,99 @@ export async function sendAdminOutboundMessage(
 export function msgToHtml(text: string, entities: any[] = []): string {
     if (!entities || entities.length === 0) return escapeHtml(text);
 
-    // Create a list of all markers (open/close tags)
-    interface Marker {
-        offset: number;
+    interface HtmlEntity {
+        index: number;
+        end: number;
+        start: number;
         type: string;
-        isClose: boolean;
         length: number;
         url?: string;
     }
 
-    const markers: Marker[] = [];
+    const tagMap: Record<string, string> = {
+        bold: "b",
+        italic: "i",
+        underline: "u",
+        strikethrough: "s",
+        code: "code",
+        pre: "pre",
+        blockquote: "blockquote",
+        expandable_blockquote: "blockquote",
+        spoiler: "tg-spoiler",
+    };
 
-    for (const entity of entities) {
-        markers.push({ offset: entity.offset, type: entity.type, isClose: false, length: entity.length, url: entity.url });
-        markers.push({ offset: entity.offset + entity.length, type: entity.type, isClose: true, length: entity.length });
-    }
+    const supportedEntities: HtmlEntity[] = entities
+        .map((entity, index) => ({
+            index,
+            start: Number(entity.offset),
+            end: Number(entity.offset) + Number(entity.length),
+            type: entity.type,
+            length: Number(entity.length),
+            url: entity.url,
+        }))
+        .filter((entity) => {
+            if (!Number.isFinite(entity.start) || !Number.isFinite(entity.end)) return false;
+            if (entity.length <= 0 || entity.start < 0 || entity.end > text.length) return false;
+            return Boolean(tagMap[entity.type] || entity.type === "text_link");
+        });
 
-    // Telegram entities can be nested and may share the same boundary.
-    // Outer tags must open first, while inner tags must close first.
-    markers.sort((a, b) => {
-        if (a.offset !== b.offset) return a.offset - b.offset;
-        if (a.isClose !== b.isClose) return a.isClose ? -1 : 1;
-        return a.isClose ? a.length - b.length : b.length - a.length;
-    });
+    if (supportedEntities.length === 0) return escapeHtml(text);
+
+    const boundaries = Array.from(new Set([
+        0,
+        text.length,
+        ...supportedEntities.flatMap((entity) => [entity.start, entity.end]),
+    ])).sort((a, b) => a - b);
+
+    const entityKey = (entity: HtmlEntity) => `${entity.index}:${entity.type}:${entity.start}:${entity.end}:${entity.url || ""}`;
+    const entityTag = (entity: HtmlEntity) => tagMap[entity.type] || "a";
+    const openTag = (entity: HtmlEntity) => {
+        if (entity.type === "text_link") return `<a href="${escapeHtmlAttribute(entity.url || "")}">`;
+        return `<${entityTag(entity)}>`;
+    };
+    const closeTag = (entity: HtmlEntity) => `</${entityTag(entity)}>`;
+    const sortActiveEntities = (active: HtmlEntity[]) => active.sort((a, b) =>
+        a.start - b.start ||
+        b.end - a.end ||
+        a.index - b.index
+    );
 
     let result = "";
-    let lastPos = 0;
+    let activeEntities: HtmlEntity[] = [];
 
-    for (const marker of markers) {
-        // Add text between last marker and current marker
-        if (marker.offset > lastPos) {
-            result += escapeHtml(text.slice(lastPos, marker.offset));
-            lastPos = marker.offset;
+    for (let i = 0; i < boundaries.length - 1; i++) {
+        const start = boundaries[i]!;
+        const end = boundaries[i + 1]!;
+        if (start === end) continue;
+
+        const nextActiveEntities = sortActiveEntities(
+            supportedEntities.filter((entity) => entity.start <= start && entity.end >= end)
+        );
+
+        let commonPrefixLength = 0;
+        while (
+            commonPrefixLength < activeEntities.length &&
+            commonPrefixLength < nextActiveEntities.length &&
+            entityKey(activeEntities[commonPrefixLength]!) === entityKey(nextActiveEntities[commonPrefixLength]!)
+        ) {
+            commonPrefixLength++;
         }
 
-        const tagMap: Record<string, string> = {
-            bold: "b",
-            italic: "i",
-            underline: "u",
-            strikethrough: "s",
-            code: "code",
-            pre: "pre",
-            blockquote: "blockquote",
-            expandable_blockquote: "blockquote",
-            spoiler: "tg-spoiler",
-        };
-
-        const tag = tagMap[marker.type];
-        if (marker.isClose) {
-            if (tag) result += `</${tag}>`;
-            else if (marker.type === "text_link") result += "</a>";
-        } else {
-            if (tag) result += `<${tag}>`;
-            else if (marker.type === "text_link") {
-                const escapedUrl = marker.url?.replace(/"/g, '&quot;') || "";
-                result += `<a href="${escapedUrl}">`;
-            }
+        for (let j = activeEntities.length - 1; j >= commonPrefixLength; j--) {
+            result += closeTag(activeEntities[j]!);
         }
+        for (let j = commonPrefixLength; j < nextActiveEntities.length; j++) {
+            result += openTag(nextActiveEntities[j]!);
+        }
+
+        result += escapeHtml(text.slice(start, end));
+        activeEntities = nextActiveEntities;
     }
 
-    // Add remaining text
-    result += escapeHtml(text.slice(lastPos));
+    for (let j = activeEntities.length - 1; j >= 0; j--) {
+        result += closeTag(activeEntities[j]!);
+    }
+
     return result;
 }
 
