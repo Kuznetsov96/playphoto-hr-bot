@@ -10,7 +10,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { systemStateRepository } from "../../repositories/system-state-repository.js";
-import { formatLocationName, normalizeCity } from "./utils.js";
+import { escapeHtml, formatLocationName, normalizeCity } from "./utils.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
 import { chatLogRepository } from "../../repositories/chat-log-repository.js";
@@ -462,7 +462,8 @@ async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = fal
         kb.text(`❌ Cancel #${index + 1}`, `admin_repl_cancel_${request.id}`).row();
     });
 
-    kb.text("🔄 Refresh", "admin_repl_board").row()
+    kb.text("➕ Start manual search", "admin_repl_manual_start").row()
+        .text("🔄 Refresh", "admin_repl_board").row()
         .text(ADMIN_TEXTS["admin-btn-back"], "back_to_schedule_dates");
 
     await ScreenManager.renderScreen(
@@ -474,8 +475,188 @@ async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = fal
     await ctx.answerCallbackQuery().catch(() => { });
 }
 
+async function ensureMainAdmin(ctx: MyContext) {
+    if (ctx.from?.id === MAIN_ADMIN_ID) return true;
+    await ctx.answerCallbackQuery("Access denied").catch(() => { });
+    return false;
+}
+
+async function showAdminReplacementCityPicker(ctx: MyContext) {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const cities = (await locationRepository.findAllCities()).sort((a, b) => normalizeCity(a).localeCompare(normalizeCity(b)));
+    (ctx.session as any).adminReplacementCities = cities;
+    delete (ctx.session as any).adminReplacementLocationIds;
+    delete (ctx.session as any).adminReplacementDraft;
+
+    const kb = new InlineKeyboard();
+    cities.forEach((city, index) => {
+        kb.text(normalizeCity(city), `admin_repl_city_${index}`);
+        if ((index + 1) % 2 === 0) kb.row();
+    });
+    kb.row().text("⬅️ Back", "admin_repl_board");
+
+    await ScreenManager.renderScreen(
+        ctx,
+        "➕ <b>Manual replacement search</b>\n\nSelect the city with an empty shift day.",
+        kb,
+        { forceNew: true, pushToStack: true }
+    );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+async function showAdminReplacementLocationPicker(ctx: MyContext, cityIndex: number) {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const cities = (ctx.session as any).adminReplacementCities as string[] | undefined;
+    const city = cities?.[cityIndex];
+    if (!city) {
+        await ctx.answerCallbackQuery("Selection expired").catch(() => { });
+        await showAdminReplacementCityPicker(ctx);
+        return;
+    }
+
+    const locations = (await locationRepository.findByCity(city)).sort((a, b) => a.name.localeCompare(b.name));
+    (ctx.session as any).adminReplacementLocationIds = locations.map(location => location.id);
+    (ctx.session as any).adminReplacementDraft = { city };
+
+    const kb = new InlineKeyboard();
+    locations.slice(0, 20).forEach((location) => {
+        kb.text(formatLocationName(location.name, location.city), `admin_repl_loc_${location.id}`).row();
+    });
+    kb.text("⬅️ Cities", "admin_repl_manual_start");
+
+    await ScreenManager.renderScreen(
+        ctx,
+        `➕ <b>Manual replacement search</b>\n\nCity: <b>${escapeHtml(normalizeCity(city))}</b>\nSelect location.`,
+        kb,
+        { forceNew: true, pushToStack: true }
+    );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+async function showAdminReplacementDatePicker(ctx: MyContext, locationId: string) {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const location = await locationRepository.findById(locationId);
+    if (!location) {
+        await ctx.answerCallbackQuery("Location not found").catch(() => { });
+        return;
+    }
+
+    const options = await replacementService.listManualSearchDateOptions(locationId, 14);
+    (ctx.session as any).adminReplacementDraft = {
+        city: location.city,
+        locationId,
+        locationName: location.name,
+    };
+
+    const kb = new InlineKeyboard();
+    options.slice(0, 14).forEach((option, index) => {
+        kb.text(option.label, `admin_repl_date_${option.dateKey}`);
+        if ((index + 1) % 2 === 0) kb.row();
+    });
+    const cityIndex = ((ctx.session as any).adminReplacementCities || []).indexOf(location.city);
+    kb.row().text("⬅️ Locations", cityIndex >= 0 ? `admin_repl_city_${cityIndex}` : "admin_repl_manual_start");
+
+    const body = options.length > 0
+        ? "Select an empty day. The search will use the location's regular shift time."
+        : "No empty days without an active search were found in the next 14 days.";
+
+    await ScreenManager.renderScreen(
+        ctx,
+        `➕ <b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocationName(location.name, location.city))}</b>\n${body}`,
+        kb,
+        { forceNew: true, pushToStack: true }
+    );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+async function showAdminReplacementManualConfirm(ctx: MyContext, dateKey: string) {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const draft = (ctx.session as any).adminReplacementDraft as { locationId?: string; locationName?: string; city?: string } | undefined;
+    if (!draft?.locationId || !draft.locationName) {
+        await ctx.answerCallbackQuery("Selection expired").catch(() => { });
+        await showAdminReplacementCityPicker(ctx);
+        return;
+    }
+
+    (ctx.session as any).adminReplacementDraft = { ...draft, dateKey };
+    const options = await replacementService.listManualSearchDateOptions(draft.locationId, 14);
+    const option = options.find(item => item.dateKey === dateKey);
+    if (!option) {
+        await ctx.answerCallbackQuery("This day is no longer available").catch(() => { });
+        await showAdminReplacementDatePicker(ctx, draft.locationId);
+        return;
+    }
+
+    const kb = new InlineKeyboard()
+        .text("✅ Start search", "admin_repl_manual_confirm").row()
+        .text("⬅️ Dates", `admin_repl_loc_${draft.locationId}`)
+        .text("✖️ Cancel", "admin_repl_board");
+
+    await ScreenManager.renderScreen(
+        ctx,
+        `➕ <b>Start manual replacement search?</b>\n\n` +
+        `📍 <b>${escapeHtml(formatLocationName(draft.locationName, draft.city || ""))}</b>\n` +
+        `📅 <b>${escapeHtml(option.label)}</b>\n\n` +
+        `The bot will ask available photographers using the usual replacement waves.`,
+        kb,
+        { forceNew: true, pushToStack: true }
+    );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+async function confirmAdminReplacementManualSearch(ctx: MyContext) {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const draft = (ctx.session as any).adminReplacementDraft as { locationId?: string; dateKey?: string } | undefined;
+    if (!draft?.locationId || !draft.dateKey) {
+        await ctx.answerCallbackQuery("Selection expired").catch(() => { });
+        await showAdminReplacementCityPicker(ctx);
+        return;
+    }
+
+    try {
+        await replacementService.startAdminRequest(ctx.api, draft.locationId, new Date(`${draft.dateKey}T00:00:00.000Z`));
+        delete (ctx.session as any).adminReplacementDraft;
+        await ctx.answerCallbackQuery("Search started").catch(() => { });
+        await showAdminReplacementBoard(ctx, true);
+    } catch (error: any) {
+        const message = error?.message === "REQUEST_ALREADY_ACTIVE"
+            ? "A search is already active for this location and date."
+            : error?.message === "LOCATION_DAY_ALREADY_HAS_SHIFT"
+                ? "This location already has a shift on that day."
+                : error?.message === "SHIFT_ALREADY_STARTED"
+                    ? "This shift time has already started."
+                    : "Could not start the search.";
+        await ctx.answerCallbackQuery({ text: message, show_alert: true });
+    }
+}
+
 adminTeamHandlers.callbackQuery("admin_repl_board", async (ctx) => {
     await showAdminReplacementBoard(ctx, true);
+});
+
+adminTeamHandlers.callbackQuery("admin_repl_manual_start", async (ctx) => {
+    await showAdminReplacementCityPicker(ctx);
+});
+
+adminTeamHandlers.callbackQuery(/^admin_repl_city_(\d+)$/, async (ctx) => {
+    await showAdminReplacementLocationPicker(ctx, Number(ctx.match![1]));
+});
+
+adminTeamHandlers.callbackQuery(/^admin_repl_loc_(.+)$/, async (ctx) => {
+    await showAdminReplacementDatePicker(ctx, ctx.match![1]!);
+});
+
+adminTeamHandlers.callbackQuery(/^admin_repl_date_(\d{4}-\d{2}-\d{2})$/, async (ctx) => {
+    await showAdminReplacementManualConfirm(ctx, ctx.match![1]!);
+});
+
+adminTeamHandlers.callbackQuery("admin_repl_manual_confirm", async (ctx) => {
+    await confirmAdminReplacementManualSearch(ctx);
 });
 
 adminTeamHandlers.callbackQuery(/^admin_repl_cancel_(.+)$/, async (ctx) => {
