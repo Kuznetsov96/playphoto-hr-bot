@@ -473,7 +473,7 @@ enum ReplacementAvailabilityKind {
 model ReplacementRequest {
   id                String                   @id @default(cuid())
   workShiftId       String?
-  requesterStaffId  String
+  requesterStaffId  String?
   replacementStaffId String?
   locationId        String
   city              String
@@ -490,7 +490,7 @@ model ReplacementRequest {
   updatedAt         DateTime                 @updatedAt
 
   workShift         WorkShift?               @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
-  requester         StaffProfile             @relation("ReplacementRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
+  requester         StaffProfile?            @relation("ReplacementRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
   replacement       StaffProfile?            @relation("ReplacementAcceptor", fields: [replacementStaffId], references: [id])
   location          Location                 @relation(fields: [locationId], references: [id])
   responses         ReplacementResponse[]

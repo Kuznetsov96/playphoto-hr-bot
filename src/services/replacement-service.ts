@@ -27,7 +27,7 @@ const FINAL_WAVE_CLOSE_LEAD_MS = 4 * 60 * 60 * 1000;
 type StaffWithUserLocation = StaffProfile & { user: User; location: Location | null };
 type RequestWithRelations = ReplacementRequest & {
     location: Location;
-    requester: StaffProfile & { user: User };
+    requester?: (StaffProfile & { user: User }) | null;
     replacement?: (StaffProfile & { user: User }) | null;
 };
 
@@ -131,6 +131,76 @@ export class ReplacementService {
         return request;
     }
 
+    async listManualSearchDateOptions(locationId: string, daysAhead: number = 14) {
+        const location = await prisma.location.findUnique({ where: { id: locationId } });
+        if (!location) return [];
+
+        const start = this.kyivStartOfDay(new Date());
+        const end = new Date(start.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+        const [shifts, activeRequests] = await Promise.all([
+            prisma.workShift.findMany({
+                where: { locationId, date: { gte: start, lt: end } },
+                select: { date: true }
+            }),
+            prisma.replacementRequest.findMany({
+                where: { locationId, status: ReplacementRequestStatus.ACTIVE, shiftDate: { gte: start, lt: end } },
+                select: { shiftDate: true }
+            })
+        ]);
+
+        const scheduledDates = new Set(shifts.map(shift => this.formatDateKey(shift.date)));
+        const activeSearchDates = new Set(activeRequests.map(request => this.formatDateKey(request.shiftDate)));
+
+        return Array.from({ length: daysAhead }, (_, index) => {
+            const date = new Date(start.getTime() + index * 24 * 60 * 60 * 1000);
+            const dateKey = this.formatDateKey(date);
+            const shiftStartAt = this.getShiftStartAt({ shiftDate: date, location });
+            return {
+                date,
+                dateKey,
+                label: `${this.formatDate(date)} · ${this.formatShiftTime({ shiftDate: date, location })}`,
+                hasShift: scheduledDates.has(dateKey),
+                hasActiveSearch: activeSearchDates.has(dateKey),
+                hasStarted: shiftStartAt <= new Date(),
+            };
+        }).filter(option => !option.hasShift && !option.hasActiveSearch && !option.hasStarted);
+    }
+
+    async startAdminRequest(api: Api, locationId: string, shiftDate: Date) {
+        const location = await prisma.location.findUnique({ where: { id: locationId } });
+        if (!location) throw new Error("LOCATION_NOT_FOUND");
+
+        const dayStart = this.kyivStartOfDay(shiftDate);
+        const dayEnd = this.nextKyivDay(shiftDate);
+        const shiftTimes = this.getShiftTimeDates(dayStart, location);
+        const shiftStartAt = shiftTimes.start ?? this.getShiftStartAt({ shiftDate: dayStart, location });
+        if (shiftStartAt <= new Date()) throw new Error("SHIFT_ALREADY_STARTED");
+
+        const existingShift = await prisma.workShift.findFirst({
+            where: { locationId, date: { gte: dayStart, lt: dayEnd } }
+        });
+        if (existingShift) throw new Error("LOCATION_DAY_ALREADY_HAS_SHIFT");
+
+        const existingRequest = await prisma.replacementRequest.findFirst({
+            where: { locationId, status: ReplacementRequestStatus.ACTIVE, shiftDate: { gte: dayStart, lt: dayEnd } }
+        });
+        if (existingRequest) throw new Error("REQUEST_ALREADY_ACTIVE");
+
+        const request = await prisma.replacementRequest.create({
+            data: {
+                locationId,
+                city: location.city,
+                shiftDate: dayStart,
+                shiftStartTime: shiftTimes.start,
+                shiftEndTime: shiftTimes.end,
+            }
+        });
+
+        await this.notifyAdminStarted(api, request.id);
+        await this.dispatchNextWave(api, request.id);
+        return request;
+    }
+
     async cancelRequest(api: Api, requesterStaffId: string, requestId: string) {
         const updated = await prisma.replacementRequest.updateMany({
             where: {
@@ -173,14 +243,16 @@ export class ReplacementService {
 
         const request = await this.getRequest(requestId);
         if (request) {
-            await api.sendMessage(
-                Number(request.requester.user.telegramId),
-                "Пошук підміни скасовано адміністратором.\nЯкщо питання ще актуальне, напиши в підтримку.",
-                {
-                    parse_mode: "HTML",
-                    reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
-                }
-            ).catch((err) => logger.warn({ err, requestId }, "Requester replacement admin-cancel notification failed"));
+            if (request.requester) {
+                await api.sendMessage(
+                    Number(request.requester.user.telegramId),
+                    "Пошук підміни скасовано адміністратором.\nЯкщо питання ще актуальне, напиши в підтримку.",
+                    {
+                        parse_mode: "HTML",
+                        reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
+                    }
+                ).catch((err) => logger.warn({ err, requestId }, "Requester replacement admin-cancel notification failed"));
+            }
             await this.inactivateOpenResponses(api, request.id, "Пошук підміни скасовано адміністратором.");
         }
 
@@ -240,7 +312,7 @@ export class ReplacementService {
 
         if (!accepted) return "closed" as const;
 
-        await this.editCandidateMessage(api, response.chatId, response.messageId, "Дякуємо. Ви прийняли підміну.\nАдміністратор отримає деталі.");
+        await this.editCandidateMessage(api, response.chatId, response.messageId, this.formatAcceptedReplacementText(response.request));
         await this.notifyRequesterFound(api, response.request);
         await this.notifyAdminFound(api, requestId);
         await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.\nПідміну знайдено, дякуємо.", response.id);
@@ -340,6 +412,17 @@ export class ReplacementService {
         });
 
         for (const request of active) {
+            if (!request.requesterStaffId) {
+                const locationShift = await prisma.workShift.findFirst({
+                    where: {
+                        locationId: request.locationId,
+                        date: { gte: this.kyivStartOfDay(request.shiftDate), lt: this.nextKyivDay(request.shiftDate) }
+                    }
+                });
+                if (locationShift) await this.closeByScheduleSync(api, request.id);
+                continue;
+            }
+
             const currentShift = await this.findSameScheduledShift(request);
             if (!currentShift) {
                 await this.closeByScheduleSync(api, request.id);
@@ -403,7 +486,9 @@ export class ReplacementService {
 
         const candidates = await prisma.staffProfile.findMany({
             where: {
-                id: { in: staffIdsWithDesiredAvailability, not: request.requesterStaffId },
+                id: request.requesterStaffId
+                    ? { in: staffIdsWithDesiredAvailability, not: request.requesterStaffId }
+                    : { in: staffIdsWithDesiredAvailability },
                 isActive: true,
                 user: { botBlockedAt: null },
                 ...this.getLocationFilter(request, wave)
@@ -517,7 +602,13 @@ export class ReplacementService {
         return `Чи можете вийти на підміну?\n\n${shift}`;
     }
 
+    private formatAcceptedReplacementText(request: RequestWithRelations) {
+        return `Дякуємо. Ви прийняли підміну.\nАдміністратор отримає деталі.\n\nВаша зміна:\n${this.formatShiftDetails(request)}`;
+    }
+
     private async notifyRequesterFound(api: Api, request: RequestWithRelations) {
+        if (!request.requester) return;
+
         await api.sendMessage(Number(request.requester.user.telegramId), "Підміну знайдено.\nАдміністратор отримає деталі та оновить графік.", {
             parse_mode: "HTML"
         }).catch((err) => logger.warn({ err, requestId: request.id }, "Requester replacement-found notification failed"));
@@ -580,10 +671,12 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
-        await api.sendMessage(Number(request.requester.user.telegramId), this.formatRequesterFailureText(request), {
-            parse_mode: "HTML",
-            reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
-        }).catch(() => { });
+        if (request.requester) {
+            await api.sendMessage(Number(request.requester.user.telegramId), this.formatRequesterFailureText(request), {
+                parse_mode: "HTML",
+                reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
+            }).catch(() => { });
+        }
         await this.notifyAdminFailed(api, requestId);
         await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.");
     }
@@ -602,9 +695,11 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
-        await api.sendMessage(Number(request.requester.user.telegramId), "Пошук закрито.\nГрафік уже оновлено.", {
-            parse_mode: "HTML"
-        }).catch(() => { });
+        if (request.requester) {
+            await api.sendMessage(Number(request.requester.user.telegramId), "Пошук закрито.\nГрафік уже оновлено.", {
+                parse_mode: "HTML"
+            }).catch(() => { });
+        }
         await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.\nГрафік оновлено.");
     }
 
@@ -640,6 +735,8 @@ export class ReplacementService {
     }
 
     private async findSameScheduledShift(request: RequestWithRelations) {
+        if (!request.requesterStaffId) return null;
+
         return prisma.workShift.findFirst({
             where: {
                 staffId: request.requesterStaffId,
@@ -704,6 +801,22 @@ export class ReplacementService {
         return this.kyivDateWithTime(date, parseInt(start[1]!), parseInt(start[2]!));
     }
 
+    private getShiftTimeDates(date: Date, location: Location) {
+        const range = getShiftTimeFromLocationSchedule(location.schedule, date);
+        const match = range?.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+        if (!match) {
+            return {
+                start: null,
+                end: null
+            };
+        }
+
+        return {
+            start: this.kyivDateWithTime(date, parseInt(match[1]!), parseInt(match[2]!)),
+            end: this.kyivDateWithTime(date, parseInt(match[3]!), parseInt(match[4]!))
+        };
+    }
+
     private formatShiftDetails(request: RequestWithRelations) {
         return `${this.formatDate(request.shiftDate)}\n${escapeHtml(request.location.name)}\n${escapeHtml(this.formatShiftTime(request))}`;
     }
@@ -750,7 +863,7 @@ export class ReplacementService {
                 `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b>\n` +
                 `📅 ${this.formatDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request))}\n` +
                 `🏙 ${escapeHtml(request.city)}\n` +
-                `👤 Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}\n` +
+                `👤 Photographer: ${request.requester ? escapeHtml(this.formatShortName(request.requester.fullName)) : "<i>empty shift</i>"}\n` +
                 `🌊 Wave: <code>${escapeHtml(request.currentWave || "not started")}</code>\n` +
                 `⏭ Next check: ${escapeHtml(nextWave)}\n` +
                 `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
@@ -774,6 +887,9 @@ export class ReplacementService {
         const replacementLine = request.replacement
             ? `\n✅ Replacement photographer: ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
             : "";
+        const requesterLine = request.requester
+            ? `👤 Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}${replacementLine}`
+            : `👤 Photographer: <i>empty shift, started by main admin</i>${replacementLine}`;
 
         return (
             `${titleByKind[kind]}\n\n` +
@@ -783,7 +899,7 @@ export class ReplacementService {
             `📍 Location: <b>${escapeHtml(request.location.name)}</b>\n` +
             `🏙 City: ${escapeHtml(request.city)}\n\n` +
             `<b>People</b>\n` +
-            `👤 Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}${replacementLine}\n\n` +
+            `${requesterLine}\n\n` +
             `<b>Next step</b>\n` +
             `${actionByKind[kind]}`
         );
@@ -823,6 +939,10 @@ export class ReplacementService {
             minute: "2-digit",
             timeZone: KYIV_TIMEZONE
         });
+    }
+
+    private formatDateKey(date: Date) {
+        return date.toLocaleDateString("en-CA", { timeZone: KYIV_TIMEZONE });
     }
 
     private formatShortName(fullName: string) {
