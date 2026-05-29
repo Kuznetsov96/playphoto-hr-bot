@@ -71,7 +71,7 @@ describe("ReplacementService", () => {
         scheduleAvailabilityService.getMonthlyScheduleSheetName.mockReturnValue("Травень 2030");
     });
 
-    it("advances past an empty wave and sends the next available wave", async () => {
+    it("schedules a follow-up job when the current wave has no candidates", async () => {
         const request: any = {
             id: "request-1",
             requesterStaffId: "requester-1",
@@ -124,20 +124,19 @@ describe("ReplacementService", () => {
             where: { id: request.id },
             data: { currentWave: ReplacementSearchWave.SAME_LOCATION_AVAILABLE, nextWaveAt: expect.any(Date) },
         });
-        expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
-            where: { id: request.id },
-            data: { currentWave: ReplacementSearchWave.SAME_LOCATION_LIMITED, nextWaveAt: expect.any(Date) },
-        });
-        expect(prismaMock.replacementResponse.create).toHaveBeenCalledWith({
-            data: {
-                requestId: request.id,
-                staffId: "limited-1",
-                wave: ReplacementSearchWave.SAME_LOCATION_LIMITED,
-                availabilityKind: ReplacementAvailabilityKind.LIMITED,
-            },
-        });
+        expect(defaultQueue.add).toHaveBeenCalledWith(
+            "replacement-dispatch-wave",
+            { requestId: request.id },
+            {
+                delay: 60_000,
+                attempts: 3,
+                backoff: { type: "fixed", delay: 60_000 },
+                removeOnComplete: true,
+            }
+        );
+        expect(prismaMock.replacementResponse.create).not.toHaveBeenCalled();
         expect(scheduleAvailabilityService.getAvailabilityForDateFromSchedule).toHaveBeenCalledWith(request.shiftDate);
-        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(api.sendMessage).not.toHaveBeenCalled();
     });
 
     it("notifies the main admin in English with shortened photographer name when replacement is not found", async () => {

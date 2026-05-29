@@ -384,7 +384,11 @@ export class ReplacementService {
                 where: { id: request.id },
                 data: { currentWave: nextWave, nextWaveAt: now }
             });
-            await this.dispatchNextWave(api, request.id);
+            await defaultQueue.add(
+                "replacement-dispatch-wave",
+                { requestId: request.id },
+                { delay: 60_000, attempts: 3, backoff: { type: "fixed", delay: 60_000 }, removeOnComplete: true }
+            );
             return;
         }
 
@@ -401,7 +405,12 @@ export class ReplacementService {
         await defaultQueue.add(
             "replacement-dispatch-wave",
             { requestId: request.id },
-            { delay: Math.max(0, nextWaveAt.getTime() - now.getTime()), attempts: 3, removeOnComplete: true }
+            {
+                delay: Math.max(0, nextWaveAt.getTime() - now.getTime()),
+                attempts: 3,
+                backoff: { type: "fixed", delay: 60_000 },
+                removeOnComplete: true
+            }
         );
     }
 
