@@ -602,4 +602,30 @@ describe("ReplacementService", () => {
         expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
     });
+
+    describe("kyivDateWithTime DST handling", () => {
+        it("encodes 12:00 Kyiv as 09:00 UTC during EEST (summer)", async () => {
+            const { ReplacementService } = await import("../replacement-service.js");
+            const svc: any = new ReplacementService();
+            const summerDate = new Date(Date.UTC(2026, 4, 30));
+            const result: Date = svc.kyivDateWithTime(summerDate, 12, 0);
+            expect(result.toISOString()).toBe("2026-05-30T09:00:00.000Z");
+        });
+
+        it("encodes 21:00 Kyiv as 18:00 UTC during EEST (summer)", async () => {
+            const { ReplacementService } = await import("../replacement-service.js");
+            const svc: any = new ReplacementService();
+            const summerDate = new Date(Date.UTC(2026, 4, 30));
+            const result: Date = svc.kyivDateWithTime(summerDate, 21, 0);
+            expect(result.toISOString()).toBe("2026-05-30T18:00:00.000Z");
+        });
+
+        it("encodes 14:00 Kyiv as 12:00 UTC during EET (winter)", async () => {
+            const { ReplacementService } = await import("../replacement-service.js");
+            const svc: any = new ReplacementService();
+            const winterDate = new Date(Date.UTC(2026, 0, 15));
+            const result: Date = svc.kyivDateWithTime(winterDate, 14, 0);
+            expect(result.toISOString()).toBe("2026-01-15T12:00:00.000Z");
+        });
+    });
 });

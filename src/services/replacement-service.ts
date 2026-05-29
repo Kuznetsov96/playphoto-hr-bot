@@ -1020,7 +1020,15 @@ export class ReplacementService {
 
     private kyivDateWithTime(date: Date, hour: number, minute: number) {
         const start = this.kyivStartOfDay(date);
-        return new Date(start.getTime() + (hour - 2) * 60 * 60 * 1000 + minute * 60 * 1000);
+        const rough = new Date(start.getTime() + hour * 60 * 60 * 1000 + minute * 60 * 1000);
+        const offsetMinutes = this.getKyivUtcOffsetMinutes(rough);
+        return new Date(rough.getTime() - offsetMinutes * 60 * 1000);
+    }
+
+    private getKyivUtcOffsetMinutes(date: Date): number {
+        const utcMs = new Date(date.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
+        const kyivMs = new Date(date.toLocaleString("en-US", { timeZone: KYIV_TIMEZONE })).getTime();
+        return (kyivMs - utcMs) / 60000;
     }
 }
 
