@@ -23,6 +23,7 @@ import { startAuditCleanupLoop } from "./services/audit-cleanup-service.js";
 import { startSecurityCleanupLoop } from "./services/security-cleanup-service.js";
 import { startFirstShiftOnboardingLoop } from "./services/first-shift-onboarding-service.js";
 import { remindersService } from "./services/reminders-service.js";
+import { replacementService } from "./services/replacement-service.js";
 import { startWorkers } from "./workers/index.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
@@ -141,6 +142,10 @@ async function bootstrap() {
         
         webhookService.listen(bot.api);
         startWorkers();
+        void replacementService.processOverdueActiveRequests(bot.api);
+        setInterval(() => {
+            void replacementService.processOverdueActiveRequests(bot.api);
+        }, 5 * 60 * 1000);
 
         // Ensure clean start
         await bot.api.deleteWebhook({ drop_pending_updates: true });

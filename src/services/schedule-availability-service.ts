@@ -14,6 +14,7 @@ interface TeamMember {
 
 export class ScheduleAvailabilityService {
     private sheets: any;
+    private readonly availabilityCache = new Map<string, { expiresAt: number; value: Map<string, ScheduleAvailabilityKind> }>();
     private readonly scheduleSheetMonths = [
         "Січень",
         "Лютий",
@@ -46,6 +47,12 @@ export class ScheduleAvailabilityService {
 
     async getAvailabilityForDate(date: Date, sheetName: string = "Актуальний розклад"): Promise<Map<string, ScheduleAvailabilityKind>> {
         this.ensureSheets();
+        const cacheKey = `${sheetName}:${this.formatDateKey(date)}`;
+        const cached = this.availabilityCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+            return new Map(cached.value);
+        }
+
         const [teamMap, { hiddenRows, hiddenColumns }, allUsersWithStaff] = await Promise.all([
             this.fetchTeamMapping(),
             this.fetchHiddenIndexes(sheetName),
@@ -97,12 +104,17 @@ export class ScheduleAvailabilityService {
             );
         }
 
+        this.availabilityCache.set(cacheKey, {
+            expiresAt: Date.now() + 60_000,
+            value: new Map(availability),
+        });
         return availability;
     }
 
     async getAvailabilityForDateFromSchedule(date: Date): Promise<Map<string, ScheduleAvailabilityKind>> {
         const monthlySheet = this.getMonthlyScheduleSheetName(date);
         const monthlyAvailability = await this.getAvailabilityForDate(date, monthlySheet).catch((err) => {
+            if (this.isTransientGoogleReadError(err)) throw err;
             logger.warn({ err, sheetName: monthlySheet }, "Monthly schedule availability lookup failed");
             return new Map<string, ScheduleAvailabilityKind>();
         });
@@ -114,6 +126,18 @@ export class ScheduleAvailabilityService {
     getMonthlyScheduleSheetName(date: Date): string {
         const kyivDate = new Date(date.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         return `${this.scheduleSheetMonths[kyivDate.getMonth()]} ${kyivDate.getFullYear()}`;
+    }
+
+    private formatDateKey(date: Date) {
+        return date.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" });
+    }
+
+    private isTransientGoogleReadError(err: any) {
+        const message = String(err?.message || "");
+        return err?.status === 429 ||
+            err?.code === 429 ||
+            message.includes("Quota exceeded") ||
+            message.includes("invalid_grant");
     }
 
     private ensureSheets() {

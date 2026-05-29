@@ -435,6 +435,31 @@ export class ReplacementService {
         }
     }
 
+    async processOverdueActiveRequests(api: Api) {
+        const now = new Date();
+        const overdue = await prisma.replacementRequest.findMany({
+            where: {
+                status: ReplacementRequestStatus.ACTIVE,
+                OR: [
+                    { nextWaveAt: { lte: now } },
+                    { shiftDate: { lt: this.kyivStartOfDay(now) } }
+                ]
+            },
+            select: { id: true },
+            orderBy: [
+                { shiftDate: "asc" },
+                { createdAt: "asc" }
+            ],
+            take: 25
+        });
+
+        for (const request of overdue) {
+            await this.dispatchNextWave(api, request.id).catch((err) => {
+                logger.warn({ err, requestId: request.id }, "Overdue replacement request recovery failed");
+            });
+        }
+    }
+
     private async findNextWave(request: RequestWithRelations): Promise<ReplacementSearchWave | null> {
         const sequence = await this.getWaveSequence(request);
         const sentWaves = await prisma.replacementResponse.findMany({
@@ -731,6 +756,19 @@ export class ReplacementService {
     }
 
     private async isRequestObsoleteAfterScheduleChange(request: RequestWithRelations) {
+        if (!request.requesterStaffId) {
+            const locationShift = await prisma.workShift.findFirst({
+                where: {
+                    locationId: request.locationId,
+                    date: {
+                        gte: this.kyivStartOfDay(request.shiftDate),
+                        lt: this.nextKyivDay(request.shiftDate)
+                    }
+                }
+            });
+            return Boolean(locationShift);
+        }
+
         return !(await this.findSameScheduledShift(request));
     }
 
@@ -848,9 +886,13 @@ export class ReplacementService {
             return "🔎 <b>Replacement searches</b>\n\nNo active replacement searches.";
         }
 
+        const visibleRequests = requests.slice(0, 8);
         let text = `🔎 <b>Replacement searches</b>\n\nOpen requests: <b>${requests.length}</b>\n`;
+        if (requests.length > visibleRequests.length) {
+            text += `Showing first <b>${visibleRequests.length}</b>. Use Refresh after closing items.\n`;
+        }
 
-        requests.forEach((request, index) => {
+        visibleRequests.forEach((request, index) => {
             const sent = request.responses.filter((response) => response.status === ReplacementResponseStatus.SENT).length;
             const accepted = request.responses.filter((response) => response.status === ReplacementResponseStatus.ACCEPTED).length;
             const declined = request.responses.filter((response) => response.status === ReplacementResponseStatus.DECLINED).length;
@@ -858,14 +900,14 @@ export class ReplacementService {
             const nextWave = request.nextWaveAt
                 ? this.formatDateTime(request.nextWaveAt)
                 : "not scheduled";
+            const photographer = request.requester
+                ? this.formatShortName(request.requester.fullName)
+                : "empty shift (main admin)";
 
             text +=
-                `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b>\n` +
+                `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b> · ${escapeHtml(request.city)}\n` +
                 `📅 ${this.formatDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request))}\n` +
-                `🏙 ${escapeHtml(request.city)}\n` +
-                `👤 Photographer: ${request.requester ? escapeHtml(this.formatShortName(request.requester.fullName)) : "<i>empty shift</i>"}\n` +
-                `🌊 Wave: <code>${escapeHtml(request.currentWave || "not started")}</code>\n` +
-                `⏭ Next check: ${escapeHtml(nextWave)}\n` +
+                `👤 ${escapeHtml(photographer)} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
                 `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
         });
 
