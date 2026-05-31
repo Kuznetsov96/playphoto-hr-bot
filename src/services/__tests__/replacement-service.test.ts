@@ -194,7 +194,7 @@ describe("ReplacementService", () => {
         );
     });
 
-    it("keeps the final wave open until four hours before the shift when that is later than the normal interval", async () => {
+    it("keeps the final wave open until the shift starts when that is later than the normal interval", async () => {
         const request: any = {
             id: "request-3",
             requesterStaffId: "requester-3",
@@ -245,7 +245,7 @@ describe("ReplacementService", () => {
         const { ReplacementService } = await import("../replacement-service.js");
         await new ReplacementService().dispatchNextWave(api as any, request.id);
 
-        const expectedFinalCloseAt = new Date("2030-05-11T07:00:00.000Z");
+        const expectedFinalCloseAt = new Date("2030-05-11T11:00:00.000Z");
         expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
             where: { id: request.id },
             data: {
@@ -257,7 +257,7 @@ describe("ReplacementService", () => {
         expect(queueCall?.[0]).toBe("replacement-dispatch-wave");
         expect(queueCall?.[1]).toEqual({ requestId: request.id });
         expect(queueCall?.[2]).toMatchObject({ attempts: 3, removeOnComplete: true });
-        expect(queueCall?.[2].delay).toBeGreaterThan(4 * 60 * 60 * 1000);
+        expect(queueCall?.[2].delay).toBeGreaterThan(8 * 60 * 60 * 1000);
     });
 
     it("notifies the main admin in English when replacement search starts", async () => {

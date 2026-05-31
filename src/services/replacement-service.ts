@@ -22,7 +22,6 @@ const URGENT_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const DAY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
-const FINAL_WAVE_CLOSE_LEAD_MS = 4 * 60 * 60 * 1000;
 
 type StaffWithUserLocation = StaffProfile & { user: User; location: Location | null };
 type RequestWithRelations = ReplacementRequest & {
@@ -832,7 +831,7 @@ export class ReplacementService {
         const normalNextAt = new Date(now.getTime() + intervalMs);
         if (sequence[sequence.length - 1] !== wave) return normalNextAt;
 
-        const finalCloseAt = new Date(this.getShiftStartAt(request).getTime() - FINAL_WAVE_CLOSE_LEAD_MS);
+        const finalCloseAt = this.getShiftStartAt(request);
         return finalCloseAt > normalNextAt ? finalCloseAt : normalNextAt;
     }
 
