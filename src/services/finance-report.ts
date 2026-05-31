@@ -155,6 +155,12 @@ const DDS_ARTICLE_MAPPING: Record<string, string> = {
     "cmlqcgvyx000hla3d1cncpb0u": "Выручка от продаж Dytyache Horyshche"
 };
 
+export function calculateCashSalaryDeduction(income: { totalSalary?: number; photographers?: string[] }): number {
+    const perPersonSalary = income.totalSalary || 0;
+    const staffCount = Math.max(income.photographers?.length || 0, 1);
+    return perPersonSalary * staffCount;
+}
+
 export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolean = false) {
     try {
         if (!incomes) {
@@ -195,7 +201,7 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                 const fopTerminalName = FOP_DISPLAY_NAMES[fopTerminalId] || FOP_DISPLAY_NAMES["KUZNETSOV"] || "Счёт ФОП Кузнецов";
                 const fopCashName = FOP_DISPLAY_NAMES[fopCashId] || "Счёт ФОП Кузнецов";
 
-                const salary = inc.totalSalary || 0;
+                const salary = calculateCashSalaryDeduction(inc);
                 const netCash = Math.max(0, inc.totalCash - salary); // Legacy: Clip to 0 if salary > cash
 
                 // Article Name (Category/Comment)
