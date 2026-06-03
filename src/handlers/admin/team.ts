@@ -22,6 +22,7 @@ import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
+import { startManualChannelAccessFlow, startManualChannelRevokeFlow } from "./manual-channel-access.js";
 
 function formatTeamSyncPreview(preview: any): string {
     const duplicatePreview = (preview.duplicateTelegramIds || [])
@@ -350,6 +351,17 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
 
     // Only Super Admin can sync or see reports
     if (hasPermission(userRole as any, 'STAFF_SYNC')) {
+        if (userRole === "SUPER_ADMIN") {
+            range.text(ADMIN_TEXTS["admin-main-channel"], async (ctx) => {
+                await ScreenManager.renderScreen(
+                    ctx,
+                    `${ADMIN_TEXTS["admin-channel-title"]}\n\n${ADMIN_TEXTS["admin-channel-menu-prompt"]}`,
+                    "admin-channel",
+                    { pushToStack: true }
+                );
+            }).row();
+        }
+
         range.text("🔄 Full Sync", async (ctx) => {
             const telegramId = ctx.from?.id;
             const preview = await scheduleSyncService.previewTeamSync(telegramId);
@@ -388,6 +400,30 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
         const text = await staffService.getAdminHeader(userRole as any);
         await ScreenManager.goBack(ctx, text, "admin-main");
+    });
+});
+
+export const adminChannelMenu = new Menu<MyContext>("admin-channel");
+adminChannelMenu.dynamic(async (ctx, range) => {
+    const telegramId = ctx.from?.id;
+    const userRole = telegramId ? await getUserAdminRole(BigInt(telegramId)) : null;
+
+    if (userRole !== "SUPER_ADMIN") {
+        range.text("⛔ No access", async (ctx) => {
+            await ctx.answerCallbackQuery({ text: "No access.", show_alert: true });
+        }).row();
+    } else {
+        range.text(ADMIN_TEXTS["admin-channel-grant"], async (ctx) => {
+            await startManualChannelAccessFlow(ctx);
+        }).row();
+
+        range.text(ADMIN_TEXTS["admin-channel-revoke"], async (ctx) => {
+            await startManualChannelRevokeFlow(ctx);
+        }).row();
+    }
+
+    range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
+        await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
     });
 });
 

@@ -191,6 +191,9 @@ export interface SessionData {
         generatedAt: number;
         requiresConfirmation: boolean;
     };
+    manualChannelAccess?: {
+        step: "AWAITING_GRANT_DETAILS" | "AWAITING_REVOKE_ID";
+    };
 }
 
 export type MyContext = Context & SessionFlavor<SessionData> & ConversationFlavor<Context & SessionFlavor<SessionData>> & MenuFlavor & {

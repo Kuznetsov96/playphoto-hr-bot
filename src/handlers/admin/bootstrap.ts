@@ -11,7 +11,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
     const { 
         adminTeamOpsMenu, adminScheduleDateMenu, adminScheduleHistoryMenu, adminScheduleCityMenu, 
         adminScheduleLocMenu, adminScheduleStaffMenu, adminTeamCityMenu, 
-        adminTeamLocMenu, adminLocationStaffMenu, adminBirthdayMenu
+        adminTeamLocMenu, adminLocationStaffMenu, adminBirthdayMenu, adminChannelMenu
     } = await import("./team.js");
 
     const { 
@@ -45,6 +45,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
     // 2. Register all menus in the Bot (CRITICAL for grammy/menu)
     bot.use(adminMenu);
     bot.use(adminTeamOpsMenu);
+    bot.use(adminChannelMenu);
     bot.use(adminBirthdayMenu);
     bot.use(adminScheduleDateMenu);
     bot.use(adminScheduleHistoryMenu);
@@ -89,6 +90,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
     // 3. Register in Registry (CRITICAL for ScreenManager.goBack and deep links)
     menuRegistry.register(adminMenu);
     menuRegistry.register(adminTeamOpsMenu);
+    menuRegistry.register(adminChannelMenu);
     menuRegistry.register(adminBirthdayMenu);
     menuRegistry.register(adminScheduleDateMenu);
     menuRegistry.register(adminScheduleHistoryMenu);
@@ -131,6 +133,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
 
     // 4. Build the hierarchy (Sub-menus)
     adminMenu.register(adminTeamOpsMenu);
+    adminTeamOpsMenu.register(adminChannelMenu);
     adminTeamOpsMenu.register(adminBirthdayMenu);
     adminTeamOpsMenu.register(adminScheduleDateMenu);
     adminScheduleDateMenu.register(adminScheduleHistoryMenu);
