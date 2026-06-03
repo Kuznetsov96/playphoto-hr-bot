@@ -48,6 +48,7 @@ async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaite
 // --- GLOBAL CALLBACKS ---
 commandHandlers.callbackQuery("cancel_step", async (ctx) => {
     ctx.session.step = "idle";
+    delete ctx.session.manualChannelAccess;
     const telegramId = ctx.from?.id;
 
     if (telegramId) {

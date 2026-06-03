@@ -25,6 +25,7 @@ import taskCreationHandlers from "./task-creation.js";
 import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
 import { adminMagnetCounterHandlers, handleAdminMagnetCounterMessage } from "./magnet-counter.js";
+import { handleManualChannelAccess } from "./manual-channel-access.js";
 import { getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 
 export { startAdminStaffSearch, startAdminSearch, startAdminMessageFlow };
@@ -93,6 +94,7 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     if (ctx.chat?.type !== "private") return await next();
 
     if (await handleAdminMagnetCounterMessage(ctx)) return;
+    if (await handleManualChannelAccess(ctx)) return;
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
@@ -178,6 +180,7 @@ protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) 
     delete ctx.session.selectedLocationId;
     delete ctx.session.taskData;
     delete ctx.session.broadcastData;
+    delete ctx.session.manualChannelAccess;
     ctx.session.candidateData = {};
 
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
