@@ -87,6 +87,22 @@ export function escapeHtml(text: string): string {
         .replace(/>/g, "&gt;");
 }
 
+export function htmlToPlainText(html: string): string {
+    return html
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/(blockquote|div|p|pre)>/gi, "\n")
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&quot;/g, "\"")
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
 function escapeHtmlAttribute(text: string): string {
     return escapeHtml(text).replace(/"/g, "&quot;");
 }

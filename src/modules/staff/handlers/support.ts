@@ -13,7 +13,7 @@ import prisma from "../../../db/core.js";
 import { workShiftRepository } from "../../../repositories/work-shift-repository.js";
 import { TicketStatus } from "@prisma/client";
 import { updateTicketVisuals, sendSupportStatus, finalizeTopicUIClosure } from "../../../handlers/support-utils.js";
-import { escapeHtml } from "../../../handlers/admin/utils.js";
+import { escapeHtml, htmlToPlainText } from "../../../handlers/admin/utils.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { audit } from "../../../core/audit-logger.js";
 import { logAuditEvent, logBusinessEvent } from "../../../core/log-events.js";
@@ -1184,11 +1184,12 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                     if (task) {
                         const taskDate = task.workDate ? task.workDate.toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit', year: 'numeric' }) : "Без дати";
                         const location = task.locationName || task.city || "Невідомо";
+                        const taskPreview = htmlToPlainText(task.taskText);
 
                         text = `❓ <b>Уточнення по завданню:</b>\n` +
                             `🆔 <b>Task #${task.id.slice(-5)}</b>\n` +
-                            `📅 ${taskDate} | 📍 ${location}\n` +
-                            `📝 <i>"${task.taskText}"</i>\n\n` +
+                            `📅 ${escapeHtml(taskDate)} | 📍 ${escapeHtml(location)}\n` +
+                            `📝 <i>"${escapeHtml(taskPreview)}"</i>\n\n` +
                             `<b>Питання:</b> ${text}`;
                         isClarification = true;
                     }
@@ -1508,10 +1509,11 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
 
                 const task = proofSubmission.task;
                 const keyboard = new InlineKeyboard().text("💬 Відповісти", `staff_task_proof_reply_${proofSubmission.id}`);
+                const taskPreview = truncateText(htmlToPlainText(task.taskText), 180);
                 const hintText =
                     `💬 <b>Уточнення від support по завданню</b>\n` +
                     `📍 ${escapeHtml(task.locationName || proofSubmission.staff.location?.name || "Локація не вказана")}\n` +
-                    `<i>${escapeHtml(truncateText(task.taskText, 180))}</i>\n\n` +
+                    `<i>${escapeHtml(taskPreview)}</i>\n\n` +
                     `Натисни кнопку нижче і надішли відповідь сюди. Я передам її в правильний topic.`;
                 await sendSupportStatus(ctx, hintText, { parse_mode: "HTML", reply_markup: keyboard }, targetTelegramId);
 

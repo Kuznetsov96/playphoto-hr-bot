@@ -17,7 +17,7 @@ import {
     groupTasksByLocation,
     formatDeadline,
 } from "../../utils/task-helpers.js";
-import { normalizeCity } from "./utils.js";
+import { escapeHtml, htmlToPlainText, normalizeCity } from "./utils.js";
 
 
 const composer = new Composer<MyContext>();
@@ -305,10 +305,10 @@ composer.callbackQuery(/^task_view_proof_(.+)$/, async (ctx: MyContext) => {
 
     const header =
         `📎 <b>Task Proof</b>\n` +
-        `👤 ${submission.staff.fullName}\n` +
+        `👤 ${escapeHtml(submission.staff.fullName)}\n` +
         `🆔 <code>${submission.task.id}</code>\n` +
         `📦 Items: <b>${submission.items.length}</b>\n\n` +
-        `<i>${submission.task.taskText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</i>`;
+        `<i>${escapeHtml(htmlToPlainText(submission.task.taskText))}</i>`;
     await ctx.reply(header, { parse_mode: "HTML" });
 
     for (const item of submission.items) {
