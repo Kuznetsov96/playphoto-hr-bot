@@ -20,6 +20,12 @@ import { replacementService } from "../../../services/replacement-service.js";
 import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 
 export const staffHandlers = new Composer<MyContext>();
+const TASK_PROOF_BLOCKED_STEPS = new Set([
+    "support_chat",
+    "create_ticket",
+    "broadcast_decline_reason",
+    "reply_and_close",
+]);
 
 function formatShiftColleague(fullName: string, username?: string | null, telegramId?: bigint | null): string {
     const parts = fullName.trim().split(/\s+/);
@@ -517,18 +523,26 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
 export async function handleTaskProofMessage(ctx: MyContext): Promise<boolean> {
     if (ctx.chat?.type !== "private" || !ctx.message || !ctx.from?.id) return false;
 
+    const currentStep = ctx.session.step || "idle";
+    if (TASK_PROOF_BLOCKED_STEPS.has(currentStep)) return false;
+
     const telegramId = BigInt(ctx.from.id);
     const user = await userRepository.findWithStaffProfileByTelegramId(telegramId);
     const staffId = user?.staffProfile?.id;
     if (!staffId) return false;
 
-    const stepTaskId = ctx.session.step?.startsWith("awaiting_task_proof_") &&
-        !ctx.session.step.startsWith("awaiting_task_proof_topic_reply_")
-        ? ctx.session.step.replace("awaiting_task_proof_", "")
+    const stepTaskId = currentStep.startsWith("awaiting_task_proof_") &&
+        !currentStep.startsWith("awaiting_task_proof_topic_reply_")
+        ? currentStep.replace("awaiting_task_proof_", "")
         : null;
     const activeDraft = stepTaskId
         ? await taskProofService.getDraft(stepTaskId)
         : await taskProofService.getActiveDraftByStaffId(staffId);
+    if (stepTaskId && !activeDraft) {
+        ctx.session.step = "idle";
+        delete ctx.session.taskProofFlow;
+        return false;
+    }
     if (!activeDraft) return false;
 
     const proofInput = mapTelegramMessageToTaskProofInput(ctx.message);

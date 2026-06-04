@@ -44,8 +44,8 @@ class TaskProofService {
     }
 
     async getDraft(taskId: string) {
-        const submission = await taskProofRepository.findByTaskId(taskId);
-        if (!submission || submission.status !== TaskProofSubmissionStatus.DRAFT) {
+        const submission = await taskProofRepository.findActiveDraftByTaskId(taskId);
+        if (!submission) {
             return null;
         }
         return submission;
