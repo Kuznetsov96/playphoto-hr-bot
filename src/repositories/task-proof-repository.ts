@@ -38,11 +38,27 @@ export class TaskProofRepository {
         });
     }
 
+    async findActiveDraftByTaskId(taskId: string) {
+        return prisma.taskProofSubmission.findFirst({
+            where: {
+                taskId,
+                status: TaskProofSubmissionStatus.DRAFT,
+                task: {
+                    isCompleted: false,
+                },
+            },
+            include: proofInclude,
+        });
+    }
+
     async findActiveDraftByStaffId(staffId: string) {
         return prisma.taskProofSubmission.findFirst({
             where: {
                 staffId,
                 status: TaskProofSubmissionStatus.DRAFT,
+                task: {
+                    isCompleted: false,
+                },
             },
             include: proofInclude,
             orderBy: { updatedAt: "desc" },

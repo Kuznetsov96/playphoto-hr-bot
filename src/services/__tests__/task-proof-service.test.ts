@@ -8,6 +8,7 @@ const taskRepository = {
 
 const taskProofRepository = {
     findByTaskId: vi.fn(),
+    findActiveDraftByTaskId: vi.fn(),
     findActiveDraftByStaffId: vi.fn(),
     createDraft: vi.fn(),
     addItem: vi.fn(),
@@ -78,7 +79,7 @@ describe("taskProofService", () => {
             isCompleted: false,
             completionMode: TaskCompletionMode.PROOF_REQUIRED,
         });
-        taskProofRepository.findByTaskId.mockResolvedValue({
+        taskProofRepository.findActiveDraftByTaskId.mockResolvedValue({
             id: "draft-3",
             taskId: "task-3",
             staffId: "staff-1",
@@ -115,7 +116,7 @@ describe("taskProofService", () => {
             isCompleted: false,
             completionMode: TaskCompletionMode.PROOF_REQUIRED,
         });
-        taskProofRepository.findByTaskId.mockResolvedValue({
+        taskProofRepository.findActiveDraftByTaskId.mockResolvedValue({
             id: "draft-4",
             taskId: "task-4",
             staffId: "staff-1",
