@@ -9,7 +9,7 @@ import { taskService } from "../../../services/task-service.js";
 import { taskProofService, mapTelegramMessageToTaskProofInput } from "../../../services/task-proof-service.js";
 import { truncateText } from "../../../utils/task-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
-import { escapeHtml } from "../../../handlers/admin/utils.js";
+import { escapeHtml, htmlToPlainText } from "../../../handlers/admin/utils.js";
 import logger from "../../../core/logger.js";
 import { buildSignedCallback } from "../../../utils/signed-callback.js";
 import { TEAM_CHATS } from "../../../config.js";
@@ -454,13 +454,14 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
         }
     }
 
+    const taskPreview = htmlToPlainText(task.taskText);
     const topicHeader =
         `📎 <b>Task Proof</b>\n` +
         `👤 <b>${escapeHtml(shortStaffName)}</b>\n` +
         `📍 <b>${escapeHtml(locationLabel)}</b>\n` +
         `📅 <b>${escapeHtml(workDateLabel)}</b>\n` +
         (task.deadlineTime ? `🕐 <b>До ${escapeHtml(task.deadlineTime)}</b>\n` : "") +
-        `\n<i>${escapeHtml(truncateText(task.taskText, 250))}</i>\n\n` +
+        `\n<i>${escapeHtml(truncateText(taskPreview, 250))}</i>\n\n` +
         `<i>Відповідь у цьому треді буде доставлена фотографу.</i>`;
 
     await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, topicHeader, {
@@ -860,9 +861,10 @@ staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {
     ctx.session.step = "create_ticket";
     ctx.session.clarificationTaskId = taskId;
 
+    const taskPreview = truncateText(htmlToPlainText(task.taskText), 100);
     const text =
         `❓ <b>Уточнення по завданню:</b>\n\n` +
-        `<i>"${truncateText(task.taskText, 100)}"</i>\n\n` +
+        `<i>"${escapeHtml(taskPreview)}"</i>\n\n` +
         `Напиши, що саме незрозуміло, і я передам твої слова адміну. ✍️`;
 
     await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", "staff_hub_nav"), {

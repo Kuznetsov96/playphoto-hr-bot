@@ -10,6 +10,7 @@ import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS } from "../config.j
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -1136,7 +1137,8 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                     text += `У тебе <b>${totalTasks}</b> активних завдань:\n`;
                     s.tasks.forEach((task: any, index: number) => {
                         const deadline = task.deadlineTime ? ` ⏰ До ${task.deadlineTime}` : "";
-                        text += `${index + 1}. ${truncateText(task.taskText, 60)}${deadline}\n`;
+                        const taskPreview = truncateText(htmlToPlainText(task.taskText), 60);
+                        text += `${index + 1}. ${escapeHtml(taskPreview)}${deadline}\n`;
                     });
                 } else if (shift) {
                     text += `Активних завдань на сьогодні немає. 🙌\n`;
@@ -1188,7 +1190,8 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
 
             // Якщо до дедлайну менше 65 хвилин (щоб вловити 5-хвилинний інтервал вокера)
             if (diffMin > 0 && diffMin <= 65) {
-                const text = `⚠️ <b>Нагадування!</b>\n\nДо дедлайну завдання "<i>${truncateText(task.taskText, 50)}</i>" залишилась 1 година! ⏰\n\nЧас: <b>${task.deadlineTime}</b>\n\nНе забудь відмітити виконання в меню. ✨`;
+                const taskPreview = escapeHtml(truncateText(htmlToPlainText(task.taskText), 50));
+                const text = `⚠️ <b>Нагадування!</b>\n\nДо дедлайну завдання "<i>${taskPreview}</i>" залишилась 1 година! ⏰\n\nЧас: <b>${task.deadlineTime}</b>\n\nНе забудь відмітити виконання в меню. ✨`;
 
                 await bot.api.sendMessage(Number(task.staff.user.telegramId), text, { parse_mode: "HTML" });
                 await taskService.markReminderSent(task.id);
@@ -1210,8 +1213,9 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
     for (const task of overdueTasks) {
         try {
             const staffName = truncateText(task.staff.fullName, 30);
+            const taskPreview = escapeHtml(truncateText(htmlToPlainText(task.taskText), 60));
             const text = `🔴 <b>Overdue:</b> ${staffName}\n` +
-                `📝 ${truncateText(task.taskText, 60)}\n` +
+                `📝 ${taskPreview}\n` +
                 `⏰ Deadline: <b>${task.deadlineTime}</b>`;
 
             const kb = new InlineKeyboard().text("📋 Details", `task_det_${task.id}_${dateStr}`);

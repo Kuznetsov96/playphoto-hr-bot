@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { msgToHtml } from "../admin/utils.js";
+import { htmlToPlainText, msgToHtml } from "../admin/utils.js";
 
 describe("msgToHtml", () => {
     it("keeps nested Telegram entities valid when they start at the same offset", () => {
@@ -35,5 +35,21 @@ describe("msgToHtml", () => {
         ]);
 
         expect(html).toBe('<a href="https://example.com/?a=1&amp;b=&quot;&lt;x&gt;&quot;">Open</a>');
+    });
+});
+
+describe("htmlToPlainText", () => {
+    it("removes Telegram HTML formatting from stored task previews", () => {
+        const text = htmlToPlainText(
+            "<b>Привіт!</b> <u>Перед початком зміни</u>\n\n<blockquote>1. основи\n2. скельця</blockquote>",
+        );
+
+        expect(text).toBe("Привіт! Перед початком зміни\n\n1. основи\n2. скельця");
+    });
+
+    it("decodes escaped user text after stripping tags", () => {
+        const text = htmlToPlainText("Порахуй &lt;10&gt; магнітів &amp; напиши \"готово\"");
+
+        expect(text).toBe("Порахуй <10> магнітів & напиши \"готово\"");
     });
 });
