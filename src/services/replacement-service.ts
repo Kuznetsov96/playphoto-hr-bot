@@ -23,6 +23,12 @@ const URGENT_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const DAY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
+const CONTACTED_RESPONSE_STATUSES = [
+    ReplacementResponseStatus.SENT,
+    ReplacementResponseStatus.ACCEPTED,
+    ReplacementResponseStatus.DECLINED,
+    ReplacementResponseStatus.INACTIVE,
+];
 
 type StaffWithUserLocation = StaffProfile & { user: User; location: Location | null };
 type RequestWithRelations = ReplacementRequest & {
@@ -552,7 +558,11 @@ export class ReplacementService {
                 select: { staffId: true }
             }),
             prisma.replacementResponse.findMany({
-                where: { requestId: request.id, staffId: { in: candidateIds } },
+                where: {
+                    staffId: { in: candidateIds },
+                    status: { in: CONTACTED_RESPONSE_STATUSES },
+                    request: this.getSameReplacementSearchFilter(request)
+                },
                 select: { staffId: true }
             })
         ]);
@@ -563,6 +573,33 @@ export class ReplacementService {
         return candidates
             .filter(candidate => !busy.has(candidate.id) && !alreadyAsked.has(candidate.id))
             .map(candidate => ({ staff: candidate, availabilityKind: kindByStaff.get(candidate.id)! }));
+    }
+
+    private getSameReplacementSearchFilter(request: RequestWithRelations) {
+        const sameSearchFilters: Prisma.ReplacementRequestWhereInput[] = [{ id: request.id }];
+        if (request.workShiftId) {
+            sameSearchFilters.push({ workShiftId: request.workShiftId });
+        }
+        if (request.requesterStaffId) {
+            sameSearchFilters.push({
+                requesterStaffId: request.requesterStaffId,
+                locationId: request.locationId,
+                shiftDate: {
+                    gte: this.kyivStartOfDay(request.shiftDate),
+                    lt: this.nextKyivDay(request.shiftDate)
+                }
+            });
+        } else {
+            sameSearchFilters.push({
+                workShiftId: null,
+                locationId: request.locationId,
+                shiftDate: {
+                    gte: this.kyivStartOfDay(request.shiftDate),
+                    lt: this.nextKyivDay(request.shiftDate)
+                }
+            });
+        }
+        return { OR: sameSearchFilters };
     }
 
     private getDesiredAvailabilityKinds(wave: ReplacementSearchWave): ReplacementAvailabilityKind[] {
