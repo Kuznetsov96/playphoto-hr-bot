@@ -497,7 +497,6 @@ model ReplacementRequest {
 
   @@index([status, nextWaveAt])
   @@index([requesterStaffId, status])
-  @@unique([workShiftId, status])
 }
 
 model ReplacementResponse {

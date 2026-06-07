@@ -313,6 +313,49 @@ describe("ReplacementService", () => {
         );
     });
 
+    it("notifies the main admin in English when the requester cancels a replacement search", async () => {
+        const request: any = {
+            id: "request-cancelled",
+            requesterStaffId: "requester-cancel",
+            locationId: "location-cancel",
+            city: "Черкаси",
+            shiftDate: new Date("2030-05-12T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-12T11:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-12T18:00:00.000Z"),
+            status: "CANCELLED",
+            currentWave: null,
+            nextWaveAt: null,
+            location: { id: "location-cancel", name: "Fantasy Town", city: "Черкаси", schedule: null },
+            requester: { id: "requester-cancel", fullName: "Смірнова Дарина", user: { telegramId: 7927905186n } },
+            replacement: null,
+        };
+
+        prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 1 });
+        prismaMock.replacementRequest.findUnique.mockResolvedValue(request);
+        prismaMock.replacementResponse.findMany.mockResolvedValue([]);
+        prismaMock.replacementResponse.updateMany.mockResolvedValue({ count: 0 });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ chat: { id: 107794048 }, message_id: 12 }),
+            editMessageText: vi.fn(),
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().cancelRequest(api as any, "requester-cancel", "request-cancelled");
+
+        expect(result).toBe(true);
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Replacement search cancelled."),
+            { parse_mode: "HTML" }
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            107794048,
+            expect.stringContaining("Photographer: Смірнова Дарина\n\n"),
+            { parse_mode: "HTML" }
+        );
+    });
+
     it("starts a manual admin replacement search without a requester photographer", async () => {
         const location: any = {
             id: "location-admin",

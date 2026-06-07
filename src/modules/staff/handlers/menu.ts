@@ -662,6 +662,7 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
     if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
 
     try {
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
         await replacementService.startRequest(ctx.api, user.staffProfile.id, shiftId);
 
         const activeRequest = await (await import("../../../db/core.js")).default.replacementRequest.findFirst({
@@ -702,6 +703,7 @@ staffHandlers.callbackQuery(/^staff_repl_cancel_(.+)$/, async (ctx) => {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
 
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     const cancelled = await replacementService.cancelRequest(ctx.api, user.staffProfile.id, requestId);
     await ScreenManager.renderScreen(
         ctx,
