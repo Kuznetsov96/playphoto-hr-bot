@@ -69,11 +69,12 @@ export const CandidateSchema = z.object({
         .refine(val => !val.startsWith("/"), "Це схоже на команду, введіть ім'я")
         .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
     birthDate: z.date()
-        .refine(date => {
-            return getCandidateAge(date) >= MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
-        }, "Ми приймаємо кандидаток тільки з 17 років (або з 16 років для окремих локацій)")
-        .refine(date => date > new Date(1950, 0, 1), "Введіть реальну дату народження"),
+        .refine(date => date > new Date(1950, 0, 1) && date <= new Date(), "Введіть реальну дату народження"),
 });
+
+export function shouldDeferCandidateAtBirthDate(birthDate: Date | string): boolean {
+    return getCandidateAge(birthDate) < MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
+}
 
 // --- CORE LOGIC ---
 
@@ -405,8 +406,23 @@ candidateHandlers.on("message:text", async (ctx, next) => {
                 const val = CandidateSchema.shape.birthDate.safeParse(date);
                 if (val.success) {
                     ctx.session.candidateData.birthDate = date.toISOString();
-                    ctx.session.step = "screening_city";
                     await persistCandidate(ctx, { birthDate: date });
+
+                    if (shouldDeferCandidateAtBirthDate(date)) {
+                        await persistCandidate(ctx, {
+                            fullName: ctx.session.candidateData.fullName,
+                            birthDate: date,
+                            gender: ctx.session.candidateData.gender,
+                            status: CandidateStatus.REJECTED,
+                            isWaitlisted: false,
+                            hrDecision: "REJECTED_SYSTEM_UNDERAGE"
+                        });
+                        ctx.session.step = "idle";
+                        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+                        return;
+                    }
+
+                    ctx.session.step = "screening_city";
                     await triggerPrompt(ctx, "screening_city");
                 } else {
                     await ScreenManager.renderScreen(ctx, `⚠️ ${val.error.issues[0]?.message}\n\n${CANDIDATE_TEXTS["candidate-ask-birthday"]}`);

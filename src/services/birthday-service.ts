@@ -7,7 +7,8 @@ const t = (key: string, args?: any) => {
     if (typeof text === 'function') return text(args || {});
     return text || key;
 };
-import { Bot } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
+import { CandidateStatus, FunnelStep } from "@prisma/client";
 import type { MyContext } from "../types/context.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
@@ -21,6 +22,10 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 function getBirthdayRecipients(): number[] {
     const ids = [...ADMIN_IDS, ...CO_FOUNDER_IDS];
     return [...new Set(ids)];
+}
+
+function hasInterviewReadyScreeningData(candidate: { city?: string | null; locationId?: string | null }): boolean {
+    return Boolean(candidate.city && candidate.locationId);
 }
 
 export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, month: number) {
@@ -46,7 +51,11 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
         `Нехай цей рік буде наповнений цікавими відкриттями, творчим натхненням та людьми, які дарують радість. ` +
         `Бажаємо, щоб кожен наступний кадр твого життя був наповнений лише світлими емоціями. 🎈\n\n` +
         `<b>Сьогодні тобі виповнилося 17</b>, а це означає, що тепер твій шлях у PlayPhoto може стати реальністю! 📸\n\n` +
-        `Ми автоматично повернули твою анкету до списку актуальних. Як тільки на твій локації з'являться вільні місця — ти отримаєш запрошення на співбесіду. Раді, що ти з нами! ✨`;
+        `Ми автоматично повернули твою анкету до списку актуальних. Як тільки на твоїй локації з'являться вільні місця — ти отримаєш запрошення на співбесіду. Раді, що ти з нами! ✨`;
+
+    const continueScreeningGreeting = `🎂 <b>З днем народження!</b> ✨\n\n` +
+        `Сьогодні тобі виповнилося 17, і тепер ти можеш продовжити шлях у PlayPhoto 📸\n\n` +
+        `Ми вже зберегли твої основні дані. Натисни кнопку нижче, щоб оновити анкету й обрати актуальне місто та локацію.`;
 
     let successCount = 0;
     for (const c of candidates) {
@@ -65,12 +74,26 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             const canReactivateUnderageCandidate = isExactly17 && wasUnderage && isFemale;
 
             if (canReactivateUnderageCandidate) {
-                await candidateRepository.update(c.id, {
-                    status: "WAITLIST_HR",
-                    hrDecision: null,
-                    isWaitlisted: true,
-                    currentStep: "INTERVIEW",
-                });
+                const isInterviewReady = hasInterviewReadyScreeningData(c);
+                const nextStatus = isInterviewReady ? CandidateStatus.WAITLIST_HR : CandidateStatus.SCREENING;
+                const nextStep = isInterviewReady ? FunnelStep.INTERVIEW : FunnelStep.INITIAL_TEST;
+
+                await candidateRepository.update(c.id, isInterviewReady
+                    ? {
+                        status: nextStatus,
+                        hrDecision: null,
+                        isWaitlisted: true,
+                        currentStep: nextStep,
+                    }
+                    : {
+                        status: nextStatus,
+                        hrDecision: null,
+                        isWaitlisted: false,
+                        currentStep: nextStep,
+                        notificationSent: false,
+                        interviewWaitlistReason: null,
+                        interviewInvitedAt: null,
+                    });
                 logAuditEvent({
                     event: "candidate.underage_reactivated_on_birthday",
                     telegramId: c.user.telegramId,
@@ -78,13 +101,21 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                     actorRole: "system",
                     candidateId: c.id,
                     result: "success",
-                    stage: "WAITLIST_HR",
+                    stage: nextStatus,
                     module: "birthday-service",
                     operation: "greetCandidateBirthdays",
-                    safeContext: { age: 17 },
+                    safeContext: {
+                        age: 17,
+                        reactivationMode: isInterviewReady ? "WAITLIST_HR" : "RESUME_SCREENING",
+                    },
                 });
 
-                await bot.api.sendMessage(tid, activationGreeting, { parse_mode: "HTML" });
+                await bot.api.sendMessage(tid, isInterviewReady ? activationGreeting : continueScreeningGreeting, {
+                    parse_mode: "HTML",
+                    ...(isInterviewReady ? {} : {
+                        reply_markup: new InlineKeyboard().text("Продовжити анкету ✨", "resume_screening")
+                    }),
+                });
             } else {
                 await bot.api.sendMessage(tid, standardGreeting, { parse_mode: "HTML" });
             }
@@ -101,6 +132,9 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                 operation: "greetCandidateBirthdays",
                 safeContext: {
                     activatedFromUnderage: isExactly17 && wasUnderage && isFemale,
+                    reactivationMode: canReactivateUnderageCandidate
+                        ? (hasInterviewReadyScreeningData(c) ? "WAITLIST_HR" : "RESUME_SCREENING")
+                        : undefined,
                 },
             });
         } catch (e) {

@@ -40,13 +40,32 @@ describe("candidate screening birth date validation", () => {
         expect(result.success).toBe(true);
     });
 
-    it("still rejects candidates under 16 at birth date step", async () => {
+    it("accepts real birth dates even when the candidate is under 16", async () => {
         const { CandidateSchema } = await import("../index.js");
         const now = new Date();
         const fifteenYearsOld = new Date(now.getFullYear() - 15, now.getMonth(), now.getDate());
 
         const result = CandidateSchema.shape.birthDate.safeParse(fifteenYearsOld);
 
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+    });
+
+    it("marks candidates under 16 for deferred underage handling at the birth date step", async () => {
+        const { shouldDeferCandidateAtBirthDate } = await import("../index.js");
+        const now = new Date();
+        const fifteenYearsOld = new Date(now.getFullYear() - 15, now.getMonth(), now.getDate());
+        const sixteenYearsOld = new Date(now.getFullYear() - 16, now.getMonth(), now.getDate());
+
+        expect(shouldDeferCandidateAtBirthDate(fifteenYearsOld)).toBe(true);
+        expect(shouldDeferCandidateAtBirthDate(sixteenYearsOld)).toBe(false);
+    });
+
+    it("rejects impossible birth dates", async () => {
+        const { CandidateSchema } = await import("../index.js");
+        const futureDate = new Date();
+        futureDate.setFullYear(futureDate.getFullYear() + 1);
+
+        expect(CandidateSchema.shape.birthDate.safeParse(new Date("1949-12-31T00:00:00.000Z")).success).toBe(false);
+        expect(CandidateSchema.shape.birthDate.safeParse(futureDate).success).toBe(false);
     });
 });
