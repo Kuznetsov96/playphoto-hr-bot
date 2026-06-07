@@ -1,5 +1,6 @@
 import { InlineKeyboard, type Api } from "grammy";
 import {
+    Prisma,
     ReplacementAvailabilityKind,
     ReplacementRequestStatus,
     ReplacementResponseStatus,
@@ -54,7 +55,10 @@ export class ReplacementService {
                 staffId,
                 date: { gte: today },
                 replacementRequests: {
-                    none: { status: ReplacementRequestStatus.ACTIVE }
+                    none: { status: { in: [
+                        ReplacementRequestStatus.ACTIVE,
+                        ReplacementRequestStatus.FAILED
+                    ] } }
                 }
             },
             include: { location: true },
@@ -113,16 +117,14 @@ export class ReplacementService {
         });
         if (previouslyFailed) throw new Error("REQUEST_PREVIOUSLY_FAILED");
 
-        const request = await prisma.replacementRequest.create({
-            data: {
-                workShiftId: shift.id,
-                requesterStaffId,
-                locationId: shift.locationId,
-                city: shift.location.city,
-                shiftDate: shift.date,
-                shiftStartTime: shift.startTime,
-                shiftEndTime: shift.endTime,
-            }
+        const request = await this.createActiveRequest({
+            workShiftId: shift.id,
+            requesterStaffId,
+            locationId: shift.locationId,
+            city: shift.location.city,
+            shiftDate: shift.date,
+            shiftStartTime: shift.startTime,
+            shiftEndTime: shift.endTime,
         });
 
         await this.notifyAdminStarted(api, request.id);
@@ -185,19 +187,28 @@ export class ReplacementService {
         });
         if (existingRequest) throw new Error("REQUEST_ALREADY_ACTIVE");
 
-        const request = await prisma.replacementRequest.create({
-            data: {
-                locationId,
-                city: location.city,
-                shiftDate: dayStart,
-                shiftStartTime: shiftTimes.start,
-                shiftEndTime: shiftTimes.end,
-            }
+        const request = await this.createActiveRequest({
+            locationId,
+            city: location.city,
+            shiftDate: dayStart,
+            shiftStartTime: shiftTimes.start,
+            shiftEndTime: shiftTimes.end,
         });
 
         await this.notifyAdminStarted(api, request.id);
         await this.dispatchNextWave(api, request.id);
         return request;
+    }
+
+    private async createActiveRequest(data: Prisma.ReplacementRequestUncheckedCreateInput) {
+        try {
+            return await prisma.replacementRequest.create({ data });
+        } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+                throw new Error("REQUEST_ALREADY_ACTIVE");
+            }
+            throw error;
+        }
     }
 
     async cancelRequest(api: Api, requesterStaffId: string, requestId: string) {
@@ -219,6 +230,7 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (request) {
             await this.inactivateOpenResponses(api, request.id, "Запит вже неактивний.\nПошук скасовано.");
+            await this.notifyAdminCancelled(api, request.id);
         }
 
         return true;
@@ -680,6 +692,16 @@ export class ReplacementService {
             .catch((err) => logger.warn({ err, requestId }, "Replacement start admin notification failed"));
     }
 
+    private async notifyAdminCancelled(api: Api, requestId: string) {
+        const request = await this.getRequest(requestId);
+        if (!request) return;
+
+        const text = this.formatAdminNotification("cancelled", request);
+
+        await api.sendMessage(MAIN_ADMIN_ID, text, { parse_mode: "HTML" })
+            .catch((err) => logger.warn({ err, requestId }, "Replacement cancel admin notification failed"));
+    }
+
     private async notifyAdminFailed(api: Api, requestId: string) {
         const request = await this.getRequest(requestId);
         if (!request) return;
@@ -922,16 +944,18 @@ export class ReplacementService {
         return text;
     }
 
-    private formatAdminNotification(kind: "started" | "found" | "failed", request: RequestWithRelations) {
+    private formatAdminNotification(kind: "started" | "found" | "failed" | "cancelled", request: RequestWithRelations) {
         const titleByKind = {
             started: "🔁 <b>Replacement search started.</b>",
             found: "✅ <b>Replacement found.</b>",
-            failed: "⚠️ <b>Replacement not found.</b>"
+            failed: "⚠️ <b>Replacement not found.</b>",
+            cancelled: "🛑 <b>Replacement search cancelled.</b>"
         };
         const actionByKind = {
             started: "The request is open. Search waves will run automatically; monitor it and help manually if needed.",
             found: "Please update the schedule manually and sync the changes.",
-            failed: "All available search waves finished without a result. Please contact the photographer and resolve manually."
+            failed: "All available search waves finished without a result. Please contact the photographer and resolve manually.",
+            cancelled: "The photographer cancelled this request. If they restart later, a new search request will be opened."
         };
 
         const replacementLine = request.replacement
