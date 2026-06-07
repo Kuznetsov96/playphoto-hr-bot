@@ -475,6 +475,68 @@ describe("ReplacementService", () => {
         });
     });
 
+    it("does not message the same photographer again when a cancelled search is restarted for the same shift", async () => {
+        const request: any = {
+            id: "request-restarted",
+            workShiftId: "shift-restarted",
+            requesterStaffId: "requester-restarted",
+            locationId: "location-restarted",
+            city: "Черкаси",
+            shiftDate: new Date("2030-05-16T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-16T11:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-16T18:00:00.000Z"),
+            status: "ACTIVE",
+            currentWave: null,
+            nextWaveAt: null,
+            location: { id: "location-restarted", name: "Fantasy Town", city: "Черкаси", schedule: null },
+            requester: { id: "requester-restarted", fullName: "Смірнова Дарина", user: { telegramId: 7927905186n } },
+            replacement: null,
+        };
+
+        prismaMock.replacementRequest.findUnique.mockImplementation(async () => ({ ...request }));
+        prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-restarted" });
+        prismaMock.location.count.mockResolvedValue(1);
+        prismaMock.replacementResponse.findMany.mockImplementation(async ({ where, distinct }: any) => {
+            if (distinct?.includes("wave")) return [];
+            if (where?.staffId?.in?.includes("candidate-restarted")) {
+                return [{ staffId: "candidate-restarted" }];
+            }
+            return [];
+        });
+        prismaMock.replacementRequest.update.mockImplementation(async ({ data }: any) => {
+            Object.assign(request, data);
+            return { ...request };
+        });
+        scheduleAvailabilityService.getAvailabilityForDateFromSchedule.mockResolvedValue(new Map([
+            ["candidate-restarted", "available"],
+        ]));
+        prismaMock.staffProfile.findMany.mockResolvedValue([
+            {
+                id: "candidate-restarted",
+                fullName: "Прокопʼєва Маріанна",
+                user: { telegramId: 123456789n },
+                location: request.location,
+            },
+        ]);
+        prismaMock.workShift.findMany.mockResolvedValue([]);
+        defaultQueue.add.mockResolvedValue({ id: "job-restarted" });
+
+        const api = {
+            sendMessage: vi.fn(),
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().dispatchNextWave(api as any, request.id);
+
+        expect(prismaMock.replacementResponse.create).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(defaultQueue.add).toHaveBeenCalledWith(
+            "replacement-dispatch-wave",
+            { requestId: request.id },
+            expect.objectContaining({ attempts: 3, removeOnComplete: true })
+        );
+    });
+
     it("shows shift details to the replacement photographer after accepting", async () => {
         const request: any = {
             id: "request-accept",
