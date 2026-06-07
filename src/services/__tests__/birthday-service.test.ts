@@ -78,13 +78,26 @@ describe("greetCandidateBirthdays", () => {
                 user: { telegramId: 1002n },
             },
             {
-                id: "cand-underage",
-                fullName: "Underage Candidate",
+                id: "cand-underage-ready",
+                fullName: "Underage Ready Candidate",
                 status: "REJECTED",
                 gender: "female",
                 hrDecision: "REJECTED_SYSTEM_UNDERAGE",
                 birthDate: new Date("2009-04-12T00:00:00.000Z"),
+                city: "Запоріжжя",
+                locationId: "loc-1",
                 user: { telegramId: 1003n },
+            },
+            {
+                id: "cand-underage-incomplete",
+                fullName: "Underage Incomplete Candidate",
+                status: "REJECTED",
+                gender: "female",
+                hrDecision: "REJECTED_SYSTEM_UNDERAGE",
+                birthDate: new Date("2009-04-12T00:00:00.000Z"),
+                city: null,
+                locationId: null,
+                user: { telegramId: 1004n },
             },
         ]);
     });
@@ -93,12 +106,12 @@ describe("greetCandidateBirthdays", () => {
         vi.useRealTimers();
     });
 
-    it("greets all deliverable candidates and reactivates exact-17 underage profiles", async () => {
+    it("greets all deliverable candidates and reactivates exact-17 complete underage profiles to HR waitlist", async () => {
         const { greetCandidateBirthdays } = await import("../birthday-service.js");
 
         const sentCount = await greetCandidateBirthdays({ api: { sendMessage } } as any, 12, 4);
 
-        expect(sentCount).toBe(3);
+        expect(sentCount).toBe(4);
         expect(sendMessage).toHaveBeenCalledWith(
             1001,
             expect.stringContaining("З днем народження"),
@@ -109,14 +122,40 @@ describe("greetCandidateBirthdays", () => {
             expect.stringContaining("З днем народження"),
             expect.objectContaining({ parse_mode: "HTML" })
         );
-        expect(updateCandidate).toHaveBeenCalledWith("cand-underage", expect.objectContaining({
+        expect(updateCandidate).toHaveBeenCalledWith("cand-underage-ready", expect.objectContaining({
             status: "WAITLIST_HR",
             hrDecision: null,
+            isWaitlisted: true,
+            currentStep: "INTERVIEW",
         }));
         expect(sendMessage).toHaveBeenCalledWith(
             1003,
             expect.stringContaining("Сьогодні тобі виповнилося 17"),
             expect.objectContaining({ parse_mode: "HTML" })
+        );
+    });
+
+    it("returns exact-17 incomplete underage profiles to screening with a resume button", async () => {
+        const { greetCandidateBirthdays } = await import("../birthday-service.js");
+
+        await greetCandidateBirthdays({ api: { sendMessage } } as any, 12, 4);
+
+        expect(updateCandidate).toHaveBeenCalledWith("cand-underage-incomplete", expect.objectContaining({
+            status: "SCREENING",
+            hrDecision: null,
+            isWaitlisted: false,
+            currentStep: "INITIAL_TEST",
+            notificationSent: false,
+            interviewWaitlistReason: null,
+            interviewInvitedAt: null,
+        }));
+        expect(sendMessage).toHaveBeenCalledWith(
+            1004,
+            expect.stringContaining("Натисни кнопку нижче"),
+            expect.objectContaining({
+                parse_mode: "HTML",
+                reply_markup: expect.any(Object),
+            })
         );
     });
 });
