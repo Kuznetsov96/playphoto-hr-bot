@@ -43,6 +43,7 @@ const INTERVIEW_TRACK_STATUSES = new Set<CandidateStatus>([
 
 const TRAINING_TRACK_STATUSES = new Set<CandidateStatus>([
     CandidateStatus.ACCEPTED,
+    CandidateStatus.MENTOR_MANUAL,
     CandidateStatus.WAITLIST_MENTOR,
     CandidateStatus.DISCOVERY_SCHEDULED,
     CandidateStatus.DISCOVERY_COMPLETED,
@@ -85,6 +86,7 @@ function isLegacyMentorWaitlist(state: CandidateFunnelSnapshot): boolean {
 
 function isMentorTrackState(state: CandidateFunnelSnapshot): boolean {
     return ([
+        CandidateStatus.MENTOR_MANUAL,
         CandidateStatus.DISCOVERY_SCHEDULED,
         CandidateStatus.DISCOVERY_COMPLETED,
         CandidateStatus.TRAINING_SCHEDULED,
@@ -103,6 +105,7 @@ function isMentorEligible(state: CandidateFunnelSnapshot): boolean {
         Boolean(state.discoverySlotId) ||
         Boolean(state.trainingSlotId) ||
         ([
+            CandidateStatus.MENTOR_MANUAL,
             CandidateStatus.DISCOVERY_COMPLETED,
             CandidateStatus.TRAINING_SCHEDULED,
             CandidateStatus.TRAINING_COMPLETED,
@@ -180,6 +183,13 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
                 CandidateStatus.DISCOVERY_SCHEDULED,
                 CandidateStatus.DISCOVERY_COMPLETED,
             ] as CandidateStatus[]).includes(oldState.status) || isLegacyMentorWaitlist(oldState);
+        case CandidateStatus.MENTOR_MANUAL:
+            return ([
+                CandidateStatus.INTERVIEW_COMPLETED,
+                CandidateStatus.DECISION_PENDING,
+                CandidateStatus.ACCEPTED,
+                CandidateStatus.MENTOR_MANUAL,
+            ] as CandidateStatus[]).includes(oldState.status) || isLegacyMentorWaitlist(oldState);
         case CandidateStatus.WAITLIST_MENTOR:
             return ([
                 CandidateStatus.ACCEPTED,
@@ -211,6 +221,7 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
             ] as CandidateStatus[]).includes(oldState.status);
         case CandidateStatus.NDA:
             return ([
+                CandidateStatus.MENTOR_MANUAL,
                 CandidateStatus.TRAINING_SCHEDULED,
                 CandidateStatus.TRAINING_COMPLETED,
                 CandidateStatus.NDA,

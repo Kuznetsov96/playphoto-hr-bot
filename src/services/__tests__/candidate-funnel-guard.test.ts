@@ -249,4 +249,61 @@ describe("candidate funnel guard", () => {
 
         expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
     });
+
+    it("allows entering MENTOR_MANUAL from interview completed with HR approval", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.INTERVIEW_COMPLETED,
+            currentStep: FunnelStep.INTERVIEW,
+            hrDecision: "ACCEPTED",
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.MENTOR_MANUAL,
+            currentStep: FunnelStep.TRAINING,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
+
+    it("normalizes MENTOR_MANUAL into the training step", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.INTERVIEW_COMPLETED,
+            currentStep: FunnelStep.INTERVIEW,
+            hrDecision: "ACCEPTED",
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+        const normalized = normalizeCandidateFunnelPatch(oldState, {
+            status: CandidateStatus.MENTOR_MANUAL,
+        });
+
+        expect((normalized as any).currentStep).toBe(FunnelStep.TRAINING);
+    });
+
+    it("allows MENTOR_MANUAL to advance to NDA", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.MENTOR_MANUAL,
+            currentStep: FunnelStep.TRAINING,
+            hrDecision: "ACCEPTED",
+            interviewCompletedAt: new Date("2026-04-01T10:00:00Z"),
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.NDA,
+            currentStep: FunnelStep.TRAINING,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
+
+    it("allows MENTOR_MANUAL to be rejected", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.MENTOR_MANUAL,
+            currentStep: FunnelStep.TRAINING,
+            hrDecision: "ACCEPTED",
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.REJECTED,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+    });
 });
