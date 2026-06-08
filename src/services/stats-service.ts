@@ -114,6 +114,7 @@ const ACTIVE_VALID_STATUSES = new Set<CandidateStatus>([
     CandidateStatus.INTERVIEW_COMPLETED,
     CandidateStatus.DECISION_PENDING,
     CandidateStatus.ACCEPTED,
+    CandidateStatus.MENTOR_MANUAL,
     CandidateStatus.DISCOVERY_SCHEDULED,
     CandidateStatus.DISCOVERY_COMPLETED,
     CandidateStatus.TRAINING_SCHEDULED,
@@ -133,6 +134,7 @@ const INTERVIEW_TRACK_STATUSES = new Set<CandidateStatus>([
     CandidateStatus.INTERVIEW_COMPLETED,
     CandidateStatus.DECISION_PENDING,
     CandidateStatus.ACCEPTED,
+    CandidateStatus.MENTOR_MANUAL,
     CandidateStatus.DISCOVERY_SCHEDULED,
     CandidateStatus.DISCOVERY_COMPLETED,
     CandidateStatus.TRAINING_SCHEDULED,
@@ -150,6 +152,7 @@ const INTERVIEW_TRACK_STATUSES = new Set<CandidateStatus>([
 
 const HR_APPROVED_STATUSES = new Set<CandidateStatus>([
     CandidateStatus.ACCEPTED,
+    CandidateStatus.MENTOR_MANUAL,
     CandidateStatus.DISCOVERY_SCHEDULED,
     CandidateStatus.DISCOVERY_COMPLETED,
     CandidateStatus.TRAINING_SCHEDULED,
@@ -345,6 +348,7 @@ export const statsService = {
             CandidateStatus.INTERVIEW_COMPLETED,
             CandidateStatus.DECISION_PENDING,
             CandidateStatus.ACCEPTED,
+            CandidateStatus.MENTOR_MANUAL,
             CandidateStatus.DISCOVERY_SCHEDULED,
             CandidateStatus.DISCOVERY_COMPLETED,
             CandidateStatus.TRAINING_SCHEDULED,
