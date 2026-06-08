@@ -69,7 +69,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 }
                             );
                             await candidateRepository.update(cand.id, {
-                                status: CandidateStatus.ACCEPTED,
+                                status: CandidateStatus.MENTOR_MANUAL,
                                 notificationSent: true
                             });
 
