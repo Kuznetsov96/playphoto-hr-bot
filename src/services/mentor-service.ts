@@ -409,6 +409,37 @@ export class MentorService {
         return { candidate: cand, result };
     }
 
+    private async sendNdaRequest(api: Api, cand: any) {
+        const firstName = extractFirstName(cand.fullName || "");
+        const staticInfo = getLocationDetails(cand.location?.name);
+        const jobDetails = `\n\n📍 <b>${cand.location?.name || cand.city}</b>\n` +
+            `🏠 ${staticInfo?.address || cand.location?.address || ""}\n` +
+            `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
+            `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
+
+        const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
+        if (!cand.user) return;
+        try {
+            await api.sendMessage(Number(cand.user.telegramId),
+                CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails),
+                { parse_mode: "HTML", reply_markup: kb }
+            );
+        } catch (err: any) {
+            if (isBotBlocked(err)) {
+                await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+            } else {
+                logger.error({ err, candidateId: cand.id, telegramId: cand.user.telegramId }, "Failed to send NDA message to candidate");
+                const mainAdmin = ADMIN_IDS[0];
+                if (mainAdmin) {
+                    api.sendMessage(mainAdmin,
+                        `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
+                        { parse_mode: "HTML" }
+                    ).catch(() => { });
+                }
+            }
+        }
+    }
+
     async completeTraining(api: any, candId: string, result: 'passed' | 'failed' | 'no_show') {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
@@ -421,36 +452,7 @@ export class MentorService {
                 ndaSentAt: new Date()
             });
 
-            // Send NDA Request
-            const firstName = extractFirstName(cand.fullName || "");
-            const staticInfo = getLocationDetails(cand.location?.name);
-            const jobDetails = `\n\n📍 <b>${cand.location?.name || cand.city}</b>\n` +
-                `🏠 ${staticInfo?.address || cand.location?.address || ""}\n` +
-                `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
-                `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
-
-            const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
-            if (cand.user) {
-                try {
-                    await api.sendMessage(Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails),
-                        { parse_mode: "HTML", reply_markup: kb }
-                    );
-                } catch (err: any) {
-                    if (isBotBlocked(err)) {
-                        await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
-                    } else {
-                        logger.error({ err, candidateId: cand.id, telegramId: cand.user.telegramId }, "Failed to send NDA message to candidate");
-                        const mainAdmin = ADMIN_IDS[0];
-                        if (mainAdmin) {
-                            api.sendMessage(mainAdmin,
-                                `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
-                                { parse_mode: "HTML" }
-                            ).catch(() => { });
-                        }
-                    }
-                }
-            }
+            await this.sendNdaRequest(api, cand);
 
         } else {
             await candidateRepository.update(candId, { status: "REJECTED" });
@@ -492,35 +494,7 @@ export class MentorService {
             ndaSentAt: new Date(),
         });
 
-        const firstName = extractFirstName(cand.fullName || "");
-        const staticInfo = getLocationDetails(cand.location?.name);
-        const jobDetails = `\n\n📍 <b>${cand.location?.name || cand.city}</b>\n` +
-            `🏠 ${staticInfo?.address || cand.location?.address || ""}\n` +
-            `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
-            `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
-
-        const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
-        if (cand.user) {
-            try {
-                await api.sendMessage(Number(cand.user.telegramId),
-                    CANDIDATE_TEXTS["nda-request"](firstName, NDA_LINK, jobDetails),
-                    { parse_mode: "HTML", reply_markup: kb }
-                );
-            } catch (err: any) {
-                if (isBotBlocked(err)) {
-                    await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
-                } else {
-                    logger.error({ err, candidateId: cand.id }, "Failed to send NDA after manual mentor accept");
-                    const mainAdmin = ADMIN_IDS[0];
-                    if (mainAdmin) {
-                        api.sendMessage(mainAdmin,
-                            `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.`,
-                            { parse_mode: "HTML" }
-                        ).catch(() => { });
-                    }
-                }
-            }
-        }
+        await this.sendNdaRequest(api, cand);
 
         audit({
             event: "candidate_manual_mentor_accepted",
@@ -538,7 +512,7 @@ export class MentorService {
         return { candidate: cand, success: true };
     }
 
-    async rejectManualMentor(api: Api, candId: string) {
+    async rejectManualMentor(candId: string) {
         const cand = await candidateRepository.findById(candId);
         if (!cand) return null;
 

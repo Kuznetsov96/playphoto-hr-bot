@@ -75,13 +75,35 @@ describe("mentor manual track", () => {
             user: { telegramId: 555n },
         });
 
-        const res = await mentorService.rejectManualMentor(api, "c1");
+        const res = await mentorService.rejectManualMentor("c1");
 
         expect(mocks.update).toHaveBeenCalledWith("c1", expect.objectContaining({
             status: CandidateStatus.REJECTED,
         }));
-        expect(mocks.syncUserAccess).toHaveBeenCalledWith(555n, expect.any(String));
+        expect(mocks.syncUserAccess).toHaveBeenCalledWith(555n, "Manual mentor reject");
         expect(res?.success).toBe(true);
+    });
+
+    it("accept returns null when candidate not found", async () => {
+        const { mentorService } = await import("../mentor-service.js");
+        mocks.findById.mockResolvedValue(null);
+        const res = await mentorService.acceptManualMentor(api, "missing");
+        expect(res).toBeNull();
+        expect(mocks.update).not.toHaveBeenCalled();
+    });
+
+    it("audits failed result when channel link cannot be generated", async () => {
+        const { mentorService } = await import("../mentor-service.js");
+        mocks.findById.mockResolvedValue({ id: "c1", user: { telegramId: 555n } });
+        mocks.createInviteLink.mockResolvedValue(null);
+
+        const link = await mentorService.generateChannelLinkForMentor("c1");
+
+        expect(link).toBeNull();
+        expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
+            event: "mentor_channel_link_generated",
+            result: "failed",
+        }));
     });
 
     it("generates a one-time channel link", async () => {
