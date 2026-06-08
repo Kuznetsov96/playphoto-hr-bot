@@ -785,6 +785,7 @@ enum CandidateStatus {
   OFFLINE_STAGING
   AWAITING_FIRST_SHIFT
   BLOCKER
+  MENTOR_MANUAL
 
   // Refactored Final Step Pipeline
   NDA
