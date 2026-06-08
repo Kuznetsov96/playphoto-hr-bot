@@ -306,4 +306,17 @@ describe("candidate funnel guard", () => {
 
         expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
     });
+
+    it("blocks entering MENTOR_MANUAL from HR waitlist without approval", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.WAITLIST_HR,
+            isWaitlisted: true,
+        });
+        const context = buildNextCandidateFunnelState(oldState, {
+            status: CandidateStatus.MENTOR_MANUAL,
+            currentStep: FunnelStep.TRAINING,
+        });
+
+        expect(() => validateCandidateFunnelTransition(context)).toThrow(InvalidCandidateTransitionError);
+    });
 });
