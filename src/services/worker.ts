@@ -6,7 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS } from "../config.js";
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
@@ -625,6 +625,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
             // 11.1 NEW: Notify candidates who haven't picked a discovery/training slot (24h after access)
             await processTrainingReminders(bot);
+            await processAcceptedMaterialsHandoffAlerts(bot);
 
             // 11.2 Funnel anomaly detection and alerting
             await processFunnelAnomalies(bot);
@@ -1055,6 +1056,7 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
         const { default: prisma } = await import("../db/core.js");
         const now = new Date();
         const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const reminderThrottleCutoff = new Date(now.getTime() - 23 * 60 * 60 * 1000);
 
         // Find candidates in ACCEPTED status who received materials but didn't book anything
         const pendingTraining = await prisma.candidate.findMany({
@@ -1063,24 +1065,22 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
                 materialsSent: true,
                 discoverySlotId: null,
                 trainingSlotId: null,
-                // Throttle using materialsSentAt or updatedAt
                 OR: [
                     { materialsSentAt: { lte: twentyFourHoursAgo } },
-                    {
-                        materialsSentAt: null,
-                        user: { updatedAt: { lte: twentyFourHoursAgo } }
-                    }
-                ]
+                    { materialsSentAt: null, pipelineTouchedAt: { lte: twentyFourHoursAgo } }
+                ],
+                AND: [{
+                    OR: [
+                        { mentorReminderSentAt: null },
+                        { mentorReminderSentAt: { lte: reminderThrottleCutoff } }
+                    ]
+                }]
             },
             include: { user: true }
         });
 
         for (const cand of pendingTraining) {
             try {
-                // Throttle: only remind once every 23 hours to avoid spamming
-                const userUpdate = new Date(cand.user.updatedAt);
-                if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
-
                 const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
 
                 const text = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
@@ -1090,9 +1090,12 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
                     reply_markup: kb
                 });
 
-                await prisma.user.update({
-                    where: { id: cand.userId },
-                    data: { updatedAt: new Date() }
+                await prisma.candidate.update({
+                    where: { id: cand.id },
+                    data: {
+                        mentorReminderSent: true,
+                        mentorReminderSentAt: new Date()
+                    }
                 });
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
@@ -1101,6 +1104,81 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
         }
     } catch (e) {
         logger.error({ err: e }, "Candidate training reminder job failed");
+    }
+}
+
+async function processAcceptedMaterialsHandoffAlerts(bot: Bot<MyContext>) {
+    try {
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const staleAccepted = await prisma.candidate.findMany({
+            where: {
+                status: CandidateStatus.ACCEPTED,
+                hrDecision: "ACCEPTED",
+                materialsSent: false,
+                isWaitlisted: false,
+                OR: [
+                    { statusChangedAt: { lte: cutoff } },
+                    { statusChangedAt: null, pipelineTouchedAt: { lte: cutoff } }
+                ]
+            },
+            select: {
+                id: true,
+                fullName: true,
+                city: true,
+                location: { select: { name: true } },
+                statusChangedAt: true,
+                pipelineTouchedAt: true
+            },
+            orderBy: [{ statusChangedAt: "asc" }, { pipelineTouchedAt: "asc" }],
+            take: 20
+        });
+
+        if (staleAccepted.length === 0) return;
+
+        const fingerprint = staleAccepted.map(c => c.id).join("|");
+        if (!await shouldSendFunnelAlert("MENTOR_ACCEPTED_WITHOUT_MATERIALS", fingerprint, 12)) return;
+
+        logBusinessEvent({
+            event: "candidate.mentor_handoff_stale",
+            level: "warn",
+            actorType: "system",
+            actorRole: "system",
+            stage: "MENTOR",
+            result: "failed",
+            reasonCode: "ACCEPTED_WITHOUT_MATERIALS",
+            module: "worker",
+            operation: "processAcceptedMaterialsHandoffAlerts",
+            safeContext: {
+                count: staleAccepted.length,
+                sample: staleAccepted.slice(0, 5).map(c => ({
+                    id: c.id,
+                    name: c.fullName,
+                    city: c.city,
+                    location: c.location?.name,
+                })),
+            },
+        });
+
+        const preview = staleAccepted
+            .slice(0, 8)
+            .map(c => `• ${c.fullName || c.id} — ${c.city || "city n/a"} / ${c.location?.name || "location n/a"}`)
+            .join("\n");
+
+        const text = `⚠️ <b>Mentor handoff needs attention</b>\n\n` +
+            `<b>${staleAccepted.length}</b> accepted candidate(s) have been waiting more than 24h without materials.\n\n` +
+            `${preview}\n\n` +
+            `Open <b>Mentor Hub → Inbox</b> and send materials.`;
+
+        const recipients = MENTOR_IDS.length > 0 ? MENTOR_IDS : ADMIN_IDS;
+        for (const recipient of recipients) {
+            await bot.api.sendMessage(recipient, text, { parse_mode: "HTML" }).catch((err) => {
+                logger.warn({ err, recipient }, "Mentor handoff stale alert delivery failed");
+            });
+        }
+
+        await saveFunnelAlertState("MENTOR_ACCEPTED_WITHOUT_MATERIALS", fingerprint);
+    } catch (err) {
+        logger.error({ err }, "Accepted-without-materials handoff alert failed");
     }
 }
 

@@ -151,7 +151,7 @@ mentorActionSuccessMenu.text("🏠 Back to Hub", async (ctx) => {
 mentorHubMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
 
-    const totalInbox = stats.newAcceptedCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
+    const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
     const inboxLabel = `📥 Inbox${totalInbox > 0 ? ` ${totalInbox}` : ''}`;
     range.text(inboxLabel, async (ctx) => {
         ctx.session.filterWaitlist = false;
@@ -222,7 +222,10 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
 
         const waitlisted = await mentorService.getCandidates(true);
         for (const cand of waitlisted) {
-            const label = `⌛ ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const needsHandoffCheck = !cand.notificationSent;
+            const icon = needsHandoffCheck ? "⚠️" : "⌛";
+            const suffix = needsHandoffCheck ? " • Check handoff" : "";
+            const label = `${icon} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}${suffix}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
@@ -394,7 +397,10 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
             range.text("🔔 Send Reminder", async (ctx) => {
                 const result = await mentorService.sendMaterials(ctx.api, cand.id);
                 if (result) {
-                    await candidateRepository.update(cand.id, { mentorReminderSent: true });
+                    await candidateRepository.update(cand.id, {
+                        mentorReminderSent: true,
+                        mentorReminderSentAt: new Date()
+                    });
                     await ctx.api.sendMessage(result.telegramId, result.text, {
                         parse_mode: "HTML",
                         reply_markup: new InlineKeyboard().text("🗓️ Обрати час знайомства", "start_training_scheduling")
