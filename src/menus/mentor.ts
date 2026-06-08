@@ -292,6 +292,19 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
             }
         }
 
+        const manualCandidates = await mentorService.getManualMentorCandidates();
+        if (manualCandidates.length > 0) {
+            range.text("👩‍🏫 Manual ——").row();
+            for (const cand of manualCandidates) {
+                const label = `👩‍🏫 ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+                range.text(label, async (ctx) => {
+                    ctx.session.selectedCandidateId = cand.id;
+                    const text = await getMentorCandidateProfileText(ctx, cand.id);
+                    await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
+                }).row();
+            }
+        }
+
         if (stats.newAcceptedCount > 0) {
             range.text("📢 Broadcast Materials", async (ctx) => {
                 await ScreenManager.renderScreen(ctx, "Select city for broadcast: 🏙️", "mentor-broadcast-cities", { pushToStack: true });
@@ -376,6 +389,30 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
         range.text("🗓 Reschedule Training", async (ctx) => {
             await ctx.answerCallbackQuery();
             await ScreenManager.renderScreen(ctx, `🗓 <b>Reschedule Training</b>\n\nSelect new date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
+        }).row();
+    }
+    else if (cand.status === "MENTOR_MANUAL") {
+        const username = cand.user?.username;
+        if (username) {
+            range.url("💬 Message", `https://t.me/${username}`).row();
+        }
+        range.text("🔗 Generate Channel Link", async (ctx) => {
+            const link = await mentorService.generateChannelLinkForMentor(cand.id);
+            if (link) {
+                await ctx.reply(`🔗 One-time channel invite link for <b>${cand.fullName}</b>:\n${link}`, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+                await ctx.answerCallbackQuery("Link generated ✅");
+            } else {
+                await ctx.answerCallbackQuery("⚠️ Could not generate link — check candidate status");
+            }
+        }).row();
+        range.text("✅ Accept (training passed)", async (ctx) => {
+            await ctx.answerCallbackQuery();
+            await mentorService.acceptManualMentor(ctx.api, cand.id);
+            await ScreenManager.renderScreen(ctx, `✅ <b>${cand.fullName} accepted.</b>\nNDA request sent.`, "mentor-action-success");
+        }).text("❌ Reject", async (ctx) => {
+            await ctx.answerCallbackQuery();
+            await mentorService.rejectManualMentor(cand.id);
+            await ScreenManager.renderScreen(ctx, `❌ <b>${cand.fullName} rejected.</b>\nChannel access revoked.`, "mentor-action-success");
         }).row();
     }
     else if (cand.status === "ACCEPTED" || cand.status === "WAITLIST_MENTOR" ||
