@@ -198,7 +198,7 @@ describe('MentorService', () => {
     });
 
     describe('notifyWaitlist', () => {
-        it('should query mentor waitlist with notificationSent=true guard', async () => {
+        it('should query mentor waitlist without notificationSent guard', async () => {
             vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
 
             await mentorService.getCandidates(true);
@@ -207,21 +207,26 @@ describe('MentorService', () => {
                 [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST],
                 expect.objectContaining({
                     isWaitlisted: true,
-                    currentStep: FunnelStep.TRAINING,
-                    notificationSent: true
+                    currentStep: FunnelStep.TRAINING
                 })
+            );
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST],
+                expect.not.objectContaining({ notificationSent: true })
             );
         });
 
-        it('should count mentor waitlist with notificationSent=true guard', async () => {
+        it('should count mentor waitlist without notificationSent guard', async () => {
             await mentorService.getWaitlistCount();
 
             expect((prisma as any).candidate.count).toHaveBeenCalledWith({
                 where: expect.objectContaining({
                     isWaitlisted: true,
-                    currentStep: FunnelStep.TRAINING,
-                    notificationSent: true
+                    currentStep: FunnelStep.TRAINING
                 })
+            });
+            expect((prisma as any).candidate.count).toHaveBeenCalledWith({
+                where: expect.not.objectContaining({ notificationSent: true })
             });
         });
 
@@ -283,10 +288,10 @@ describe('MentorService', () => {
             }));
         });
 
-        it('should skip corrupt waitlist candidate with materialsSent=true but notificationSent=false', async () => {
+        it('should notify waitlist candidate with materialsSent=true even when notificationSent=false', async () => {
             vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
                 {
-                    id: 'cand-corrupt',
+                    id: 'cand-visible',
                     status: CandidateStatus.WAITLIST_MENTOR,
                     currentStep: FunnelStep.TRAINING,
                     isWaitlisted: true,
@@ -300,9 +305,12 @@ describe('MentorService', () => {
             const mockApi = { sendMessage: vi.fn().mockResolvedValue({}) };
             const count = await mentorService.notifyWaitlist(mockApi);
 
-            expect(count).toBe(0);
-            expect(mockApi.sendMessage).not.toHaveBeenCalled();
-            expect(candidateRepository.update).not.toHaveBeenCalled();
+            expect(count).toBe(1);
+            expect(mockApi.sendMessage).toHaveBeenCalledWith(444, expect.any(String), expect.any(Object));
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-visible', expect.objectContaining({
+                status: 'ACCEPTED',
+                isWaitlisted: false
+            }));
         });
     });
 

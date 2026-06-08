@@ -114,8 +114,7 @@ export class MentorService {
         return {
             status: { in: [CandidateStatus.WAITLIST_MENTOR, CandidateStatus.WAITLIST] },
             isWaitlisted: true,
-            currentStep: FunnelStep.TRAINING,
-            notificationSent: true
+            currentStep: FunnelStep.TRAINING
         };
     }
 
@@ -340,9 +339,10 @@ export class MentorService {
             this.getMentorWaitlistWhere()
         );
 
-        // Only notify candidates who passed HR or are already in mentor flow
+        // Only notify candidates who passed HR or are already in mentor flow.
+        // notificationSent is a delivery bookkeeping flag, not a mentor visibility rule.
         const filtered = mentorWaitlist.filter(c =>
-            c.notificationSent && (c.hrDecision === "ACCEPTED" || c.materialsSent)
+            c.hrDecision === "ACCEPTED" || c.materialsSent
         );
 
         let successCount = 0;
