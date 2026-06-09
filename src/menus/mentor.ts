@@ -151,7 +151,7 @@ mentorActionSuccessMenu.text("🏠 Back to Hub", async (ctx) => {
 mentorHubMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
 
-    const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
+    const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.manualCount + stats.waitlistCount + stats.unreadMessagesCount;
     const inboxLabel = `📥 Inbox${totalInbox > 0 ? ` ${totalInbox}` : ''}`;
     range.text(inboxLabel, async (ctx) => {
         ctx.session.filterWaitlist = false;
@@ -241,7 +241,7 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
     }
 
     const candidates = await mentorService.getActionNeededCandidates();
-    const hasAnyTasks = stats.unreadMessagesCount > 0 || stats.waitlistCount > 0 || candidates.length > 0;
+    const hasAnyTasks = stats.unreadMessagesCount > 0 || stats.waitlistCount > 0 || candidates.length > 0 || stats.manualCount > 0;
 
     if (!hasAnyTasks) {
         range.text("All tasks completed! ✨", (ctx) => ctx.answerCallbackQuery("Nothing to do!")).row();

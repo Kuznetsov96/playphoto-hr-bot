@@ -150,9 +150,10 @@ export class MentorService {
         });
 
         const onboardingCount = (await this.findMentorOnboardingCandidates()).length;
+        const manualCount = await candidateRepository.countByStatus(CandidateStatus.MENTOR_MANUAL);
 
         return {
-            actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount,
+            actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount + manualCount,
             calendarCount: trainingToday + overdue,
             trainingToday,
             overdue,
@@ -160,6 +161,7 @@ export class MentorService {
             newAcceptedCount,
             awaitingBookingCount,
             readyForTrainingCount,
+            manualCount,
             waitlistCount,
             unreadMessagesCount
         };
@@ -167,7 +169,7 @@ export class MentorService {
 
     async getHubText() {
         const stats = await this.getStats();
-        const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.waitlistCount + stats.unreadMessagesCount;
+        const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.manualCount + stats.waitlistCount + stats.unreadMessagesCount;
 
         let calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday}`;
         if (stats.overdue > 0) {
