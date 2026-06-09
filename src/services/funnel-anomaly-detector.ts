@@ -2,6 +2,7 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 
 const MENTOR_OR_FINAL_STATUSES = new Set<CandidateStatus>([
     CandidateStatus.ACCEPTED,
+    CandidateStatus.MENTOR_MANUAL,
     CandidateStatus.WAITLIST_MENTOR,
     CandidateStatus.DISCOVERY_SCHEDULED,
     CandidateStatus.DISCOVERY_COMPLETED,

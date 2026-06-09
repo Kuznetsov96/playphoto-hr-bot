@@ -71,6 +71,7 @@ export class AccessService {
             const status = user.candidate.status;
             const allowedStatuses: CandidateStatus[] = [
                 CandidateStatus.ACCEPTED,
+                CandidateStatus.MENTOR_MANUAL,
                 CandidateStatus.DISCOVERY_SCHEDULED,
                 CandidateStatus.DISCOVERY_COMPLETED,
                 CandidateStatus.TRAINING_SCHEDULED,

@@ -92,6 +92,16 @@ describe("AccessService", () => {
         }
     });
 
+    it("authorizes candidates in the manual mentor track", async () => {
+        const service = new AccessService();
+        mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
+            role: Role.CANDIDATE,
+            candidate: { status: CandidateStatus.MENTOR_MANUAL },
+        });
+
+        await expect(service.isAuthorized(123n)).resolves.toBe(true);
+    });
+
     it("clears existing protected chat bans before creating a valid one-time invite", async () => {
         const service = new AccessService();
         const unbanChatMember = vi.fn().mockResolvedValue(undefined);
