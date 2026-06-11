@@ -157,6 +157,7 @@ export interface SessionData {
     filterWaitlist?: boolean;
     candidatePage?: number;
     hiringNeedsPage?: number;
+    manualPage?: number;
     selectedNoSlotReason?: string | null;
     broadcastValue?: string | string[];
     broadcastCity?: string;
