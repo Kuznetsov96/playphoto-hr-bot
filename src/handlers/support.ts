@@ -336,7 +336,9 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             return true;
         }
 
-        // Mentor-owned flow (training/discovery + mentor onboarding) → DM mentors directly
+        // Mentor-owned flow (training/discovery + mentor onboarding) → DM main admin directly.
+        // There may be no active mentor during offboarding, but candidates still see the
+        // "contact mentor" button in older messages and should get a real reply path.
         // and keep this dialog out of generic support tickets/topics.
         if (isMentorOwnedFlow) {
             const payload = getCandidateSupportPayload(ctx);
@@ -351,13 +353,13 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 stage: "MENTOR",
                 result: "success",
                 module: "support",
-                safeContext: { routing: "mentor_dm", status: candidate.status }
+                safeContext: { routing: "admin_dm", status: candidate.status }
             });
-            let categoryLabel = "Mentor";
-            let targetAdminIds = MENTOR_IDS.length > 0 ? MENTOR_IDS : ADMIN_IDS;
+            let categoryLabel = "Admin (Mentor)";
+            let targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
 
             if (targetAdminIds.length === 0) {
-                await ctx.reply("Вибачте, зараз немає активної наставниці. Спробуйте пізніше.");
+                await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
                 ctx.session.step = "idle";
                 return true;
             }
@@ -381,12 +383,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
                     delivered = true;
                 } catch (e) {
-                    logger.warn({ err: e, adminId }, "Failed to deliver mentor-stage message to mentor");
+                    logger.warn({ err: e, adminId }, "Failed to deliver mentor-stage message to main admin");
                 }
-            }
-
-            if (!delivered && ADMIN_IDS.length > 0) {
-                await ctx.api.sendMessage(Number(ADMIN_IDS[0]!), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => { });
             }
 
             try {
@@ -409,7 +407,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("✅ Повідомлення надіслано наставниці! Вона відповість найближчим часом. ✨");
+            await ctx.reply("✅ Повідомлення надіслано адміністратору! Він відповість найближчим часом. ✨");
             return true;
         }
 
@@ -520,8 +518,8 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             categoryLabel = "Admin (Setup)";
             targetAdminIds = ADMIN_IDS;
         } else if (!isExplicitSupportFlow && isMentorStage) {
-            categoryLabel = "Mentor";
-            targetAdminIds = MENTOR_IDS;
+            categoryLabel = "Admin (Mentor)";
+            targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
         } else if (isHRStage) {
             categoryLabel = "HR";
             targetAdminIds = HR_IDS;
