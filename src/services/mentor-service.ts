@@ -203,7 +203,7 @@ export class MentorService {
 
         const statusMap: Record<string, string> = {
             "ACCEPTED": cand.materialsSent ? "📩 Materials sent" : "🆕 New",
-            "MENTOR_MANUAL": "👩‍🏫 Manual mentoring",
+            "MENTOR_MANUAL": "👨‍🏫 Manual mentoring",
             "WAITLIST": "⏳ Waitlist",
             "WAITLIST_HR": "⏳ Waitlist (HR)",
             "WAITLIST_MENTOR": "⏳ Waitlist (Mentor)",

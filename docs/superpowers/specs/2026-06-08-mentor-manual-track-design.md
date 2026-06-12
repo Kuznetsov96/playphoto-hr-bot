@@ -16,7 +16,7 @@ Replace the **mentorship portion** of the funnel with a simple manual track:
 
 - The HR funnel stays exactly as it is.
 - After HR approval, the candidate enters a new manual mentor stage. The bot still sends the
-  existing handoff message ("наставниця зв'яжеться" + "Написати наставниці"). No automatic
+  existing handoff message ("наставник зв'яжеться" + "Написати наставнику"). No automatic
   self-scheduling button.
 - The mentor sees a simple list of these candidates. Each candidate has a profile card with
   the info the mentor needs, plus action buttons. The mentor contacts candidates manually
@@ -62,7 +62,7 @@ HR approves (hrDecision = ACCEPTED)
         │
         ▼
 worker.ts processes decision (≈6h delay) — UNCHANGED message
-   • sends "worker-offer-accepted" ("наставниця зв'яжеться") + "Написати наставниці" (contact_mentor)
+   • sends "worker-offer-accepted" ("наставник зв'яжеться") + "Написати наставнику" (contact_mentor)
    • sets status = MENTOR_MANUAL  (was: ACCEPTED)
         │
         ▼

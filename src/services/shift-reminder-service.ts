@@ -85,7 +85,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                         `Ти вже частина команди PlayPhoto, і ми дуже раді, що ти з нами. 📸\n\n` +
                         `📍 <b>${shift.location.name}</b>\n`;
                     if (shiftTime) text += `🕐 <b>${shiftTime}</b>\n`;
-                    text += `\nНе хвилюйся — наша наставниця буде на зв'язку онлайн протягом зміни і допоможе з усім розібратися.\n\n` +
+                    text += `\nНе хвилюйся — наш наставник буде на зв'язку онлайн протягом зміни і допоможе з усім розібратися.\n\n` +
                         `Впевнені, що все пройде чудово. Вдалого першого дня! ✨`;
 
                     const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");

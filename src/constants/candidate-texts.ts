@@ -15,7 +15,7 @@ export const CANDIDATE_TEXTS = {
     "candidate-info-processing": "Дякуємо! Обробляємо твою анкету... ⏳\n\nГотово",
     "candidate-screening-unfinished": (_firstName: string) => `<b>Анкету майже завершено! ✨</b>\n\nТвій шлях у PlayPhoto розпочато. Залишилося ще кілька кроків, щоб ми могли познайомитися ближче. Давай продовжимо! 📸`,
     "candidate-invite-reminder": (_firstName: string) => `<b>Час обрати зручний момент! 🗓️</b>\n\nПривіт! ✨ Ми вже чекаємо на зустріч із тобою, але слот для співбесіди ще не обрано. Тисни кнопку нижче, щоб забронювати зручний час для здзвону. ✨`,
-    "candidate-discovery-reminder": (_firstName: string) => `<b>Час для першого знайомства! ✨</b>\n\nПривіт! ✨ Ти вже маєш доступ до матеріалів PlayPhoto. Наступний крок — коротка відеозустріч із наставницею (20 хв). Обери зручний час, щоб ми могли познайомитися ближче! 🗓️`,
+    "candidate-discovery-reminder": (_firstName: string) => `<b>Час для першого знайомства! ✨</b>\n\nПривіт! ✨ Ти вже маєш доступ до матеріалів PlayPhoto. Наступний крок — коротка відеозустріч із наставником (20 хв). Обери зручний час, щоб ми могли познайомитися ближче! 🗓️`,
     "candidate-training-reminder": (_firstName: string) => `<b>Продовжимо твоє навчання? 📸</b>\n\nПривіт! ✨ Знайомство пройшло чудово! Залишився останній крок перед виходом на локацію — основне навчання. Обери зручне «вікно» у графіку, щоб розібрати всі тонкощі роботи. ✨`,
 
     // --- 2. РЕЗУЛЬТАТИ ВІДБОРУ ---
@@ -32,12 +32,12 @@ export const CANDIDATE_TEXTS = {
     },
 
     "candidate-accepted-materials": (_firstName: string) => `🌸 Привіт! ✨ Матеріали вже у тебе!\n\nНаступний крок — наша відеозустріч-знайомство (20 хв). Обери зручний час:`,
-    "candidate-accepted-welcome": (_firstName: string) => `🎉 <b>Вітаємо в команді! ✨</b>\n\nТи прийнята в команду PlayPhoto! 🌸✨\n\nНаставниця скоро зв'яжеться з тобою щодо навчання. Ласкаво просимо! 💖`,
+    "candidate-accepted-welcome": (_firstName: string) => `🎉 <b>Вітаємо в команді! ✨</b>\n\nТи прийнята в команду PlayPhoto! 🌸✨\n\nНаставник скоро зв'яжеться з тобою щодо навчання. Ласкаво просимо! 💖`,
 
     "candidate-training-scheduled": (typeLabel: string, dateStr: string, timeStr: string, meetLink?: string) => {
         let text = `🗓️ <b>Твоє ${typeLabel} заплановане!</b>\n\n📅 Дата: <b>${dateStr}</b>\n⏰ Час: <b>${timeStr}</b>\n`;
         if (meetLink) text += `📹 <a href="${meetLink}">Приєднатися до зустрічі</a>\n`;
-        text += `\nТвоя наставниця чекатиме на тебе! ✨`;
+        text += `\nТвій наставник чекатиме на тебе! ✨`;
         return text;
     },
 
@@ -60,14 +60,19 @@ export const CANDIDATE_TEXTS = {
     "discovery-invite": (_kbLink: string, channelLink: string, guideLink: string) => {
         const guideLine = guideLink
             ? `📚 Ознайомся з <a href="${guideLink}">гайдом фотографа</a>`
-            : `📚 Гайд фотографа надішле наставниця окремо`;
+            : `📚 Гайд фотографа надішле наставник окремо`;
         return `Привіт! ✨\n\nПеред нашою відеозустріччю (20 хв) будь ласка:\n\n${guideLine}\n🕊️ Підпишись на <a href="${channelLink}">канал підтримки</a>\n\nОбери зручний час для знайомства:`;
     },
-    "discovery-confirm": (mentorName: string, date: string, time: string) => `Чудово, зустріч призначено! 📅\n\nНаставниця <b>${mentorName}</b> чекатиме на тебе. Якщо виникнуть питання — ти можеш написати їй особисто.\n\n⏰ <b>${date}</b> о <b>${time}</b>\n🔗 Посилання на Meet надішлю за 10 хвилин до початку.`,
+    "discovery-confirm": (mentorName: string, date: string, time: string) => {
+        const mentorLine = mentorName.toLowerCase().includes("наставник")
+            ? `Твій ${mentorName}`
+            : `Наставник <b>${mentorName}</b>`;
+        return `Чудово, зустріч призначено! 📅\n\n${mentorLine} чекатиме на тебе. Якщо виникнуть питання — ти можеш написати йому особисто.\n\n⏰ <b>${date}</b> о <b>${time}</b>\n🔗 Посилання на Meet надішлю за 10 хвилин до початку.`;
+    },
     "training-manual-invite": (date: string, time: string, channelLink: string, guideLink: string) => {
         const guideLine = guideLink
             ? `📚 <a href="${guideLink}">Гайд фотографа</a>`
-            : `📚 Гайд фотографа надішле наставниця окремо`;
+            : `📚 Гайд фотографа надішле наставник окремо`;
         return `<b>Ти в команді! 📸</b>\n\nНам було дуже приємно познайомитися. Твій наступний крок — online-стажування, де ми разом розберемо всі тонкощі твоєї нової ролі.\n\n📅 <b>${date}</b> о <b>${time}</b>\n\nБудь ласка, повністю ознайомся з гайдом фотографа перед зустріччю — це допоможе нам провести час продуктивно:\n\n🕊️ <a href="${channelLink}">Канал підтримки</a>\n${guideLine}\n\nПосилання на зустріч надішлю за 10 хвилин до початку. До зустрічі! 🤍`;
     },
 
@@ -103,7 +108,7 @@ export const CANDIDATE_TEXTS = {
     "candidate-btn-appr-yes": "Так, маю 💍",
     "candidate-val-appearance-none": "Без особливостей",
     "candidate-ask-appearance-details": "Зрозуміла! Напиши, будь ласка, детальніше: що саме і де знаходиться? Або просто <b>надішли фото</b> (так буде навіть краще!) 📸✨",
-    "candidate-support-welcome": "❤️ <b>Раді тебе бачити!</b>\n\nТвій шлях у PlayPhoto вже розпочався. 📸\n\nЩоб твоє питання було вирішено максимально швидко — будь ласка, скористайся кнопкою <b>'Допомога 🆘'</b> в головному меню або напиши своїй наставниці в особисті повідомлення.",
+    "candidate-support-welcome": "❤️ <b>Раді тебе бачити!</b>\n\nТвій шлях у PlayPhoto вже розпочався. 📸\n\nЩоб твоє питання було вирішено максимально швидко — будь ласка, скористайся кнопкою <b>'Допомога 🆘'</b> в головному меню або напиши своєму наставнику в особисті повідомлення.",
     "candidate-feedback-sent": "✨ <b>Повідомлення надіслано!</b>\n\nМи отримали твій запит і відповімо найближчим часом. Очікуй сповіщення! 🕊️",
     "candidate-confirm-msg-to-role": (roleLabel: string, text: string) => `🧐 <b>Це повідомлення для ${roleLabel}?</b>\n\nТвій текст: <i>"${text}"</i>\n\nЯкщо так — натисни кнопку нижче, щоб ми його отримали. ✨`,
     "candidate-confirm-photo-to-role": (roleLabel: string) => `🧐 <b>Надіслати це фото ${roleLabel}?</b>\n\nЯкщо так — натисни кнопку нижче. ✨`,
