@@ -41,10 +41,10 @@ const locations = [
         sheet: 'Kidlandia',
         schedule: "Пн-Пт — 14:00-21:00\nСб-Нд — 12:00-21:00",
         salary: "Пн-Пт — 1 человек 20%\nСб-Нд — 1 человек 30%",
-        hasAcquiring: true,
+        hasAcquiring: false,
         cashInEnvelope: false,
         fopId: 'KARPUK',
-        searchId: 19,
+        searchId: 21,
         telegramChatId: BigInt(-1001982334091)
     },
 
