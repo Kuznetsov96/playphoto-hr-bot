@@ -57,7 +57,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
                     if (decision === "ACCEPTED") {
                         const firstName = extractFirstName(cand.fullName || "Кандидатко");
-                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `твоя наставниця ${MENTOR_NAME}`;
+                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `твій наставник ${MENTOR_NAME}`;
 
                         try {
                             await bot.api.sendMessage(
@@ -65,7 +65,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 CANDIDATE_TEXTS["worker-offer-accepted"](firstName, mentorDisplay),
                                 {
                                     parse_mode: "HTML",
-                                    reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_mentor")
+                                    reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
                                 }
                             );
                             await candidateRepository.update(cand.id, {
@@ -328,7 +328,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                     const firstName = extractFirstName(cand.fullName || "Candidate");
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `наставниця ${MENTOR_NAME}`;
+                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
                     const typeText = isDiscovery ? "discovery" : "training";
                     const msg = await bot.api.sendMessage(
@@ -336,7 +336,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-6h"](firstName, typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_mentor")
+                            reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -414,7 +414,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink; // Both use same field for now
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставниц") ? MENTOR_NAME : `наставниця ${MENTOR_NAME}`;
+                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
                     const typeText = isDiscovery ? "discovery" : "training";
                     await bot.api.sendMessage(
@@ -422,7 +422,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👩‍🏫 Написати наставниці", "contact_mentor")
+                            reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });
@@ -1898,7 +1898,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     // Day 5: Warning (We run this once a day, so it will hit exactly once)
                     let contextStr = "на твій наступний крок";
                     switch (cand.status) {
-                        case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставницею"; break;
+                        case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставником"; break;
                         case "NDA": contextStr = "на ознайомлення з NDA (правилами команди)"; break;
                         case "KNOWLEDGE_TEST": contextStr = "на проходження фінального тесту"; break;
                     }

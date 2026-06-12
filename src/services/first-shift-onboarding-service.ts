@@ -830,7 +830,7 @@ export class FirstShiftOnboardingService {
             `📌 <b>Стан:</b> ${mentorState}\n` +
             `🔢 <b>Зараз:</b> ${currentLabel}\n` +
             `📝 <b>Що робить фотограф:</b> ${photographerTask}\n` +
-            `👩‍🏫 <b>Дія ментора:</b> ${escapeHtml(mentorAction)}\n` +
+            `👨‍🏫 <b>Дія ментора:</b> ${escapeHtml(mentorAction)}\n` +
             `⏱ <b>Очікує:</b> ${escapeHtml(waitingLabel)}\n` +
             `🕒 <b>Оновлено:</b> ${escapeHtml(this.formatDateTime(new Date()))}`;
     }

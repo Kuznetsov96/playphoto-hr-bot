@@ -17,7 +17,7 @@ const envSchema = z.object({
     MENTOR_IDS: z.string().default(""),
     HR_IDS: z.string().default(""),
     HR_NAME: z.string().default("HR"),
-    MENTOR_NAME: z.string().default("наставниця"),
+    MENTOR_NAME: z.string().default("наставник"),
     FINANCE_IDS: z.string().default(""),
 
     // Google / Sheets
@@ -95,6 +95,11 @@ export const BOT_TOKEN = env.BOT_TOKEN;
 
 // Helper to parse number arrays
 const parseNumArray = (str: string) => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+const normalizeMentorName = (value: string) => value
+    .replace(/\u0442\u0432\u043e\u044f \u043d\u0430\u0441\u0442\u0430\u0432\u043d\u0438\u0446\u044f/gi, "твій наставник")
+    .replace(/\u043d\u0430\u0441\u0442\u0430\u0432\u043d\u0438\u0446\u044f/gi, "наставник")
+    .replace(/\u043d\u0430\u0441\u0442\u0430\u0432\u043d\u0438\u0446\u0456/gi, "наставнику")
+    .trim();
 
 export const ADMIN_IDS = parseNumArray(env.ADMIN_IDS);
 export const CO_FOUNDER_IDS = parseNumArray(env.CO_FOUNDER_IDS);
@@ -102,7 +107,7 @@ export const SUPPORT_IDS = parseNumArray(env.SUPPORT_IDS);
 export const MENTOR_IDS = parseNumArray(env.MENTOR_IDS);
 export const HR_IDS = parseNumArray(env.HR_IDS);
 export const HR_NAME = env.HR_NAME;
-export const MENTOR_NAME = env.MENTOR_NAME;
+export const MENTOR_NAME = normalizeMentorName(env.MENTOR_NAME);
 export const FINANCE_IDS = parseNumArray(env.FINANCE_IDS);
 
 export const TRAINING_STATUSES = ["ACCEPTED", "TRAINING_SCHEDULED", "TRAINING_COMPLETED", "OFFLINE_STAGING"];

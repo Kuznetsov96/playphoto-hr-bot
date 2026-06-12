@@ -165,7 +165,7 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
 🏙️ City: ${p.city}
 Admin created the schedule and entered data. Please conduct the first shift and set a score in "Onboarding" menu.`,
   "hr-info-cand-schedule-ready": `✨ <b>Твій графік готовий!</b>
-Наш адміністратор вніс твої дані в систему та підготував робочий графік. Твоя наставниця зв'яжеться з тобою для узгодження твоєї першої робочої зміни. Ласкаво просимо! 📸`,
+Наш адміністратор вніс твої дані в систему та підготував робочий графік. Твій наставник зв'яжеться з тобою для узгодження твоєї першої робочої зміни. Ласкаво просимо! 📸`,
   "hr-ans-mentor-notified": `Done! Mentor notified. 🚀`,
   "hr-info-broadcast-confirm": (p: { city: string | number, count: string | number }) => `🌆 City: <b>${p.city}</b>
 👥 Candidates in queue: <b>${p.count}</b>

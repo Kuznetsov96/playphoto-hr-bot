@@ -645,9 +645,9 @@ In `src/menus/mentor.ts`, in `mentorInboxMenu.dynamic` (the non-waitlist branch,
 ```typescript
         const manualCandidates = await mentorService.getManualMentorCandidates();
         if (manualCandidates.length > 0) {
-            range.text("👩‍🏫 Manual ——").row();
+            range.text("👨‍🏫 Manual ——").row();
             for (const cand of manualCandidates) {
-                const label = `👩‍🏫 ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+                const label = `👨‍🏫 ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
                 range.text(label, async (ctx) => {
                     ctx.session.selectedCandidateId = cand.id;
                     const text = await getMentorCandidateProfileText(ctx, cand.id);
@@ -691,7 +691,7 @@ In `mentorInboxDetailsMenu.dynamic`, add a branch for the manual status. Place i
 The existing `✍️ Reply` button (guarded by `cand.status !== "TRAINING_COMPLETED"`) already covers `MENTOR_MANUAL`, so the mentor gets a bot-reply fallback automatically. `getCandidateDetails` already has a `statusMap`; add a label for the new status so the card header reads cleanly — in `mentor-service.ts` `getCandidateDetails`, add to `statusMap`:
 
 ```typescript
-            "MENTOR_MANUAL": "👩‍🏫 Manual mentoring",
+            "MENTOR_MANUAL": "👨‍🏫 Manual mentoring",
 ```
 
 - [ ] **Step 3: Build and menu-id check**

@@ -300,9 +300,9 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
         }
 
         if (stats.manualCount > 0) {
-            range.text(`👩‍🏫 Manual ${stats.manualCount}`, async (ctx) => {
+            range.text(`👨‍🏫 Manual ${stats.manualCount}`, async (ctx) => {
                 ctx.session.manualPage = 1;
-                await ScreenManager.renderScreen(ctx, "👩‍🏫 <b>Manual</b>\nCandidates you're guiding personally: 👇", "mentor-manual", { pushToStack: true });
+                await ScreenManager.renderScreen(ctx, "👨‍🏫 <b>Manual</b>\nCandidates you're guiding personally: 👇", "mentor-manual", { pushToStack: true });
             }).row();
         }
 
@@ -354,7 +354,7 @@ mentorManualMenu.dynamic(async (ctx, range) => {
         range.text("No candidates here. ✨", (ctx) => ctx.answerCallbackQuery("Nothing to do!")).row();
     } else {
         for (const cand of pageItems) {
-            const label = `👩‍🏫 ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const label = `👨‍🏫 ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
