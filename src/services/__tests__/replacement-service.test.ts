@@ -600,6 +600,67 @@ describe("ReplacementService", () => {
         );
     });
 
+    it("reports a closed request when a photographer accepts after another replacement was found", async () => {
+        const request: any = {
+            id: "request-found",
+            locationId: "location-found",
+            city: "Запоріжжя",
+            shiftDate: new Date("2030-05-15T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-15T12:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-15T20:00:00.000Z"),
+            status: "FOUND",
+            location: { id: "location-found", name: "Volkland 3", city: "Запоріжжя", schedule: null },
+            requester: { id: "requester-found", fullName: "Іщенко Вікторія", user: { telegramId: 772086875n } },
+            replacementStaffId: "replacement-other",
+        };
+
+        prismaMock.replacementResponse.findUnique.mockResolvedValue({
+            id: "response-late",
+            requestId: request.id,
+            staffId: "replacement-late",
+            status: "INACTIVE",
+            chatId: 1132074881n,
+            messageId: 321,
+            request,
+            staff: { id: "replacement-late", fullName: "Пізній Фотограф", user: { telegramId: 1132074881n } },
+        });
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().accept({} as any, "replacement-late", request.id);
+
+        expect(result).toBe("closed");
+        expect(prismaMock.workShift.count).not.toHaveBeenCalled();
+        expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("reports a closed request when a photographer declines after another replacement was found", async () => {
+        const request: any = {
+            id: "request-found-decline",
+            locationId: "location-found",
+            city: "Запоріжжя",
+            shiftDate: new Date("2030-05-15T00:00:00.000Z"),
+            status: "FOUND",
+            replacementStaffId: "replacement-other",
+        };
+
+        prismaMock.replacementResponse.findUnique.mockResolvedValue({
+            id: "response-late-decline",
+            requestId: request.id,
+            staffId: "replacement-late",
+            status: "INACTIVE",
+            chatId: 1132074881n,
+            messageId: 321,
+            request,
+        });
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().decline({} as any, "replacement-late", request.id);
+
+        expect(result).toBe("closed");
+        expect(prismaMock.replacementResponse.update).not.toHaveBeenCalled();
+        expect(prismaMock.replacementResponse.count).not.toHaveBeenCalled();
+    });
+
     it("blocks a duplicate active search for the same requester, date, and location after a shift resync", async () => {
         const shift: any = {
             id: "shift-new",

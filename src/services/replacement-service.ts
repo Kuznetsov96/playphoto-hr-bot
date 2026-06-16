@@ -283,8 +283,8 @@ export class ReplacementService {
         });
 
         if (!response) return "not_found" as const;
-        if (response.status !== ReplacementResponseStatus.SENT) return "already_answered" as const;
         if (response.request.status !== ReplacementRequestStatus.ACTIVE) return "closed" as const;
+        if (response.status !== ReplacementResponseStatus.SENT) return "already_answered" as const;
 
         const hasConflict = await this.hasShiftOnDate(staffId, response.request.shiftDate);
         if (hasConflict) return "conflict" as const;
@@ -344,8 +344,8 @@ export class ReplacementService {
         });
 
         if (!response) return "not_found" as const;
-        if (response.status !== ReplacementResponseStatus.SENT) return "already_answered" as const;
         if (response.request.status !== ReplacementRequestStatus.ACTIVE) return "closed" as const;
+        if (response.status !== ReplacementResponseStatus.SENT) return "already_answered" as const;
 
         await prisma.replacementResponse.update({
             where: { id: response.id },
