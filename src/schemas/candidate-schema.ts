@@ -17,7 +17,7 @@ export const CandidateSchema = z.object({
                 age--;
             }
             return age >= 17;
-        }, "Ми приймаємо на роботу лише з 17 років")
+        }, "Цей етап поки недоступний для твоєї анкети")
         .refine(date => date > new Date(1950, 0, 1), "Введіть реальну дату народження"),
 
     phone: z.string()
