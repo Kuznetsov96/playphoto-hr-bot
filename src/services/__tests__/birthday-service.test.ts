@@ -130,7 +130,7 @@ describe("greetCandidateBirthdays", () => {
         }));
         expect(sendMessage).toHaveBeenCalledWith(
             1003,
-            expect.stringContaining("Сьогодні тобі виповнилося 17"),
+            expect.stringContaining("Ми повернули твою анкету до списку актуальних"),
             expect.objectContaining({ parse_mode: "HTML" })
         );
     });
