@@ -3,11 +3,9 @@ import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { taskService } from "./task-service.js";
-import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 
 export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
     const now = new Date();
@@ -28,43 +26,6 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             return;
         }
 
-        // Pre-fetch onboarding candidates from the real work schedule.
-        const onboardingCandidates = await prisma.candidate.findMany({
-            where: {
-                status: CandidateStatus.HIRED,
-                isMentorLocked: true,
-                user: {
-                    is: {
-                        staffProfile: {
-                            is: {
-                                shifts: {
-                                    some: { date: { gte: startOfDay, lte: endOfDay } }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            include: {
-                user: {
-                    include: {
-                        staffProfile: {
-                            include: {
-                                shifts: {
-                                    where: { date: { gte: startOfDay, lte: endOfDay } },
-                                    orderBy: { date: "asc" },
-                                    take: 1,
-                                    include: { location: true }
-                                }
-                            }
-                        }
-                    }
-                },
-                location: true
-            }
-        });
-        const onboardingByUserId = new Map(onboardingCandidates.map(c => [c.userId, c]));
-
         for (const shift of todayShifts) {
             const staff = shift.staff;
             const telegramId = (staff as any).user?.telegramId;
@@ -75,88 +36,46 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             }
 
             try {
-                const isFirstShift = onboardingByUserId.has(staff.userId);
+                const dateStr = shift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
+                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸\nВдалого дня та гарних знімків! ✨`;
 
-                if (isFirstShift) {
-                    // First shift — special onboarding message
-                    const shiftTime = getShiftTimeFromLocationSchedule(shift.location.schedule, shift.date) || "";
+                const tasks = await taskService.getStaffActiveTasks(staff.id);
+                const activeTasksCount = tasks.filter(t => !t.isCompleted).length;
+                const taskSummary = activeTasksCount > 0
+                    ? `\n\n🔴 <b>У тебе є активні завдання (${activeTasksCount})!</b>\nПереглянь їх у розділі «Мої завдання». 👇`
+                    : "";
 
-                    let text = `🌟 <b>Сьогодні твій перший робочий день!</b>\n\n` +
-                        `Ти вже частина команди PlayPhoto, і ми дуже раді, що ти з нами. 📸\n\n` +
-                        `📍 <b>${shift.location.name}</b>\n`;
-                    if (shiftTime) text += `🕐 <b>${shiftTime}</b>\n`;
-                    text += `\nНе хвилюйся — наш наставник буде на зв'язку онлайн протягом зміни і допоможе з усім розібратися.\n\n` +
-                        `Впевнені, що все пройде чудово. Вдалого першого дня! ✨`;
+                const pendingParcelsCount = await prisma.parcel.count({
+                    where: {
+                        locationId: shift.locationId,
+                        OR: [
+                            { status: { in: ['EXPECTED', 'ARRIVED'] } },
+                            { status: 'DELIVERED', contentPhotoIds: { isEmpty: true } }
+                        ]
+                    }
+                });
 
-                    const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
-                    await bot.api.sendMessage(Number(telegramId), text, { parse_mode: "HTML", reply_markup: kb });
-                    logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "First shift onboarding reminder sent");
-                } else {
-                    // Regular shift reminder
-                    const dateStr = shift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸\nВдалого дня та гарних знімків! ✨`;
+                const parcelsSummary = pendingParcelsCount > 0
+                    ? `\n\n📦 <b>Активні посилки на локації: ${pendingParcelsCount} шт.</b>\nВідкрий меню «📦 Посилки локації»: там можуть бути як посилки на забір, так і посилки, де треба дозавантажити фото вмісту.`
+                    : "";
 
-                    const tasks = await taskService.getStaffActiveTasks(staff.id);
-                    const activeTasksCount = tasks.filter(t => !t.isCompleted).length;
-                    const taskSummary = activeTasksCount > 0
-                        ? `\n\n🔴 <b>У тебе є активні завдання (${activeTasksCount})!</b>\nПереглянь їх у розділі «Мої завдання». 👇`
-                        : "";
+                const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографине';
+                const greeting = `👋 <b>Доброго ранку, ${firstName}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
 
-                    const pendingParcelsCount = await prisma.parcel.count({
-                        where: {
-                            locationId: shift.locationId,
-                            OR: [
-                                { status: { in: ['EXPECTED', 'ARRIVED'] } },
-                                { status: 'DELIVERED', contentPhotoIds: { isEmpty: true } }
-                            ]
-                        }
-                    });
+                const fullText = `${greeting}\n\n${shiftText}${taskSummary}${parcelsSummary}`;
+                const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
 
-                    const parcelsSummary = pendingParcelsCount > 0
-                        ? `\n\n📦 <b>Активні посилки на локації: ${pendingParcelsCount} шт.</b>\nВідкрий меню «📦 Посилки локації»: там можуть бути як посилки на забір, так і посилки, де треба дозавантажити фото вмісту.`
-                        : "";
-
-                    const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографине';
-                    const greeting = `👋 <b>Доброго ранку, ${firstName}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
-
-                    const fullText = `${greeting}\n\n${shiftText}${taskSummary}${parcelsSummary}`;
-                    const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
-
-                    await bot.api.sendMessage(Number(telegramId), fullText, {
-                        parse_mode: "HTML",
-                        reply_markup: kb,
-                        disable_notification: true
-                    });
-                    logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");
-                }
+                await bot.api.sendMessage(Number(telegramId), fullText, {
+                    parse_mode: "HTML",
+                    reply_markup: kb,
+                    disable_notification: true
+                });
+                logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");
             } catch (err) {
                 logger.error({ err, telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder delivery failed");
             }
         }
 
-        // Notify mentors about today's onboarding candidates
-        if (onboardingCandidates.length > 0) {
-            const { MENTOR_IDS } = await import("../config.js");
-            for (const cand of onboardingCandidates) {
-                const shift = cand.user.staffProfile?.shifts?.[0];
-                if (!shift) continue;
-
-                const locName = shift.location?.name || cand.location?.name || cand.city || "—";
-                const shiftTime = getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "";
-
-                let text = `🎓 <b>Onboarding Today</b>\n\n` +
-                    `👤 ${cand.fullName}\n` +
-                    `📍 ${locName}\n`;
-                if (shiftTime) text += `🕐 ${shiftTime}\n`;
-                text += `\nPlease stay available online during the shift.`;
-
-                const kb = new InlineKeyboard().text("👤 Profile", `mentor_onboarding_details_${cand.id}`);
-                for (const mentorId of MENTOR_IDS) {
-                    await bot.api.sendMessage(mentorId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
-                }
-                logger.debug({ candidateId: cand.id }, "Mentor onboarding reminder sent");
-            }
-        }
         logBusinessEvent({
             event: "staff.shift_reminders.completed",
             actorType: "system",
@@ -166,7 +85,6 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             operation: "sendDailyShiftReminders",
             safeContext: {
                 shiftsCount: todayShifts.length,
-                onboardingCandidatesCount: onboardingCandidates.length,
             },
         });
     } catch (error) {

@@ -21,12 +21,10 @@ import { startLogisticsLoop } from "./services/logistics-worker.js";
 import { startLogCleanupLoop } from "./services/log-cleanup-service.js";
 import { startAuditCleanupLoop } from "./services/audit-cleanup-service.js";
 import { startSecurityCleanupLoop } from "./services/security-cleanup-service.js";
-import { startFirstShiftOnboardingLoop } from "./services/first-shift-onboarding-service.js";
 import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
-import { startHireOnboardingSyncLoop } from "./services/mentor-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 
 let runner: RunnerHandle | undefined;
@@ -135,8 +133,6 @@ async function bootstrap() {
         startLogCleanupLoop();
         startAuditCleanupLoop();
         startSecurityCleanupLoop();
-        startFirstShiftOnboardingLoop(bot as any);
-        startHireOnboardingSyncLoop();
         remindersService.startRemindersLoop(bot.api);
         
         webhookService.listen(bot.api);

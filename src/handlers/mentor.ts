@@ -8,6 +8,8 @@ import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
+import { escapeHtml } from "./admin/utils.js";
+import { CandidateStatus } from "@prisma/client";
 
 export const mentorHandlers = new Composer<MyContext>();
 
@@ -28,6 +30,54 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
     const step = ctx.session.step || "";
 
     if (text.startsWith("/")) return next();
+
+    // Staff mentors do not pass through hrHandlers, so mentor replies need local handling.
+    if (step.startsWith("admin_reply_")) {
+        const targetId = step.replace("admin_reply_", "");
+        if (!/^\d+$/.test(targetId)) return next();
+
+        try {
+            const cand = await candidateRepository.findByTelegramId(Number(targetId));
+            const name = cand?.fullName?.split(" ")[0] || "Candidate";
+
+            const msgOptions: Parameters<typeof ctx.api.sendMessage>[2] = { parse_mode: "HTML" };
+            if (cand?.gender !== "male") {
+                msgOptions.reply_markup = new InlineKeyboard().text("💬 Відповісти", "contact_mentor");
+            }
+
+            await ctx.api.sendMessage(
+                Number(targetId),
+                `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${escapeHtml(text)}`,
+                msgOptions
+            );
+
+            if (cand) {
+                const { messageRepository } = await import("../repositories/message-repository.js");
+                await messageRepository.create({
+                    candidate: { connect: { id: cand.id } },
+                    sender: "MENTOR",
+                    scope: "MENTOR",
+                    content: text
+                });
+                await candidateRepository.update(cand.id, { hasUnreadMessage: false });
+            }
+
+            await ScreenManager.renderScreen(ctx, `✅ Message sent to ${name}.`, "mentor-action-success");
+        } catch (e: any) {
+            if (e.description?.includes("forbidden") || e.description?.includes("blocked") || e.error_code === 403) {
+                const cand = await candidateRepository.findByTelegramId(Number(targetId));
+                if (cand) {
+                    await candidateRepository.update(cand.id, { status: CandidateStatus.BLOCKER, hasUnreadMessage: false });
+                    await ScreenManager.renderScreen(ctx, `🚫 <b>Candidate stopped the bot.</b>\n\nReply to <b>${cand.fullName}</b> is impossible. Her status has been changed to BLOCKER.`);
+                }
+            } else {
+                await ScreenManager.renderScreen(ctx, `❌ Send error: ${e.message}`);
+            }
+        }
+
+        ctx.session.step = "idle";
+        return;
+    }
 
     // 1. Handle manual time for Discovery/Internship
     if (step.startsWith("wait_mentor_manual_time_")) {
@@ -112,17 +162,6 @@ mentorHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => 
 });
 
 // --- CALLBACK HANDLERS ---
-
-mentorHandlers.callbackQuery(/^mentor_onboarding_details_(.+)$/, async (ctx) => {
-    const candId = ctx.match![1]!;
-    await ctx.answerCallbackQuery();
-    ctx.session.selectedCandidateId = candId;
-    const cand = await mentorService.getCandidateForMentorProfile(candId);
-    if (!cand) return;
-    const { formatCandidateProfile } = await import("../utils/profile-formatter.js");
-    const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true, viewerRole: "MENTOR" });
-    await ScreenManager.renderScreen(ctx, text, "mentor-onboarding-details", { pushToStack: true });
-});
 
 mentorHandlers.callbackQuery(/^mentor_discovery_passed_(.+)$/, async (ctx) => {
     const candId = ctx.match![1]!;

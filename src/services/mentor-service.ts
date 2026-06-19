@@ -2,7 +2,6 @@ import { Bot, InlineKeyboard, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
-import { locationRepository } from "../repositories/location-repository.js";
 import { accessService } from "./access-service.js";
 import { ADMIN_IDS, KNOWLEDGE_BASE_LINK, NDA_LINK, PHOTOGRAPHER_GUIDE_LINK } from "../config.js";
 import { extractFirstName } from "../utils/string-utils.js";
@@ -12,7 +11,7 @@ import { createKyivDate } from "../utils/bot-utils.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
 import { cleanupUserSessionMessages } from "../utils/cleanup.js";
 import prisma from "../db/core.js";
-import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
+import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
@@ -36,78 +35,6 @@ export class MentorService {
         const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         kyivNow.setHours(0, 0, 0, 0);
         return kyivNow;
-    }
-
-    private getMentorOnboardingWhere(fromDate: Date, candId?: string): Prisma.CandidateWhereInput {
-        return {
-            ...(candId ? { id: candId } : {}),
-            status: CandidateStatus.HIRED,
-            isMentorLocked: true,
-            fullName: { not: null },
-            user: {
-                is: {
-                    staffProfile: {
-                        is: {
-                            shifts: {
-                                some: {
-                                    date: { gte: fromDate }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-    }
-
-    private async findMentorOnboardingCandidates(fromDate: Date = this.getKyivStartOfToday(), candId?: string) {
-        const rows = await prisma.candidate.findMany({
-            where: this.getMentorOnboardingWhere(fromDate, candId),
-            include: {
-                user: {
-                    include: {
-                        staffProfile: {
-                            include: {
-                                shifts: {
-                                    where: { date: { gte: fromDate } },
-                                    orderBy: { date: "asc" },
-                                    take: 1,
-                                    include: { location: true }
-                                }
-                            }
-                        }
-                    }
-                },
-                location: true,
-                firstShiftPartner: { include: { user: true } },
-                discoverySlot: true,
-                trainingSlot: true,
-                interviewSlot: true,
-                messages: true
-            }
-        });
-
-        return rows
-            .flatMap((cand) => {
-                const nextShift = cand.user.staffProfile?.shifts?.[0];
-                if (!nextShift) return [];
-
-                const shiftLocation = nextShift.location || cand.location;
-                const shiftTime = getShiftTimeFromLocationSchedule(shiftLocation?.schedule, nextShift.date) || cand.firstShiftTime;
-
-                return [{
-                    ...cand,
-                    location: shiftLocation,
-                    firstShiftDate: nextShift.date,
-                    firstShiftTime: shiftTime
-                }];
-            })
-            .sort((a, b) => {
-                const aTime = new Date(a.firstShiftDate).getTime();
-                const bTime = new Date(b.firstShiftDate).getTime();
-                if (aTime !== bTime) return aTime - bTime;
-                return (a.fullName || '').localeCompare(b.fullName || '');
-            });
     }
 
     private getMentorWaitlistWhere() {
@@ -149,7 +76,6 @@ export class MentorService {
             }
         });
 
-        const onboardingCount = (await this.findMentorOnboardingCandidates()).length;
         const manualCount = await candidateRepository.countByStatus(CandidateStatus.MENTOR_MANUAL);
 
         return {
@@ -157,7 +83,6 @@ export class MentorService {
             calendarCount: trainingToday + overdue,
             trainingToday,
             overdue,
-            onboardingCount,
             newAcceptedCount,
             awaitingBookingCount,
             readyForTrainingCount,
@@ -178,8 +103,7 @@ export class MentorService {
 
         return `🎓 <b>Mentor Hub</b>\n\n` +
             `📥 <b>Inbox:</b> ${totalInbox}\n` +
-            `${calendarText}\n` +
-            `🚀 <b>Onboarding:</b> ${stats.onboardingCount}\n`;
+            `${calendarText}\n`;
     }
 
     async getWaitlistCount() {
@@ -189,8 +113,6 @@ export class MentorService {
     }
 
     async getCandidateForMentorProfile(candId: string) {
-        const onboardingCandidate = (await this.findMentorOnboardingCandidates(this.getKyivStartOfToday(), candId))[0];
-        if (onboardingCandidate) return onboardingCandidate;
         return candidateRepository.findById(candId);
     }
 
@@ -478,10 +400,6 @@ export class MentorService {
         return { candidate: cand, result };
     }
 
-    async getOnboardingCandidates() {
-        return await this.findMentorOnboardingCandidates();
-    }
-
     async getManualMentorCandidates() {
         return await candidateRepository.findByStatusWithUser(CandidateStatus.MENTOR_MANUAL);
     }
@@ -554,166 +472,6 @@ export class MentorService {
         });
 
         return link;
-    }
-
-    async syncHireOnboardingStateForStaff(staffId: string) {
-        const fromDate = this.getKyivStartOfToday();
-        const staff = await prisma.staffProfile.findUnique({
-            where: { id: staffId },
-            include: {
-                user: {
-                    include: {
-                        candidate: {
-                            include: {
-                                firstShiftOnboardingCase: true,
-                            },
-                        },
-                    },
-                },
-                shifts: {
-                    where: { date: { gte: fromDate } },
-                    orderBy: { date: "asc" },
-                    take: 1,
-                    include: { location: true },
-                },
-            },
-        });
-
-        const candidate = staff?.user?.candidate;
-        const nextShift = staff?.shifts?.[0];
-        if (!candidate || !nextShift) return null;
-
-        const nextShiftTime = getShiftTimeFromLocationSchedule(nextShift.location?.schedule, nextShift.date) || candidate.firstShiftTime;
-        const hasDateDrift = !candidate.firstShiftDate || candidate.firstShiftDate.getTime() !== nextShift.date.getTime();
-        const hasTimeDrift = (candidate.firstShiftTime || null) !== (nextShiftTime || null);
-        const hasLocationDrift = candidate.locationId !== nextShift.locationId;
-
-        const caseStatus = candidate.firstShiftOnboardingCase?.status || null;
-        const hasActiveCase = !!caseStatus && !["PASSED", "FAILED"].includes(caseStatus);
-        const hasPassedFirstShiftOnboarding = caseStatus === "PASSED";
-        const isReopenableStatus =
-            candidate.status === CandidateStatus.AWAITING_FIRST_SHIFT ||
-            candidate.status === CandidateStatus.HIRED;
-
-        const shouldRelock =
-            !hasActiveCase &&
-            !hasPassedFirstShiftOnboarding &&
-            !candidate.isMentorLocked &&
-            isReopenableStatus &&
-            (!candidate.firstShiftDate || candidate.firstShiftDate < fromDate || hasDateDrift);
-
-        const updateData: Prisma.CandidateUpdateInput = {};
-        if (hasDateDrift) updateData.firstShiftDate = nextShift.date;
-        if (hasTimeDrift) updateData.firstShiftTime = nextShiftTime;
-        if (hasLocationDrift) updateData.location = { connect: { id: nextShift.locationId } };
-        if (shouldRelock) updateData.isMentorLocked = true;
-
-        if (Object.keys(updateData).length > 0) {
-            await candidateRepository.update(candidate.id, updateData);
-        }
-
-        return {
-            candidateId: candidate.id,
-            relocked: shouldRelock,
-            refreshed: Object.keys(updateData).length > 0,
-            nextShift: {
-                date: nextShift.date,
-                locationId: nextShift.locationId,
-                locationName: nextShift.location?.name || candidate.locationId || "Unknown",
-                time: nextShiftTime || null,
-            },
-        };
-    }
-
-    async syncAllHireOnboardingStates(fromDate: Date = this.getKyivStartOfToday()) {
-        const staffRows = await prisma.staffProfile.findMany({
-            where: {
-                isActive: true,
-                user: {
-                    is: {
-                        candidate: {
-                            is: {
-                                status: { in: [CandidateStatus.AWAITING_FIRST_SHIFT, CandidateStatus.HIRED] },
-                            },
-                        },
-                    },
-                },
-                shifts: {
-                    some: {
-                        date: { gte: fromDate },
-                    },
-                },
-            },
-            select: { id: true },
-        });
-
-        let refreshedCount = 0;
-        let relockedCount = 0;
-        let errorCount = 0;
-
-        for (const staff of staffRows) {
-            try {
-                const result = await this.syncHireOnboardingStateForStaff(staff.id);
-                if (result?.refreshed) refreshedCount++;
-                if (result?.relocked) relockedCount++;
-            } catch (err) {
-                errorCount++;
-                logger.error({ err, staffId: staff.id }, "Hire onboarding background sync failed for staff");
-            }
-        }
-
-        return {
-            scannedCount: staffRows.length,
-            refreshedCount,
-            relockedCount,
-            errorCount,
-        };
-    }
-
-    async completeOnboarding(candId: string, success: boolean, api?: Api) {
-        const cand = await candidateRepository.findById(candId);
-        if (!cand) return null;
-
-        if (success) {
-            await candidateRepository.update(candId, {
-                status: "HIRED",
-                isMentorLocked: false
-            });
-            if (cand.locationId) {
-                try { await locationRepository.update(cand.locationId, { neededCount: { decrement: 1 } }); } catch (e) { }
-            }
-            if (cand.user) {
-                await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: SUCCESS (HIRED)");
-            }
-            await this.closeFirstShiftOnboardingFromLegacy(candId, true, api);
-            return { candidate: cand, success: true };
-        } else {
-            await candidateRepository.update(candId, { status: "REJECTED" });
-            if (cand.user) {
-                await accessService.syncUserAccess(cand.user.telegramId, "Onboarding result: FAILED");
-            }
-            await this.closeFirstShiftOnboardingFromLegacy(candId, false, api);
-            return { candidate: cand, success: false };
-        }
-    }
-
-    private async closeFirstShiftOnboardingFromLegacy(candId: string, success: boolean, api?: Api) {
-        if (!api) return;
-
-        try {
-            const { firstShiftOnboardingRepository } = await import("../repositories/first-shift-onboarding-repository.js");
-            const { firstShiftOnboardingService } = await import("./first-shift-onboarding-service.js");
-            const activeCase = await firstShiftOnboardingRepository.findActiveCaseByCandidateId(candId);
-            if (!activeCase) return;
-
-            if (success) {
-                await firstShiftOnboardingService.completeCase(api, activeCase.id);
-            } else {
-                await firstShiftOnboardingService.failCase(api, activeCase.id, "Legacy mentor onboarding marked as failed.");
-            }
-        } catch (err) {
-            logger.error({ err, candId, success }, "Failed to close first-shift onboarding from legacy mentor completion");
-        }
     }
 
     async getTrainingSlots(date?: string) {
@@ -1031,19 +789,3 @@ export class MentorService {
 }
 
 export const mentorService = new MentorService();
-
-export function startHireOnboardingSyncLoop() {
-    const run = async () => {
-        try {
-            const summary = await mentorService.syncAllHireOnboardingStates();
-            if (summary.refreshedCount > 0 || summary.relockedCount > 0 || summary.errorCount > 0) {
-                logger.info({ summary }, "Hire onboarding background sync completed");
-            }
-        } catch (err) {
-            logger.error({ err }, "Hire onboarding background sync loop failed");
-        }
-    };
-
-    setTimeout(run, 60_000);
-    setInterval(run, 15 * 60 * 1000);
-}

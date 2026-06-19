@@ -9,7 +9,7 @@ import { InlineKeyboard, Composer } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 import { formatCandidateProfile, formatMessagePreview } from "../utils/profile-formatter.js";
-import { formatCompactName, shortenName } from "../utils/string-utils.js";
+import { formatCompactName } from "../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { hiringNeedsService } from "../services/hiring-needs-service.js";
@@ -28,16 +28,11 @@ const formatDate = (date: Date) => {
 const getMentorCandidateProfileText = async (ctx: MyContext, candId: string) => {
     const cand = await mentorService.getCandidateForMentorProfile(candId) as any;
     if (!cand) return "Candidate details not found. Please refresh /mentor.";
-    const isMentorOnboarding = cand.status === "HIRED" && cand.isMentorLocked;
-    const historySince = isMentorOnboarding
-        ? (cand.firstShiftDate || cand.statusChangedAt || null)
-        : null;
 
     return await formatCandidateProfile(ctx as any, cand, {
         includeHistory: true,
         viewerRole: "MENTOR",
-        historyScope: "MENTOR",
-        historySince
+        historyScope: "MENTOR"
     });
 };
 
@@ -126,20 +121,6 @@ export const mentorTrainingDayViewMenu = new Menu<MyContext>("mentor-training-da
     },
 });
 menuRegistry.register(mentorTrainingDayViewMenu);
-export const mentorOnboardingMenu = new Menu<MyContext>("mentor-onboarding", {
-    onMenuOutdated: async (ctx) => {
-        await ctx.menu.update();
-    },
-});
-menuRegistry.register(mentorOnboardingMenu);
-export const mentorOnboardingDayMenu = new Menu<MyContext>("mentor-onboarding-day", {
-    onMenuOutdated: async (ctx) => {
-        await ctx.menu.update();
-    },
-});
-menuRegistry.register(mentorOnboardingDayMenu);
-export const mentorOnboardingDetailsMenu = new Menu<MyContext>("mentor-onboarding-details");
-menuRegistry.register(mentorOnboardingDetailsMenu);
 export const mentorHiringNeedsMenu = new Menu<MyContext>("mentor-hiring-needs");
 menuRegistry.register(mentorHiringNeedsMenu);
 export const mentorBroadcastCitiesMenu = new Menu<MyContext>("mentor-broadcast-cities");
@@ -177,10 +158,6 @@ mentorHubMenu.dynamic(async (ctx, range) => {
         await ScreenManager.renderScreen(ctx, text, "mentor-hiring-needs", { pushToStack: true });
     }).row();
 
-    const onboardingLabel = `🚀 Onboarding${stats.onboardingCount > 0 ? ` ${stats.onboardingCount}` : ''}`;
-    range.text(onboardingLabel, async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "🚀 <b>Onboarding</b>", "mentor-onboarding", { pushToStack: true });
-    }).row();
 });
 
 mentorHiringNeedsMenu.dynamic(async (ctx, range) => {
@@ -436,6 +413,8 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
         const username = cand.user?.username;
         if (username) {
             range.url("💬 Message", `https://t.me/${username}`).row();
+        } else if (cand.user?.telegramId) {
+            range.url("💬 Message", `tg://user?id=${cand.user.telegramId.toString()}`).row();
         }
         range.text("🔗 Generate Channel Link", async (ctx) => {
             const link = await mentorService.generateChannelLinkForMentor(cand.id);
@@ -693,94 +672,6 @@ mentorTrainingDayViewMenu.dynamic(async (ctx, range) => {
     range.row().text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "🗓 Dates", "mentor-training-dates"));
 });
 
-// --- 6. ONBOARDING ---
-mentorOnboardingMenu.dynamic(async (ctx, range) => {
-    const candidates = await mentorService.getOnboardingCandidates();
-    const dateGroups: Record<string, number> = {};
-    candidates.forEach((cand: any) => {
-        const d = cand.firstShiftDate ? new Date(cand.firstShiftDate).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' }) : "No Date";
-        dateGroups[d] = (dateGroups[d] || 0) + 1;
-    });
-    for (const d of Object.keys(dateGroups)) {
-        range.text(`🗓 ${d} (${dateGroups[d]})`, async (ctx) => {
-            ctx.session.selectedOnboardingDate = d;
-            await ScreenManager.renderScreen(ctx, `🚀 <b>Onboarding for ${d}:</b>`, "mentor-onboarding-day", { pushToStack: true });
-        }).row();
-    }
-    range.text("🏠 Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, await mentorService.getHubText(), "mentor-hub-menu");
-    });
-    // Removed 'Update Menu' button for cleaner UX
-});
-
-mentorOnboardingDayMenu.dynamic(async (ctx, range) => {
-    const selectedDate = ctx.session.selectedOnboardingDate;
-    const candidates = await mentorService.getOnboardingCandidates();
-    const filtered = candidates.filter((c: any) => (c.firstShiftDate ? new Date(c.firstShiftDate).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' }) : "No Date") === selectedDate);
-    let index = 0;
-    for (const c of filtered) {
-        const hiddenSpaces = '\u200B'.repeat(index++);
-        range.text(`👤 ${shortenName(c.fullName || "")}${hiddenSpaces}`, async (ctx) => {
-            ctx.session.selectedCandidateId = c.id;
-            try {
-                const text = await getMentorCandidateProfileText(ctx, c.id);
-                if (!text) {
-                    await ctx.answerCallbackQuery("Profile not found or incomplete.");
-                    return;
-                }
-                await ScreenManager.renderScreen(ctx, text, "mentor-onboarding-details", { pushToStack: true });
-            } catch (err) {
-                await ctx.answerCallbackQuery("Error opening profile.");
-            }
-        }).row();
-    }
-    range.text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "🚀 Onboarding", "mentor-onboarding"));
-    // Removed 'Update' button for cleaner UX
-});
-
-mentorOnboardingDetailsMenu.dynamic(async (ctx, range) => {
-    const candId = ctx.session.selectedCandidateId;
-    if (!candId) return;
-
-    const details = await mentorService.getCandidateDetails(candId);
-    const cand = details?.cand;
-    if (cand) {
-        const username = cand.user?.username;
-        const tid = Number(cand.user?.telegramId);
-        if (username) {
-            range.url("💬 Contact Candidate", `https://t.me/${username}`);
-        }
-        range.text("✍️ Message (Forum)", async (ctx) => {
-            const { startAdminMessageFlow } = await import("../handlers/admin/search.js");
-            if (!cand.userId) {
-                return ctx.answerCallbackQuery("⚠️ User ID відсутній у базі даних").catch(() => {});
-            }
-            await startAdminMessageFlow(ctx, cand.userId);
-        }).row();
-    }
-
-    range.text("🗓 Edit Date", async (ctx) => {
-        ctx.session.adminFlow = 'SCHEDULE';
-        await ScreenManager.renderScreen(ctx, "<b>Select new date for first shift:</b>", "mentor-manual-date", { pushToStack: true });
-    }).row();
-
-    range.text("🚀 Open First Shift Flow", async (ctx) => {
-        const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
-        await firstShiftOnboardingService.notifyCandidate(ctx.api, candId);
-        await ctx.answerCallbackQuery("First shift onboarding opened.");
-    }).row();
-
-    range.text("✅ Successful Onboarding", async (ctx) => {
-        await mentorService.completeOnboarding(candId, true, ctx.api);
-        await ScreenManager.renderScreen(ctx, "🚀 <b>Onboarding Successful!</b>", "mentor-onboarding");
-    }).row();
-    range.text("❌ Failed", async (ctx) => {
-        await mentorService.completeOnboarding(candId, false, ctx.api);
-        await ScreenManager.renderScreen(ctx, "Onboarding failed.", "mentor-onboarding");
-    }).row();
-    range.text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "🚀 Onboarding Day", "mentor-onboarding-day"));
-});
-
 // --- BROADCAST ---
 mentorBroadcastCitiesMenu.dynamic(async (ctx, range) => {
     const cities = await mentorService.getBroadcastCities();
@@ -820,9 +711,6 @@ mentorManualTrainingDateMenu.register(mentorManualTimeSelectionMenu);
 mentorHubMenu.register(mentorTrainingDatesMenu);
 mentorTrainingDatesMenu.register(mentorTrainingDayViewMenu);
 mentorHubMenu.register(mentorHiringNeedsMenu);
-mentorHubMenu.register(mentorOnboardingMenu);
-mentorOnboardingMenu.register(mentorOnboardingDayMenu);
-mentorOnboardingDayMenu.register(mentorOnboardingDetailsMenu);
 mentorInboxMenu.register(mentorBroadcastCitiesMenu);
 mentorBroadcastCitiesMenu.register(mentorBroadcastCombinedConfirmMenu);
 mentorHubMenu.register(mentorActionSuccessMenu);

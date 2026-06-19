@@ -19,7 +19,6 @@ export class ScreenManager {
         'candidateProfileMenuId',
         'selectedSlotId',
         'selectedDate',
-        'selectedOnboardingDate',
         'candidatePage',
         'hiringNeedsPage',
         'broadcastCity',
