@@ -139,16 +139,10 @@ mentorActionSuccessMenu.text("🏠 Back to Hub", async (ctx) => {
 mentorHubMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
 
-    const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.manualCount + stats.waitlistCount + stats.unreadMessagesCount;
+    const totalInbox = stats.manualCount + stats.unreadMessagesCount;
     const inboxLabel = `📥 Inbox${totalInbox > 0 ? ` ${totalInbox}` : ''}`;
     range.text(inboxLabel, async (ctx) => {
-        ctx.session.filterWaitlist = false;
         await ScreenManager.renderScreen(ctx, "📥 <b>Inbox</b>", "mentor-inbox", { pushToStack: true });
-    }).row();
-
-    const calendarLabel = `📅 Calendar${stats.trainingToday > 0 ? ` ${stats.trainingToday}` : ''}`;
-    range.text(calendarLabel, async (ctx) => {
-        await updateCalendarDashboard(ctx);
     }).row();
 
     range.text("🎯 Needs", async (ctx) => {
@@ -195,37 +189,8 @@ mentorHiringNeedsMenu.dynamic(async (ctx, range) => {
 // --- 2. INBOX ---
 mentorInboxMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
-    const isWaitlist = ctx.session.filterWaitlist === true;
 
-    if (isWaitlist) {
-        range.text("🔔 Notify All Waitlist", async (ctx) => {
-            const count = await mentorService.notifyWaitlist(ctx.api);
-            await ctx.answerCallbackQuery(`Notified ${count} candidates! 🚀`);
-            await ctx.menu.update();
-        }).row();
-
-        const waitlisted = await mentorService.getCandidates(true);
-        for (const cand of waitlisted) {
-            const needsHandoffCheck = !cand.notificationSent;
-            const icon = needsHandoffCheck ? "⚠️" : "⌛";
-            const suffix = needsHandoffCheck ? " • Check handoff" : "";
-            const label = `${icon} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}${suffix}`;
-            range.text(label, async (ctx) => {
-                ctx.session.selectedCandidateId = cand.id;
-                const text = await getMentorCandidateProfileText(ctx, cand.id);
-                await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
-            }).row();
-        }
-
-        range.text("⬅️ Back to Inbox", async (ctx) => {
-            ctx.session.filterWaitlist = false;
-            await ctx.menu.update();
-        });
-        return;
-    }
-
-    const candidates = await mentorService.getActionNeededCandidates();
-    const hasAnyTasks = stats.unreadMessagesCount > 0 || stats.waitlistCount > 0 || candidates.length > 0 || stats.manualCount > 0;
+    const hasAnyTasks = stats.unreadMessagesCount > 0 || stats.manualCount > 0;
 
     if (!hasAnyTasks) {
         range.text("All tasks completed! ✨", (ctx) => ctx.answerCallbackQuery("Nothing to do!")).row();
@@ -236,56 +201,10 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
             }).row();
         }
 
-        if (stats.waitlistCount > 0) {
-            range.text(`⌛ Waitlist ${stats.waitlistCount}`, async (ctx) => {
-                ctx.session.filterWaitlist = true;
-                await ctx.menu.update();
-            }).row();
-        }
-
-        if ((stats.unreadMessagesCount > 0 || stats.waitlistCount > 0) && candidates.length > 0) {
-            range.text("--------------------").row();
-        }
-
-        for (const cand of candidates) {
-            let icon = "🆕";
-            let timeLabel = "";
-
-            if (cand.status === "DISCOVERY_COMPLETED") {
-                icon = "✅";
-            } else if (cand.materialsSent) {
-                icon = cand.mentorReminderSent ? "📚🔔" : "📚";
-                if (cand.materialsSentAt) {
-                    const diff = new Date().getTime() - new Date(cand.materialsSentAt).getTime();
-                    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-                    timeLabel = days > 0 ? ` (${days}d)` : " (today)";
-                }
-            }
-
-            const label = `${icon} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}${timeLabel}`;
-            range.text(label, async (ctx) => {
-                ctx.session.selectedCandidateId = cand.id;
-                const text = await getMentorCandidateProfileText(ctx, cand.id);
-                await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
-            }).row();
-
-            if (cand.status === "DISCOVERY_COMPLETED") {
-                range.text("🗓 Assign Internship", async (ctx) => {
-                    await renderManualTrainingPicker(ctx, cand.id, cand.fullName);
-                }).row();
-            }
-        }
-
         if (stats.manualCount > 0) {
             range.text(`👨‍🏫 Manual ${stats.manualCount}`, async (ctx) => {
                 ctx.session.manualPage = 1;
                 await ScreenManager.renderScreen(ctx, "👨‍🏫 <b>Manual</b>\nCandidates you're guiding personally: 👇", "mentor-manual", { pushToStack: true });
-            }).row();
-        }
-
-        if (stats.newAcceptedCount > 0) {
-            range.text("📢 Broadcast Materials", async (ctx) => {
-                await ScreenManager.renderScreen(ctx, "Select city for broadcast: 🏙️", "mentor-broadcast-cities", { pushToStack: true });
             }).row();
         }
     }
@@ -331,7 +250,8 @@ mentorManualMenu.dynamic(async (ctx, range) => {
         range.text("No candidates here. ✨", (ctx) => ctx.answerCallbackQuery("Nothing to do!")).row();
     } else {
         for (const cand of pageItems) {
-            const label = `👨‍🏫 ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const contacted = Boolean(cand.mentorManualContactedAt);
+            const label = `${contacted ? "☑️" : "⬜"} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
@@ -410,6 +330,13 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
         }).row();
     }
     else if (cand.status === "MENTOR_MANUAL") {
+        const contacted = Boolean(cand.mentorManualContactedAt);
+        range.text(contacted ? "☑️ Contacted" : "⬜ Mark Contacted", async (ctx) => {
+            await mentorService.setManualMentorContacted(cand.id, !contacted);
+            await ctx.answerCallbackQuery(contacted ? "Marked as not contacted" : "Marked as contacted");
+            await ctx.menu.update();
+        }).row();
+
         const username = cand.user?.username;
         if (username) {
             range.url("💬 Message", `https://t.me/${username}`).row();

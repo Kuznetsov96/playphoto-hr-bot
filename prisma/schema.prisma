@@ -117,6 +117,7 @@ model Candidate {
   ndaReminderSentAt    DateTime?
   mentorReminderSent   Boolean         @default(false)
   mentorReminderSentAt DateTime?
+  mentorManualContactedAt DateTime?
   firstShiftDate       DateTime?
   firstShiftTime       String?
   firstShiftPartnerId  String?

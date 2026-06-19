@@ -55,7 +55,6 @@ export class MentorService {
         const newAcceptedCount = accepted.filter(c => !c.materialsSent).length;
         const awaitingBookingCount = accepted.filter(c => c.materialsSent && !c.discoverySlotId).length;
         const readyForTrainingCount = await candidateRepository.countByStatus(CandidateStatus.DISCOVERY_COMPLETED);
-        const waitlistCount = await this.getWaitlistCount();
         const unreadMessagesCount = await candidateRepository.countUnreadByScope("MENTOR");
 
         const today = new Date();
@@ -79,7 +78,7 @@ export class MentorService {
         const manualCount = await candidateRepository.countByStatus(CandidateStatus.MENTOR_MANUAL);
 
         return {
-            actionNeeded: newAcceptedCount + awaitingBookingCount + readyForTrainingCount + manualCount,
+            actionNeeded: manualCount,
             calendarCount: trainingToday + overdue,
             trainingToday,
             overdue,
@@ -87,23 +86,17 @@ export class MentorService {
             awaitingBookingCount,
             readyForTrainingCount,
             manualCount,
-            waitlistCount,
+            waitlistCount: 0,
             unreadMessagesCount
         };
     }
 
     async getHubText() {
         const stats = await this.getStats();
-        const totalInbox = stats.newAcceptedCount + stats.awaitingBookingCount + stats.readyForTrainingCount + stats.manualCount + stats.waitlistCount + stats.unreadMessagesCount;
-
-        let calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday}`;
-        if (stats.overdue > 0) {
-            calendarText = `📅 <b>Calendar:</b> ${stats.trainingToday} <a href="">(⚠️ ${stats.overdue} pending)</a>`;
-        }
+        const totalInbox = stats.manualCount + stats.unreadMessagesCount;
 
         return `🎓 <b>Mentor Hub</b>\n\n` +
-            `📥 <b>Inbox:</b> ${totalInbox}\n` +
-            `${calendarText}\n`;
+            `📥 <b>Inbox:</b> ${totalInbox}\n`;
     }
 
     async getWaitlistCount() {
@@ -401,7 +394,36 @@ export class MentorService {
     }
 
     async getManualMentorCandidates() {
-        return await candidateRepository.findByStatusWithUser(CandidateStatus.MENTOR_MANUAL);
+        const candidates = await candidateRepository.findByStatusWithUser(CandidateStatus.MENTOR_MANUAL);
+        return candidates.sort((left, right) => {
+            const leftContacted = left.mentorManualContactedAt ? 1 : 0;
+            const rightContacted = right.mentorManualContactedAt ? 1 : 0;
+            if (leftContacted !== rightContacted) return leftContacted - rightContacted;
+            const leftTime = left.mentorManualContactedAt ? new Date(left.mentorManualContactedAt).getTime() : 0;
+            const rightTime = right.mentorManualContactedAt ? new Date(right.mentorManualContactedAt).getTime() : 0;
+            return leftTime - rightTime;
+        });
+    }
+
+    async setManualMentorContacted(candId: string, contacted: boolean) {
+        const cand = await candidateRepository.findById(candId);
+        if (!cand || cand.status !== CandidateStatus.MENTOR_MANUAL) return null;
+
+        const updated = await candidateRepository.update(candId, {
+            mentorManualContactedAt: contacted ? new Date() : null,
+        });
+
+        audit({
+            event: "candidate_manual_mentor_contact_marked",
+            result: "success",
+            actorType: "admin",
+            telegramId: cand.user?.telegramId,
+            entityType: "candidate",
+            entityId: cand.id,
+            context: { contacted },
+        });
+
+        return { candidate: updated, success: true };
     }
 
     async acceptManualMentor(api: Api, candId: string) {
