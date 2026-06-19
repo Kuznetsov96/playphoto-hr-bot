@@ -139,9 +139,9 @@ mentorActionSuccessMenu.text("🏠 Back to Hub", async (ctx) => {
 mentorHubMenu.dynamic(async (ctx, range) => {
     const stats = await mentorService.getStats();
 
-    const totalInbox = stats.manualCount + stats.unreadMessagesCount;
-    const inboxLabel = `📥 Inbox${totalInbox > 0 ? ` ${totalInbox}` : ''}`;
+    const inboxLabel = `📥 Inbox${stats.manualCount > 0 ? ` ${stats.manualCount}` : ''}`;
     range.text(inboxLabel, async (ctx) => {
+        ctx.session.manualPage = 1;
         await ScreenManager.renderScreen(ctx, "📥 <b>Inbox</b>", "mentor-inbox", { pushToStack: true });
     }).row();
 
@@ -188,24 +188,39 @@ mentorHiringNeedsMenu.dynamic(async (ctx, range) => {
 
 // --- 2. INBOX ---
 mentorInboxMenu.dynamic(async (ctx, range) => {
-    const stats = await mentorService.getStats();
+    const candidates = await mentorService.getManualMentorCandidates();
+    const totalPages = Math.max(1, Math.ceil(candidates.length / MENTOR_MANUAL_PAGE_SIZE));
+    const page = Math.min(Math.max(1, ctx.session.manualPage || 1), totalPages);
+    const pageItems = candidates.slice((page - 1) * MENTOR_MANUAL_PAGE_SIZE, page * MENTOR_MANUAL_PAGE_SIZE);
 
-    const hasAnyTasks = stats.unreadMessagesCount > 0 || stats.manualCount > 0;
-
-    if (!hasAnyTasks) {
-        range.text("All tasks completed! ✨", (ctx) => ctx.answerCallbackQuery("Nothing to do!")).row();
+    if (candidates.length === 0) {
+        range.text("No candidates here. ✨", (ctx) => ctx.answerCallbackQuery("Nothing to do!")).row();
     } else {
-        if (stats.unreadMessagesCount > 0) {
-            range.text(`💬 Messages ${stats.unreadMessagesCount}`, async (ctx) => {
-                await ScreenManager.renderScreen(ctx, "💬 <b>Messages</b>\nConversations waiting for your reply: 👇", "mentor-messages", { pushToStack: true });
+        for (const cand of pageItems) {
+            const contacted = Boolean(cand.mentorManualContactedAt);
+            const label = `${contacted ? "☑️" : "⬜"} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            range.text(label, async (ctx) => {
+                ctx.session.selectedCandidateId = cand.id;
+                const text = await getMentorCandidateProfileText(ctx, cand.id);
+                await ScreenManager.renderScreen(ctx, text, "mentor-inbox-details", { pushToStack: true });
             }).row();
         }
 
-        if (stats.manualCount > 0) {
-            range.text(`👨‍🏫 Manual ${stats.manualCount}`, async (ctx) => {
-                ctx.session.manualPage = 1;
-                await ScreenManager.renderScreen(ctx, "👨‍🏫 <b>Manual</b>\nCandidates you're guiding personally: 👇", "mentor-manual", { pushToStack: true });
-            }).row();
+        if (totalPages > 1) {
+            if (page > 1) {
+                range.text("⬅️ Previous", async (ctx) => {
+                    ctx.session.manualPage = page - 1;
+                    await ctx.menu.update();
+                });
+            }
+            if (page < totalPages) {
+                range.text("Next ➡️", async (ctx) => {
+                    ctx.session.manualPage = page + 1;
+                    await ctx.menu.update();
+                });
+            }
+            range.row();
+            range.text(`Page ${page}/${totalPages}`, (ctx) => ctx.answerCallbackQuery()).row();
         }
     }
 
@@ -277,7 +292,9 @@ mentorManualMenu.dynamic(async (ctx, range) => {
         }
     }
 
-    range.text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "mentor-inbox"));
+    range.text("⬅️ Back", async (ctx) => {
+        await ScreenManager.goBack(ctx, await mentorService.getHubText(), "mentor-hub-menu");
+    });
 });
 
 // --- 3. DETAILS ---
@@ -407,7 +424,13 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
-    range.text("⬅️ Back", (ctx) => ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "mentor-inbox"));
+    range.text("⬅️ Back", async (ctx) => {
+        if (cand.status === "MENTOR_MANUAL") {
+            await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "mentor-inbox");
+            return;
+        }
+        await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "mentor-inbox");
+    });
 });
 
 // --- 4. MANUAL TRAINING ASSIGNMENT ---
@@ -630,7 +653,7 @@ export const mentorHandlers = new Composer<MyContext>();
 mentorRootMenu.register(mentorHubMenu);
 mentorHubMenu.register(mentorInboxMenu);
 mentorInboxMenu.register(mentorMessagesMenu);
-mentorInboxMenu.register(mentorManualMenu);
+mentorHubMenu.register(mentorManualMenu);
 mentorInboxMenu.register(mentorInboxDetailsMenu);
 mentorInboxDetailsMenu.register(mentorManualTrainingDateMenu);
 mentorManualTrainingDateMenu.register(mentorManualTrainingTimeMenu);

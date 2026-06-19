@@ -93,10 +93,9 @@ export class MentorService {
 
     async getHubText() {
         const stats = await this.getStats();
-        const totalInbox = stats.manualCount + stats.unreadMessagesCount;
 
         return `🎓 <b>Mentor Hub</b>\n\n` +
-            `📥 <b>Inbox:</b> ${totalInbox}\n`;
+            `📥 <b>Inbox:</b> ${stats.manualCount}\n`;
     }
 
     async getWaitlistCount() {
