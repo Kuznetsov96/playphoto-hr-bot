@@ -55,7 +55,7 @@ export const ADMIN_TEXTS = {
   "admin-msg-err-delivery": `❌ Send Error: bot blocked or invalid ID.`,
   "admin-notif-interview-completed": (p: { name: string | number }) => `🏁 <b>Interview Completed: ${p.name}</b>\n\nTime is up, status updated to "Completed". Please review the profile and make an offer decision! ⚖️🌸`,
   "admin-notif-training-completed": (p: { name: string | number }) => `🏁 <b>Training Completed: ${p.name}</b>\n\nSlot time is up. Please mark the result (Passed/Failed) in the candidate's profile so they can proceed to NDA and test! 🎓🌸`,
-  "admin-notif-new-onboarding": (p: { name: string | number }) => `🚀 <b>New Onboarding!</b>\n\nCandidate <b>${p.name}</b> has successfully completed all stages and been added to the schedule. 📸\n\nPlease monitor their first shift and assist with adaptation! ✨`,
+  "admin-notif-new-staff-scheduled": (p: { name: string | number }) => `📅 <b>New Staff Scheduled</b>\n\nCandidate <b>${p.name}</b> has completed hiring and has been added to the schedule. 📸\n\nNo separate mentor onboarding is required.`,
   "admin-notif-delivery-failed": (p: { name: string | number, error: string | number }) => `⚠️ <b>Offer not delivered!</b>\n\nCandidate: <b>${p.name}</b>\nError: ${p.error}\nCandidate might have blocked the bot. Please contact them manually.`,
   "admin-search-staff-not-found": `Staff not found.`,
   "admin-search-cand-prompt": `Enter Name, Surname or Username to search: 🔍`,

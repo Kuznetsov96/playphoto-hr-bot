@@ -795,7 +795,7 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hire_final_(.+)$/, async (ctx: My
 
         if (res.candidate) {
             const { MENTOR_IDS } = await import("../../config.js");
-            const mentorMsg = ADMIN_TEXTS["admin-notif-new-onboarding"]({ name: res.candidate.fullName || "Candidate" });
+            const mentorMsg = ADMIN_TEXTS["admin-notif-new-staff-scheduled"]({ name: res.candidate.fullName || "Candidate" });
             for (const mId of MENTOR_IDS) {
                 await ctx.api.sendMessage(mId, mentorMsg, { parse_mode: "HTML" }).catch(() => { });
             }

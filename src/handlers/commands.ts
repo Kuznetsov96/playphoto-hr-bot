@@ -657,7 +657,6 @@ commandHandlers.command("set_step", async (ctx) => {
             await candidateRepository.update(candidate.id, {
                 status: target.status || candidate.status,
                 currentStep: target.funnel || candidate.currentStep,
-                isMentorLocked: true, // Re-lock for testing onboarding if needed
             } as any);
 
             // If we are testing final steps, allow re-triggering welcome message

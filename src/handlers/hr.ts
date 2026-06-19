@@ -154,6 +154,7 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             const isMentor = MENTOR_IDS.includes(ctx.from!.id);
             const isMentorOwnedStage = !!cand && [
                 "ACCEPTED",
+                "MENTOR_MANUAL",
                 "WAITLIST_MENTOR",
                 "DISCOVERY_SCHEDULED",
                 "DISCOVERY_COMPLETED",

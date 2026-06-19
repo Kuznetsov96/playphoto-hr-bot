@@ -161,10 +161,6 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
   "hr-btn-start-nda": `📑 Почати NDA`,
   "hr-ans-status-updated-success": `Status updated: Success! 🎉`,
   "hr-btn-schedule-created": `✅ Schedule Ready`,
-  "hr-info-mentor-onboarding": (p: { fullName: string | number, city: string | number }) => `🚀 <b>Candidate ready for onboarding!</b>
-👤 Name: ${p.fullName}
-🏙️ City: ${p.city}
-Admin created the schedule and entered data. Please conduct the first shift and set a score in "Onboarding" menu.`,
   "hr-info-cand-schedule-ready": `✨ <b>Твій графік готовий!</b>
 Наш адміністратор вніс твої дані в систему та підготував робочий графік. Твій наставник зв'яжеться з тобою для узгодження твоєї першої робочої зміни. Ласкаво просимо! 📸`,
   "hr-ans-mentor-notified": `Done! Mentor notified. 🚀`,

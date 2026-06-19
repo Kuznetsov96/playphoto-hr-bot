@@ -144,7 +144,6 @@ export interface SessionData {
     selectedSlotId?: string;
     selectedDate?: string;
     selectedTrainingDate?: string;
-    selectedOnboardingDate?: string | undefined;
     selectedLocationId?: string;
     selectedUserId?: string;
     selectedUserIdForAdmin?: string;
