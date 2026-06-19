@@ -39,12 +39,58 @@ describe("mentor manual track", () => {
 
     it("lists MENTOR_MANUAL candidates", async () => {
         const { mentorService } = await import("../mentor-service.js");
-        mocks.findByStatusWithUser.mockResolvedValue([{ id: "c1" }]);
+        mocks.findByStatusWithUser.mockResolvedValue([{ id: "c1", mentorManualContactedAt: null }]);
 
         const result = await mentorService.getManualMentorCandidates();
 
         expect(mocks.findByStatusWithUser).toHaveBeenCalledWith(CandidateStatus.MENTOR_MANUAL);
-        expect(result).toEqual([{ id: "c1" }]);
+        expect(result).toEqual([{ id: "c1", mentorManualContactedAt: null }]);
+    });
+
+    it("puts not-contacted manual candidates first", async () => {
+        const { mentorService } = await import("../mentor-service.js");
+        mocks.findByStatusWithUser.mockResolvedValue([
+            { id: "contacted", mentorManualContactedAt: new Date("2026-06-01T10:00:00.000Z") },
+            { id: "fresh", mentorManualContactedAt: null },
+        ]);
+
+        const result = await mentorService.getManualMentorCandidates();
+
+        expect(result.map((candidate) => candidate.id)).toEqual(["fresh", "contacted"]);
+    });
+
+    it("marks manual candidate as contacted", async () => {
+        const { mentorService } = await import("../mentor-service.js");
+        mocks.findById.mockResolvedValue({
+            id: "c1",
+            status: CandidateStatus.MENTOR_MANUAL,
+            user: { telegramId: 555n },
+        });
+        mocks.update.mockResolvedValue({ id: "c1" });
+
+        const res = await mentorService.setManualMentorContacted("c1", true);
+
+        expect(mocks.update).toHaveBeenCalledWith("c1", {
+            mentorManualContactedAt: expect.any(Date),
+        });
+        expect(mocks.audit).toHaveBeenCalledWith(expect.objectContaining({
+            event: "candidate_manual_mentor_contact_marked",
+            context: { contacted: true },
+        }));
+        expect(res?.success).toBe(true);
+    });
+
+    it("does not mark non-manual candidates as contacted", async () => {
+        const { mentorService } = await import("../mentor-service.js");
+        mocks.findById.mockResolvedValue({
+            id: "c1",
+            status: CandidateStatus.ACCEPTED,
+        });
+
+        const res = await mentorService.setManualMentorContacted("c1", true);
+
+        expect(res).toBeNull();
+        expect(mocks.update).not.toHaveBeenCalled();
     });
 
     it("accept advances candidate to NDA", async () => {
