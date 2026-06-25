@@ -691,7 +691,7 @@ describe("ReplacementService", () => {
 
         expect(prismaMock.replacementRequest.findFirst).toHaveBeenCalledWith({
             where: {
-                status: "ACTIVE",
+                status: { in: ["ACTIVE", "FOUND", "FAILED"] },
                 OR: [
                     { workShiftId: "shift-new" },
                     {
@@ -702,6 +702,38 @@ describe("ReplacementService", () => {
                 ],
             },
         });
+        expect(prismaMock.replacementRequest.create).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("blocks restarting a search when a replacement was already found for the same shift", async () => {
+        const shift: any = {
+            id: "shift-found",
+            staffId: "requester-found",
+            locationId: "location-found",
+            date: new Date("2030-05-14T00:00:00.000Z"),
+            startTime: new Date("2030-05-14T11:00:00.000Z"),
+            endTime: new Date("2030-05-14T18:00:00.000Z"),
+            location: { id: "location-found", name: "Smile Park", city: "Київ", schedule: null },
+            staff: { id: "requester-found", fullName: "Прокопʼєва Маріанна", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.workShift.findUnique.mockResolvedValue(shift);
+        prismaMock.replacementRequest.findFirst.mockResolvedValue({
+            id: "found-request",
+            workShiftId: null,
+            requesterStaffId: "requester-found",
+            locationId: "location-found",
+            shiftDate: shift.date,
+            status: "FOUND",
+        });
+
+        const api = { sendMessage: vi.fn() };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await expect(new ReplacementService().startRequest(api as any, "requester-found", "shift-found"))
+            .rejects.toThrow("REQUEST_ALREADY_FOUND");
+
         expect(prismaMock.replacementRequest.create).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
     });
@@ -719,16 +751,14 @@ describe("ReplacementService", () => {
         };
 
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
-        prismaMock.replacementRequest.findFirst
-            .mockResolvedValueOnce(null)
-            .mockResolvedValueOnce({
-                id: "failed-request",
-                workShiftId: null,
-                requesterStaffId: "requester-7",
-                locationId: "location-7",
-                shiftDate: shift.date,
-                status: "FAILED",
-            });
+        prismaMock.replacementRequest.findFirst.mockResolvedValue({
+            id: "failed-request",
+            workShiftId: null,
+            requesterStaffId: "requester-7",
+            locationId: "location-7",
+            shiftDate: shift.date,
+            status: "FAILED",
+        });
 
         const api = { sendMessage: vi.fn() };
 
