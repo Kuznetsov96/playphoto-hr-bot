@@ -15,6 +15,7 @@ interface TeamMember {
 export class ScheduleAvailabilityService {
     private sheets: any;
     private readonly availabilityCache = new Map<string, { expiresAt: number; value: Map<string, ScheduleAvailabilityKind> }>();
+    private scheduleSheetTitleCache: { expiresAt: number; value: string[] } | null = null;
     private readonly scheduleSheetMonths = [
         "Січень",
         "Лютий",
@@ -66,7 +67,7 @@ export class ScheduleAvailabilityService {
 
         const res = await this.sheets.spreadsheets.get({
             spreadsheetId: SPREADSHEET_ID_SCHEDULE,
-            ranges: [`'${sheetName}'!A1:AL500`],
+            ranges: [this.formatA1Range(sheetName)],
             includeGridData: true,
             fields: "sheets(data(rowData(values(formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle)))))"
         });
@@ -112,13 +113,15 @@ export class ScheduleAvailabilityService {
     }
 
     async getAvailabilityForDateFromSchedule(date: Date): Promise<Map<string, ScheduleAvailabilityKind>> {
-        const monthlySheet = this.getMonthlyScheduleSheetName(date);
-        const monthlyAvailability = await this.getAvailabilityForDate(date, monthlySheet).catch((err) => {
-            if (this.isTransientGoogleReadError(err)) throw err;
-            logger.warn({ err, sheetName: monthlySheet }, "Monthly schedule availability lookup failed");
-            return new Map<string, ScheduleAvailabilityKind>();
-        });
-        if (monthlyAvailability.size > 0) return monthlyAvailability;
+        const monthlySheet = await this.findExistingMonthlyScheduleSheetName(date);
+        if (monthlySheet) {
+            const monthlyAvailability = await this.getAvailabilityForDate(date, monthlySheet).catch((err) => {
+                if (this.isTransientGoogleReadError(err)) throw err;
+                logger.warn({ err, sheetName: monthlySheet }, "Monthly schedule availability lookup failed");
+                return new Map<string, ScheduleAvailabilityKind>();
+            });
+            if (monthlyAvailability.size > 0) return monthlyAvailability;
+        }
 
         return this.getAvailabilityForDate(date, "Актуальний розклад");
     }
@@ -150,7 +153,7 @@ export class ScheduleAvailabilityService {
 
         const res = await this.sheets.spreadsheets.get({
             spreadsheetId: SPREADSHEET_ID_SCHEDULE,
-            ranges: [`'${sheetName}'!A1:AL500`],
+            ranges: [this.formatA1Range(sheetName)],
             includeGridData: true,
             fields: "sheets(properties(title),data(rowMetadata(hiddenByFilter,hiddenByUser),columnMetadata(hiddenByFilter,hiddenByUser)))"
         });
@@ -164,6 +167,53 @@ export class ScheduleAvailabilityService {
         });
 
         return { hiddenRows, hiddenColumns };
+    }
+
+    private async findExistingMonthlyScheduleSheetName(date: Date): Promise<string | null> {
+        const exactName = this.getMonthlyScheduleSheetName(date);
+        const monthName = exactName.replace(/\s+\d{4}$/, "");
+
+        const titles = await this.fetchScheduleSheetTitles().catch((err) => {
+            if (this.isTransientGoogleReadError(err)) throw err;
+            logger.warn({ err, sheetName: exactName }, "Monthly schedule sheet metadata lookup failed");
+            return [];
+        });
+
+        return this.findSheetTitle(titles, exactName) ?? this.findSheetTitle(titles, monthName);
+    }
+
+    private async fetchScheduleSheetTitles(): Promise<string[]> {
+        if (this.scheduleSheetTitleCache && this.scheduleSheetTitleCache.expiresAt > Date.now()) {
+            return this.scheduleSheetTitleCache.value;
+        }
+
+        this.ensureSheets();
+        const res = await this.sheets.spreadsheets.get({
+            spreadsheetId: SPREADSHEET_ID_SCHEDULE,
+            fields: "sheets(properties(title))"
+        });
+        const titles = (res.data.sheets || [])
+            .map((sheet: any) => String(sheet?.properties?.title || "").trim())
+            .filter(Boolean);
+
+        this.scheduleSheetTitleCache = {
+            expiresAt: Date.now() + 5 * 60_000,
+            value: titles,
+        };
+        return titles;
+    }
+
+    private findSheetTitle(titles: string[], expected: string): string | null {
+        const normalizedExpected = this.normalizeSheetTitle(expected);
+        return titles.find(title => this.normalizeSheetTitle(title) === normalizedExpected) ?? null;
+    }
+
+    private normalizeSheetTitle(title: string): string {
+        return title.trim().replace(/\s+/g, " ").toLocaleLowerCase("uk-UA");
+    }
+
+    private formatA1Range(sheetName: string): string {
+        return `'${sheetName.replace(/'/g, "''")}'!A1:AL500`;
     }
 
     private async fetchTeamMapping(): Promise<Record<string, TeamMember>> {

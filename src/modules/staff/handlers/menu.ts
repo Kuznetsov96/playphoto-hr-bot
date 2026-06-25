@@ -684,13 +684,16 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
         await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
         await ctx.answerCallbackQuery("Пошук запущено");
     } catch (error: any) {
-        const message = error?.message === "REQUEST_ALREADY_ACTIVE"
-            ? "Пошук для цієї зміни вже активний."
-            : error?.message === "REQUEST_PREVIOUSLY_FAILED"
-                ? "Ти вже запускала пошук для цієї зміни, але заміну не знайшли. Напиши в підтримку, щоб команда допомогла вручну."
-            : error?.message === "SHIFT_ALREADY_STARTED"
-                ? "Ця зміна вже почалась."
-                : "Не вдалося запустити пошук.";
+        let message = "Не вдалося запустити пошук.";
+        if (error?.message === "REQUEST_ALREADY_ACTIVE") {
+            message = "Пошук для цієї зміни вже активний.";
+        } else if (error?.message === "REQUEST_ALREADY_FOUND") {
+            message = "Підміну для цієї зміни вже знайдено. Якщо графік ще не оновили, напиши в підтримку.";
+        } else if (error?.message === "REQUEST_PREVIOUSLY_FAILED") {
+            message = "Ти вже запускала пошук для цієї зміни, але заміну не знайшли. Напиши в підтримку, щоб команда допомогла вручну.";
+        } else if (error?.message === "SHIFT_ALREADY_STARTED") {
+            message = "Ця зміна вже почалась.";
+        }
         await ctx.answerCallbackQuery({ text: message, show_alert: true });
     }
 });

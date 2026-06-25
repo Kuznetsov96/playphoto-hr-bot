@@ -645,13 +645,18 @@ async function confirmAdminReplacementManualSearch(ctx: MyContext) {
         await ctx.answerCallbackQuery("Search started").catch(() => { });
         await showAdminReplacementBoard(ctx, true);
     } catch (error: any) {
-        const message = error?.message === "REQUEST_ALREADY_ACTIVE"
-            ? "A search is already active for this location and date."
-            : error?.message === "LOCATION_DAY_ALREADY_HAS_SHIFT"
-                ? "This location already has a shift on that day."
-                : error?.message === "SHIFT_ALREADY_STARTED"
-                    ? "This shift time has already started."
-                    : "Could not start the search.";
+        let message = "Could not start the search.";
+        if (error?.message === "REQUEST_ALREADY_ACTIVE") {
+            message = "A search is already active for this location and date.";
+        } else if (error?.message === "REQUEST_ALREADY_FOUND") {
+            message = "A replacement was already found for this location and date. Update and sync the schedule first.";
+        } else if (error?.message === "REQUEST_PREVIOUSLY_FAILED") {
+            message = "A search already finished without a replacement for this location and date.";
+        } else if (error?.message === "LOCATION_DAY_ALREADY_HAS_SHIFT") {
+            message = "This location already has a shift on that day.";
+        } else if (error?.message === "SHIFT_ALREADY_STARTED") {
+            message = "This shift time has already started.";
+        }
         await ctx.answerCallbackQuery({ text: message, show_alert: true });
     }
 }

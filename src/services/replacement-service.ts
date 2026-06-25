@@ -29,6 +29,11 @@ const CONTACTED_RESPONSE_STATUSES = [
     ReplacementResponseStatus.DECLINED,
     ReplacementResponseStatus.INACTIVE,
 ];
+const REPLACEMENT_RESTART_BLOCKING_STATUSES = [
+    ReplacementRequestStatus.ACTIVE,
+    ReplacementRequestStatus.FOUND,
+    ReplacementRequestStatus.FAILED,
+];
 
 type StaffWithUserLocation = StaffProfile & { user: User; location: Location | null };
 type RequestWithRelations = ReplacementRequest & {
@@ -61,10 +66,7 @@ export class ReplacementService {
                 staffId,
                 date: { gte: today },
                 replacementRequests: {
-                    none: { status: { in: [
-                        ReplacementRequestStatus.ACTIVE,
-                        ReplacementRequestStatus.FAILED
-                    ] } }
+                    none: { status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES } }
                 }
             },
             include: { location: true },
@@ -89,7 +91,7 @@ export class ReplacementService {
 
         const existing = await prisma.replacementRequest.findFirst({
             where: {
-                status: ReplacementRequestStatus.ACTIVE,
+                status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
                 OR: [
                     { workShiftId: shift.id },
                     {
@@ -103,25 +105,9 @@ export class ReplacementService {
                 ]
             }
         });
-        if (existing) throw new Error("REQUEST_ALREADY_ACTIVE");
-
-        const previouslyFailed = await prisma.replacementRequest.findFirst({
-            where: {
-                status: ReplacementRequestStatus.FAILED,
-                OR: [
-                    { workShiftId: shift.id },
-                    {
-                        requesterStaffId,
-                        locationId: shift.locationId,
-                        shiftDate: {
-                            gte: this.kyivStartOfDay(shift.date),
-                            lt: this.nextKyivDay(shift.date)
-                        }
-                    }
-                ]
-            }
-        });
-        if (previouslyFailed) throw new Error("REQUEST_PREVIOUSLY_FAILED");
+        if (existing?.status === ReplacementRequestStatus.ACTIVE) throw new Error("REQUEST_ALREADY_ACTIVE");
+        if (existing?.status === ReplacementRequestStatus.FOUND) throw new Error("REQUEST_ALREADY_FOUND");
+        if (existing?.status === ReplacementRequestStatus.FAILED) throw new Error("REQUEST_PREVIOUSLY_FAILED");
 
         const request = await this.createActiveRequest({
             workShiftId: shift.id,
@@ -150,13 +136,13 @@ export class ReplacementService {
                 select: { date: true }
             }),
             prisma.replacementRequest.findMany({
-                where: { locationId, status: ReplacementRequestStatus.ACTIVE, shiftDate: { gte: start, lt: end } },
+                where: { locationId, status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES }, shiftDate: { gte: start, lt: end } },
                 select: { shiftDate: true }
             })
         ]);
 
         const scheduledDates = new Set(shifts.map(shift => this.formatDateKey(shift.date)));
-        const activeSearchDates = new Set(activeRequests.map(request => this.formatDateKey(request.shiftDate)));
+        const blockedSearchDates = new Set(activeRequests.map(request => this.formatDateKey(request.shiftDate)));
 
         return Array.from({ length: daysAhead }, (_, index) => {
             const date = new Date(start.getTime() + index * 24 * 60 * 60 * 1000);
@@ -167,7 +153,7 @@ export class ReplacementService {
                 dateKey,
                 label: `${this.formatDate(date)} · ${this.formatShiftTime({ shiftDate: date, location })}`,
                 hasShift: scheduledDates.has(dateKey),
-                hasActiveSearch: activeSearchDates.has(dateKey),
+                hasActiveSearch: blockedSearchDates.has(dateKey),
                 hasStarted: shiftStartAt <= new Date(),
             };
         }).filter(option => !option.hasShift && !option.hasActiveSearch && !option.hasStarted);
@@ -189,9 +175,11 @@ export class ReplacementService {
         if (existingShift) throw new Error("LOCATION_DAY_ALREADY_HAS_SHIFT");
 
         const existingRequest = await prisma.replacementRequest.findFirst({
-            where: { locationId, status: ReplacementRequestStatus.ACTIVE, shiftDate: { gte: dayStart, lt: dayEnd } }
+            where: { locationId, status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES }, shiftDate: { gte: dayStart, lt: dayEnd } }
         });
-        if (existingRequest) throw new Error("REQUEST_ALREADY_ACTIVE");
+        if (existingRequest?.status === ReplacementRequestStatus.ACTIVE) throw new Error("REQUEST_ALREADY_ACTIVE");
+        if (existingRequest?.status === ReplacementRequestStatus.FOUND) throw new Error("REQUEST_ALREADY_FOUND");
+        if (existingRequest?.status === ReplacementRequestStatus.FAILED) throw new Error("REQUEST_PREVIOUSLY_FAILED");
 
         const request = await this.createActiveRequest({
             locationId,
