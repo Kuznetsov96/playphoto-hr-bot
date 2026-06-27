@@ -1066,6 +1066,14 @@ export class ScheduleSyncService {
 
         const cities = Object.values(CITY_NAME_MAP);
         const shiftsToCreate: Array<{ staffId: string; locationId: string; date: Date }> = [];
+        const scheduleLabelCounts = new Map<string, number>();
+
+        for (let i = 2; i < rows.length; i++) {
+            if (hiddenRows.has(i)) continue;
+            const label = String(rows[i]?.[0] || "").trim();
+            if (!label || !teamMap[label]) continue;
+            scheduleLabelCounts.set(label, (scheduleLabelCounts.get(label) || 0) + 1);
+        }
 
         for (let i = 2; i < rows.length; i++) {
             if (hiddenRows.has(i)) continue;
@@ -1082,6 +1090,18 @@ export class ScheduleSyncService {
                 if (telegramId) {
                     const staffProfile = userStaffMap.get(telegramId);
                     if (staffProfile) {
+                        if (!this.shouldUseScheduleRowForMember(member, currentLocation, allLocations, scheduleLabelCounts.get(label) || 0)) {
+                            skippedSectionMismatchCount++;
+                            logger.warn({
+                                label,
+                                rowNumber: i + 1,
+                                memberLocation: member.locationName,
+                                currentLocation: currentLocation?.name,
+                                currentCity,
+                            }, "Schedule sync skipped duplicate staff label outside member location");
+                            continue;
+                        }
+
                         for (const [colIdx, date] of Object.entries(dateMap)) {
                             const cell = String(row[parseInt(colIdx)] || "").trim();
                             const shiftCode = this.getShiftCode(cell);
@@ -1409,6 +1429,21 @@ export class ScheduleSyncService {
         }
 
         return null;
+    }
+
+    private resolveTeamMemberLocation(locationName: string | undefined, allLocations: Location[]): Location | null {
+        if (!locationName) return null;
+        const [firstLocationPart] = locationName.split(",").map((part) => part.trim()).filter(Boolean);
+        return this.matchLocation(firstLocationPart || locationName, allLocations);
+    }
+
+    private shouldUseScheduleRowForMember(member: TeamMember, currentLocation: Location | null, allLocations: Location[], labelRowCount: number): boolean {
+        if (labelRowCount <= 1 || !currentLocation) return true;
+
+        const memberLocation = this.resolveTeamMemberLocation(member.locationName, allLocations);
+        if (!memberLocation) return true;
+
+        return memberLocation.id === currentLocation.id;
     }
 
     private parseMonth(monthStr: string): number {
