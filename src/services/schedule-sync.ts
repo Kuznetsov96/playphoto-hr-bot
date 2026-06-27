@@ -25,6 +25,8 @@ interface TeamMember {
     locationName?: string;
 }
 
+type TeamMemberMap = Record<string, TeamMember[]>;
+
 export type ScheduleAvailabilityKind = "available" | "limited";
 
 export interface ScheduleAvailabilityEntry {
@@ -135,6 +137,19 @@ export class ScheduleSyncService {
 
     private ensureSheets() {
         if (!this.sheets) throw new Error("Google Sheets not configured (missing google-service-account.json)");
+    }
+
+    private addTeamMapping(mapping: TeamMemberMap, key: string, member: TeamMember) {
+        const normalizedKey = key.trim();
+        if (!normalizedKey || normalizedKey === "<>" || normalizedKey.toLowerCase() === "n/a" || normalizedKey === "UNKNOWN_IMPORT") {
+            return;
+        }
+
+        const members = mapping[normalizedKey] ?? [];
+        if (!members.some((existing) => existing.telegramId === member.telegramId)) {
+            members.push(member);
+        }
+        mapping[normalizedKey] = members;
     }
 
     private async clearObsoletePreferenceRemindersForScheduledStaff(
@@ -690,7 +705,7 @@ export class ScheduleSyncService {
             throw new Error(`Duplicate Telegram IDs in team sheet: ${preview}`);
         }
 
-        const teamMappingForSchedule: { [key: string]: TeamMember } = {};
+        const teamMappingForSchedule: TeamMemberMap = {};
         const todayKyiv = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         todayKyiv.setHours(0, 0, 0, 0);
         const massDeactivationThreshold = Math.max(5, Math.ceil(activeBefore * 0.2));
@@ -762,9 +777,9 @@ export class ScheduleSyncService {
 
             if (isActive) {
                 const memberObj = { fullName, directoryName, telegramId: telegramId.toString(), surnameNameDot, locationName: locName };
-                if (surnameNameDot && surnameNameDot !== "<>") teamMappingForSchedule[surnameNameDot] = memberObj;
-                if (directoryName && directoryName !== "<>") teamMappingForSchedule[directoryName] = memberObj;
-                teamMappingForSchedule[telegramId.toString()] = memberObj;
+                this.addTeamMapping(teamMappingForSchedule, surnameNameDot, memberObj);
+                this.addTeamMapping(teamMappingForSchedule, directoryName, memberObj);
+                this.addTeamMapping(teamMappingForSchedule, telegramId.toString(), memberObj);
             }
 
             let birthDate: Date | null = null;
@@ -1014,7 +1029,7 @@ export class ScheduleSyncService {
     }
 
 
-    async syncSchedule(sheetName: string = "Актуальний розклад", existingTeamMap?: { [key: string]: TeamMember }) {
+    async syncSchedule(sheetName: string = "Актуальний розклад", existingTeamMap?: TeamMemberMap) {
         this.ensureSheets();
         const teamMap = existingTeamMap || await this.fetchTeamMapping();
         const { hiddenRows, hiddenColumns } = await this.fetchHiddenScheduleIndexes(sheetName);
@@ -1056,7 +1071,7 @@ export class ScheduleSyncService {
         const allLocations = await locationRepository.findAll();
         // BATCH CACHE
         const allUsersWithStaff = await userRepository.findAllWithStaff();
-        const userStaffMap = new Map(allUsersWithStaff.filter(u => u.staffProfile).map(u => [u.telegramId, u.staffProfile!]));
+        const userStaffMap = new Map(allUsersWithStaff.filter(u => u.staffProfile).map(u => [u.telegramId.toString(), u.staffProfile!]));
 
         let currentLocation: Location | null = null;
         let currentCity: string | null = null;
@@ -1066,15 +1081,6 @@ export class ScheduleSyncService {
 
         const cities = Object.values(CITY_NAME_MAP);
         const shiftsToCreate: Array<{ staffId: string; locationId: string; date: Date }> = [];
-        const scheduleLabelCounts = new Map<string, number>();
-
-        for (let i = 2; i < rows.length; i++) {
-            if (hiddenRows.has(i)) continue;
-            const label = String(rows[i]?.[0] || "").trim();
-            if (!label || !teamMap[label]) continue;
-            scheduleLabelCounts.set(label, (scheduleLabelCounts.get(label) || 0) + 1);
-        }
-
         for (let i = 2; i < rows.length; i++) {
             if (hiddenRows.has(i)) continue;
 
@@ -1084,24 +1090,25 @@ export class ScheduleSyncService {
             const label = String(row[0] || "").trim();
             if (!label) continue;
 
-            const member = teamMap[label];
-            if (member) {
+            const members = teamMap[label] ?? [];
+            if (members.length > 0) {
+                const member = this.selectTeamMemberForScheduleRow(members, currentLocation, allLocations, userStaffMap);
+                if (!member) {
+                    skippedSectionMismatchCount++;
+                    logger.warn({
+                        label,
+                        rowNumber: i + 1,
+                        memberCount: members.length,
+                        currentLocation: currentLocation?.name,
+                        currentCity,
+                    }, "Schedule sync skipped ambiguous duplicate staff label");
+                    continue;
+                }
+
                 const telegramId = this.parseTelegramId(member.telegramId);
                 if (telegramId) {
-                    const staffProfile = userStaffMap.get(telegramId);
+                    const staffProfile = userStaffMap.get(telegramId.toString());
                     if (staffProfile) {
-                        if (!this.shouldUseScheduleRowForMember(member, currentLocation, allLocations, scheduleLabelCounts.get(label) || 0)) {
-                            skippedSectionMismatchCount++;
-                            logger.warn({
-                                label,
-                                rowNumber: i + 1,
-                                memberLocation: member.locationName,
-                                currentLocation: currentLocation?.name,
-                                currentCity,
-                            }, "Schedule sync skipped duplicate staff label outside member location");
-                            continue;
-                        }
-
                         for (const [colIdx, date] of Object.entries(dateMap)) {
                             const cell = String(row[parseInt(colIdx)] || "").trim();
                             const shiftCode = this.getShiftCode(cell);
@@ -1234,10 +1241,11 @@ export class ScheduleSyncService {
 
     async getAvailabilityForDate(date: Date, sheetName: string = "Актуальний розклад"): Promise<Map<string, ScheduleAvailabilityKind>> {
         this.ensureSheets();
-        const [teamMap, { hiddenRows, hiddenColumns }, allUsersWithStaff] = await Promise.all([
+        const [teamMap, { hiddenRows, hiddenColumns }, allUsersWithStaff, allLocations] = await Promise.all([
             this.fetchTeamMapping(),
             this.fetchHiddenScheduleIndexes(sheetName),
-            userRepository.findAllWithStaff()
+            userRepository.findAllWithStaff(),
+            locationRepository.findAll()
         ]);
         const userStaffMap = new Map(
             allUsersWithStaff
@@ -1263,6 +1271,10 @@ export class ScheduleSyncService {
         if (targetCol < 0) return new Map();
 
         const availability = new Map<string, ScheduleAvailabilityKind>();
+        const cities = Object.values(CITY_NAME_MAP);
+        let currentLocation: Location | null = null;
+        let currentCity: string | null = null;
+
         for (let i = 2; i < rowData.length; i++) {
             if (hiddenRows.has(i)) continue;
 
@@ -1270,7 +1282,22 @@ export class ScheduleSyncService {
             const label = String(values[0]?.formattedValue || "").trim();
             if (!label) continue;
 
-            const member = teamMap[label];
+            const members = teamMap[label] ?? [];
+            if (members.length === 0) {
+                const foundCity = cities.find(c => c.toLowerCase() === label.toLowerCase()) ||
+                    Object.keys(CITY_NAME_MAP).find(k => k.toLowerCase() === label.toLowerCase());
+                if (foundCity) {
+                    currentCity = CITY_NAME_MAP[foundCity.toLowerCase()] || foundCity;
+                    currentLocation = null;
+                    continue;
+                }
+
+                const resolved = this.resolveLocationFromHeader(label, allLocations, currentCity || undefined);
+                if (resolved) currentLocation = resolved;
+                continue;
+            }
+
+            const member = this.selectTeamMemberForScheduleRow(members, currentLocation, allLocations, userStaffMap);
             if (!member) continue;
 
             const telegramId = this.parseTelegramId(member.telegramId);
@@ -1437,13 +1464,26 @@ export class ScheduleSyncService {
         return this.matchLocation(firstLocationPart || locationName, allLocations);
     }
 
-    private shouldUseScheduleRowForMember(member: TeamMember, currentLocation: Location | null, allLocations: Location[], labelRowCount: number): boolean {
-        if (labelRowCount <= 1 || !currentLocation) return true;
+    private selectTeamMemberForScheduleRow(
+        members: TeamMember[],
+        currentLocation: Location | null,
+        allLocations: Location[],
+        userStaffMap?: Map<string, { locationId?: string | null }>
+    ): TeamMember | null {
+        if (members.length === 0) return null;
+        if (members.length === 1) return members[0]!;
+        if (!currentLocation) return null;
 
-        const memberLocation = this.resolveTeamMemberLocation(member.locationName, allLocations);
-        if (!memberLocation) return true;
+        const matchingMembers = members.filter((member) => {
+            const telegramId = this.parseTelegramId(member.telegramId);
+            const staffProfile = telegramId ? userStaffMap?.get(telegramId.toString()) : undefined;
+            if (staffProfile?.locationId === currentLocation.id) return true;
 
-        return memberLocation.id === currentLocation.id;
+            const memberLocation = this.resolveTeamMemberLocation(member.locationName, allLocations);
+            return memberLocation?.id === currentLocation.id;
+        });
+
+        return matchingMembers.length === 1 ? matchingMembers[0]! : null;
     }
 
     private parseMonth(monthStr: string): number {
@@ -1592,14 +1632,14 @@ export class ScheduleSyncService {
         return this.getShiftCode(cell) !== null;
     }
 
-    private async fetchTeamMapping(): Promise<{ [key: string]: TeamMember }> {
+    private async fetchTeamMapping(): Promise<TeamMemberMap> {
         this.ensureSheets();
         const res = await this.sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID_TEAM,
             range: "'В роботі'!A1:S2000"
         });
         const rows = res.data.values;
-        const mapping: { [key: string]: TeamMember } = {};
+        const mapping: TeamMemberMap = {};
         if (rows) {
             rows.forEach((row: any) => {
                 const status = String(row[5] || "").trim().toLowerCase();
@@ -1610,9 +1650,9 @@ export class ScheduleSyncService {
                 const telegramId = String(row[17] || "").trim();
                 if (status === "працює" && telegramId && telegramId.length > 5) {
                     const member = { fullName, directoryName, telegramId, surnameNameDot, locationName: locName };
-                    if (surnameNameDot && surnameNameDot !== "<>" && surnameNameDot !== "n/a") mapping[surnameNameDot] = member;
-                    if (directoryName && directoryName !== "<>" && directoryName !== "n/a" && directoryName !== "UNKNOWN_IMPORT") mapping[directoryName] = member;
-                    mapping[telegramId] = member;
+                    this.addTeamMapping(mapping, surnameNameDot, member);
+                    this.addTeamMapping(mapping, directoryName, member);
+                    this.addTeamMapping(mapping, telegramId, member);
                 }
             });
         }
