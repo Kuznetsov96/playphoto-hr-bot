@@ -18,21 +18,35 @@ const locations = [
 
 describe("ScheduleSyncService staff label disambiguation", () => {
     const service = new ScheduleSyncService() as any;
-    const member = {
+    const kidlandiaMember = {
         fullName: "Палівода Анастасія Анатоліївна",
         directoryName: "ne1buhay1vino",
         telegramId: "1340583088",
         surnameNameDot: "Палівода А.",
         locationName: "Kidlandia",
     };
+    const smileMember = {
+        fullName: "Палівода Анна",
+        directoryName: "palivoda_smile",
+        telegramId: "200000001",
+        surnameNameDot: "Палівода А.",
+        locationName: "SP Київ",
+    };
 
-    it("uses member location to skip duplicated labels from other schedule sections", () => {
-        expect(service.shouldUseScheduleRowForMember(member, locations[0], locations, 2)).toBe(false);
-        expect(service.shouldUseScheduleRowForMember(member, locations[1], locations, 2)).toBe(true);
+    it("keeps all schedule sections when a duplicated row label belongs to one staff member", () => {
+        expect(service.selectTeamMemberForScheduleRow([kidlandiaMember], locations[0], locations)?.telegramId).toBe("1340583088");
+        expect(service.selectTeamMemberForScheduleRow([kidlandiaMember], locations[1], locations)?.telegramId).toBe("1340583088");
     });
 
-    it("keeps existing behavior for unique labels or unknown member locations", () => {
-        expect(service.shouldUseScheduleRowForMember(member, locations[0], locations, 1)).toBe(true);
-        expect(service.shouldUseScheduleRowForMember({ ...member, locationName: "" }, locations[0], locations, 2)).toBe(true);
+    it("uses section location only when multiple staff members share the same row label", () => {
+        expect(service.selectTeamMemberForScheduleRow([kidlandiaMember, smileMember], locations[0], locations)?.telegramId).toBe("200000001");
+        expect(service.selectTeamMemberForScheduleRow([kidlandiaMember, smileMember], locations[1], locations)?.telegramId).toBe("1340583088");
+    });
+
+    it("skips truly ambiguous duplicated labels", () => {
+        expect(service.selectTeamMemberForScheduleRow([
+            { ...kidlandiaMember, telegramId: "300000001", locationName: "" },
+            { ...kidlandiaMember, telegramId: "300000002", locationName: "" },
+        ], locations[0], locations)).toBeNull();
     });
 });
