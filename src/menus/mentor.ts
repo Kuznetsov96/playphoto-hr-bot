@@ -357,8 +357,6 @@ mentorInboxDetailsMenu.dynamic(async (ctx, range) => {
         const username = cand.user?.username;
         if (username) {
             range.url("💬 Message", `https://t.me/${username}`).row();
-        } else if (cand.user?.telegramId) {
-            range.url("💬 Message", `tg://user?id=${cand.user.telegramId.toString()}`).row();
         }
         range.text("🔗 Generate Channel Link", async (ctx) => {
             const link = await mentorService.generateChannelLinkForMentor(cand.id);
