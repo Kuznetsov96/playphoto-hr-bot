@@ -39,6 +39,7 @@ export async function startStatelessBroadcast(ctx: MyContext) {
     ctx.session.adminFlow = 'BROADCAST';
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.manualChannelAccess;
     ctx.session.broadcastData = {
         step: 'SELECT_TARGET',
         selectedLocs: []

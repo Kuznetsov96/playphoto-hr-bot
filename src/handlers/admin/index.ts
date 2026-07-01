@@ -94,6 +94,7 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     if (ctx.chat?.type !== "private") return await next();
 
     if (await handleAdminMagnetCounterMessage(ctx)) return;
+    if (await handleBroadcastContent(ctx)) return;
     if (await handleManualChannelAccess(ctx)) return;
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
@@ -133,7 +134,6 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
         return;
     }
 
-    if (await handleBroadcastContent(ctx)) return;
     if (await handleTaskText(ctx)) return;
     if (
         ctx.session.broadcastData &&
