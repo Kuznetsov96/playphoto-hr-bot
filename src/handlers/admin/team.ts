@@ -23,6 +23,28 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
 import { startManualChannelAccessFlow, startManualChannelRevokeFlow } from "./manual-channel-access.js";
+import { getShiftTimeFromLocationSchedule } from "../../utils/shift-time.js";
+
+function formatShiftClock(date: Date) {
+    return date.toLocaleTimeString("uk-UA", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/Kyiv"
+    });
+}
+
+function formatScheduleNotificationShiftTime(shift: {
+    date: Date;
+    startTime?: Date | null;
+    endTime?: Date | null;
+    location?: { schedule?: string | null } | null;
+}) {
+    if (shift.startTime && shift.endTime) {
+        return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
+    }
+
+    return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
+}
 
 function formatTeamSyncPreview(preview: any): string {
     const duplicatePreview = (preview.duplicateTelegramIds || [])
@@ -147,7 +169,8 @@ async function executeFullSync(ctx: MyContext, msg: any) {
                         for (const s of upcomingShifts) {
                             const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
                             const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-                            schedMsg += `▫️ <code>${dateStr}</code> — ${s.location.name}\n`;
+                            const timeStr = formatScheduleNotificationShiftTime(s);
+                            schedMsg += `▫️ <code>${dateStr}</code> — ${escapeHtml(timeStr)} — ${escapeHtml(s.location.name)}\n`;
                         }
                         schedMsg += `\n✨ Ти можеш переглянути графік будь-коли в меню бота.`;
                         const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
