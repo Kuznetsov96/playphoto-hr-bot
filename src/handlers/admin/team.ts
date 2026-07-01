@@ -24,7 +24,6 @@ import { candidateRepository } from "../../repositories/candidate-repository.js"
 import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
 import { startManualChannelAccessFlow, startManualChannelRevokeFlow } from "./manual-channel-access.js";
 import { getShiftTimeFromLocationSchedule } from "../../utils/shift-time.js";
-import { createKyivDate } from "../../utils/bot-utils.js";
 
 function formatShiftClock(date: Date) {
     return date.toLocaleTimeString("uk-UA", {
@@ -47,69 +46,24 @@ function formatScheduleNotificationShiftTime(shift: {
     return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
 }
 
-function getKyivDateParts(date: Date) {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Europe/Kyiv",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).formatToParts(date);
-
-    return {
-        year: Number(parts.find((part) => part.type === "year")?.value),
-        month: Number(parts.find((part) => part.type === "month")?.value),
-        day: Number(parts.find((part) => part.type === "day")?.value),
-    };
-}
-
-function getScheduleNotificationUnixTime(shift: {
-    date: Date;
-    startTime?: Date | null;
-    location?: { schedule?: string | null } | null;
-}) {
-    if (shift.startTime) return Math.floor(shift.startTime.getTime() / 1000);
-
-    const { year, month, day } = getKyivDateParts(shift.date);
-    const shiftTime = getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date);
-    const timeMatch = shiftTime?.match(/^(\d{2}):(\d{2})/);
-    const hour = timeMatch ? Number(timeMatch[1]) : 12;
-    const minute = timeMatch ? Number(timeMatch[2]) : 0;
-
-    return Math.floor(createKyivDate(year, month - 1, day, hour, minute).getTime() / 1000);
-}
-
 function buildScheduleNotificationMessage(shifts: Array<{
     date: Date;
     startTime?: Date | null;
     endTime?: Date | null;
     location: { name: string; schedule?: string | null };
 }>) {
-    const entities: any[] = [];
-    let text = "📅 ";
-    const titleOffset = text.length;
-    text += "Твій графік:";
-    entities.push({ type: "bold", offset: titleOffset, length: "Твій графік:".length });
-    text += "\n\n";
+    let text = "📅 <b>Твій графік:</b>\n\n";
 
     for (const s of shifts) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
         const timeStr = formatScheduleNotificationShiftTime(s);
 
-        text += "▫️ ";
-        const dateOffset = text.length;
-        text += dateStr;
-        entities.push({
-            type: "date_time",
-            offset: dateOffset,
-            length: dateStr.length,
-            unix_time: getScheduleNotificationUnixTime(s),
-        });
-        text += ` · ${timeStr} · ${s.location.name}\n`;
+        text += `▫️ ${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} · ${escapeHtml(s.location.name)}\n`;
     }
 
     text += "\n✨ Ти можеш переглянути графік будь-коли в меню бота.";
-    return { text, entities };
+    return text;
 }
 
 function formatTeamSyncPreview(preview: any): string {
@@ -233,7 +187,7 @@ async function executeFullSync(ctx: MyContext, msg: any) {
                     if (upcomingShifts.length > 0) {
                         const schedMsg = buildScheduleNotificationMessage(upcomingShifts);
                         const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
-                        await ctx.api.sendMessage(staffTgId, schedMsg.text, { entities: schedMsg.entities, reply_markup: schedKb }).catch(() => { });
+                        await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
                     }
                 }
 
