@@ -24,6 +24,9 @@ import { accessService } from "../services/access-service.js";
 
 export const commandHandlers = new Composer<MyContext>();
 
+const RESET_TESTER_IDS = [7096140693, 7455712248, 8253241676];
+const RESET_TESTER_ID_BIGINTS = new Set(RESET_TESTER_IDS.map((id) => BigInt(id)));
+
 async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaited<ReturnType<typeof getUserAdminRole>>>) {
     if (adminRole === 'SUPER_ADMIN' || adminRole === 'CO_FOUNDER' || adminRole === 'SUPPORT') {
         const text = await staffService.getAdminHeader(adminRole as any);
@@ -529,7 +532,7 @@ commandHandlers.command("mentor", requireRole('SUPER_ADMIN', 'MENTOR_LEAD'), asy
 commandHandlers.command("reset_me", async (ctx) => {
     try { await ctx.deleteMessage(); } catch (e) { }
     const callerId = ctx.from?.id || 0;
-    const isAuthorized = ADMIN_IDS.includes(callerId) || CO_FOUNDER_IDS.includes(callerId) || callerId === 7096140693;
+    const isAuthorized = ADMIN_IDS.includes(callerId) || CO_FOUNDER_IDS.includes(callerId) || RESET_TESTER_IDS.includes(callerId);
     if (!isAuthorized) return;
 
     // Parse optional ID from text (e.g. /reset_me 12345678)
@@ -564,7 +567,7 @@ commandHandlers.command("reset_me", async (ctx) => {
 
         // 2. Special Case: Clear Staff Profile if it's the tester or if specifically requested for reset
         // This allows testers to return to the candidate flow despite the security shield.
-        if (user.staffProfile && (targetId === 7096140693n || match)) {
+        if (user.staffProfile && (RESET_TESTER_ID_BIGINTS.has(targetId) || match)) {
             const { staffRepository } = await import("../repositories/staff-repository.js");
             await staffRepository.deleteRelatedData(user.staffProfile.id);
             logAuditEvent({
