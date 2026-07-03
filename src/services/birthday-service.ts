@@ -8,24 +8,19 @@ const t = (key: string, args?: any) => {
     return text || key;
 };
 import { Bot, InlineKeyboard } from "grammy";
-import { CandidateStatus, FunnelStep } from "@prisma/client";
 import type { MyContext } from "../types/context.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
-import { locationRepository } from "../repositories/location-repository.js";
 import { ADMIN_IDS, CO_FOUNDER_IDS } from "../config.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
+import { reactivateUnderageCandidateIfEligible } from "./underage-reactivation-service.js";
 
 function getBirthdayRecipients(): number[] {
     const ids = [...ADMIN_IDS, ...CO_FOUNDER_IDS];
     return [...new Set(ids)];
-}
-
-function hasInterviewReadyScreeningData(candidate: { city?: string | null; locationId?: string | null }): boolean {
-    return Boolean(candidate.city && candidate.locationId);
 }
 
 export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, month: number) {
@@ -62,37 +57,9 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
             if (!c.user?.telegramId) continue;
 
             const tid = Number(c.user.telegramId);
-            const birthDate = new Date(c.birthDate!);
-            const today = new Date();
-            let age = today.getFullYear() - birthDate.getFullYear();
+            const reactivation = await reactivateUnderageCandidateIfEligible(c, "birthday_greeting");
 
-            // Check if it's exactly 17th birthday for a previously rejected girl
-            const isExactly17 = age === 17;
-            const wasUnderage = c.hrDecision === "REJECTED_SYSTEM_UNDERAGE";
-            const isFemale = c.gender === "female";
-            const canReactivateUnderageCandidate = isExactly17 && wasUnderage && isFemale;
-
-            if (canReactivateUnderageCandidate) {
-                const isInterviewReady = hasInterviewReadyScreeningData(c);
-                const nextStatus = isInterviewReady ? CandidateStatus.WAITLIST_HR : CandidateStatus.SCREENING;
-                const nextStep = isInterviewReady ? FunnelStep.INTERVIEW : FunnelStep.INITIAL_TEST;
-
-                await candidateRepository.update(c.id, isInterviewReady
-                    ? {
-                        status: nextStatus,
-                        hrDecision: null,
-                        isWaitlisted: true,
-                        currentStep: nextStep,
-                    }
-                    : {
-                        status: nextStatus,
-                        hrDecision: null,
-                        isWaitlisted: false,
-                        currentStep: nextStep,
-                        notificationSent: false,
-                        interviewWaitlistReason: null,
-                        interviewInvitedAt: null,
-                    });
+            if (reactivation) {
                 logAuditEvent({
                     event: "candidate.underage_reactivated_on_birthday",
                     telegramId: c.user.telegramId,
@@ -100,20 +67,19 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                     actorRole: "system",
                     candidateId: c.id,
                     result: "success",
-                    stage: nextStatus,
+                    stage: reactivation.candidate.status,
                     module: "birthday-service",
                     operation: "greetCandidateBirthdays",
                     safeContext: {
-                        age: 17,
-                        reactivationMode: isInterviewReady ? "WAITLIST_HR" : "RESUME_SCREENING",
+                        reactivationMode: reactivation.mode,
                     },
                 });
 
-                await bot.api.sendMessage(tid, isInterviewReady ? activationGreeting : continueScreeningGreeting, {
+                await bot.api.sendMessage(tid, reactivation.mode === "RESUME_SCREENING" ? continueScreeningGreeting : activationGreeting, {
                     parse_mode: "HTML",
-                    ...(isInterviewReady ? {} : {
+                    ...(reactivation.mode === "RESUME_SCREENING" ? {
                         reply_markup: new InlineKeyboard().text("Продовжити анкету ✨", "resume_screening")
-                    }),
+                    } : {}),
                 });
             } else {
                 await bot.api.sendMessage(tid, standardGreeting, { parse_mode: "HTML" });
@@ -130,10 +96,8 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                 module: "birthday-service",
                 operation: "greetCandidateBirthdays",
                 safeContext: {
-                    activatedFromUnderage: isExactly17 && wasUnderage && isFemale,
-                    reactivationMode: canReactivateUnderageCandidate
-                        ? (hasInterviewReadyScreeningData(c) ? "WAITLIST_HR" : "RESUME_SCREENING")
-                        : undefined,
+                    activatedFromUnderage: Boolean(reactivation),
+                    reactivationMode: reactivation?.mode,
                 },
             });
         } catch (e) {
