@@ -7,6 +7,7 @@ import { googleCalendar } from "./google-calendar.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
+import { reactivateUnderageCandidateIfEligible } from "./underage-reactivation-service.js";
 
 function toIsoOrUndefined(value: unknown): string | undefined {
     if (value instanceof Date) return value.toISOString();
@@ -26,7 +27,7 @@ export class BookingService {
                 throw new Error("ALREADY_BOOKED");
             }
 
-            const candidate = await candidateRepository.findByTelegramId(telegramId, tx);
+            let candidate = await candidateRepository.findByTelegramId(telegramId, tx);
 
             if (!candidate) {
                 throw new Error("CANDIDATE_NOT_FOUND");
@@ -36,19 +37,28 @@ export class BookingService {
                 throw new Error("MALE_CANDIDATE");
             }
 
-            // Server-side protection from stale callback buttons and inconsistent states.
-            if (candidate.status === "REJECTED" || candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
-                throw new Error("UNDERAGE_CANDIDATE");
-            }
-            if (candidate.hrDecision === "AGE_LIMIT") {
-                throw new Error("AGE_LIMIT_CANDIDATE");
-            }
             const ageRejection = getBirthDateRejection(candidate.birthDate, candidate.location);
             if (ageRejection === "UNDERAGE") {
                 throw new Error("UNDERAGE_CANDIDATE");
             }
             if (ageRejection === "AGE_LIMIT") {
                 throw new Error("AGE_LIMIT_CANDIDATE");
+            }
+            if (candidate.hrDecision === "AGE_LIMIT") {
+                throw new Error("AGE_LIMIT_CANDIDATE");
+            }
+
+            // Server-side recovery from stale interview buttons sent before an
+            // underage rejection became eligible by date.
+            if (candidate.status === "REJECTED" || candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
+                const reactivation = await reactivateUnderageCandidateIfEligible(candidate, "interview_booking", tx);
+                if (!reactivation) {
+                    throw new Error(candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE" ? "UNDERAGE_CANDIDATE" : "CANDIDATE_NOT_ACTIVE");
+                }
+                if (reactivation.mode === "RESUME_SCREENING" || reactivation.mode === "MANUAL_REVIEW") {
+                    throw new Error("SCREENING_INCOMPLETE");
+                }
+                candidate = reactivation.candidate;
             }
 
             // --- SMART RESCHEDULE LOGIC ---

@@ -129,6 +129,10 @@ function isMentorEligible(state: CandidateFunnelSnapshot): boolean {
         isLegacyMentorWaitlist(state);
 }
 
+function isRecoverableUnderageRejection(state: CandidateFunnelSnapshot): boolean {
+    return state.status === CandidateStatus.REJECTED && state.hrDecision === "REJECTED_SYSTEM_UNDERAGE";
+}
+
 function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: CandidateStatus): boolean {
     if (oldState.status === nextStatus) return true;
 
@@ -139,7 +143,7 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
                 CandidateStatus.WAITLIST_HR,
                 CandidateStatus.WAITLIST,
                 CandidateStatus.MANUAL_REVIEW,
-            ] as CandidateStatus[]).includes(oldState.status);
+            ] as CandidateStatus[]).includes(oldState.status) || isRecoverableUnderageRejection(oldState);
         case CandidateStatus.WAITLIST_HR:
             return ([
                 CandidateStatus.SCREENING,
@@ -147,14 +151,14 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
                 CandidateStatus.WAITLIST,
                 CandidateStatus.INTERVIEW_SCHEDULED,
                 CandidateStatus.INTERVIEW_COMPLETED,
-            ] as CandidateStatus[]).includes(oldState.status);
+            ] as CandidateStatus[]).includes(oldState.status) || isRecoverableUnderageRejection(oldState);
         case CandidateStatus.MANUAL_REVIEW:
             return ([
                 CandidateStatus.SCREENING,
                 CandidateStatus.MANUAL_REVIEW,
                 CandidateStatus.WAITLIST_HR,
                 CandidateStatus.WAITLIST,
-            ] as CandidateStatus[]).includes(oldState.status);
+            ] as CandidateStatus[]).includes(oldState.status) || isRecoverableUnderageRejection(oldState);
         case CandidateStatus.INTERVIEW_SCHEDULED:
             return ([
                 CandidateStatus.SCREENING,

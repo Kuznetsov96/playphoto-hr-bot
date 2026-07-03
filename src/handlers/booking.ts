@@ -309,6 +309,13 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         } else if (e.message === "AGE_LIMIT_CANDIDATE") {
             await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-age-limit"]);
+        } else if (e.message === "SCREENING_INCOMPLETE") {
+            await ctx.answerCallbackQuery("Спершу потрібно оновити анкету.");
+            await ScreenManager.renderScreen(
+                ctx,
+                "Анкету потрібно оновити перед записом на співбесіду 🌸\n\nНатисни кнопку нижче, щоб продовжити з того місця, де ми зупинилися.",
+                new InlineKeyboard().text("Продовжити анкету ✨", "resume_screening")
+            );
         } else if (e.message === "MALE_CANDIDATE") {
             await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]("цій локації", "вашому місті"));

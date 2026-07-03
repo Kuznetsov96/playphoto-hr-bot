@@ -110,6 +110,48 @@ describe('BookingService', () => {
                 .rejects.toThrow('AGE_LIMIT_CANDIDATE');
         });
 
+        it('should reactivate stale underage rejection when candidate is now eligible', async () => {
+            const startTime = new Date('2026-04-12T10:00:00.000Z');
+            const endTime = new Date('2026-04-12T10:30:00.000Z');
+            const txMock = {};
+            const candidate = {
+                id: 'cand-reactivate',
+                status: 'REJECTED',
+                hrDecision: 'REJECTED_SYSTEM_UNDERAGE',
+                gender: 'female',
+                fullName: 'Test Candidate',
+                birthDate: new Date('2009-04-12T00:00:00.000Z'),
+                city: 'Київ',
+                locationId: 'loc-1',
+                appearance: 'Без особливостей',
+                source: 'Instagram',
+                location: { neededCount: 1, isHidden: false, isHiddenFromCandidates: false },
+                user: { telegramId: 12345n },
+            };
+
+            vi.mocked(prisma.$transaction).mockImplementationOnce(async (cb: any) => cb(txMock));
+            vi.mocked(interviewRepository.findSlotById).mockResolvedValue({ id: 'slot1', isBooked: false } as any);
+            vi.mocked(candidateRepository.findByTelegramId).mockResolvedValue(candidate as any);
+            vi.mocked(candidateRepository.update)
+                .mockResolvedValueOnce({ ...candidate, status: 'SCREENING', hrDecision: null } as any)
+                .mockResolvedValue({} as any);
+            vi.mocked(interviewRepository.updateSlot).mockResolvedValue({
+                id: 'slot1',
+                startTime,
+                endTime,
+                candidate: { fullName: 'Test Candidate' }
+            } as any);
+            vi.mocked(googleCalendar.createInterviewEvent).mockResolvedValue({ meetLink: 'http://meet' } as any);
+
+            await bookingService.bookInterviewSlot(12345, 'slot1', 'user');
+
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(1, 'cand-reactivate', expect.objectContaining({
+                status: 'SCREENING',
+                hrDecision: null,
+            }), txMock);
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-reactivate', { status: 'INTERVIEW_SCHEDULED' }, txMock);
+        });
+
         it('should successfully book a slot and create google event', async () => {
             const startTime = new Date();
             const endTime = new Date();

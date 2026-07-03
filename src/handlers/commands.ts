@@ -293,9 +293,30 @@ commandHandlers.command("start", async (ctx) => {
 
         // 3. Candidate Logic
         await updateUserCommands(ctx, "CANDIDATE");
-        const candidate = onboardingCandidate;
+        let candidate = onboardingCandidate;
 
         if (candidate) {
+            const { reactivateUnderageCandidateIfEligible } = await import("../services/underage-reactivation-service.js");
+            const underageReactivation = await reactivateUnderageCandidateIfEligible(candidate, "start_command");
+            if (underageReactivation) {
+                candidate = underageReactivation.candidate;
+
+                if (underageReactivation.mode === "RESUME_SCREENING") {
+                    ctx.session.candidateData = {
+                        fullName: candidate.fullName,
+                        gender: candidate.gender,
+                        birthDate: candidate.birthDate?.toISOString(),
+                        city: candidate.city,
+                        locationIds: candidate.locationId ? [candidate.locationId] : [],
+                        appearance: candidate.appearance,
+                        source: candidate.source,
+                        clickSource: candidate.clickSource
+                    } as any;
+                    await startScreening(ctx);
+                    return;
+                }
+            }
+
             if (candidate.status === CandidateStatus.BLOCKER && clearedBlockedUsers.count > 0) {
                 logBusinessEvent({
                     event: "candidate.recovery.started",

@@ -52,6 +52,23 @@ describe("candidate funnel guard", () => {
         expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
     });
 
+    it("allows recovering underage rejections back into early HR funnel states", () => {
+        const oldState = makeCandidate({
+            status: CandidateStatus.REJECTED,
+            hrDecision: "REJECTED_SYSTEM_UNDERAGE",
+        });
+
+        for (const status of [CandidateStatus.SCREENING, CandidateStatus.WAITLIST_HR, CandidateStatus.MANUAL_REVIEW]) {
+            const context = buildNextCandidateFunnelState(oldState, {
+                status,
+                hrDecision: null,
+                currentStep: FunnelStep.INITIAL_TEST,
+            });
+
+            expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+        }
+    });
+
     it("allows stale booked interview recovery from screening interview step", () => {
         const oldState = makeCandidate({
             status: CandidateStatus.SCREENING,

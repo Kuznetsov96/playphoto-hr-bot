@@ -58,6 +58,11 @@ describe("greetCandidateBirthdays", () => {
         vi.setSystemTime(new Date("2026-04-12T09:00:00.000Z"));
         vi.clearAllMocks();
         sendMessage.mockResolvedValue({});
+        updateCandidate.mockImplementation(async (id, patch) => ({
+            id,
+            status: patch.status,
+            user: { telegramId: 999n },
+        }));
         findBirthdaysToday.mockResolvedValue([
             {
                 id: "cand-rejected",
@@ -86,6 +91,9 @@ describe("greetCandidateBirthdays", () => {
                 birthDate: new Date("2009-04-12T00:00:00.000Z"),
                 city: "Запоріжжя",
                 locationId: "loc-1",
+                appearance: "Без особливостей",
+                source: "Instagram",
+                location: { neededCount: 1, isHidden: false, isHiddenFromCandidates: false },
                 user: { telegramId: 1003n },
             },
             {
@@ -106,7 +114,7 @@ describe("greetCandidateBirthdays", () => {
         vi.useRealTimers();
     });
 
-    it("greets all deliverable candidates and reactivates exact-17 complete underage profiles to HR waitlist", async () => {
+    it("greets all deliverable candidates and reactivates complete underage profiles with open locations", async () => {
         const { greetCandidateBirthdays } = await import("../birthday-service.js");
 
         const sentCount = await greetCandidateBirthdays({ api: { sendMessage } } as any, 12, 4);
@@ -123,11 +131,11 @@ describe("greetCandidateBirthdays", () => {
             expect.objectContaining({ parse_mode: "HTML" })
         );
         expect(updateCandidate).toHaveBeenCalledWith("cand-underage-ready", expect.objectContaining({
-            status: "WAITLIST_HR",
+            status: "SCREENING",
             hrDecision: null,
-            isWaitlisted: true,
-            currentStep: "INTERVIEW",
-        }));
+            isWaitlisted: false,
+            currentStep: "INITIAL_TEST",
+        }), undefined);
         expect(sendMessage).toHaveBeenCalledWith(
             1003,
             expect.stringContaining("Ми повернули твою анкету до списку актуальних"),
@@ -148,7 +156,7 @@ describe("greetCandidateBirthdays", () => {
             notificationSent: false,
             interviewWaitlistReason: null,
             interviewInvitedAt: null,
-        }));
+        }), undefined);
         expect(sendMessage).toHaveBeenCalledWith(
             1004,
             expect.stringContaining("Натисни кнопку нижче"),
