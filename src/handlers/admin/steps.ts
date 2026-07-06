@@ -28,6 +28,19 @@ adminStepHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) 
         step.startsWith("set_custom_staging_time_");
 
     if (!isAdminStep || step === "idle") return next();
+    if ((step.startsWith("set_needed_") || step.startsWith("edit_city_")) && ctx.session.adminFlow !== "LOCATIONS") {
+        return next();
+    }
+    if (step === "sync_other_sheet" && ctx.session.adminFlow !== "SCHEDULE") {
+        return next();
+    }
+    if (
+        (step.startsWith("set_first_shift_date_") || step.startsWith("set_custom_staging_time_")) &&
+        ctx.session.adminFlow &&
+        ctx.session.adminFlow !== "RECRUITMENT"
+    ) {
+        return next();
+    }
 
     // 1. Permission Guard
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
@@ -77,6 +90,9 @@ async function handleSetNeeded(ctx: MyContext, step: string, text: string) {
     await locationRepository.update(locId, { neededCount: count });
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-need-updated"]({ count }), "admin-ops");
     ctx.session.step = "idle";
+    if (ctx.session.adminFlow === "LOCATIONS") {
+        delete ctx.session.adminFlow;
+    }
 }
 
 async function handleEditCity(ctx: MyContext, step: string, text: string) {
@@ -87,6 +103,9 @@ async function handleEditCity(ctx: MyContext, step: string, text: string) {
     await ctx.reply(ADMIN_TEXTS["admin-success-city-updated"]({ city: newCity }));
 
     ctx.session.step = "idle";
+    if (ctx.session.adminFlow === "LOCATIONS") {
+        delete ctx.session.adminFlow;
+    }
     // Повертаємось до списку міст
     await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-cities", { forceNew: true });
 }
@@ -115,6 +134,9 @@ async function handleSetFirstShiftDate(ctx: MyContext, step: string, text: strin
     await candidateRepository.update(candId, updateData);
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-date-saved"]({ date: shiftDate.toLocaleDateString('uk-UA') }), "admin-ops");
     ctx.session.step = "idle";
+    if (ctx.session.adminFlow === "RECRUITMENT") {
+        delete ctx.session.adminFlow;
+    }
 }
 
 async function handleSetCustomStagingTime(ctx: MyContext, step: string, text: string) {
@@ -124,6 +146,9 @@ async function handleSetCustomStagingTime(ctx: MyContext, step: string, text: st
     ctx.session.stagingTime = stagingTime;
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-time-updated"]({ time: stagingTime }), "admin-candidate");
     ctx.session.step = "idle";
+    if (ctx.session.adminFlow === "RECRUITMENT") {
+        delete ctx.session.adminFlow;
+    }
 }
 
 async function handleSyncOtherSheet(ctx: MyContext, text: string) {
@@ -199,6 +224,9 @@ async function handleSyncOtherSheet(ctx: MyContext, text: string) {
     }
     delete ctx.session.customSyncPromptMessageId;
     ctx.session.step = "idle";
+    if (ctx.session.adminFlow === "SCHEDULE") {
+        delete ctx.session.adminFlow;
+    }
 }
 
 async function renderCustomSyncStatus(ctx: MyContext, text: string, replyMarkup?: InlineKeyboard) {

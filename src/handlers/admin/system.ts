@@ -113,6 +113,15 @@ locationAdminMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) =>
 });
 
 async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
+    ctx.session.adminFlow = "LOCATIONS";
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
+
     const displayName = formatLocationName(l.name, city);
     const kb = new InlineKeyboard()
         .text(l.isHiddenFromCandidates ? '🔓 Show to Candidates' : '🔒 Hide from Candidates', `toggle_visibility_${l.id}`).row()
@@ -141,6 +150,12 @@ selectCityForLocMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>)
         range.text(normalizeCity(city), async (ctx: MyContext) => {
             await locationRepository.update(locId, { city });
             await ctx.answerCallbackQuery(`City changed to ${normalizeCity(city)} ✅`);
+            if (ctx.session.adminFlow === "LOCATIONS") {
+                delete ctx.session.adminFlow;
+            }
+            if (ctx.session.step?.startsWith("edit_city_")) {
+                ctx.session.step = "idle";
+            }
             
             // Return to city list (most logical after changing location ownership)
             await ScreenManager.goBack(ctx, "🏙️ Select City:", "admin-cities");
@@ -177,6 +192,7 @@ adminSystemHandlers.callbackQuery(/^edit_city_(.+)$/, async (ctx: MyContext) => 
     if (!locId) return;
     
     await ctx.answerCallbackQuery();
+    ctx.session.adminFlow = "LOCATIONS";
     ctx.session.selectedLocationId = locId; // Store ID for menu context
     ctx.session.step = `edit_city_${locId}`;
     

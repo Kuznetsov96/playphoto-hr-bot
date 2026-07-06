@@ -40,13 +40,22 @@ function getCandidateBackCallback(ctx: MyContext, candidateId: string) {
     return `view_candidate_${candidateId}`;
 }
 
+function startSearchFlow(ctx: MyContext) {
+    ctx.session.adminFlow = 'SEARCH';
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
+}
+
 export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     // MUST answer the callback query first to prevent Telegram loading spinner
     await ctx.answerCallbackQuery().catch(() => { });
 
-    ctx.session.adminFlow = 'SEARCH';
-    delete ctx.session.taskData;
-    delete ctx.session.broadcastData;
+    startSearchFlow(ctx);
 
     const user = await userRepository.findById(userId);
     if (!user) {
@@ -82,17 +91,13 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
 }
 
 export async function startAdminSearch(ctx: MyContext) {
-    ctx.session.adminFlow = 'SEARCH';
-    delete ctx.session.taskData;
-    delete ctx.session.broadcastData;
+    startSearchFlow(ctx);
     ctx.session.step = "admin_search_cand";
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-cand-prompt"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step"), { pushToStack: true });
 }
 
 export async function startAdminStaffSearch(ctx: MyContext) {
-    ctx.session.adminFlow = 'SEARCH';
-    delete ctx.session.taskData;
-    delete ctx.session.broadcastData;
+    startSearchFlow(ctx);
     ctx.session.step = "admin_search_staff";
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-staff-prompt"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step"), { pushToStack: true });
 }
@@ -101,6 +106,7 @@ adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
     const telegramId = ctx.match![1]!;
     await ctx.answerCallbackQuery();
 
+    startSearchFlow(ctx);
     ctx.session.step = `admin_reply_direct_${telegramId}`;
     await ScreenManager.renderScreen(ctx, `Write response for candidate (ID: ${telegramId}): ✍️\n\n<i>Message will be delivered directly to her bot chat.</i>`, new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "cancel_step"), { pushToStack: true });
 });
@@ -140,6 +146,10 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
     const isDirectReplyStep = step.startsWith("admin_reply_direct_");
     const isDirectMessageStep = step.startsWith("admin_msg_");
     const isSearchStep = step === "admin_search_cand" || step === "admin_search_staff";
+
+    if ((isDirectReplyStep || isDirectMessageStep || isSearchStep) && ctx.session.adminFlow !== "SEARCH") {
+        return next();
+    }
 
     if (isSearchStep) {
         await ctx.deleteMessage().catch(() => { });
@@ -191,6 +201,9 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
 
             await ScreenManager.renderScreen(ctx, "✅ Response sent successfully!", kb);
             ctx.session.step = "idle";
+            if (ctx.session.adminFlow === "SEARCH") {
+                delete ctx.session.adminFlow;
+            }
         } catch (e: any) {
             logger.error({ err: e, targetTelegramId: targetTgId }, "Admin direct reply delivery failed");
             await ScreenManager.renderScreen(ctx, `❌ Failed to send: ${e.message}`);
@@ -201,6 +214,9 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
     if (isDirectMessageStep) {
         const userId = step.replace("admin_msg_", "");
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "SEARCH") {
+            delete ctx.session.adminFlow;
+        }
         await handleAdminMessageSend(ctx, userId);
         return;
     }
@@ -212,6 +228,9 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
         }
         const query = ctx.message.text.trim();
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "SEARCH") {
+            delete ctx.session.adminFlow;
+        }
 
         const candidates = await candidateRepository.findByQuery(query);
         if (candidates.length === 0) {
@@ -236,6 +255,9 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
         }
         const query = ctx.message.text.trim();
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "SEARCH") {
+            delete ctx.session.adminFlow;
+        }
 
         const staff = await staffService.searchStaff(query);
         if (staff.length === 0) {

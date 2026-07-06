@@ -347,17 +347,29 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
 
     range.text("📅 Schedule", async (ctx) => {
         ctx.session.adminFlow = 'SCHEDULE';
+        ctx.session.step = "idle";
         delete ctx.session.taskData;
+        delete ctx.session.taskCreation;
         delete ctx.session.broadcastData;
+        delete ctx.session.broadcastDraft;
+        delete ctx.session.manualChannelAccess;
+        delete ctx.session.supportData?.step;
+        delete ctx.session.supportData?.replyingToUserId;
         await ScreenManager.renderScreen(ctx, "📅 <b>Schedule</b>", "admin-schedule-dates", { pushToStack: true });
     }).row();
 
     range.text("🏢 Locations", async (ctx) => {
         ctx.session.adminFlow = 'LOCATIONS';
+        ctx.session.step = "idle";
         delete ctx.session.selectedDate;
         delete ctx.session.selectedLocationId;
         delete ctx.session.taskData;
+        delete ctx.session.taskCreation;
         delete ctx.session.broadcastData;
+        delete ctx.session.broadcastDraft;
+        delete ctx.session.manualChannelAccess;
+        delete ctx.session.supportData?.step;
+        delete ctx.session.supportData?.replyingToUserId;
         await ScreenManager.renderScreen(ctx, "🏢 <b>Locations</b>", "admin-team-cities", { pushToStack: true });
     });
 
@@ -404,7 +416,15 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
             });
         });
         range.text("📂 Custom Sync", async (ctx) => {
+            ctx.session.adminFlow = "SCHEDULE";
             ctx.session.step = "sync_other_sheet";
+            delete ctx.session.taskData;
+            delete ctx.session.taskCreation;
+            delete ctx.session.broadcastData;
+            delete ctx.session.broadcastDraft;
+            delete ctx.session.manualChannelAccess;
+            delete ctx.session.supportData?.step;
+            delete ctx.session.supportData?.replyingToUserId;
             const prompt = await ctx.reply(ADMIN_TEXTS["admin-sync-enter-sheet"]);
             ctx.session.customSyncPromptMessageId = prompt.message_id;
             ctx.session.messagesToDelete.push(prompt.message_id);

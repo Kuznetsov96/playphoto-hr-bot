@@ -65,7 +65,14 @@ async function renderTaskModeSelection(ctx: MyContext, backCallback: string) {
 // Обробник початку створення завдання
 composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
     ctx.session.adminFlow = 'TASK';
+    ctx.session.step = "idle";
+    ctx.session.candidateData = {};
+    delete ctx.session.taskData;
     delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     const data = ctx.callbackQuery.data.replace("task_add_start", "");
     const preselectedDate = data.startsWith("_") ? data.substring(1) : null;
 
@@ -435,6 +442,9 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
 
         const createdTaskDate = ctx.session.taskCreation.date || new Date().toISOString().split("T")[0];
         delete ctx.session.taskCreation;
+        if (ctx.session.adminFlow === "TASK") {
+            delete ctx.session.adminFlow;
+        }
 
         let successText = `✅ <b>Tasks created successfully (${staffIds.length})!</b>\n\n`;
         const failed = results.filter(r => !r.success);
@@ -490,7 +500,7 @@ composer.on("message:text", async (ctx, next) => {
 
 
 composer.on("message:photo", async (ctx, next) => {
-    if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
+    if (ctx.session.adminFlow === "TASK" && ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
         if (!await checkTaskCreationRole(ctx)) return;
         const photo = ctx.message.photo[ctx.message.photo.length - 1];
         const input: {
@@ -511,7 +521,7 @@ composer.on("message:photo", async (ctx, next) => {
 });
 
 composer.on("message:video", async (ctx, next) => {
-    if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
+    if (ctx.session.adminFlow === "TASK" && ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
         if (!await checkTaskCreationRole(ctx)) return;
         const input: {
             text?: string;
@@ -531,7 +541,7 @@ composer.on("message:video", async (ctx, next) => {
 });
 
 composer.on("message:document", async (ctx, next) => {
-    if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
+    if (ctx.session.adminFlow === "TASK" && ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
         if (!await checkTaskCreationRole(ctx)) return;
         const input: {
             text?: string;
@@ -551,7 +561,7 @@ composer.on("message:document", async (ctx, next) => {
 });
 
 composer.on(["message:voice", "message:video_note", "message:audio", "message:animation"], async (ctx, next) => {
-    if (ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
+    if (ctx.session.adminFlow === "TASK" && ctx.session.taskCreation?.step === "entering_text" && ctx.chat?.type === "private") {
         if (!await checkTaskCreationRole(ctx)) return;
         const message = ctx.message;
         const file =
@@ -630,6 +640,9 @@ composer.callbackQuery("tas_edit_done_back", async (ctx) => {
 // Обробник скасування
 composer.callbackQuery("task_creation_cancel", async (ctx) => {
     delete ctx.session.taskCreation;
+    if (ctx.session.adminFlow === "TASK") {
+        delete ctx.session.adminFlow;
+    }
     const kb = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
         .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");

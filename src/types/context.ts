@@ -183,7 +183,7 @@ export interface SessionData {
         sourceMessageId?: number;
         completionMode?: TaskCompletionModeValue;
     };
-    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | undefined;
+    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;
     teamSyncPreview?: {

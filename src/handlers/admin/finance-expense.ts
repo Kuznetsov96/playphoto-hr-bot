@@ -37,6 +37,28 @@ const ROLE_FOP_MAP: Record<string, string> = {
 
 export const expenseHandlers = new Composer<MyContext>();
 
+const EXPENSE_STEPS = new Set([
+    "expense_amount",
+    "expense_category",
+    "expense_location",
+    "expense_comment",
+    "expense_confirm",
+]);
+
+function isExpenseStep(step?: string) {
+    return !!step && EXPENSE_STEPS.has(step);
+}
+
+function clearExpenseFlow(ctx: MyContext) {
+    if (ctx.session.adminFlow === "EXPENSE") {
+        delete ctx.session.adminFlow;
+    }
+    ctx.session.step = "idle";
+    ctx.session.candidateData = {};
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
+}
+
 export async function startExpenseFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -44,6 +66,14 @@ export async function startExpenseFlow(ctx: MyContext) {
     const userRole = await getUserAdminRole(BigInt(telegramId));
     const fopName = ROLE_FOP_MAP[userRole || ''] || 'Готівка';
 
+    ctx.session.adminFlow = "EXPENSE";
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.step = "expense_amount";
     ctx.session.candidateData = { expenseFop: fopName } as any;
 
@@ -54,7 +84,7 @@ export async function startExpenseFlow(ctx: MyContext) {
 }
 
 expenseHandlers.callbackQuery("expense_cancel", async (ctx) => {
-    ctx.session.step = "idle";
+    clearExpenseFlow(ctx);
     await ctx.answerCallbackQuery("❌ Cancelled.");
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     await ctx.reply("❌ Expense creation cancelled.", {
@@ -62,11 +92,22 @@ expenseHandlers.callbackQuery("expense_cancel", async (ctx) => {
     });
 });
 
-expenseHandlers.on("message:text", async (ctx, next) => {
+export async function handleExpenseText(ctx: MyContext, next: () => Promise<void>) {
     const step = ctx.session.step || "";
+    const messageText = ctx.message?.text;
+    if (!messageText) {
+        await next();
+        return;
+    }
+
+    if (ctx.session.adminFlow === "EXPENSE" && !isExpenseStep(step)) {
+        clearExpenseFlow(ctx);
+        await next();
+        return;
+    }
 
     if (step === "expense_amount") {
-        const amountText = ctx.message.text.replace(',', '.');
+        const amountText = messageText.replace(',', '.');
         const amount = parseFloat(amountText);
 
         if (isNaN(amount) || amount <= 0) {
@@ -90,8 +131,18 @@ expenseHandlers.on("message:text", async (ctx, next) => {
         return;
     }
 
+    if (step === "expense_category") {
+        await ctx.reply("📂 Please select a category using the buttons above.");
+        return;
+    }
+
+    if (step === "expense_location") {
+        await ctx.reply("📍 Please select a location/project using the buttons above.");
+        return;
+    }
+
     if (step === "expense_comment") {
-        const comment = ctx.message.text;
+        const comment = messageText;
         (ctx.session.candidateData as any).expenseComment = comment;
 
         const fopName = (ctx.session.candidateData as any).expenseFop;
@@ -122,8 +173,15 @@ expenseHandlers.on("message:text", async (ctx, next) => {
         return;
     }
 
+    if (step === "expense_confirm") {
+        await ctx.reply("✅ Please save or cancel the expense using the buttons above.");
+        return;
+    }
+
     await next();
-});
+}
+
+expenseHandlers.on("message:text", handleExpenseText);
 
 expenseHandlers.callbackQuery(/^exp_cat_(\d+)$/, async (ctx) => {
     if (ctx.session.step !== "expense_category") return ctx.answerCallbackQuery("Invalid step");
@@ -199,7 +257,7 @@ expenseHandlers.callbackQuery("exp_confirm_save", async (ctx) => {
     await ctx.answerCallbackQuery("Saving...");
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
 
-    ctx.session.step = "idle";
+    clearExpenseFlow(ctx);
     const loadingMsg = await ctx.reply("⏳ Saving to DDS...");
 
     const dateStr = new Date().toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });

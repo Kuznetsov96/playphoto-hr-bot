@@ -9,8 +9,27 @@ import type { MyContext } from "../../types/context.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { escapeHtml } from "./utils.js";
 
+function startManualFlow(ctx: MyContext, step: NonNullable<MyContext["session"]["manualChannelAccess"]>["step"]) {
+    ctx.session.adminFlow = "MANUAL_CHANNEL_ACCESS";
+    ctx.session.step = "idle";
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
+    ctx.session.manualChannelAccess = { step };
+}
+
+function clearManualFlow(ctx: MyContext) {
+    delete ctx.session.manualChannelAccess;
+    if (ctx.session.adminFlow === "MANUAL_CHANNEL_ACCESS") {
+        delete ctx.session.adminFlow;
+    }
+}
+
 export async function startManualChannelAccessFlow(ctx: MyContext) {
-    ctx.session.manualChannelAccess = { step: "AWAITING_GRANT_DETAILS" };
+    startManualFlow(ctx, "AWAITING_GRANT_DETAILS");
     await ScreenManager.renderScreen(
         ctx,
         `${ADMIN_TEXTS["admin-channel-access-title"]}\n\n${ADMIN_TEXTS["admin-channel-access-prompt"]}`,
@@ -20,7 +39,7 @@ export async function startManualChannelAccessFlow(ctx: MyContext) {
 }
 
 export async function startManualChannelRevokeFlow(ctx: MyContext) {
-    ctx.session.manualChannelAccess = { step: "AWAITING_REVOKE_ID" };
+    startManualFlow(ctx, "AWAITING_REVOKE_ID");
     await ScreenManager.renderScreen(
         ctx,
         `${ADMIN_TEXTS["admin-channel-revoke-title"]}\n\n${ADMIN_TEXTS["admin-channel-revoke-prompt"]}`,
@@ -54,7 +73,7 @@ export async function handleManualChannelAccess(ctx: MyContext): Promise<boolean
 
     const adminRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
     if (adminRole !== "SUPER_ADMIN") {
-        delete ctx.session.manualChannelAccess;
+        clearManualFlow(ctx);
         await ctx.reply(ADMIN_TEXTS["admin-err-access-denied"]);
         return true;
     }
@@ -122,7 +141,7 @@ export async function handleManualChannelAccess(ctx: MyContext): Promise<boolean
             throw new Error("User was saved, but invite link could not be created.");
         }
 
-        delete ctx.session.manualChannelAccess;
+        clearManualFlow(ctx);
         await ScreenManager.renderScreen(
             ctx,
             ADMIN_TEXTS["admin-channel-access-success"]({
@@ -134,6 +153,7 @@ export async function handleManualChannelAccess(ctx: MyContext): Promise<boolean
             { forceNew: true }
         );
     } catch (e: any) {
+        clearManualFlow(ctx);
         logger.error({ err: e, telegramId: parsed.telegramId }, "Manual channel access grant failed");
         await ScreenManager.renderScreen(
             ctx,
@@ -161,7 +181,7 @@ async function handleManualChannelRevoke(ctx: MyContext) {
     try {
         const user = await userRepository.findWithStaffProfileByTelegramId(telegramId);
         if (user && (user.adminRole || ["ADMIN", "HR", "MENTOR"].includes(user.role))) {
-            delete ctx.session.manualChannelAccess;
+            clearManualFlow(ctx);
             await ScreenManager.renderScreen(
                 ctx,
                 ADMIN_TEXTS["admin-channel-revoke-privileged"],
@@ -199,7 +219,7 @@ async function handleManualChannelRevoke(ctx: MyContext) {
 
         await accessService.revokeAccess(telegramId, "Manual channel access revoked");
 
-        delete ctx.session.manualChannelAccess;
+        clearManualFlow(ctx);
         await ScreenManager.renderScreen(
             ctx,
             ADMIN_TEXTS["admin-channel-revoke-success"]({
@@ -210,6 +230,7 @@ async function handleManualChannelRevoke(ctx: MyContext) {
             { forceNew: true }
         );
     } catch (e: any) {
+        clearManualFlow(ctx);
         logger.error({ err: e, telegramId }, "Manual channel access revoke failed");
         await ScreenManager.renderScreen(
             ctx,

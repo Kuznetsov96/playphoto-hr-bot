@@ -135,6 +135,16 @@ bot.use(async (ctx, next) => {
     if (ctx.hasCommand("start")) {
         if (ctx.session) {
             ctx.session.step = "idle";
+            delete ctx.session.adminFlow;
+            delete ctx.session.taskData;
+            delete ctx.session.taskCreation;
+            delete ctx.session.broadcastData;
+            delete ctx.session.broadcastDraft;
+            delete ctx.session.manualChannelAccess;
+            delete ctx.session.customSyncPromptMessageId;
+            delete ctx.session.broadcastId;
+            delete ctx.session.supportData?.step;
+            delete ctx.session.supportData?.replyingToUserId;
         }
     }
     await next();
