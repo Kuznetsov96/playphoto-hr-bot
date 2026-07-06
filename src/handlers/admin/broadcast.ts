@@ -37,9 +37,14 @@ function isBroadcastActive(broadcast: any): boolean {
  */
 export async function startStatelessBroadcast(ctx: MyContext) {
     ctx.session.adminFlow = 'BROADCAST';
+    ctx.session.step = "idle";
+    ctx.session.candidateData = {};
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
     delete ctx.session.manualChannelAccess;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.broadcastData = {
         step: 'SELECT_TARGET',
         selectedLocs: []
@@ -521,6 +526,9 @@ async function renderReview(ctx: MyContext) {
 adminBroadcastHandlers.callbackQuery("br_cancel", async (ctx) => {
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
+    if (ctx.session.adminFlow === "BROADCAST") {
+        delete ctx.session.adminFlow;
+    }
     await ctx.answerCallbackQuery("❌ Cancelled.");
     await ScreenManager.renderScreen(ctx, "❌ Broadcast creation cancelled.", new InlineKeyboard().text("🏠 Back to Hub", "br_to_hub"));
 });
@@ -775,6 +783,9 @@ adminBroadcastHandlers.callbackQuery("b_send", async (ctx: MyContext) => {
 
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
+        if (ctx.session.adminFlow === "BROADCAST") {
+            delete ctx.session.adminFlow;
+        }
         await ScreenManager.renderScreen(ctx, successText, kb, { forceNew: true });
     } catch (e: any) {
         audit({ event: "broadcast_send", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, error: e.message });

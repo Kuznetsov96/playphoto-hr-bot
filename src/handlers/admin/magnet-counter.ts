@@ -112,7 +112,15 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
         return;
     }
 
+    ctx.session.adminFlow = "MAGNET_COUNTER";
     ctx.session.step = "support_magnet_count_photo";
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     delete ctx.session.supportData?.magnetCount;
 
     await ctx.answerCallbackQuery();
@@ -143,6 +151,9 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
     }
 
     ctx.session.step = "idle";
+    if (ctx.session.adminFlow === "MAGNET_COUNTER") {
+        delete ctx.session.adminFlow;
+    }
     delete ctx.session.supportData?.magnetCount;
     await ctx.answerCallbackQuery("Count confirmed.");
     await ScreenManager.renderScreen(
@@ -174,6 +185,10 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_correct", async (
 });
 
 export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<boolean> {
+    if (ctx.session.adminFlow !== "MAGNET_COUNTER") {
+        return false;
+    }
+
     if (!await ensureRole(ctx)) {
         return false;
     }
@@ -252,6 +267,9 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
 
     if (!magnetCountService.isConfigured()) {
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "MAGNET_COUNTER") {
+            delete ctx.session.adminFlow;
+        }
         await ScreenManager.renderScreen(
             ctx,
             "⚠️ <b>Magnet counting is unavailable</b>\n\n`OPENAI_API_KEY` is not configured on the server yet, so vision analysis is currently disabled.",
@@ -341,6 +359,9 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
     } catch (error) {
         logger.error({ err: error, telegramId: ctx.from?.id }, "Magnet counter analysis failed");
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "MAGNET_COUNTER") {
+            delete ctx.session.adminFlow;
+        }
         await ScreenManager.renderScreen(
             ctx,
             "❌ <b>Could not count the magnets</b>\n\nTry another photo with less glare, and make sure the top and bottom of each stack are visible.",

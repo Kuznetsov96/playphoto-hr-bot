@@ -15,8 +15,14 @@ export const taskFlowHandlers = new Composer<MyContext>();
 
 export async function startTaskFlow(ctx: MyContext, identifier?: string) {
     ctx.session.adminFlow = 'TASK';
+    ctx.session.step = "idle";
+    ctx.session.candidateData = {};
     delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
     delete ctx.session.taskCreation;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.taskData = { step: 'SELECT_STAFF' } as any;
     if (identifier) {
         // First try finding by StaffProfile.userId, then fallback to StaffProfile.id
@@ -230,6 +236,9 @@ taskFlowHandlers.callbackQuery("task_back_deadline", async (ctx) => {
 taskFlowHandlers.callbackQuery("task_cancel_flow", async (ctx) => {
     const staffId = ctx.session.taskData?.staffId;
     delete ctx.session.taskData;
+    if (ctx.session.adminFlow === "TASK") {
+        delete ctx.session.adminFlow;
+    }
     await ctx.answerCallbackQuery("Cancelled.");
     
     const kb = new InlineKeyboard();
@@ -259,6 +268,9 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
         });
 
         delete ctx.session.taskData;
+        if (ctx.session.adminFlow === "TASK") {
+            delete ctx.session.adminFlow;
+        }
         
         // Notify photographer and check delivery
         let deliveryStatus = "✅ Task created and notification sent!";

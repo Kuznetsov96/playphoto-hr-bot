@@ -94,8 +94,8 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     if (ctx.chat?.type !== "private") return await next();
 
     if (await handleAdminMagnetCounterMessage(ctx)) return;
-    if (await handleBroadcastContent(ctx)) return;
     if (await handleManualChannelAccess(ctx)) return;
+    if (await handleBroadcastContent(ctx)) return;
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
@@ -175,12 +175,18 @@ protectedAdminCallbacks.callbackQuery("admin_main_back", async (ctx: MyContext) 
 
 protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) => {
     // Clear flow-specific data
+    ctx.session.step = "idle";
     delete ctx.session.adminFlow;
     delete ctx.session.selectedDate;
     delete ctx.session.selectedLocationId;
     delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
     delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;
+    delete ctx.session.customSyncPromptMessageId;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.candidateData = {};
 
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));

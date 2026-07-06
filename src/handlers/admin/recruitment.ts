@@ -331,6 +331,14 @@ adminRecruitmentHandlers.callbackQuery(/^admin_hn_visibility_(.+)$/, async (ctx)
 adminRecruitmentHandlers.callbackQuery(/^admin_hn_note_(.+)$/, async (ctx) => {
     const locationId = ctx.match[1];
     if (!locationId) return;
+    ctx.session.adminFlow = "RECRUITMENT";
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.selectedLocationId = locationId;
     ctx.session.step = `set_hiring_note_${locationId}`;
     await ctx.answerCallbackQuery();
@@ -857,16 +865,21 @@ adminRecruitmentHandlers.callbackQuery(/^staging_(.+)_date_(.+)$/, async (ctx: M
 adminRecruitmentHandlers.on("message:text", async (ctx, next) => {
     const step = ctx.session.step || "";
     if (step.startsWith("set_hiring_note_")) {
+        if (ctx.session.adminFlow !== "RECRUITMENT") return next();
         const locationId = step.replace("set_hiring_note_", "");
         const raw = ctx.message.text.trim();
         const note = raw === "-" ? null : raw.slice(0, 140);
         await hiringNeedsService.setNote(locationId, note);
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "RECRUITMENT") {
+            delete ctx.session.adminFlow;
+        }
         await refreshHiringNeedDetails(ctx, locationId);
         return;
     }
 
     if (step.startsWith("set_staging_time_")) {
+        if (ctx.session.adminFlow && ctx.session.adminFlow !== "RECRUITMENT") return next();
         await ctx.deleteMessage().catch(() => { });
         const candId = step.replace("set_staging_time_", "");
 
@@ -885,6 +898,9 @@ adminRecruitmentHandlers.on("message:text", async (ctx, next) => {
             stagingNotifiedAt: null
         });
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "RECRUITMENT") {
+            delete ctx.session.adminFlow;
+        }
 
         const updatedCand = await hrService.getCandidateDetails(candId);
         if (updatedCand) {
@@ -907,6 +923,14 @@ adminRecruitmentHandlers.callbackQuery(/^admin_set_default_time_(.+)$/, async (c
 adminRecruitmentHandlers.callbackQuery(/^admin_change_staging_date_(.+)$/, async (ctx: MyContext) => {
     const candId = ctx.match![1];
     if (candId) ctx.session.selectedCandidateId = candId;
+    ctx.session.adminFlow = "RECRUITMENT";
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.step = `set_first_shift_date_${candId}`;
     await ctx.answerCallbackQuery();
     await ctx.reply(ADMIN_TEXTS["admin-staging-ask-date"] + "\nExample: 25.02.2026");
@@ -921,6 +945,14 @@ adminRecruitmentHandlers.callbackQuery(/^admin_change_staging_loc_(.+)$/, async 
 adminRecruitmentHandlers.callbackQuery(/^admin_change_staging_time_(.+)$/, async (ctx: MyContext) => {
     const candId = ctx.match![1];
     if (candId) ctx.session.selectedCandidateId = candId;
+    ctx.session.adminFlow = "RECRUITMENT";
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    delete ctx.session.manualChannelAccess;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     ctx.session.step = `set_staging_time_${candId}`;
     await ctx.answerCallbackQuery();
     await ctx.reply("✍️ <b>Enter staging time:</b>\nExample: 10:00-12:00", { reply_markup: { force_reply: true } });

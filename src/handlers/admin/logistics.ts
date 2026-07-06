@@ -42,12 +42,26 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
     }
 
     range.row().text("➕ Add TTN", async (ctx) => {
+        ctx.session.adminFlow = "LOGISTICS";
         ctx.session.step = "admin_logistics_add_ttn";
+        delete ctx.session.taskData;
+        delete ctx.session.taskCreation;
+        delete ctx.session.broadcastData;
+        delete ctx.session.broadcastDraft;
+        delete ctx.session.manualChannelAccess;
+        delete ctx.session.supportData?.step;
+        delete ctx.session.supportData?.replyingToUserId;
         await ctx.reply("Please enter the 14-digit TTN number: 📦");
         await ctx.answerCallbackQuery();
     });
 
     range.row().text("⬅️ Back", async (ctx) => {
+        if (ctx.session.adminFlow === "LOGISTICS") {
+            delete ctx.session.adminFlow;
+        }
+        if (ctx.session.step === "admin_logistics_add_ttn") {
+            ctx.session.step = "idle";
+        }
         await ScreenManager.goBack(ctx, "🛠 System Management", "admin-system");
     });
 });
@@ -331,7 +345,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
 
 // --- Message Handler for manual TTN ---
 adminLogisticsHandlers.on("message:text", async (ctx, next) => {
-    if (ctx.session.step !== "admin_logistics_add_ttn") return next();
+    if (ctx.session.adminFlow !== "LOGISTICS" || ctx.session.step !== "admin_logistics_add_ttn") return next();
 
     const ttn = ctx.message.text.trim();
     if (ttn.length !== 14 || !/^\d+$/.test(ttn)) {
@@ -362,6 +376,9 @@ adminLogisticsHandlers.on("message:text", async (ctx, next) => {
         });
 
         ctx.session.step = "idle";
+        if (ctx.session.adminFlow === "LOGISTICS") {
+            delete ctx.session.adminFlow;
+        }
 
         audit({ event: "parcel_add_ttn", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", updateId: ctx.update.update_id, context: { ttn } });
 

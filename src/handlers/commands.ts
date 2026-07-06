@@ -51,7 +51,15 @@ async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaite
 // --- GLOBAL CALLBACKS ---
 commandHandlers.callbackQuery("cancel_step", async (ctx) => {
     ctx.session.step = "idle";
+    delete ctx.session.adminFlow;
+    delete ctx.session.taskData;
+    delete ctx.session.taskCreation;
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;
+    delete ctx.session.customSyncPromptMessageId;
+    delete ctx.session.supportData?.step;
+    delete ctx.session.supportData?.replyingToUserId;
     const telegramId = ctx.from?.id;
 
     if (telegramId) {
@@ -119,6 +127,16 @@ commandHandlers.command("start", async (ctx) => {
         }
 
         ctx.session.step = "idle";
+        delete ctx.session.adminFlow;
+        delete ctx.session.taskData;
+        delete ctx.session.taskCreation;
+        delete ctx.session.broadcastData;
+        delete ctx.session.broadcastDraft;
+        delete ctx.session.manualChannelAccess;
+        delete ctx.session.customSyncPromptMessageId;
+        delete ctx.session.broadcastId;
+        delete ctx.session.supportData?.step;
+        delete ctx.session.supportData?.replyingToUserId;
 
         // Clear bot-blocked flag (user unblocked bot and pressed /start)
         const clearedBlockedUsers = await prisma.user.updateMany({
