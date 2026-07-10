@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { htmlToPlainText, msgToHtml } from "../admin/utils.js";
+import { describe, expect, it, vi } from "vitest";
+import { htmlToPlainText, msgToHtml, sendAdminOutboundMessage } from "../admin/utils.js";
 
 describe("msgToHtml", () => {
     it("keeps nested Telegram entities valid when they start at the same offset", () => {
@@ -51,5 +51,72 @@ describe("htmlToPlainText", () => {
         const text = htmlToPlainText("Порахуй &lt;10&gt; магнітів &amp; напиши \"готово\"");
 
         expect(text).toBe("Порахуй <10> магнітів & напиши \"готово\"");
+    });
+});
+
+describe("sendAdminOutboundMessage", () => {
+    it("copies media with short captions unchanged", async () => {
+        const replyMarkup = { inline_keyboard: [[{ text: "Reply", callback_data: "reply" }]] };
+        const ctx = {
+            chat: { id: 555 },
+            message: {
+                message_id: 77,
+                caption: "Short caption",
+                caption_entities: [],
+                photo: [{ file_id: "photo-1" }],
+            },
+            api: {
+                copyMessage: vi.fn().mockResolvedValue({}),
+                sendMessage: vi.fn().mockResolvedValue({}),
+            },
+        };
+
+        await sendAdminOutboundMessage(ctx as any, 123, {
+            messageThreadId: 9,
+            replyMarkup: replyMarkup as any,
+        });
+
+        expect(ctx.api.copyMessage).toHaveBeenCalledWith(123, 555, 77, {
+            message_thread_id: 9,
+            reply_markup: replyMarkup,
+        });
+        expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("splits media with long captions into media plus text message", async () => {
+        const replyMarkup = { inline_keyboard: [[{ text: "Reply", callback_data: "reply" }]] };
+        const longCaption = `Intro <tag>\n${"а".repeat(1100)}`;
+        const ctx = {
+            chat: { id: 555 },
+            message: {
+                message_id: 77,
+                caption: longCaption,
+                caption_entities: [],
+                photo: [{ file_id: "photo-1" }],
+            },
+            api: {
+                copyMessage: vi.fn().mockResolvedValue({}),
+                sendMessage: vi.fn().mockResolvedValue({}),
+            },
+        };
+
+        await sendAdminOutboundMessage(ctx as any, 123, {
+            messageThreadId: 9,
+            replyMarkup: replyMarkup as any,
+        });
+
+        expect(ctx.api.copyMessage).toHaveBeenCalledWith(123, 555, 77, {
+            message_thread_id: 9,
+            caption: "",
+        });
+        expect(ctx.api.sendMessage).toHaveBeenCalledWith(
+            123,
+            `Intro &lt;tag&gt;\n${"а".repeat(1100)}`,
+            {
+                parse_mode: "HTML",
+                message_thread_id: 9,
+                reply_markup: replyMarkup,
+            },
+        );
     });
 });
