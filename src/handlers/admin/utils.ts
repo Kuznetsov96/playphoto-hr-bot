@@ -2,6 +2,7 @@ import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
+const TELEGRAM_CAPTION_LIMIT = 1024;
 
 export const CITY_MAP: Record<string, string> = {
     // English targets
@@ -139,11 +140,28 @@ export async function sendAdminOutboundMessage(
         if (options?.messageThreadId !== undefined) {
             copyOptions.message_thread_id = options.messageThreadId;
         }
-        if (options?.replyMarkup) {
+        if (text.length > TELEGRAM_CAPTION_LIMIT) {
+            copyOptions.caption = "";
+        } else if (options?.replyMarkup) {
             copyOptions.reply_markup = options.replyMarkup;
         }
 
         await ctx.api.copyMessage(targetChatId, ctx.chat.id, message.message_id, copyOptions as any);
+
+        if (text.length > TELEGRAM_CAPTION_LIMIT) {
+            const longCaptionOptions: {
+                replyMarkup?: InstanceType<typeof InlineKeyboard>;
+                messageThreadId?: number;
+            } = {};
+            if (options?.messageThreadId !== undefined) {
+                longCaptionOptions.messageThreadId = options.messageThreadId;
+            }
+            if (options?.replyMarkup) {
+                longCaptionOptions.replyMarkup = options.replyMarkup;
+            }
+
+            await sendLongHtmlMessage(ctx, targetChatId, formattedHtmlText, longCaptionOptions);
+        }
         return;
     }
 
