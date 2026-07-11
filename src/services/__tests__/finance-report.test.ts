@@ -98,7 +98,7 @@ describe("finance report DDS sync", () => {
 });
 
 describe("daily finance report", () => {
-    it("formats location labels once and sorts by displayed income", async () => {
+    it("formats location labels once and sorts by actual income", async () => {
         vi.mocked(locationRepository.findAllActive).mockResolvedValue([
             {
                 id: "loc-fk-kyiv",
@@ -128,8 +128,8 @@ describe("daily finance report", () => {
                 locationName: "Fly Kids (Київ)",
                 city: "Київ",
                 totalCash: 1600,
-                totalTerminal: 3400,
-                totalIncome: 5000,
+                totalTerminal: 1300,
+                totalIncome: 2900,
                 date: "10.07.2026",
             },
             {
@@ -160,13 +160,15 @@ describe("daily finance report", () => {
         expect(sendMessage).toHaveBeenCalledTimes(1);
         const reportText = sendMessage.mock.calls[0]![1] as string;
         expect(reportText).toContain("📍 Smile Park (Львів): <b>7,250 грн</b>");
-        expect(reportText).toContain("📍 Fly Kids (Київ): <b>1,600 грн</b>");
+        expect(reportText).toContain("📍 Fly Kids (Київ): <b>2,900 грн</b>");
         expect(reportText).not.toContain("Smile Park (Львів) (Львів)");
         expect(reportText).not.toContain("Fly Kids (Київ) (Київ)");
         expect(reportText).toContain("- Drive City (Львів)\n");
+        expect(reportText).toContain("💳 Terminal: 7,300 UAH");
+        expect(reportText).toContain("🔥 <b>TOTAL: 12,700 UAH</b>");
 
-        expect(reportText.indexOf("Smile Park (Troieshchyna) (Київ)")).toBeLessThan(
-            reportText.indexOf("Fly Kids (Київ)")
+        expect(reportText.indexOf("Fly Kids (Київ)")).toBeLessThan(
+            reportText.indexOf("Smile Park (Troieshchyna) (Київ)")
         );
     });
 });

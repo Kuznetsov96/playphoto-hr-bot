@@ -85,22 +85,18 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         }
 
         const allLocations = await locationRepository.findAllActive();
-        const locationMap = new Map(allLocations.map(l => [l.id, l]));
 
         const reportRows = incomes
             .map(inc => {
-                const loc = locationMap.get(inc.locationId);
-                const reportableTerminal = getReportableTerminalAmount(inc.totalTerminal, loc);
-                const reportableIncome = inc.totalCash + reportableTerminal;
+                const displayedIncome = inc.totalCash + inc.totalTerminal;
 
                 return {
                     ...inc,
-                    reportableTerminal,
-                    reportableIncome,
+                    displayedIncome,
                     label: formatFinanceLocationLabel(inc.locationName, inc.city)
                 };
             })
-            .sort((a, b) => b.reportableIncome - a.reportableIncome);
+            .sort((a, b) => b.displayedIncome - a.displayedIncome);
 
         let totalCash = 0;
         let totalTerminal = 0;
@@ -109,11 +105,11 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         let reportText = `📊 <b>REPORT FOR ${todayStr}</b>\n\n`;
 
         reportRows.forEach(inc => {
-            reportText += `📍 ${inc.label}: <b>${inc.reportableIncome.toLocaleString()} грн</b>\n`;
+            reportText += `📍 ${inc.label}: <b>${inc.displayedIncome.toLocaleString()} грн</b>\n`;
 
             totalCash += inc.totalCash;
-            totalTerminal += inc.reportableTerminal;
-            totalIncome += inc.reportableIncome;
+            totalTerminal += inc.totalTerminal;
+            totalIncome += inc.displayedIncome;
         });
 
         reportText += `--------------------------\n`;
