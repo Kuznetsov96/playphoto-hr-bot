@@ -23,16 +23,7 @@ vi.mock("../../config.js", () => ({
 
 vi.mock("../../repositories/location-repository.js", () => ({
     locationRepository: {
-        findAllActive: vi.fn().mockResolvedValue([
-            {
-                id: "loc-leoland",
-                name: "Leolend",
-                city: "Львів",
-                fopId: "KUZNETSOV",
-                hasAcquiring: false,
-                cashInEnvelope: false
-            }
-        ])
+        findAllActive: vi.fn()
     }
 }));
 
@@ -53,7 +44,9 @@ vi.mock("../../core/log-events.js", () => ({
 }));
 
 vi.mock("../finance/location-rules.js", () => ({
-    getReportableTerminalAmount: vi.fn((amount: number) => amount),
+    getReportableTerminalAmount: vi.fn((amount: number, loc?: { name?: string } | null) =>
+        loc?.name === "Fly Kids (Київ)" ? 0 : amount
+    ),
     shouldExcludeTerminalFromFopAccounting: vi.fn(() => false)
 }));
 
@@ -63,10 +56,23 @@ vi.mock("../../core/queue.js", () => ({
     }
 }));
 
-import { calculateCashSalaryDeduction, syncToDDS } from "../finance-report.js";
+import { locationRepository } from "../../repositories/location-repository.js";
+import { techCashService } from "../finance/tech-cash.js";
+import { calculateCashSalaryDeduction, sendDailyIncomeReport, syncToDDS } from "../finance-report.js";
 
 describe("finance report DDS sync", () => {
     it("deducts photographer salary per staff member from cash", async () => {
+        vi.mocked(locationRepository.findAllActive).mockResolvedValue([
+            {
+                id: "loc-leoland",
+                name: "Leolend",
+                city: "Львів",
+                fopId: "KUZNETSOV",
+                hasAcquiring: false,
+                cashInEnvelope: false
+            } as any
+        ]);
+
         const result = await syncToDDS("30.05.2026", [
             {
                 locationId: "loc-leoland",
@@ -88,5 +94,79 @@ describe("finance report DDS sync", () => {
 
     it("keeps legacy single-person deduction when no photographer names are available", () => {
         expect(calculateCashSalaryDeduction({ totalSalary: 3850 })).toBe(3850);
+    });
+});
+
+describe("daily finance report", () => {
+    it("formats location labels once and sorts by displayed income", async () => {
+        vi.mocked(locationRepository.findAllActive).mockResolvedValue([
+            {
+                id: "loc-fk-kyiv",
+                name: "Fly Kids (Київ)",
+                city: "Київ",
+            } as any,
+            {
+                id: "loc-sp-lviv",
+                name: "Smile Park (Львів)",
+                city: "Львів",
+            } as any,
+            {
+                id: "loc-sp-troieshchyna",
+                name: "Smile Park (Troieshchyna)",
+                city: "Київ",
+            } as any,
+            {
+                id: "loc-drive",
+                name: "Drive City (Львів)",
+                city: "Львів",
+            } as any
+        ]);
+
+        vi.mocked(techCashService.getIncomeForDate).mockResolvedValue([
+            {
+                locationId: "loc-fk-kyiv",
+                locationName: "Fly Kids (Київ)",
+                city: "Київ",
+                totalCash: 1600,
+                totalTerminal: 3400,
+                totalIncome: 5000,
+                date: "10.07.2026",
+            },
+            {
+                locationId: "loc-sp-lviv",
+                locationName: "Smile Park (Львів)",
+                city: "Львів",
+                totalCash: 1250,
+                totalTerminal: 6000,
+                totalIncome: 7250,
+                date: "10.07.2026",
+            },
+            {
+                locationId: "loc-sp-troieshchyna",
+                locationName: "Smile Park (Troieshchyna)",
+                city: "Київ",
+                totalCash: 2550,
+                totalTerminal: 0,
+                totalIncome: 2550,
+                date: "10.07.2026",
+            }
+        ]);
+
+        const sendMessage = vi.fn();
+        const bot = { api: { sendMessage } } as any;
+
+        await sendDailyIncomeReport(bot, 123);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        const reportText = sendMessage.mock.calls[0]![1] as string;
+        expect(reportText).toContain("📍 Smile Park (Львів): <b>7,250 грн</b>");
+        expect(reportText).toContain("📍 Fly Kids (Київ): <b>1,600 грн</b>");
+        expect(reportText).not.toContain("Smile Park (Львів) (Львів)");
+        expect(reportText).not.toContain("Fly Kids (Київ) (Київ)");
+        expect(reportText).toContain("- Drive City (Львів)\n");
+
+        expect(reportText.indexOf("Smile Park (Troieshchyna) (Київ)")).toBeLessThan(
+            reportText.indexOf("Fly Kids (Київ)")
+        );
     });
 });
