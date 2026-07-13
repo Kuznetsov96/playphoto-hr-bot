@@ -9,6 +9,43 @@ import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { getReportableTerminalAmount, shouldExcludeTerminalFromFopAccounting } from "./finance/location-rules.js";
 
+const CITY_ALIASES: Record<string, string[]> = {
+    "Київ": ["київ", "kyiv", "kiev"],
+    "Львів": ["львів", "lviv"],
+    "Харків": ["харків", "kharkiv"],
+    "Рівне": ["рівне", "рівно", "rivne", "rovno"],
+    "Запоріжжя": ["запоріжжя", "zaporizhzhia", "zaporizhia"],
+    "Черкаси": ["черкаси", "cherkasy"],
+    "Хмельницький": ["хмельницький", "khmelnytskyi"],
+    "Самбір": ["самбір", "sambir"],
+    "Коломия": ["коломия", "коломія", "kolomyya", "kolomyia"],
+    "Шептицький": ["шептицький", "sheptytskyi"],
+};
+
+function normalizeLocationPart(value: string): string {
+    return value
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+}
+
+function formatFinanceLocationLabel(name: string, city: string): string {
+    const cleanName = name.trim();
+    const cleanCity = city.trim();
+    if (!cleanCity) return cleanName;
+
+    const normalizedName = normalizeLocationPart(cleanName);
+    const normalizedCity = normalizeLocationPart(cleanCity);
+    const cityAliases = CITY_ALIASES[cleanCity] || [normalizedCity];
+
+    if (cityAliases.some(alias => normalizedName.split(" ").includes(alias))) {
+        return cleanName;
+    }
+
+    return `${cleanName} (${cleanCity})`;
+}
+
 // Export for manual testing via command
 export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number, forceSync: boolean = false) {
     try {
@@ -48,10 +85,18 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         }
 
         const allLocations = await locationRepository.findAllActive();
-        const locationMap = new Map(allLocations.map(l => [l.id, l]));
 
-        // Sort by total income desc
-        incomes.sort((a, b) => b.totalIncome - a.totalIncome);
+        const reportRows = incomes
+            .map(inc => {
+                const displayedIncome = inc.totalCash + inc.totalTerminal;
+
+                return {
+                    ...inc,
+                    displayedIncome,
+                    label: formatFinanceLocationLabel(inc.locationName, inc.city)
+                };
+            })
+            .sort((a, b) => b.displayedIncome - a.displayedIncome);
 
         let totalCash = 0;
         let totalTerminal = 0;
@@ -59,16 +104,12 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
 
         let reportText = `📊 <b>REPORT FOR ${todayStr}</b>\n\n`;
 
-        incomes.forEach(inc => {
-            const loc = locationMap.get(inc.locationId);
-            const reportableTerminal = getReportableTerminalAmount(inc.totalTerminal, loc);
-            const reportableIncome = inc.totalCash + reportableTerminal;
-            const label = `${inc.locationName} (${inc.city})`;
-            reportText += `📍 ${label}: <b>${reportableIncome.toLocaleString()} грн</b>\n`;
+        reportRows.forEach(inc => {
+            reportText += `📍 ${inc.label}: <b>${inc.displayedIncome.toLocaleString()} грн</b>\n`;
 
             totalCash += inc.totalCash;
-            totalTerminal += reportableTerminal;
-            totalIncome += reportableIncome;
+            totalTerminal += inc.totalTerminal;
+            totalIncome += inc.displayedIncome;
         });
 
         reportText += `--------------------------\n`;
@@ -81,7 +122,7 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
         const reportKeys = new Set(incomes.map(inc => `${inc.locationName}|${inc.city}`));
         const missingLocations = allLocations
             .filter(l => !reportKeys.has(`${l.name}|${l.city}`))
-            .map(l => `${l.name} (${l.city})`);
+            .map(l => formatFinanceLocationLabel(l.name, l.city));
 
         if (missingLocations.length > 0) {
             reportText += `\n\n⚠️ <b>Missing Data:</b>\n`;
