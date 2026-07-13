@@ -169,17 +169,18 @@ export async function sendAdminOutboundMessage(
         ? formattedHtmlText
         : `📩 <b>Повідомлення від PlayPhoto:</b>\n\n${formattedHtmlText}`;
 
-    const sendOptions: Record<string, unknown> = {
-        parse_mode: "HTML",
-    };
+    const longMessageOptions: {
+        replyMarkup?: InstanceType<typeof InlineKeyboard>;
+        messageThreadId?: number;
+    } = {};
     if (options?.messageThreadId !== undefined) {
-        sendOptions.message_thread_id = options.messageThreadId;
+        longMessageOptions.messageThreadId = options.messageThreadId;
     }
     if (options?.replyMarkup) {
-        sendOptions.reply_markup = options.replyMarkup;
+        longMessageOptions.replyMarkup = options.replyMarkup;
     }
 
-    await ctx.api.sendMessage(targetChatId, htmlText, sendOptions as any);
+    await sendLongHtmlMessage(ctx, targetChatId, htmlText, longMessageOptions);
 }
 
 export function msgToHtml(text: string, entities: any[] = []): string {
