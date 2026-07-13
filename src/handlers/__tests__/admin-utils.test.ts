@@ -119,4 +119,44 @@ describe("sendAdminOutboundMessage", () => {
             },
         );
     });
+
+    it("splits long text-only messages and keeps reply markup on the last chunk", async () => {
+        const replyMarkup = { inline_keyboard: [[{ text: "Reply", callback_data: "reply" }]] };
+        const longText = `${"а".repeat(3000)}\n${"б".repeat(1800)}`;
+        const ctx = {
+            chat: { id: 555 },
+            message: {
+                message_id: 77,
+                text: longText,
+                entities: [],
+            },
+            api: {
+                copyMessage: vi.fn().mockResolvedValue({}),
+                sendMessage: vi.fn().mockResolvedValue({}),
+            },
+        };
+
+        await sendAdminOutboundMessage(ctx as any, 123, {
+            replyMarkup: replyMarkup as any,
+            prefixText: false,
+        });
+
+        expect(ctx.api.copyMessage).not.toHaveBeenCalled();
+        expect(ctx.api.sendMessage).toHaveBeenCalledTimes(2);
+        expect(ctx.api.sendMessage).toHaveBeenNthCalledWith(
+            1,
+            123,
+            "а".repeat(3000),
+            { parse_mode: "HTML" },
+        );
+        expect(ctx.api.sendMessage).toHaveBeenNthCalledWith(
+            2,
+            123,
+            "б".repeat(1800),
+            {
+                parse_mode: "HTML",
+                reply_markup: replyMarkup,
+            },
+        );
+    });
 });

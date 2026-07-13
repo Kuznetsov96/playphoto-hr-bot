@@ -13,7 +13,7 @@ import prisma from "../../../db/core.js";
 import { workShiftRepository } from "../../../repositories/work-shift-repository.js";
 import { TicketStatus } from "@prisma/client";
 import { updateTicketVisuals, sendSupportStatus, finalizeTopicUIClosure } from "../../../handlers/support-utils.js";
-import { escapeHtml, htmlToPlainText } from "../../../handlers/admin/utils.js";
+import { escapeHtml, htmlToPlainText, sendAdminOutboundMessage } from "../../../handlers/admin/utils.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { audit } from "../../../core/audit-logger.js";
 import { logAuditEvent, logBusinessEvent } from "../../../core/log-events.js";
@@ -1504,7 +1504,7 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
         if (proofSubmission && proofSubmission.supportTopicStatus !== "CLOSED") {
             try {
                 const targetTelegramId = Number(proofSubmission.staff.user.telegramId);
-                await ctx.copyMessage(targetTelegramId);
+                await sendAdminOutboundMessage(ctx, targetTelegramId, { prefixText: false });
                 await taskProofService.markWaitingForStaff(proofSubmission.id);
 
                 const task = proofSubmission.task;
@@ -1553,7 +1553,7 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
 
         try {
             const targetTelegramId = Number(staffUser.telegramId);
-            await ctx.copyMessage(targetTelegramId);
+            await sendAdminOutboundMessage(ctx, targetTelegramId, { prefixText: false });
 
             // Touch updatedAt to track activity
             await prisma.outgoingTopic.update({
@@ -1611,7 +1611,7 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
     }
 
     try {
-        await ctx.copyMessage(telegramId);
+        await sendAdminOutboundMessage(ctx, telegramId, { prefixText: false });
 
         // Touch updatedAt to track activity
         await supportRepository.updateTicket(ticket.id, { updatedAt: new Date() }).catch(() => { });
