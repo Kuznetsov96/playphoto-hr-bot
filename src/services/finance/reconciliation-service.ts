@@ -7,7 +7,7 @@ import logger from "../../core/logger.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
-import { getReportableTerminalAmount } from "./location-rules.js";
+import { getReportableCashAmount, getReportableTerminalAmount } from "./location-rules.js";
 
 interface ReconMatch {
     location: string;
@@ -267,10 +267,12 @@ export class ReconciliationService {
 
                         if (isKuz) {
                             const totalCash = inc?.totalCash || 0;
+                            const reportableCash = getReportableCashAmount(totalCash, locCfg);
                             const perPersonSalary = inc?.totalSalary || 0;
                             const staffCount = Math.max(locShifts.length, 1);
                             const totalSalary = perPersonSalary * staffCount;
-                            const cashExp = totalCash - totalSalary;
+                            const cashExpRaw = Number((reportableCash - totalSalary).toFixed(2));
+                            const cashExp = Math.max(0, cashExpRaw);
 
                             if (totalCash > 0 || displaySurnames.length > 0) {
                                 const candidates = pool.filter(item => {
@@ -300,8 +302,8 @@ export class ReconciliationService {
 
                                 // --- INFORMATIVE LABELS (no DB writes) ---
                                 if (!isEnv && autoStatus !== 'OK') {
-                                    if (totalCash < totalSalary && actual === 0) {
-                                        const deficit = totalSalary - totalCash;
+                                    if (reportableCash < totalSalary && actual === 0) {
+                                        const deficit = totalSalary - reportableCash;
                                         autoDetails += ` ℹ️ Salary > Cash: -${Math.round(deficit)} UAH (no transfer expected)`;
                                     } else if (diff < 0 && !inc?.comment) {
                                         const shortage = Math.abs(diff);
@@ -313,7 +315,7 @@ export class ReconciliationService {
                                     fopMatches.push({
                                         location: formatAuditLocationLabel(locCfg),
                                         type: 'Cash',
-                                        expected: isEnv ? 0 : (cashExp < 0 ? 0 : cashExp),
+                                        expected: isEnv ? 0 : cashExp,
                                         actual,
                                         diff,
                                         status: autoStatus as any,

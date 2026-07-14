@@ -3,6 +3,8 @@ import { normalizeFinanceString } from "./utils.js";
 
 type FinanceLocationLike = Pick<Location, "name" | "legacyName" | "city" | "sheet">;
 
+const FLY_KIDS_KYIV_CASH_PAYOUT_RATE = 0.7;
+
 function isFlyKidsKyivLocation(loc?: Partial<FinanceLocationLike> | null): boolean {
     if (!loc) return false;
 
@@ -22,4 +24,12 @@ export function getReportableTerminalAmount(
     loc?: Partial<FinanceLocationLike> | null
 ): number {
     return shouldExcludeTerminalFromFopAccounting(loc) ? 0 : terminalAmount;
+}
+
+export function getReportableCashAmount(
+    cashAmount: number,
+    loc?: Partial<FinanceLocationLike> | null
+): number {
+    const rate = isFlyKidsKyivLocation(loc) ? FLY_KIDS_KYIV_CASH_PAYOUT_RATE : 1;
+    return Number((cashAmount * rate).toFixed(2));
 }

@@ -11,7 +11,7 @@ export class LocationRepository {
         const locations = await prisma.location.findMany({
             where: { isHidden: false }
         });
-        const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 3', 'Karamel Sambir'];
+        const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 2', 'Volkland 2 (Шевчик)', 'Volkland 3', 'Karamel Sambir'];
         const karpukLocs = ['Volkland', 'Fly Kids'];
         const acquiringLocs = ['Smile Park Lviv', 'Dragon Park', 'Smile Park (Даринок)', 'Smile Park (Darynok)', 'Leoland', 'Leolend', 'Smile Park Київ', 'Smile Park Kharkiv'];
 
@@ -63,7 +63,7 @@ export class LocationRepository {
             // @ts-ignore
             where: { sheet: { not: null }, isHidden: false }
         });
-        const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 3', 'Karamel Sambir'];
+        const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 2', 'Volkland 2 (Шевчик)', 'Volkland 3', 'Karamel Sambir'];
         const karpukLocs = ['Volkland', 'Fly Kids'];
         const acquiringLocs = ['Smile Park Lviv', 'Dragon Park', 'Smile Park (Даринок)', 'Smile Park (Darynok)', 'Leoland', 'Leolend', 'Smile Park Київ', 'Smile Park Kharkiv'];
 
