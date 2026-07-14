@@ -7,7 +7,7 @@ import { locationRepository } from "../repositories/location-repository.js";
 import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { getReportableTerminalAmount, shouldExcludeTerminalFromFopAccounting } from "./finance/location-rules.js";
+import { getReportableCashAmount, shouldExcludeTerminalFromFopAccounting } from "./finance/location-rules.js";
 
 const CITY_ALIASES: Record<string, string[]> = {
     "Київ": ["київ", "kyiv", "kiev"],
@@ -243,7 +243,8 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                 const fopCashName = FOP_DISPLAY_NAMES[fopCashId] || "Счёт ФОП Кузнецов";
 
                 const salary = calculateCashSalaryDeduction(inc);
-                const netCash = Math.max(0, inc.totalCash - salary); // Legacy: Clip to 0 if salary > cash
+                const reportableCash = getReportableCashAmount(inc.totalCash, loc);
+                const netCash = Math.max(0, Number((reportableCash - salary).toFixed(2)));
 
                 // Article Name (Category/Comment)
                 const baseName = loc?.name || inc.locationName;

@@ -44,6 +44,9 @@ vi.mock("../../core/log-events.js", () => ({
 }));
 
 vi.mock("../finance/location-rules.js", () => ({
+    getReportableCashAmount: vi.fn((amount: number, loc?: { name?: string } | null) =>
+        loc?.name === "Fly Kids (Київ)" ? Number((amount * 0.7).toFixed(2)) : amount
+    ),
     getReportableTerminalAmount: vi.fn((amount: number, loc?: { name?: string } | null) =>
         loc?.name === "Fly Kids (Київ)" ? 0 : amount
     ),
@@ -94,6 +97,37 @@ describe("finance report DDS sync", () => {
 
     it("keeps legacy single-person deduction when no photographer names are available", () => {
         expect(calculateCashSalaryDeduction({ totalSalary: 3850 })).toBe(3850);
+    });
+
+    it("deducts salary from 70 percent of cash for Fly Kids Kyiv", async () => {
+        vi.mocked(locationRepository.findAllActive).mockResolvedValue([
+            {
+                id: "loc-fk-kyiv",
+                name: "Fly Kids (Київ)",
+                city: "Київ",
+                fopId: "KUZNETSOV",
+                hasAcquiring: false,
+                cashInEnvelope: false
+            } as any
+        ]);
+
+        const result = await syncToDDS("14.07.2026", [
+            {
+                locationId: "loc-fk-kyiv",
+                locationName: "Fly Kids (Київ)",
+                city: "Київ",
+                totalCash: 1000,
+                totalTerminal: 0,
+                totalSalary: 250,
+                totalIncome: 1000,
+                date: "14.07.2026",
+                photographers: ["Photographer One"]
+            }
+        ], true);
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain("Add Cash: 450");
+        expect(result.message).not.toContain("Add Cash: 750");
     });
 });
 
