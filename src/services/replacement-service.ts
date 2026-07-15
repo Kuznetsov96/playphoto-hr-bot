@@ -629,7 +629,7 @@ export class ReplacementService {
             const text = this.buildCandidateText(request, candidate.availabilityKind);
             const keyboard = new InlineKeyboard()
                 .text("Можу вийти", `staff_repl_accept_${request.id}`).row()
-                .text("Не можу", `staff_repl_decline_${request.id}`);
+                .text("Не можу", `staff_repl_decline_${request.id}`).danger();
 
             try {
                 const sent = await api.sendMessage(Number(candidate.staff.user.telegramId), text, {

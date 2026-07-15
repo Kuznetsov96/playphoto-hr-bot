@@ -33,7 +33,7 @@ function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', 
 
     if (buttonType === 'preferences') {
         kb.text("🗓 Заповнити графік", "pref_fill").row();
-        kb.text("🚫 Не буду заповнювати", "pref_opt_out");
+        kb.text("🚫 Не буду заповнювати", "pref_opt_out").danger();
         return kb;
     }
 
@@ -42,10 +42,10 @@ function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', 
         kb.text("✅ Ознайомлена", okAction);
 
         if (broadcastId && isGroup && botUsername) {
-            kb.url("❌ Не згодна", `https://t.me/${botUsername}?start=bcq_${broadcastId}`);
+            kb.url("❌ Не згодна", `https://t.me/${botUsername}?start=bcq_${broadcastId}`).danger();
         } else {
             const declineAction = broadcastId ? `broadcast_confirm_decline_${broadcastId}` : "test_confirm_decline";
-            kb.text("❌ Не згодна", declineAction);
+            kb.text("❌ Не згодна", declineAction).danger();
         }
     }
 

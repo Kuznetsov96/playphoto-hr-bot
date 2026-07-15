@@ -22,6 +22,16 @@ describe("broadcastService media delivery", () => {
             "<b>Hello</b>",
             expect.objectContaining({ parse_mode: "HTML", reply_markup: expect.any(Object) })
         );
+
+        const replyMarkup = api.sendMessage.mock.calls[0]?.[2]?.reply_markup;
+        expect(replyMarkup.inline_keyboard).toEqual([[{
+            text: "✅ Ознайомлена",
+            callback_data: "test_confirm_ok",
+        }, {
+            text: "❌ Не згодна",
+            callback_data: "test_confirm_decline",
+            style: "danger",
+        }]]);
     });
 
     it("sends document broadcasts without buttons when requested", async () => {

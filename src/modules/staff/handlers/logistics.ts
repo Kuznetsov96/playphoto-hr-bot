@@ -57,7 +57,7 @@ async function clearCallbackKeyboard(ctx: MyContext) {
 function buildParcelPhotoDraftKeyboard(parcelId: string) {
     return new InlineKeyboard()
         .text(LOGISTICS_TEXTS_STAFF.btn_photo_done, buildSignedCallback("ppd", parcelId))
-        .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, buildSignedCallback("ppx", parcelId));
+        .text(LOGISTICS_TEXTS_STAFF.btn_photo_cancel, buildSignedCallback("ppx", parcelId)).danger();
 }
 
 function buildParcelPhotoRestartKeyboard(parcelId: string) {

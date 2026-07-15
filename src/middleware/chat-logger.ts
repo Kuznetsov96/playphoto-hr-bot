@@ -4,6 +4,7 @@ import { chatLogRepository } from "../repositories/chat-log-repository.js";
 import prisma from "../db/core.js";
 import type { MiddlewareFn } from "grammy";
 import { sanitizeCallbackData, sanitizeChatLogEntry, sanitizeTextForLogs } from "../core/log-sanitizer.js";
+import { getRichMessagePlainText } from "../utils/rich-message.js";
 
 /**
  * Middleware: logs every incoming message/callback from users to ChatLog.
@@ -69,6 +70,9 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
             } else if (msg.venue) {
                 contentType = "venue";
                 text = "[VENUE_REDACTED]";
+            } else if (msg.rich_message) {
+                contentType = "rich_message";
+                text = sanitizeTextForLogs(getRichMessagePlainText(msg.rich_message) || "[RICH_MESSAGE]");
             } else if (!text) {
                 contentType = "unsupported";
                 text = "[UNSUPPORTED_MESSAGE_TYPE]";
@@ -89,19 +93,28 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
 };
 
 /**
- * API Transformer: logs every outgoing sendMessage/editMessageText to ChatLog.
+ * API Transformer: logs outgoing text and rich-message sends/edits to ChatLog.
  * Attached via bot.api.config.use()
  */
 export const chatLogTransformer: Transformer = async (prev, method, payload, signal) => {
+    const isLoggedMessageMethod = method === "sendMessage" ||
+        method === "sendRichMessage" ||
+        method === "editMessageText";
+
     // We make it async to wait for the result and catch errors
     try {
         const result = await prev(method, payload, signal);
 
         // Only log message-sending methods to private chats
-        if (method === "sendMessage" || method === "editMessageText") {
+        if (isLoggedMessageMethod) {
             const p = payload as any;
             const chatId = p?.chat_id;
-            const text = sanitizeTextForLogs(p?.text ?? p?.caption ?? null);
+            const text = sanitizeTextForLogs(
+                p?.text ??
+                p?.caption ??
+                getRichMessagePlainText(p?.rich_message) ??
+                null,
+            );
 
             // Only log if chat_id looks like a user (positive number = private chat)
             if (chatId && Number(chatId) > 0) {
@@ -119,10 +132,15 @@ export const chatLogTransformer: Transformer = async (prev, method, payload, sig
         return result;
     } catch (error: any) {
         // LOG ERROR TO DATABASE
-        if (method === "sendMessage" || method === "editMessageText") {
+        if (isLoggedMessageMethod) {
             const p = payload as any;
             const chatId = p?.chat_id;
-            const text = sanitizeTextForLogs(p?.text ?? p?.caption ?? null);
+            const text = sanitizeTextForLogs(
+                p?.text ??
+                p?.caption ??
+                getRichMessagePlainText(p?.rich_message) ??
+                null,
+            );
 
             if (chatId && Number(chatId) > 0) {
                 const telegramId = BigInt(chatId);

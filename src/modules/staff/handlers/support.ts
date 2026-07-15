@@ -24,6 +24,7 @@ import { shortenName } from "../../../utils/string-utils.js";
 import { getLocationShortcut } from "../../../utils/ticket-card.js";
 import { truncateText } from "../../../utils/task-helpers.js";
 import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../../../services/first-shift-onboarding-service.js";
+import { getRichMessagePlainText } from "../../../utils/rich-message.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -34,7 +35,8 @@ export const staffSupportHandlers = new Composer<MyContext>();
 const adminSupportCallbacks = new Composer<MyContext>();
 
 function buildOnboardingPayloadFromSupportMessage(ctx: MyContext): FirstShiftOnboardingCandidateMessage {
-    const text = ctx.message?.text || ctx.message?.caption || undefined;
+    const richText = getRichMessagePlainText(ctx.message?.rich_message) || undefined;
+    const text = ctx.message?.text || ctx.message?.caption || richText;
     const photoId = ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null;
     const hasMedia = Boolean(
         photoId ||
@@ -44,7 +46,8 @@ function buildOnboardingPayloadFromSupportMessage(ctx: MyContext): FirstShiftOnb
         ctx.message?.document ||
         ctx.message?.audio ||
         ctx.message?.animation ||
-        ctx.message?.sticker,
+        ctx.message?.sticker ||
+        ctx.message?.rich_message,
     );
     const hasFormattedText = Boolean(ctx.message?.entities?.length || ctx.message?.caption_entities?.length);
 
@@ -93,6 +96,7 @@ function isDuplicateSupportAction(actionKey: string) {
 
 function getSupportMessageTypeLabel(message: NonNullable<MyContext["message"]>): string {
     if (message.text) return "текст";
+    if (message.rich_message) return "rich message";
     if (message.photo) return "фото";
     if (message.video) return "відео";
     if (message.document) return "документ";
@@ -110,13 +114,13 @@ function getSupportMessageTypeLabel(message: NonNullable<MyContext["message"]>):
 }
 
 function getSupportMessagePreview(message: NonNullable<MyContext["message"]>): string {
-    const text = message.text || message.caption;
+    const text = message.text || message.caption || getRichMessagePlainText(message.rich_message);
     if (text) return text;
     return `[${getSupportMessageTypeLabel(message)}]`;
 }
 
 function buildSupportFallbackBody(message: NonNullable<MyContext["message"]>): string {
-    const text = message.text || message.caption;
+    const text = message.text || message.caption || getRichMessagePlainText(message.rich_message);
     if (text) {
         return `📝 <b>Вміст повідомлення</b>\n${escapeHtml(text)}`;
     }
@@ -223,7 +227,7 @@ staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
         kb.text("📦 Logistics", "admin_logistics_nav").row();
     }
 
-    kb.text(STAFF_TEXTS["hr-btn-cancel"], "staff_hub_nav");
+    kb.text(STAFF_TEXTS["hr-btn-cancel"], "staff_hub_nav").danger();
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 });
@@ -295,7 +299,7 @@ staffSupportHandlers.callbackQuery(/^ticket_reply_close_(\d+)$/, async (ctx) => 
     await ctx.answerCallbackQuery();
     await ctx.reply(STAFF_TEXTS["support-ask-reply"], {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text(STAFF_TEXTS["hr-btn-cancel"], "cancel_step")
+        reply_markup: new InlineKeyboard().text(STAFF_TEXTS["hr-btn-cancel"], "cancel_step").danger()
     });
 });
 

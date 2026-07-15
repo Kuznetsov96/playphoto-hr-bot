@@ -10,6 +10,8 @@ import {
 } from "../../menus/candidate.js";
 import { supportHandlers, handleSupportMessage } from "../../handlers/support.js";
 import { bot } from "../../core/bot.js";
+import { shouldRouteMessageToPrivateRoleFlows } from "../../utils/message-routing.js";
+import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 
 export const candidateModule = new Composer<MyContext>();
 
@@ -28,9 +30,18 @@ candidateModule.use(supportHandlers);
 
 // 3. Handle Messages (Support Flow for Candidates)
 candidateModule.on("message", async (ctx, next) => {
+    // Candidate flows are private by design. Group/service messages must never
+    // expose candidate status or advance a private funnel session.
+    if (!shouldRouteMessageToPrivateRoleFlows(ctx.chat?.type)) return next();
+
     // Attempt to handle as support message
     const handled = await handleSupportMessage(ctx);
     if (handled) return;
+
+    if (ctx.message.rich_message) {
+        await ctx.reply(CANDIDATE_TEXTS["candidate-rich-message-plain-text-required"]);
+        return;
+    }
 
     // --- CATCH-ALL FOR CANDIDATES ---
     // If we are here, it means the message wasn't caught by screening or support
