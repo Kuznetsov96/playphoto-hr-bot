@@ -131,11 +131,12 @@ export async function sendAdminOutboundMessage(
         text,
         (message.text ? message.entities : message.caption_entities) || []
     );
-    const hasMedia = Boolean(
-        message.photo || message.video || message.document || message.voice || message.video_note || message.audio || message.animation
-    );
+    // Telegram keeps adding copyable non-text message types. Treat only actual
+    // text messages as text so stickers and other payloads are not sent as an
+    // empty sendMessage call.
+    const shouldCopyMessage = !message.text;
 
-    if (hasMedia) {
+    if (shouldCopyMessage) {
         const copyOptions: Record<string, unknown> = {};
         if (options?.messageThreadId !== undefined) {
             copyOptions.message_thread_id = options.messageThreadId;

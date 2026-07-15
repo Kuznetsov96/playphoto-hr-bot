@@ -55,6 +55,25 @@ describe("htmlToPlainText", () => {
 });
 
 describe("sendAdminOutboundMessage", () => {
+    it("copies stickers instead of sending an empty text message", async () => {
+        const ctx = {
+            chat: { id: 555 },
+            message: {
+                message_id: 77,
+                sticker: { file_id: "sticker-1" },
+            },
+            api: {
+                copyMessage: vi.fn().mockResolvedValue({}),
+                sendMessage: vi.fn().mockResolvedValue({}),
+            },
+        };
+
+        await sendAdminOutboundMessage(ctx as any, 123, { prefixText: false });
+
+        expect(ctx.api.copyMessage).toHaveBeenCalledWith(123, 555, 77, {});
+        expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+    });
+
     it("copies media with short captions unchanged", async () => {
         const replyMarkup = { inline_keyboard: [[{ text: "Reply", callback_data: "reply" }]] };
         const ctx = {
