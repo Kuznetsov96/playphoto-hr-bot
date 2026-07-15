@@ -408,7 +408,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
             if (!preview.duplicateTelegramIds.length) {
                 kb.text(preview.requiresConfirmation ? "⚠️ Confirm Full Sync" : "✅ Run Full Sync", "team_sync_confirm");
             }
-            kb.text("✖️ Cancel", "team_sync_cancel");
+            kb.text("✖️ Cancel", "team_sync_cancel").danger();
 
             await ctx.reply(formatTeamSyncPreview(preview), {
                 parse_mode: "HTML",
@@ -671,7 +671,7 @@ async function showAdminReplacementManualConfirm(ctx: MyContext, dateKey: string
     const kb = new InlineKeyboard()
         .text("✅ Start search", "admin_repl_manual_confirm").row()
         .text("⬅️ Dates", `admin_repl_loc_${draft.locationId}`)
-        .text("✖️ Cancel", "admin_repl_board");
+        .text("✖️ Cancel", "admin_repl_board").danger();
 
     await ScreenManager.renderScreen(
         ctx,
@@ -761,7 +761,9 @@ adminTeamHandlers.callbackQuery("back_to_schedule_dates", async (ctx) => {
 adminTeamHandlers.callbackQuery("team_sync_cancel", async (ctx) => {
     await ctx.answerCallbackQuery("Sync cancelled").catch(() => { });
     delete ctx.session.teamSyncPreview;
-    await ctx.editMessageText("❌ <b>Full Sync cancelled.</b>", { parse_mode: "HTML" }).catch(() => { });
+    await ctx.deleteMessage().catch(async () => {
+        await ScreenManager.renderScreen(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
+    });
 });
 
 adminTeamHandlers.callbackQuery("team_sync_confirm", async (ctx) => {

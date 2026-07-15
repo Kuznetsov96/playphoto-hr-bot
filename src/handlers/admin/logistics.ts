@@ -232,7 +232,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
     locations.forEach(loc => {
         kb.text(loc.name, buildParcelSetLocationCallback(parcelId, loc.id)).row();
     });
-    kb.text("⬅️ Cancel", `admin_parcel_view_details_${parcelId}`);
+    kb.text("✖️ Cancel", `admin_parcel_view_details_${parcelId}`).danger();
 
     await ctx.editMessageText("📍 <b>Select Location for this parcel:</b>", { parse_mode: 'HTML', reply_markup: kb });
     await ctx.answerCallbackQuery().catch(() => { });
