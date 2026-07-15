@@ -54,7 +54,7 @@ export async function preferencesConversation(conversation: MyConversation, ctx:
             } else {
                 kb.row().text(`✅ Готово (${selectedDays.size} дн.)`, "pref_finish");
             }
-            kb.row().text("❌ Скасувати", "pref_cancel").danger();
+            kb.row().text("✖️ Скасувати", "pref_cancel").danger();
 
             const text = `🗓 <b>Побажання (${monthName})</b>\n\n` +
                 `Познач дні, коли ти <b>НЕ МОЖЕШ</b> вийти на зміну (твої вихідні). 🚫\n\n` +
@@ -138,7 +138,7 @@ export async function preferencesConversation(conversation: MyConversation, ctx:
             .text("✅ Так, зберегти", "pref_confirm_save")
             .text("🔄 Почати спочатку", "pref_restart")
             .row()
-            .text("❌ Скасувати", "pref_cancel").danger();
+            .text("✖️ Скасувати", "pref_cancel").danger();
 
         await ctx.api.editMessageText(ctx.chat!.id, menuMsgId as number, summary, { parse_mode: "HTML", reply_markup: confirmKb }).catch(() => { });
 

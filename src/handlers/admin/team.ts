@@ -536,7 +536,7 @@ async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = fal
     const kb = new InlineKeyboard();
 
     requests.slice(0, 8).forEach((request, index) => {
-        kb.text(`❌ Cancel #${index + 1}`, `admin_repl_cancel_${request.id}`).row();
+        kb.text(`✖️ Cancel #${index + 1}`, `admin_repl_cancel_${request.id}`).danger().row();
     });
 
     kb.text("➕ Start manual search", "admin_repl_manual_start").row()

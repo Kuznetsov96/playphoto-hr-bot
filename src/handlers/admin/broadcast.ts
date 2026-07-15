@@ -60,7 +60,7 @@ async function renderTargetSelection(ctx: MyContext) {
         .text("🏘️ City Chats", "br_type_city_chats").row()
         .text("👤 PM: All Staff", "br_type_pm_all").row()
         .text("👤 PM: By Cities", "br_type_pm_city").row()
-        .text("❌ Cancel", "br_cancel");
+        .text("✖️ Cancel", "br_cancel").danger();
 
     const text = "📢 <b>BROADCAST:</b> Select recipients:";
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
@@ -278,7 +278,7 @@ async function renderContentPrompt(ctx: MyContext) {
         `For photo collections, send all photos and then tap Continue.\n\n` +
         `<i>Formatting (bold, links, etc.) will be preserved.</i>`;
 
-    const kb = new InlineKeyboard().text("⬅️ Back", "br_confirm_buttons").text("❌ Cancel", "br_cancel");
+    const kb = new InlineKeyboard().text("⬅️ Back", "br_confirm_buttons").text("✖️ Cancel", "br_cancel").danger();
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
@@ -299,7 +299,7 @@ async function renderMediaCollectionPrompt(ctx: MyContext) {
         .text(`➡️ Continue (${photoCount})`, "br_media_continue").row()
         .text("🗑 Clear Photos", "br_media_reset").row()
         .text("⬅️ Back", "br_confirm_buttons")
-        .text("❌ Cancel", "br_cancel");
+        .text("✖️ Cancel", "br_cancel").danger();
 
     await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
 }
@@ -497,7 +497,7 @@ async function renderReview(ctx: MyContext) {
 
     const kb = getBroadcastKb(false, false, stats);
 
-    kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
+    kb.row().text("🔄 Start Over", "br_restart").text("✖️ Cancel", "br_cancel").danger();
 
     ctx.session.broadcastDraft = {
         textHtml: data.text || "",
@@ -587,8 +587,8 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
 
     range.text("⏹ Stop All Active Pings", async (ctx) => {
         const confirmKb = new InlineKeyboard()
-            .text("✅ Yes, stop all", "br_stop_all_pings_exec").row()
-            .text("↩️ Cancel", "br_stop_all_pings_cancel");
+            .text("✅ Yes, stop all", "br_stop_all_pings_exec").danger().row()
+            .text("✖️ Cancel", "br_stop_all_pings_cancel");
 
         await ScreenManager.renderScreen(
             ctx,
@@ -749,7 +749,7 @@ adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
         const mediaSummary = getMediaSummary(Array.isArray(draft.media) ? draft.media : (draft.media ? [draft.media] : []));
         const preview = getBroadcastPreview(draft.textHtml, draft.targetType, stats, true, true, draft.buttonType || 'default', mediaSummary);
         const kb = getBroadcastKb(true, true, stats);
-        kb.row().text("🔄 Start Over", "br_restart").text("❌ Cancel", "br_cancel");
+        kb.row().text("🔄 Start Over", "br_restart").text("✖️ Cancel", "br_cancel").danger();
 
         await ctx.editMessageText(preview, { reply_markup: kb }).catch(() => { });
     } catch (e: any) {

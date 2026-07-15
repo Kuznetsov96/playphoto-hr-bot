@@ -127,7 +127,7 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
         keyboard.text("⏩ No time", "tas_time_none").row();
         keyboard.text("📝 Edit text", "tas_edit_text")
         keyboard.text("📅 Change date", "tas_change_date").row();
-        keyboard.text("❌ Cancel", "task_creation_cancel");
+        keyboard.text("✖️ Cancel", "task_creation_cancel").danger();
 
         await ScreenManager.renderScreen(
             ctx,
@@ -361,7 +361,7 @@ async function handleTaskInput(
     keyboard.text("⏩ No time", "tas_time_none").row();
     keyboard.text("📝 Edit text", "tas_edit_text")
     keyboard.text("📅 Change date", "tas_change_date").row();
-    keyboard.text("❌ Cancel", "task_creation_cancel");
+    keyboard.text("✖️ Cancel", "task_creation_cancel").danger();
 
     await ScreenManager.renderScreen(
         ctx,
@@ -628,7 +628,7 @@ composer.callbackQuery("tas_edit_done_back", async (ctx) => {
     const keyboard = new InlineKeyboard();
     keyboard.text("🌑 End of day", "tas_time_23:59").text("⏩ No time", "tas_time_none").row();
     keyboard.text("📝 Edit text", "tas_edit_text").text("📅 Change date", "tas_change_date").row();
-    keyboard.text("❌ Cancel", "task_creation_cancel");
+    keyboard.text("✖️ Cancel", "task_creation_cancel").danger();
     await ScreenManager.renderScreen(
         ctx,
         `📍 Task for ${ctx.session.taskCreation.staffName}:\n<i>${ctx.session.taskCreation.taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,

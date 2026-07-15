@@ -8,7 +8,7 @@ vi.mock("../../../constants/admin-texts.js", () => ({
         "admin-channel-access-prompt": "Send the person's Telegram ID.",
         "admin-channel-revoke-title": "Manual Channel Revoke",
         "admin-channel-revoke-prompt": "Send the person's Telegram ID.",
-        "admin-btn-cancel": "Cancel",
+        "admin-btn-cancel": "✖️ Cancel",
     }, {
         get(target, prop: string) {
             return target[prop as keyof typeof target] || prop;
@@ -80,5 +80,11 @@ describe("manual channel access flow", () => {
         expect(ctx.session.supportData.step).toBeUndefined();
         expect(ctx.session.supportData.replyingToUserId).toBeUndefined();
         expect(renderScreen).toHaveBeenCalled();
+        const keyboard = renderScreen.mock.calls[0]?.[2];
+        expect(keyboard.inline_keyboard[0]?.[0]).toMatchObject({
+            text: "✖️ Cancel",
+            callback_data: "cancel_step",
+            style: "danger",
+        });
     });
 });

@@ -47,7 +47,7 @@ async function renderDateSelection(ctx: MyContext) {
     if (!ctx.session.taskData) return;
     const kb = new InlineKeyboard();
     build14DayCalendar("task_date_").forEach(row => kb.row(...row));
-    kb.text("❌ Cancel", "task_cancel_flow");
+    kb.text("✖️ Cancel", "task_cancel_flow").danger();
     const text = `📅 <b>Task for ${ctx.session.taskData.staffName}</b>\n\nSelect date:`;
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
@@ -90,7 +90,7 @@ async function renderTextPrompt(ctx: MyContext) {
     const attachmentLine = data.fileId ? `\n📎 <b>Attachment saved:</b> ${data.mediaType || "media"}` : "";
     const modeLabel = data.completionMode === "PROOF_REQUIRED" ? "Proof Required" : "Quick Completion";
     const text = `📝 <b>Task Content</b>\n👤 Staff: ${data.staffName}\n⚙️ Type: <b>${modeLabel}</b>${attachmentLine}\n\n👇 <b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
-    const kb = new InlineKeyboard().text("⬅️ Back", "task_back_date").text("❌ Cancel", "task_cancel_flow");
+    const kb = new InlineKeyboard().text("⬅️ Back", "task_back_date").text("✖️ Cancel", "task_cancel_flow").danger();
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
@@ -184,7 +184,7 @@ async function renderDeadlineSelection(ctx: MyContext) {
     const kb = new InlineKeyboard();
     kb.text("🌑 End of day", "task_time_23:59")
     kb.text("⏩ No time", "task_time_none").row();
-    kb.text("⬅️ Back to Text", "task_back_text").text("❌ Cancel", "task_cancel_flow");
+    kb.text("⬅️ Back to Text", "task_back_text").text("✖️ Cancel", "task_cancel_flow").danger();
 
     const attachmentLine = data.fileId ? `\n📎 Attachment: <b>${data.mediaType || "media"}</b>` : "";
     const text = `⏰ <b>Set Deadline</b>\n👤 Staff: ${data.staffName}\n📅 Date: ${prettyDate}${attachmentLine}\n📝 Text: <i>${data.text}</i>\n\n👇 <b>Select or write time (e.g. 15:00):</b>`;
@@ -222,7 +222,7 @@ async function renderConfirmation(ctx: MyContext) {
     const attachmentLine = data.fileId ? `\n📎 <b>Attachment:</b> ${data.mediaType || "media"}` : "";
 
     const summary = `✅ <b>Task Confirmation</b>\n\n👤 <b>${data.staffName}</b>\n📅 ${new Date(data.workDate!).toLocaleDateString("uk-UA")}${deadlineStr}${attachmentLine}\n\n📝 <i>${data.text}</i>`;
-    const kb = new InlineKeyboard().text("✅ Create", "task_confirm_save").row().text("⬅️ Back", "task_back_deadline").text("❌ Cancel", "task_cancel_flow");
+    const kb = new InlineKeyboard().text("✅ Create", "task_confirm_save").row().text("⬅️ Back", "task_back_deadline").text("✖️ Cancel", "task_cancel_flow").danger();
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true });
 }
 

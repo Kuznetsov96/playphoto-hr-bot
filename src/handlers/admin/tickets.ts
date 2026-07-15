@@ -90,7 +90,7 @@ export async function showTicketDetails(ctx: MyContext, ticketId: number) {
     }
 
     kb.row().text("✍️ Quick Reply", `admin_reply_to_${t.user.telegramId}`);
-    kb.row().text(ADMIN_TEXTS["support-btn-force-close"], `ticket_force_close_${t.id}`);
+    kb.row().text(ADMIN_TEXTS["support-btn-force-close"], `ticket_force_close_${t.id}`).danger();
     kb.row().text("⬅️ Back to List", "back_to_ticket_list");
 
     await ScreenManager.renderScreen(ctx, detailText, kb, { pushToStack: true });

@@ -33,7 +33,7 @@ export async function startManualChannelAccessFlow(ctx: MyContext) {
     await ScreenManager.renderScreen(
         ctx,
         `${ADMIN_TEXTS["admin-channel-access-title"]}\n\n${ADMIN_TEXTS["admin-channel-access-prompt"]}`,
-        new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step"),
+        new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step").danger(),
         { pushToStack: true }
     );
 }
@@ -43,7 +43,7 @@ export async function startManualChannelRevokeFlow(ctx: MyContext) {
     await ScreenManager.renderScreen(
         ctx,
         `${ADMIN_TEXTS["admin-channel-revoke-title"]}\n\n${ADMIN_TEXTS["admin-channel-revoke-prompt"]}`,
-        new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step"),
+        new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step").danger(),
         { pushToStack: true }
     );
 }
@@ -89,7 +89,7 @@ export async function handleManualChannelAccess(ctx: MyContext): Promise<boolean
     if (!parsed) {
         await ctx.reply(ADMIN_TEXTS["admin-channel-access-invalid"], {
             parse_mode: "HTML",
-            reply_markup: new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step")
+            reply_markup: new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step").danger()
         });
         return true;
     }
@@ -171,7 +171,7 @@ async function handleManualChannelRevoke(ctx: MyContext) {
     if (!telegramId) {
         await ctx.reply(ADMIN_TEXTS["admin-channel-revoke-invalid"], {
             parse_mode: "HTML",
-            reply_markup: new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step")
+            reply_markup: new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step").danger()
         });
         return;
     }

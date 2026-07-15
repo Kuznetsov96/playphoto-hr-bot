@@ -191,7 +191,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     }
 
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-msg-staff"], `admin_msg_staff_${task.staffId}`).row();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-delete"], `task_del_conf_${taskId}_${dateStr}`).row();
+    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-delete"], `task_del_conf_${taskId}_${dateStr}`).danger().row();
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-back-list"], `task_dash_${dateStr}`);
 
     await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
@@ -246,7 +246,7 @@ composer.callbackQuery(/^task_del_conf_/, async (ctx: MyContext) => {
     const dateStr = data[1]!;
 
     const keyboard = new InlineKeyboard();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-del-yes"], `task_del_exec_${taskId}_${dateStr}`).row();
+    keyboard.text(ADMIN_TEXTS["admin-tasks-del-yes"], `task_del_exec_${taskId}_${dateStr}`).danger().row();
     keyboard.text(ADMIN_TEXTS["admin-tasks-del-no"], `task_det_${taskId}_${dateStr}`);
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-del-conf"], keyboard);

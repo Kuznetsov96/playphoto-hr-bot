@@ -58,6 +58,12 @@ describe("admin finance expense flow", () => {
         expect(ctx.session.manualChannelAccess).toBeUndefined();
         expect(ctx.session.supportData.step).toBeUndefined();
         expect(ctx.session.supportData.replyingToUserId).toBeUndefined();
+        const replyOptions = ctx.reply.mock.calls[0]?.[1];
+        expect(replyOptions.reply_markup.inline_keyboard[0]?.[0]).toMatchObject({
+            text: "✖️ Cancel",
+            callback_data: "expense_cancel",
+            style: "danger",
+        });
     });
 
     it("does not let expense location text fall through to another flow", async () => {

@@ -32,7 +32,7 @@ export const createDatePickerKb = (prefix: string) => {
     }
     kb.row();
 
-    kb.text("❌ Cancel", "cancel_step");
+    kb.text("✖️ Cancel", "cancel_step");
     return kb;
 };
 

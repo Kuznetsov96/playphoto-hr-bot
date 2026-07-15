@@ -79,7 +79,7 @@ export async function startExpenseFlow(ctx: MyContext) {
 
     await ctx.reply(`💸 <b>New Expense</b>\n\nAccount: <b>${fopName}</b>\n\nEnter amount (UAH):`, {
         parse_mode: "HTML",
-        reply_markup: new InlineKeyboard().text("❌ Cancel", "expense_cancel")
+        reply_markup: new InlineKeyboard().text("✖️ Cancel", "expense_cancel").danger()
     });
 }
 
@@ -168,7 +168,7 @@ export async function handleExpenseText(ctx: MyContext, next: () => Promise<void
             parse_mode: "HTML",
             reply_markup: new InlineKeyboard()
                 .text("✅ Save", "exp_confirm_save")
-                .text("❌ Cancel", "expense_cancel")
+                .text("✖️ Cancel", "expense_cancel").danger()
         });
         return;
     }

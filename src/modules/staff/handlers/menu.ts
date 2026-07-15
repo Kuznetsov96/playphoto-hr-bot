@@ -69,7 +69,7 @@ function formatStaffShiftTime(shift: {
 function buildTaskProofKeyboard(taskId: string) {
     return new InlineKeyboard()
         .text("✅ Завершити завдання", `staff_task_proof_submit_${taskId}`).row()
-        .text("❌ Скасувати", `staff_task_proof_cancel_${taskId}`).danger();
+        .text("✖️ Скасувати", `staff_task_proof_cancel_${taskId}`).danger();
 }
 
 function buildTaskProofText(taskText: string, proofCount: number) {
@@ -623,7 +623,7 @@ export async function startSupportFlow(ctx: MyContext) {
 
     const text = STAFF_TEXTS["support-ask-issue"];
 
-    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", cancelCallback).danger(), {
+    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("✖️ Скасувати", cancelCallback).danger(), {
         pushToStack: true
     });
 }
@@ -872,7 +872,7 @@ staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {
         `<i>"${escapeHtml(taskPreview)}"</i>\n\n` +
         `Напиши, що саме незрозуміло, і я передам твої слова адміну. ✍️`;
 
-    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", "staff_hub_nav").danger(), {
+    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("✖️ Скасувати", "staff_hub_nav").danger(), {
         pushToStack: true
     });
     await ctx.answerCallbackQuery();

@@ -245,7 +245,7 @@ async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, target
                     {
                         message_thread_id: topic.message_thread_id,
                         parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().text("🔒 Resolve & Close", `admin_close_ticket_${ticket.id}`)
+                        reply_markup: new InlineKeyboard().text("🔒 Resolve & Close", `admin_close_ticket_${ticket.id}`).danger()
                     }
                 );
             }
