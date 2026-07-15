@@ -38,11 +38,6 @@ candidateModule.on("message", async (ctx, next) => {
     const handled = await handleSupportMessage(ctx);
     if (handled) return;
 
-    if (ctx.message.rich_message) {
-        await ctx.reply(CANDIDATE_TEXTS["candidate-rich-message-plain-text-required"]);
-        return;
-    }
-
     // --- CATCH-ALL FOR CANDIDATES ---
     // If we are here, it means the message wasn't caught by screening or support
     const { candidateRepository } = await import("../../repositories/candidate-repository.js");
