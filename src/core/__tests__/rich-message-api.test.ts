@@ -5,6 +5,7 @@ import type { InputRichBlock, LatestInputRichMessage } from "../../types/telegra
 import {
     buildRichMessageUpgrade,
     createLatestRichMessageFromText,
+    preserveLegacyHtmlLineBreaks,
     richMessageApiTransformer,
     sendLatestRichMessage,
     sendLatestRichMessageDraft,
@@ -22,6 +23,32 @@ describe("createLatestRichMessageFromText", () => {
 
     it("keeps MarkdownV2 on the classic API because it is a different grammar", () => {
         expect(createLatestRichMessageFromText("*Hello*", "MarkdownV2")).toBeNull();
+    });
+
+    it("preserves legacy HTML line breaks in rich HTML", () => {
+        const adminPanel = [
+            "🤖 <b>PlayPhoto 2.0 Admin Panel</b>",
+            "👥 <b>Team:</b> 88 active",
+            "📍 <b>Locations:</b> 19 active",
+            "",
+            "Choose category:",
+        ].join("\n");
+
+        expect(createLatestRichMessageFromText(adminPanel, "HTML")).toEqual({
+            html: "🤖 <b>PlayPhoto 2.0 Admin Panel</b><br>👥 <b>Team:</b> 88 active<br>📍 <b>Locations:</b> 19 active<br><br>Choose category:",
+        });
+    });
+});
+
+describe("preserveLegacyHtmlLineBreaks", () => {
+    it("normalizes CRLF and leaves preformatted newlines intact", () => {
+        expect(preserveLegacyHtmlLineBreaks("Before\r\n<pre>line 1\r\nline 2</pre>\rAfter"))
+            .toBe("Before<br><pre>line 1\nline 2</pre><br>After");
+    });
+
+    it("supports multiple preformatted blocks", () => {
+        expect(preserveLegacyHtmlLineBreaks("A\n<pre>B\nC</pre>\nD\n<pre>E\nF</pre>\nG"))
+            .toBe("A<br><pre>B\nC</pre><br>D<br><pre>E\nF</pre><br>G");
     });
 });
 

@@ -52,11 +52,32 @@ function hasUnsupportedPreviewOptions(payload: Record<string, any>): boolean {
     return keys.some(key => key !== "is_disabled") || options.is_disabled !== true;
 }
 
+/**
+ * Classic Bot API HTML treats raw newlines as visible line breaks, while rich
+ * HTML follows document whitespace rules and requires explicit <br> tags.
+ * Preserve legacy layout without changing whitespace inside <pre> blocks.
+ */
+export function preserveLegacyHtmlLineBreaks(html: string): string {
+    const normalized = html.replace(/\r\n?/g, "\n");
+    const preBlockPattern = /<pre(?:\s[^>]*)?>[\s\S]*?<\/pre>/gi;
+    let result = "";
+    let cursor = 0;
+
+    for (const match of normalized.matchAll(preBlockPattern)) {
+        const index = match.index;
+        result += normalized.slice(cursor, index).replaceAll("\n", "<br>");
+        result += match[0];
+        cursor = index + match[0].length;
+    }
+
+    return result + normalized.slice(cursor).replaceAll("\n", "<br>");
+}
+
 export function createLatestRichMessageFromText(
     text: string,
     parseMode?: ParseMode,
 ): LatestInputRichMessage | null {
-    if (parseMode === "HTML") return { html: text };
+    if (parseMode === "HTML") return { html: preserveLegacyHtmlLineBreaks(text) };
     if (parseMode === "Markdown") return { markdown: text };
     if (parseMode === "MarkdownV2") return null;
     if (parseMode !== undefined) return null;
