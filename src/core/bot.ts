@@ -5,7 +5,6 @@ import { BOT_TOKEN } from "../config.js";
 import { createRateLimitMiddleware } from "../middleware/rate-limit.js";
 import { chatLoggerMiddleware, chatLogTransformer } from "../middleware/chat-logger.js";
 import { richMessageInputMiddleware } from "../middleware/rich-message.js";
-import { configureRichMessageApi } from "./rich-message-api.js";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { sequentialize } from "@grammyjs/runner";
 
@@ -28,7 +27,7 @@ accessService.setApi(bot.api);
 
 // --- API TRANSFORMERS ---
 bot.api.config.use(autoRetry());
-configureRichMessageApi(bot.api);
+// Keep outgoing sendMessage/editMessageText classic; rich output is explicit.
 bot.api.config.use(chatLogTransformer);
 
 // --- SESSION ---

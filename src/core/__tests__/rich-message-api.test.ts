@@ -3,161 +3,11 @@ import type { RichText } from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
 import type { InputRichBlock, LatestInputRichMessage } from "../../types/telegram-rich-message.js";
 import {
-    buildRichMessageUpgrade,
-    createLatestRichMessageFromText,
-    preserveLegacyHtmlLineBreaks,
-    richMessageApiTransformer,
+    editLatestRichInlineMessage,
+    editLatestRichMessage,
     sendLatestRichMessage,
     sendLatestRichMessageDraft,
 } from "../rich-message-api.js";
-
-describe("createLatestRichMessageFromText", () => {
-    it("maps existing HTML, rich Markdown, and plain text to rich content", () => {
-        expect(createLatestRichMessageFromText("<b>Hello</b>", "HTML"))
-            .toEqual({ html: "<b>Hello</b>" });
-        expect(createLatestRichMessageFromText("**Hello**", "Markdown"))
-            .toEqual({ markdown: "**Hello**" });
-        expect(createLatestRichMessageFromText("Hello"))
-            .toEqual({ blocks: [{ type: "paragraph", text: "Hello" }] });
-    });
-
-    it("keeps MarkdownV2 on the classic API because it is a different grammar", () => {
-        expect(createLatestRichMessageFromText("*Hello*", "MarkdownV2")).toBeNull();
-    });
-
-    it("preserves legacy HTML line breaks in rich HTML", () => {
-        const adminPanel = [
-            "🤖 <b>PlayPhoto 2.0 Admin Panel</b>",
-            "👥 <b>Team:</b> 88 active",
-            "📍 <b>Locations:</b> 19 active",
-            "",
-            "Choose category:",
-        ].join("\n");
-
-        expect(createLatestRichMessageFromText(adminPanel, "HTML")).toEqual({
-            html: "🤖 <b>PlayPhoto 2.0 Admin Panel</b><br>👥 <b>Team:</b> 88 active<br>📍 <b>Locations:</b> 19 active<br><br>Choose category:",
-        });
-    });
-});
-
-describe("preserveLegacyHtmlLineBreaks", () => {
-    it("normalizes CRLF and leaves preformatted newlines intact", () => {
-        expect(preserveLegacyHtmlLineBreaks("Before\r\n<pre>line 1\r\nline 2</pre>\rAfter"))
-            .toBe("Before<br><pre>line 1\nline 2</pre><br>After");
-    });
-
-    it("supports multiple preformatted blocks", () => {
-        expect(preserveLegacyHtmlLineBreaks("A\n<pre>B\nC</pre>\nD\n<pre>E\nF</pre>\nG"))
-            .toBe("A<br><pre>B\nC</pre><br>D<br><pre>E\nF</pre><br>G");
-    });
-});
-
-describe("buildRichMessageUpgrade", () => {
-    it("upgrades compatible sendMessage calls without losing delivery options", () => {
-        expect(buildRichMessageUpgrade("sendMessage", {
-            chat_id: 42,
-            text: "<b>Hello</b>",
-            parse_mode: "HTML",
-            disable_notification: true,
-            protect_content: true,
-            reply_to_message_id: 7,
-            reply_markup: { inline_keyboard: [] },
-            link_preview_options: { is_disabled: true },
-        })).toEqual({
-            method: "sendRichMessage",
-            payload: {
-                chat_id: 42,
-                rich_message: { html: "<b>Hello</b>" },
-                disable_notification: true,
-                protect_content: true,
-                reply_parameters: { message_id: 7 },
-                reply_markup: { inline_keyboard: [] },
-            },
-        });
-    });
-
-    it("upgrades compatible editMessageText calls", () => {
-        expect(buildRichMessageUpgrade("editMessageText", {
-            chat_id: 42,
-            message_id: 11,
-            text: "Updated",
-        })).toEqual({
-            method: "editMessageText",
-            payload: {
-                chat_id: 42,
-                message_id: 11,
-                rich_message: { blocks: [{ type: "paragraph", text: "Updated" }] },
-            },
-        });
-    });
-
-    it.each([
-        ["explicit entities", { entities: [{ type: "bold", offset: 0, length: 1 }] }],
-        ["MarkdownV2", { parse_mode: "MarkdownV2" }],
-        ["custom previews", { link_preview_options: { url: "https://example.com" } }],
-        ["ephemeral receiver", { receiver_user_id: 10 }],
-        ["ephemeral callback", { callback_query_id: "callback" }],
-    ])("keeps %s on the classic API", (_name, extra) => {
-        expect(buildRichMessageUpgrade("sendMessage", {
-            chat_id: 42,
-            text: "Hello",
-            ...extra,
-        })).toBeNull();
-    });
-});
-
-describe("richMessageApiTransformer", () => {
-    type Invoke = (
-        method: string,
-        payload: Record<string, unknown>,
-        signal?: AbortSignal,
-    ) => Promise<Record<string, unknown>>;
-
-    const transform = richMessageApiTransformer as unknown as (
-        prev: Invoke,
-        method: string,
-        payload: Record<string, unknown>,
-        signal?: AbortSignal,
-    ) => Promise<Record<string, unknown>>;
-
-    it("sends an upgraded rich request when Telegram accepts it", async () => {
-        const response = { ok: true, result: { message_id: 1 } };
-        const prev = vi.fn<Invoke>().mockResolvedValue(response);
-
-        await expect(transform(prev, "sendMessage", { chat_id: 42, text: "Hello" }))
-            .resolves.toBe(response);
-        expect(prev).toHaveBeenCalledOnce();
-        expect(prev).toHaveBeenCalledWith("sendRichMessage", {
-            chat_id: 42,
-            rich_message: { blocks: [{ type: "paragraph", text: "Hello" }] },
-        }, undefined);
-    });
-
-    it.each([400, 404])("falls back to sendMessage after a Telegram %s response", async (errorCode) => {
-        const richError = { ok: false, error_code: errorCode };
-        const classicResponse = { ok: true, result: { message_id: 1 } };
-        const prev = vi.fn<Invoke>()
-            .mockResolvedValueOnce(richError)
-            .mockResolvedValueOnce(classicResponse);
-        const original = { chat_id: 42, text: "Hello" };
-
-        await expect(transform(prev, "sendMessage", original)).resolves.toBe(classicResponse);
-        expect(prev).toHaveBeenNthCalledWith(1, "sendRichMessage", {
-            chat_id: 42,
-            rich_message: { blocks: [{ type: "paragraph", text: "Hello" }] },
-        }, undefined);
-        expect(prev).toHaveBeenNthCalledWith(2, "sendMessage", original, undefined);
-    });
-
-    it("does not hide server or rate-limit failures behind a second request", async () => {
-        const response = { ok: false, error_code: 500 };
-        const prev = vi.fn<Invoke>().mockResolvedValue(response);
-
-        await expect(transform(prev, "sendMessage", { chat_id: 42, text: "Hello" }))
-            .resolves.toBe(response);
-        expect(prev).toHaveBeenCalledOnce();
-    });
-});
 
 describe("Bot API 10.2 rich-message senders", () => {
     const allRichText: RichText = [
@@ -290,5 +140,34 @@ describe("Bot API 10.2 rich-message senders", () => {
             draft,
             { message_thread_id: 5 },
         );
+    });
+
+    it("edits a message as rich content only when explicitly requested", async () => {
+        const editMessageTextMock = vi.fn().mockResolvedValue({ message_id: 1 });
+        const api = { editMessageText: editMessageTextMock } as unknown as Api;
+        const richMessage: LatestInputRichMessage = {
+            blocks: [{ type: "heading", size: 2, text: "Updated report" }],
+        };
+
+        await editLatestRichMessage(api, 42, 7, richMessage, {
+            reply_markup: { inline_keyboard: [] },
+        });
+
+        expect(editMessageTextMock).toHaveBeenCalledWith(
+            42,
+            7,
+            richMessage,
+            { reply_markup: { inline_keyboard: [] } },
+        );
+    });
+
+    it("edits inline rich content only when explicitly requested", async () => {
+        const editInlineMock = vi.fn().mockResolvedValue(true);
+        const api = { editMessageTextInline: editInlineMock } as unknown as Api;
+        const richMessage: LatestInputRichMessage = { markdown: "# Updated report" };
+
+        await editLatestRichInlineMessage(api, "inline-id", richMessage);
+
+        expect(editInlineMock).toHaveBeenCalledWith("inline-id", richMessage, undefined);
     });
 });

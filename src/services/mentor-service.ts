@@ -1,4 +1,4 @@
-import { InlineKeyboard, type Api } from "grammy";
+import { Bot, InlineKeyboard, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
@@ -17,7 +17,6 @@ import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 import { googleCalendar } from "./google-calendar.js";
-import { createRichMessageBot } from "../core/rich-message-api.js";
 
 export class MentorService {
     private hasBookedOverlap(overlap: {
@@ -244,7 +243,7 @@ export class MentorService {
         });
 
         if (cand.user) {
-            await cleanupUserSessionMessages(createRichMessageBot(process.env.BOT_TOKEN!) as any, Number(cand.user.telegramId));
+            await cleanupUserSessionMessages(new Bot(process.env.BOT_TOKEN!) as any, Number(cand.user.telegramId));
             return { telegramId: Number(cand.user.telegramId), text: msgText };
         }
 
