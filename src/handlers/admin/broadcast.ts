@@ -588,7 +588,7 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
     range.text("⏹ Stop All Active Pings", async (ctx) => {
         const confirmKb = new InlineKeyboard()
             .text("✅ Yes, stop all", "br_stop_all_pings_exec").danger().row()
-            .text("✖️ Cancel", "br_stop_all_pings_cancel");
+            .text("✖️ Cancel", "br_stop_all_pings_cancel").danger();
 
         await ScreenManager.renderScreen(
             ctx,

@@ -247,7 +247,7 @@ composer.callbackQuery(/^task_del_conf_/, async (ctx: MyContext) => {
 
     const keyboard = new InlineKeyboard();
     keyboard.text(ADMIN_TEXTS["admin-tasks-del-yes"], `task_del_exec_${taskId}_${dateStr}`).danger().row();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-del-no"], `task_det_${taskId}_${dateStr}`);
+    keyboard.text(ADMIN_TEXTS["admin-tasks-del-no"], `task_det_${taskId}_${dateStr}`).danger();
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-del-conf"], keyboard);
     await ctx.answerCallbackQuery().catch(() => { });

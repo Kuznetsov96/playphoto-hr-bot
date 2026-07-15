@@ -85,7 +85,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     await ScreenManager.renderScreen(
         ctx,
         text,
-        new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "admin_main_back"),
+        new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "admin_main_back").danger(),
         { pushToStack: true }
     );
 }
@@ -93,13 +93,13 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
 export async function startAdminSearch(ctx: MyContext) {
     startSearchFlow(ctx);
     ctx.session.step = "admin_search_cand";
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-cand-prompt"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step"), { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-cand-prompt"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step").danger(), { pushToStack: true });
 }
 
 export async function startAdminStaffSearch(ctx: MyContext) {
     startSearchFlow(ctx);
     ctx.session.step = "admin_search_staff";
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-staff-prompt"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step"), { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-staff-prompt"], new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-cancel"], "cancel_step").danger(), { pushToStack: true });
 }
 
 adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
@@ -108,7 +108,7 @@ adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
 
     startSearchFlow(ctx);
     ctx.session.step = `admin_reply_direct_${telegramId}`;
-    await ScreenManager.renderScreen(ctx, `Write response for candidate (ID: ${telegramId}): ✍️\n\n<i>Message will be delivered directly to her bot chat.</i>`, new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "cancel_step"), { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, `Write response for candidate (ID: ${telegramId}): ✍️\n\n<i>Message will be delivered directly to her bot chat.</i>`, new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "cancel_step").danger(), { pushToStack: true });
 });
 
 adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => {
