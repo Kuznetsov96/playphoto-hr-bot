@@ -133,7 +133,7 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
         safeContext: { preferredTarget, status: candidate.status }
     });
 
-    const kb = new InlineKeyboard().text("❌ Скасувати", "end_support_chat").danger();
+    const kb = new InlineKeyboard().text("✖️ Скасувати", "end_support_chat").danger();
     await ctx.reply(
         `<b>Напишіть ваше питання або повідомлення нижче ⤵️</b>\n` +
         `Ми одразу передамо його відповідальній особі, і ви отримаєте відповідь прямо тут. ✨`,

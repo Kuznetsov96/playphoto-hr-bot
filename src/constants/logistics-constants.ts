@@ -38,7 +38,7 @@ export const LOGISTICS_TEXTS_STAFF = {
     'btn_reject': '❌ Не можу',
     'btn_photo': '📸 Сфотографувати вміст',
     'btn_photo_done': '✅ Готово',
-    'btn_photo_cancel': '❌ Скасувати',
+    'btn_photo_cancel': '✖️ Скасувати',
     'ask_phone': (phone: string) => `Оформлюємо доручення на твій номер <b>${phone}</b>?\n\n<i>(Нова Пошта надішле код саме на цей номер)</i>`,
     'btn_confirm_phone': '✅ Так, номер вірний',
     'btn_change_phone': '✏️ Інший номер',

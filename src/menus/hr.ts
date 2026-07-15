@@ -973,7 +973,7 @@ hrBroadcastConfirmMenu.text("✅ Confirm & Send", async (ctx) => {
     delete ctx.session.broadcastLocationId;
     delete (ctx.session as any).broadcastLimit;
     await ScreenManager.goBack(ctx, "📣 <b>Broadcasts & Tools</b>", "hr-tools");
-}).row().text("❌ Cancel", async (ctx) => {
+}).row().text("✖️ Cancel", async (ctx) => {
     delete ctx.session.broadcastLocationId;
     delete (ctx.session as any).broadcastLimit;
     await ScreenManager.goBack(ctx, "📣 <b>Invite New Candidates</b>", "hr-broadcast-cities");

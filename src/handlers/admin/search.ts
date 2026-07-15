@@ -336,7 +336,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
                 const topicActions = new InlineKeyboard()
                     .text(ADMIN_TEXTS["admin-topic-btn-fwd"], `forward_to_kuznetsov_${topic.message_thread_id}`)
-                    .text(ADMIN_TEXTS["admin-topic-btn-close"], `close_topic_${topic.message_thread_id}`);
+                    .text(ADMIN_TEXTS["admin-topic-btn-close"], `close_topic_${topic.message_thread_id}`).danger();
 
                 await ctx.api.sendMessage(SUPPORT_CHAT_ID, infoCard, {
                     message_thread_id: topic.message_thread_id,

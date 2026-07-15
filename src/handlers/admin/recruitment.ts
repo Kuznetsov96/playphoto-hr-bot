@@ -726,7 +726,7 @@ adminRecruitmentHandlers.callbackQuery(/^admin_manage_active_(.+)$/, async (ctx:
     const cand = await candidateRepository.findById(candId!);
     if (!cand) return;
     const text = `👤 <b>${cand.fullName}</b>\n` + ADMIN_TEXTS["admin-staging-card-location"]({ loc: cand.location?.name || "—" }) + "\n" + ADMIN_TEXTS["admin-staging-card-partner"]({ partner: shortenName(cand.firstShiftPartner?.fullName || "—") }) + "\n\n" + `<b>${ADMIN_TEXTS["admin-staging-card-result"]}</b> <i>Select outcome:</i>`;
-    const kb = new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-pass"], `admin_staging_pass_${candId}`).text(ADMIN_TEXTS["admin-btn-fail"], `admin_staging_fail_${candId}`).row().text(ADMIN_TEXTS["admin-staging-back-btn"], "admin_staging_active");
+    const kb = new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-pass"], `admin_staging_pass_${candId}`).text(ADMIN_TEXTS["admin-btn-fail"], `admin_staging_fail_${candId}`).danger().row().text(ADMIN_TEXTS["admin-staging-back-btn"], "admin_staging_active");
     await ScreenManager.renderScreen(ctx, text, kb);
 });
 

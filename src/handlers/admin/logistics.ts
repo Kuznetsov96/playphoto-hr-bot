@@ -98,7 +98,7 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
         kb.text("✅ Complete", `admin_parcel_confirm_${parcel.id}`).row();
     }
 
-    kb.text("🗑 Delete", `admin_parcel_delete_${parcel.id}`).row();
+    kb.text("🗑 Delete", `admin_parcel_delete_${parcel.id}`).danger().row();
     kb.text("📍 Set Location", `admin_parcel_loc_${parcel.id}`).row();
     kb.text("⬅️ Back to List", "admin_logistics_nav");
 
@@ -302,7 +302,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
     if (parcel && parcel.contentPhotoIds.length > 0) {
         const kb = new InlineKeyboard()
             .text("✅ Everything is fine", `apc_${parcel.id}`)
-            .text("🗑 Delete", `apd_${parcel.id}`);
+            .text("🗑 Delete", `apd_${parcel.id}`).danger();
 
         // Only show navigation in private bot chat
         if (ctx.chat?.type === 'private') {
