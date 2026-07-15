@@ -104,7 +104,7 @@ export async function startAdminStaffSearch(ctx: MyContext) {
 
 adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
     const telegramId = ctx.match![1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     startSearchFlow(ctx);
     ctx.session.step = `admin_reply_direct_${telegramId}`;
@@ -113,7 +113,7 @@ adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
 
 adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => {
     const topicId = Number(ctx.match![1]!);
-    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-topic-ans-fwd-ok"]);
+    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-topic-ans-fwd-ok"]).catch(() => { });
 
     const kuznetsovId = ADMIN_IDS[0];
     if (!kuznetsovId) {
@@ -417,10 +417,10 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 export async function handleAdminTimelineExport(ctx: MyContext, userId: string) {
     const { ADMIN_IDS } = await import("../../config.js");
     if (!ADMIN_IDS.includes(Number(ctx.from?.id))) {
-        return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-err-super-admin-only"]);
+        return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-err-super-admin-only"]).catch(() => { });
     }
 
-    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-ans-gen-report"]);
+    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-ans-gen-report"]).catch(() => { });
 
     try {
         const { adminService } = await import("../../services/admin-service.js");

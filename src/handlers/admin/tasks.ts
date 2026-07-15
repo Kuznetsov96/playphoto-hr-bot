@@ -130,7 +130,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     const task = await taskService.getTaskById(taskId);
 
     if (!task) {
-        await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-not-found"]);
+        await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-not-found"]).catch(() => { });
         return;
     }
 
@@ -204,7 +204,7 @@ composer.callbackQuery(/^task_dash_/, async (ctx: MyContext) => {
 
     const { text, keyboard } = await buildTasksDashboard(dateStr, 0);
     await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник пагінації
@@ -215,7 +215,7 @@ composer.callbackQuery(/^task_page_/, async (ctx: MyContext) => {
 
     const { text, keyboard } = await buildTasksDashboard(dateStr, page);
     await ScreenManager.renderScreen(ctx, text, keyboard);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник деталей завдання
@@ -225,7 +225,7 @@ composer.callbackQuery(/^task_det_/, async (ctx: MyContext) => {
     const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
 
     await showTaskDetails(ctx, taskId, dateStr);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник зміни статусу
@@ -236,7 +236,7 @@ composer.callbackQuery(/^task_toggle_/, async (ctx: MyContext) => {
 
     await taskService.toggleTaskStatus(taskId);
     await showTaskDetails(ctx, taskId, dateStr);
-    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-toggled"]);
+    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-toggled"]).catch(() => { });
 });
 
 // Обробник підтвердження видалення
@@ -250,7 +250,7 @@ composer.callbackQuery(/^task_del_conf_/, async (ctx: MyContext) => {
     keyboard.text(ADMIN_TEXTS["admin-tasks-del-no"], `task_det_${taskId}_${dateStr}`);
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-del-conf"], keyboard);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник видалення
@@ -262,7 +262,7 @@ composer.callbackQuery(/^task_del_exec_/, async (ctx: MyContext) => {
     await taskService.deleteTask(taskId);
     const { text, keyboard } = await buildTasksDashboard(dateStr, 0);
     await ScreenManager.renderScreen(ctx, text, keyboard);
-    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-deleted"]);
+    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-deleted"]).catch(() => { });
 });
 
 // Обробник календаря
@@ -276,13 +276,13 @@ composer.callbackQuery("task_calendar_open", async (ctx: MyContext) => {
 
     keyboard.text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${new Date().toISOString().split("T")[0]}_0`);
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-calendar-title"], keyboard, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник перегляду файлу завдання
 composer.callbackQuery(/^task_view_file_(.+)$/, async (ctx: MyContext) => {
     const taskId = ctx.match![1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const task = await taskService.getTaskById(taskId);
     if (!task?.fileId) {
         await ctx.reply("⚠️ File not found for this task.");
@@ -295,7 +295,7 @@ composer.callbackQuery(/^task_view_file_(.+)$/, async (ctx: MyContext) => {
 
 composer.callbackQuery(/^task_view_proof_(.+)$/, async (ctx: MyContext) => {
     const taskId = ctx.match![1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     const submission = await taskProofService.getSubmission(taskId);
     if (!submission || submission.items.length === 0) {
@@ -339,7 +339,7 @@ composer.callbackQuery(/^task_view_proof_(.+)$/, async (ctx: MyContext) => {
 // Обробник написання повідомлення співробітнику з деталей завдання
 composer.callbackQuery(/^admin_msg_staff_(.+)$/, async (ctx: MyContext) => {
     const staffId = ctx.match![1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const staff = await staffRepository.findById(staffId);
     if (!staff) {
         await ctx.reply("❌ Staff not found.");

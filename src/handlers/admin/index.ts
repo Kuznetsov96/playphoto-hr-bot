@@ -170,7 +170,7 @@ protectedAdminCallbacks.callbackQuery("admin_main_back", async (ctx: MyContext) 
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
     const text = await staffService.getAdminHeader(userRole as any);
     await ScreenManager.goBack(ctx, text, "admin-main");
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) => {
@@ -192,7 +192,7 @@ protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) 
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
     const text = await staffService.getAdminHeader(userRole as any);
     await ScreenManager.renderScreen(ctx, text, "admin-main", { forceNew: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyContext) => {
@@ -203,7 +203,7 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
         const date = new Date(ctx.session.selectedDate);
         const dateStr = date.toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
         await ScreenManager.renderScreen(ctx, `🏢 <b>Select City (${dateStr}):</b>`, "admin-schedule-cities", { forceNew: true });
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
@@ -211,7 +211,7 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
     if (flow === 'BROADCAST' && ctx.session.broadcastData) {
         const { renderCitySelection } = await import("./broadcast.js");
         await renderCitySelection(ctx);
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
@@ -219,24 +219,24 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
     if (flow === 'TASK') {
         // If task was finished, go to generic city selection for locations
         await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-team-cities", { forceNew: true });
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
     // 4. Default: Main Team Cities (for LOCATIONS, SEARCH, or finished flows)
     await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-team-cities", { forceNew: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 protectedAdminCallbacks.callbackQuery("admin_system_back", async (ctx: MyContext) => {
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
     const text = await staffService.getAdminHeader(userRole as any);
     await ScreenManager.goBack(ctx, text, "admin-system");
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 protectedAdminCallbacks.callbackQuery(/^admin_send_(msg|task)_(.+)$/, async (ctx: MyContext) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const type = ctx.match![1]!;
     const userId = ctx.match![2]!;
     if (type === "msg") {
@@ -250,7 +250,7 @@ adminHandlers.use(adminProtected);
 
 protectedAdminCallbacks.callbackQuery(/^view_staff_(.+)$/, async (ctx) => {
     const staffId = ctx.match![1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
     const staff = await staffRepository.findById(staffId);
@@ -274,7 +274,7 @@ protectedAdminCallbacks.callbackQuery(/^view_staff_(.+)$/, async (ctx) => {
 protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx) => {
     const isNew = ctx.match![1] === "_new";
     const data = ctx.match![2]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     let candidate;
     if (isNew) {
@@ -306,17 +306,17 @@ protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx
 });
 
 protectedAdminCallbacks.callbackQuery("back_to_schedule_staff", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-team"], "admin-schedule-staff");
 });
 
 protectedAdminCallbacks.callbackQuery("back_to_loc_staff", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-team"], "admin-location-staff");
 });
 
 protectedAdminCallbacks.callbackQuery("admin_birthdays_back", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-bday-header-all"] + "\n\n" + ADMIN_TEXTS["admin-bday-select-month"], "admin-birthdays");
 });
 

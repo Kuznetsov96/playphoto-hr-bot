@@ -108,7 +108,7 @@ async function getAdminUserId(ctx: MyContext) {
 
 adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ctx) => {
     if (!await ensureRole(ctx)) {
-        await ctx.answerCallbackQuery({ text: "Access denied", show_alert: true });
+        await ctx.answerCallbackQuery({ text: "Access denied", show_alert: true }).catch(() => { });
         return;
     }
 
@@ -123,7 +123,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
     delete ctx.session.supportData?.replyingToUserId;
     delete ctx.session.supportData?.magnetCount;
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.renderScreen(
         ctx,
         "🧲 <b>Count Magnets</b>\n\nSend one photo of the magnet stacks. I will return stack-by-stack counts, the total count, and the confidence level.",
@@ -135,7 +135,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
 adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (ctx) => {
     const result = ctx.session.supportData?.magnetCount;
     if (!result || typeof result.estimateTotal !== "number") {
-        await ctx.answerCallbackQuery("No active result.");
+        await ctx.answerCallbackQuery("No active result.").catch(() => { });
         return;
     }
 
@@ -155,7 +155,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
         delete ctx.session.adminFlow;
     }
     delete ctx.session.supportData?.magnetCount;
-    await ctx.answerCallbackQuery("Count confirmed.");
+    await ctx.answerCallbackQuery("Count confirmed.").catch(() => { });
     await ScreenManager.renderScreen(
         ctx,
         buildConfirmationText({
@@ -170,12 +170,12 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_confirm", async (
 adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_correct", async (ctx) => {
     const result = ctx.session.supportData?.magnetCount;
     if (!result || typeof result.estimateTotal !== "number") {
-        await ctx.answerCallbackQuery("Upload a photo first.");
+        await ctx.answerCallbackQuery("Upload a photo first.").catch(() => { });
         return;
     }
 
     ctx.session.step = "support_magnet_count_correct_total";
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.renderScreen(
         ctx,
         `✏️ <b>Correct Count</b>\n\nModel estimate: <b>${result.estimateTotal}</b>\nSend the correct total as a single number.`,

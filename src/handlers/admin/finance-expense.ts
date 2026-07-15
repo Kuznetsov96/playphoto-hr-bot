@@ -85,7 +85,7 @@ export async function startExpenseFlow(ctx: MyContext) {
 
 expenseHandlers.callbackQuery("expense_cancel", async (ctx) => {
     clearExpenseFlow(ctx);
-    await ctx.answerCallbackQuery("❌ Cancelled.");
+    await ctx.answerCallbackQuery("❌ Cancelled.").catch(() => { });
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     await ctx.reply("❌ Expense creation cancelled.", {
         reply_markup: new InlineKeyboard().text("🏠 Back to Finance", "admin_finance_back")
@@ -184,13 +184,13 @@ export async function handleExpenseText(ctx: MyContext, next: () => Promise<void
 expenseHandlers.on("message:text", handleExpenseText);
 
 expenseHandlers.callbackQuery(/^exp_cat_(\d+)$/, async (ctx) => {
-    if (ctx.session.step !== "expense_category") return ctx.answerCallbackQuery("Invalid step");
+    if (ctx.session.step !== "expense_category") return ctx.answerCallbackQuery("Invalid step").catch(() => { });
 
     const categoryIndex = parseInt(ctx.match![1]!);
     const category = EXPENSE_CATEGORIES[categoryIndex] || "Other";
     (ctx.session.candidateData as any).expenseCategory = category;
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     ctx.session.step = "expense_location";
 
     const locations = await locationRepository.findAllActive();
@@ -226,7 +226,7 @@ expenseHandlers.callbackQuery(/^exp_cat_(\d+)$/, async (ctx) => {
 });
 
 expenseHandlers.callbackQuery(/^exp_loc_(.+)$/, async (ctx) => {
-    if (ctx.session.step !== "expense_location") return ctx.answerCallbackQuery("Invalid step");
+    if (ctx.session.step !== "expense_location") return ctx.answerCallbackQuery("Invalid step").catch(() => { });
 
     const locId = ctx.match![1]!;
     let locationName = "PlayPhoto";
@@ -238,14 +238,14 @@ expenseHandlers.callbackQuery(/^exp_loc_(.+)$/, async (ctx) => {
     }
 
     (ctx.session.candidateData as any).expenseLocation = locationName;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     ctx.session.step = "expense_comment";
     await ctx.reply(`📍 Location: <b>${locationName}</b>\n\nEnter comment (description):`, { parse_mode: "HTML" });
 });
 
 expenseHandlers.callbackQuery("exp_confirm_save", async (ctx) => {
-    if (ctx.session.step !== "expense_confirm") return ctx.answerCallbackQuery("Invalid step");
+    if (ctx.session.step !== "expense_confirm") return ctx.answerCallbackQuery("Invalid step").catch(() => { });
 
     const fopName = (ctx.session.candidateData as any).expenseFop;
     const amount = (ctx.session.candidateData as any).expenseAmount;
@@ -254,7 +254,7 @@ expenseHandlers.callbackQuery("exp_confirm_save", async (ctx) => {
     const locationName = (ctx.session.candidateData as any).expenseLocation;
     const comment = (ctx.session.candidateData as any).expenseComment;
 
-    await ctx.answerCallbackQuery("Saving...");
+    await ctx.answerCallbackQuery("Saving...").catch(() => { });
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
 
     clearExpenseFlow(ctx);

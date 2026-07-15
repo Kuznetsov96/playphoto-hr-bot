@@ -80,7 +80,7 @@ export async function showTicketDetails(ctx: MyContext, ticketId: number) {
     
     const detailText = await supportService.getTicketSummary(ticketId);
     const t = await supportRepository.findTicketById(ticketId);
-    if (!t) return ctx.answerCallbackQuery("Ticket not found.");
+    if (!t) return ctx.answerCallbackQuery("Ticket not found.").catch(() => { });
 
     const kb = new InlineKeyboard();
 
@@ -94,5 +94,5 @@ export async function showTicketDetails(ctx: MyContext, ticketId: number) {
     kb.row().text("⬅️ Back to List", "back_to_ticket_list");
 
     await ScreenManager.renderScreen(ctx, detailText, kb, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 }

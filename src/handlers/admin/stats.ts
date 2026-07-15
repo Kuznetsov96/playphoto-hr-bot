@@ -19,11 +19,11 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
     const isAllSelected = !ctx.session.broadcastCity;
     const cityLabel = ctx.session.broadcastCity ? normalizeCity(ctx.session.broadcastCity) : "All Cities";
     range.text(isAllSelected ? "🌍 🔘 All Cities" : `📍 ${cityLabel}`, async (ctx) => {
-        await ctx.answerCallbackQuery("Use Change City to adjust this filter");
+        await ctx.answerCallbackQuery("Use Change City to adjust this filter").catch(() => { });
     });
 
     range.text("🏙️ Change City", async (ctx) => {
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         await ScreenManager.renderScreen(ctx, "🏙️ <b>Select Stats City</b>", "admin-stats-city");
     }).row();
 
@@ -67,7 +67,7 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
 });
 
 async function refreshStats(ctx: MyContext) {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const city = ctx.session.broadcastCity;
     const locationId = ctx.session.broadcastLocationId;
     const locationName = ctx.session.broadcastLocationName;

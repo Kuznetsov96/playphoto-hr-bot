@@ -71,7 +71,7 @@ async function renderTargetSelection(ctx: MyContext) {
  */
 adminBroadcastHandlers.callbackQuery(/^br_type_(.+)$/, async (ctx) => {
     const type = ctx.match![1] as any;
-    if (!ctx.session.broadcastData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.broadcastData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
 
     ctx.session.broadcastData.targetType = type;
 
@@ -82,7 +82,7 @@ adminBroadcastHandlers.callbackQuery(/^br_type_(.+)$/, async (ctx) => {
         ctx.session.broadcastData.step = 'SELECT_BUTTONS';
         await renderButtonSelection(ctx);
     }
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 async function renderButtonSelection(ctx: MyContext) {
@@ -102,7 +102,7 @@ adminBroadcastHandlers.callbackQuery(/^br_btn_(.+)$/, async (ctx) => {
     ctx.session.broadcastData.buttonType = type;
     ctx.session.broadcastData.step = 'AWAITING_CONTENT';
     await renderContentPrompt(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 /**
@@ -142,7 +142,7 @@ adminBroadcastHandlers.callbackQuery(/^br_toggle_city_(.+)$/, async (ctx) => {
 
     ctx.session.broadcastData.targetValue = Array.from(selected);
     await renderCitySelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_toggle_all_cities", async (ctx) => {
@@ -158,7 +158,7 @@ adminBroadcastHandlers.callbackQuery("br_toggle_all_cities", async (ctx) => {
     }
 
     await renderCitySelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_confirm_cities", async (ctx) => {
@@ -175,7 +175,7 @@ adminBroadcastHandlers.callbackQuery("br_confirm_cities", async (ctx) => {
             if (chatCount <= 1) {
                 ctx.session.broadcastData.step = 'SELECT_BUTTONS';
                 await renderButtonSelection(ctx);
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 return;
             }
         }
@@ -183,7 +183,7 @@ adminBroadcastHandlers.callbackQuery("br_confirm_cities", async (ctx) => {
         if (type === 'pm_city' && cityLocs.length <= 1) {
             ctx.session.broadcastData.step = 'SELECT_BUTTONS';
             await renderButtonSelection(ctx);
-            await ctx.answerCallbackQuery();
+            await ctx.answerCallbackQuery().catch(() => { });
             return;
         }
 
@@ -198,14 +198,14 @@ adminBroadcastHandlers.callbackQuery("br_confirm_cities", async (ctx) => {
         ctx.session.broadcastData.step = 'SELECT_BUTTONS';
         await renderButtonSelection(ctx);
     }
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_scope_all", async (ctx) => {
     if (!ctx.session.broadcastData) return;
     ctx.session.broadcastData.step = 'SELECT_BUTTONS';
     await renderButtonSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_scope_locs", async (ctx) => {
@@ -213,7 +213,7 @@ adminBroadcastHandlers.callbackQuery("br_scope_locs", async (ctx) => {
     const currentType = ctx.session.broadcastData.targetType;
     ctx.session.broadcastData.targetType = currentType === 'pm_city' ? 'pm_location' : 'city_chat_location';
     await renderLocationSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 async function renderLocationSelection(ctx: MyContext) {
@@ -256,7 +256,7 @@ adminBroadcastHandlers.callbackQuery(/^br_toggle_loc_(.+)$/, async (ctx) => {
 
     ctx.session.broadcastData.selectedLocs = Array.from(selected);
     await renderLocationSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_confirm_locs", async (ctx) => {
@@ -264,7 +264,7 @@ adminBroadcastHandlers.callbackQuery("br_confirm_locs", async (ctx) => {
     ctx.session.broadcastData.targetValue = ctx.session.broadcastData.selectedLocs || [];
     ctx.session.broadcastData.step = 'SELECT_BUTTONS';
     await renderButtonSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 async function renderContentPrompt(ctx: MyContext) {
@@ -357,7 +357,7 @@ function getMediaSuccessSummary(mediaItems: BroadcastMediaItem[]): string {
 
 adminBroadcastHandlers.callbackQuery("br_confirm_buttons", async (ctx) => {
     await renderButtonSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 export async function handleBroadcastContent(ctx: MyContext) {
@@ -450,28 +450,28 @@ export async function handleBroadcastContent(ctx: MyContext) {
 
 adminBroadcastHandlers.callbackQuery("br_media_reset", async (ctx) => {
     const data = ctx.session.broadcastData;
-    if (!data) return ctx.answerCallbackQuery("Session expired.");
+    if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
 
     delete data.media;
     delete data.mediaItems;
     delete data.text;
     await renderContentPrompt(ctx);
-    await ctx.answerCallbackQuery("Photos cleared.");
+    await ctx.answerCallbackQuery("Photos cleared.").catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_media_continue", async (ctx) => {
     const data = ctx.session.broadcastData;
-    if (!data) return ctx.answerCallbackQuery("Session expired.");
+    if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
 
     const mediaItems = getBroadcastMediaItems(data);
     if (mediaItems.length === 0) {
-        await ctx.answerCallbackQuery("Add at least one photo first.");
+        await ctx.answerCallbackQuery("Add at least one photo first.").catch(() => { });
         return;
     }
 
     data.step = 'CONFIRMATION';
     await renderReview(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 async function renderReview(ctx: MyContext) {
@@ -529,23 +529,23 @@ adminBroadcastHandlers.callbackQuery("br_cancel", async (ctx) => {
     if (ctx.session.adminFlow === "BROADCAST") {
         delete ctx.session.adminFlow;
     }
-    await ctx.answerCallbackQuery("❌ Cancelled.");
+    await ctx.answerCallbackQuery("❌ Cancelled.").catch(() => { });
     await ScreenManager.renderScreen(ctx, "❌ Broadcast creation cancelled.", new InlineKeyboard().text("🏠 Back to Hub", "br_to_hub"));
 });
 
 adminBroadcastHandlers.callbackQuery("br_restart", async (ctx) => {
     await startStatelessBroadcast(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_to_hub", async (ctx) => {
     await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 adminBroadcastHandlers.callbackQuery("br_back_to_main", async (ctx) => {
     await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // --- MENU IMPLEMENTATIONS ---
@@ -555,7 +555,7 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
     const activeBroadcasts = broadcasts.filter((broadcast: any) => isBroadcastActive(broadcast)).slice(0, 10);
 
     if (activeBroadcasts.length === 0) {
-        range.text("✅ No active pings", (ctx) => ctx.answerCallbackQuery()).row();
+        range.text("✅ No active pings", (ctx) => ctx.answerCallbackQuery().catch(() => { })).row();
     }
     else {
         activeBroadcasts.forEach((b: any) => {
@@ -635,7 +635,7 @@ adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
 
     if (pageItems.length === 0) {
         range.text("✅ Archive is empty", async (ctx) => {
-            await ctx.answerCallbackQuery();
+            await ctx.answerCallbackQuery().catch(() => { });
         }).row();
     } else {
         pageItems.forEach((broadcast: any) => {
@@ -680,12 +680,12 @@ adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
 
 adminBroadcastHandlers.callbackQuery("br_stop_all_pings_exec", async (ctx) => {
     const stopped = await broadcastService.stopAllPings();
-    await ctx.answerCallbackQuery("Done");
+    await ctx.answerCallbackQuery("Done").catch(() => { });
     await ScreenManager.renderScreen(ctx, `⏹️ <b>Active pings stopped:</b> ${stopped}`, "admin-broadcast-list");
 });
 
 adminBroadcastHandlers.callbackQuery("br_stop_all_pings_cancel", async (ctx) => {
-    await ctx.answerCallbackQuery("Cancelled");
+    await ctx.answerCallbackQuery("Cancelled").catch(() => { });
     await ScreenManager.goBack(ctx, "📜 <b>Active Broadcasts</b>", "admin-broadcast-list");
 });
 
@@ -706,7 +706,7 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
     }).row()
         .text("⏹ Stop Pings", async (ctx) => {
             await broadcastService.stopPinging(bId);
-            await ctx.answerCallbackQuery("Pings stopped");
+            await ctx.answerCallbackQuery("Pings stopped").catch(() => { });
 
             const freshStats = await broadcastService.getStats(bId);
             const freshText = `📊 <b>Broadcast Statistics (ID: ${bId})</b>\n\n` +
@@ -719,7 +719,7 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
         }).row()
         .text("🗑️ Delete", async (ctx) => {
             await broadcastService.deleteBroadcast(ctx, bId);
-            await ctx.answerCallbackQuery("✅ Deleted.");
+            await ctx.answerCallbackQuery("✅ Deleted.").catch(() => { });
             await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
         }).row()
         .text("⬅️ Back", async (ctx) => {
@@ -729,8 +729,8 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
 
 adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
     const draft = ctx.session.broadcastDraft;
-    if (!draft) return ctx.answerCallbackQuery("Session expired.");
-    await ctx.answerCallbackQuery("🧪 Sending test...");
+    if (!draft) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
+    await ctx.answerCallbackQuery("🧪 Sending test...").catch(() => { });
 
     try {
         await broadcastService.sendTestBroadcast(
@@ -761,7 +761,7 @@ adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {
 adminBroadcastHandlers.callbackQuery("b_send", async (ctx: MyContext) => {
     const draft = ctx.session.broadcastDraft;
     if (!draft) return;
-    await ctx.answerCallbackQuery("⏳ Sending...");
+    await ctx.answerCallbackQuery("⏳ Sending...").catch(() => { });
 
     try {
         const pingOptions = draft.buttonType ? { buttonType: draft.buttonType } : undefined;

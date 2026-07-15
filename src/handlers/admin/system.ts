@@ -44,7 +44,7 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
 
         range.text(ADMIN_TEXTS["admin-sys-tasks"], async (ctx: MyContext) => {
             try {
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const today = new Date().toISOString().split("T")[0] || "";
                 const { text, keyboard } = await buildTasksDashboard(today, 0);
                 await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
@@ -149,7 +149,7 @@ selectCityForLocMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>)
     cities.forEach((city: string) => {
         range.text(normalizeCity(city), async (ctx: MyContext) => {
             await locationRepository.update(locId, { city });
-            await ctx.answerCallbackQuery(`City changed to ${normalizeCity(city)} ✅`);
+            await ctx.answerCallbackQuery(`City changed to ${normalizeCity(city)} ✅`).catch(() => { });
             if (ctx.session.adminFlow === "LOCATIONS") {
                 delete ctx.session.adminFlow;
             }
@@ -173,13 +173,13 @@ adminSystemHandlers.callbackQuery(/^toggle_visibility_(.+)$/, async (ctx: MyCont
     const locId = ctx.match?.[1];
     if (!locId) return;
     const loc = await locationRepository.findById(locId);
-    if (!loc) return ctx.answerCallbackQuery("Location not found");
+    if (!loc) return ctx.answerCallbackQuery("Location not found").catch(() => { });
 
     const newHidden = !loc.isHiddenFromCandidates;
     // Update ONLY isHiddenFromCandidates. The rest of the system is unaffected.
     const updatedLoc = await locationRepository.update(locId, { isHiddenFromCandidates: newHidden });
     
-    await ctx.answerCallbackQuery(newHidden ? "Location HIDDEN for candidates 🔒" : "Location VISIBLE for candidates 🔓");
+    await ctx.answerCallbackQuery(newHidden ? "Location HIDDEN for candidates 🔒" : "Location VISIBLE for candidates 🔓").catch(() => { });
     
     // Re-render screen to update UI
     if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
@@ -191,7 +191,7 @@ adminSystemHandlers.callbackQuery(/^edit_city_(.+)$/, async (ctx: MyContext) => 
     const locId = ctx.match?.[1];
     if (!locId) return;
     
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     ctx.session.adminFlow = "LOCATIONS";
     ctx.session.selectedLocationId = locId; // Store ID for menu context
     ctx.session.step = `edit_city_${locId}`;
