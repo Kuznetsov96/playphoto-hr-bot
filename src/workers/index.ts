@@ -3,11 +3,11 @@ import { QUEUES } from '../core/queue.js';
 import { redis } from '../core/redis.js';
 import logger from '../core/logger.js';
 import { broadcastService } from '../services/broadcast.js';
-import { Bot } from 'grammy';
 import process from 'process';
 import { sendDailyIncomeReport, sendMorningAuditReport } from '../services/finance-report.js';
 import { preferencesService } from '../services/preferences-service.js';
 import { logBusinessEvent } from '../core/log-events.js';
+import { createRichMessageBot } from '../core/rich-message-api.js';
 
 const connection = redis;
 
@@ -24,7 +24,7 @@ export const startWorkers = () => {
     const defaultWorker = new Worker(QUEUES.DEFAULT, async job => {
         logger.info({ jobId: job.id, name: job.name }, 'Processing job');
         if (job.name === 'replacement-dispatch-wave') {
-            const bot = new Bot(process.env.BOT_TOKEN!);
+            const bot = createRichMessageBot(process.env.BOT_TOKEN!);
             const { replacementService } = await import('../services/replacement-service.js');
             await replacementService.dispatchNextWave(bot.api, job.data.requestId);
         }
@@ -33,7 +33,7 @@ export const startWorkers = () => {
     const broadcastWorker = new Worker(QUEUES.BROADCAST, async job => {
         logger.info({ jobId: job.id }, 'Processing broadcast');
         try {
-            await broadcastService.processBroadcast(job.data, new Bot(process.env.BOT_TOKEN!).api);
+            await broadcastService.processBroadcast(job.data, createRichMessageBot(process.env.BOT_TOKEN!).api);
             logger.info({ jobId: job.id }, '✅ Broadcast job done');
         } catch (e) {
             logger.error({ err: e }, '❌ Broadcast job failed');
@@ -43,11 +43,10 @@ export const startWorkers = () => {
 
 
     const reportsWorker = new Worker(QUEUES.REPORTS, async job => {
-        const botApi = new Bot(process.env.BOT_TOKEN!).api; // Helper
         // We need a full bot instance for some methods if they rely on bot.api, but services mostly take bot instance.
         // Actually sendDailyIncomeReport takes (bot: Bot<MyContext>).
         // Constructing a new Bot instance is cheap.
-        const bot = new Bot(process.env.BOT_TOKEN!);
+        const bot = createRichMessageBot(process.env.BOT_TOKEN!);
 
         logger.info({ jobId: job.id, name: job.name }, 'Processing report');
 

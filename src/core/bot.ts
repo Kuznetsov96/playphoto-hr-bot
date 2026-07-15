@@ -4,6 +4,8 @@ import { lazySession } from "./session.js";
 import { BOT_TOKEN } from "../config.js";
 import { createRateLimitMiddleware } from "../middleware/rate-limit.js";
 import { chatLoggerMiddleware, chatLogTransformer } from "../middleware/chat-logger.js";
+import { richMessageInputMiddleware } from "../middleware/rich-message.js";
+import { configureRichMessageApi } from "./rich-message-api.js";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { sequentialize } from "@grammyjs/runner";
 
@@ -26,6 +28,7 @@ accessService.setApi(bot.api);
 
 // --- API TRANSFORMERS ---
 bot.api.config.use(autoRetry());
+configureRichMessageApi(bot.api);
 bot.api.config.use(chatLogTransformer);
 
 // --- SESSION ---
@@ -131,7 +134,10 @@ bot.use(async (ctx, next) => {
 // 5. Chat Logging
 bot.use(chatLoggerMiddleware);
 
-// 6. Global Command Breakout
+// 6. Normalize rich-message text before all role/conversation handlers.
+bot.use(richMessageInputMiddleware);
+
+// 7. Global Command Breakout
 bot.use(async (ctx, next) => {
     if (ctx.hasCommand("start")) {
         if (ctx.session) {
@@ -151,7 +157,7 @@ bot.use(async (ctx, next) => {
     await next();
 });
 
-// 7. Global Error Handler
+// 8. Global Error Handler
 bot.catch(async (err) => {
     const ctx = err.ctx;
     const error = err.error as any;

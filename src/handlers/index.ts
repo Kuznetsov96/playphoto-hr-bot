@@ -270,11 +270,6 @@ handlers.use(async (ctx, next) => {
 
     if (adminRole) {
         // --- ADMIN CONTEXT ---
-        if (ctx.chat?.type === "private" && ctx.message?.rich_message) {
-            await ctx.reply(ADMIN_TEXTS["admin-rich-message-plain-text-required"]);
-            return;
-        }
-
         const adminApp = new Composer<MyContext>();
         adminApp.use(slotBuilderHandlers);
         adminApp.use(hrHandlers);

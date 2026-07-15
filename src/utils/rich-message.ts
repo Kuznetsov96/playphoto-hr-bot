@@ -1,6 +1,11 @@
 import type { InputRichMessage, RichBlock, RichBlockCaption, RichMessage, RichText } from "grammy/types";
 
 const DEFAULT_PREVIEW_LIMIT = 1_000;
+const MAX_RICH_MESSAGE_TEXT_LENGTH = 32_768;
+
+interface PlainTextOptions {
+    includeMediaLabels: boolean;
+}
 
 function richTextToPlainText(text: RichText): string {
     if (typeof text === "string") return text;
@@ -25,11 +30,11 @@ function captionToPlainText(caption?: RichBlockCaption): string {
     return [text, credit].filter(Boolean).join(" — ");
 }
 
-function blocksToPlainText(blocks: RichBlock[]): string {
-    return blocks.map(blockToPlainText).filter(Boolean).join("\n");
+function blocksToPlainText(blocks: RichBlock[], options: PlainTextOptions): string {
+    return blocks.map(block => blockToPlainText(block, options)).filter(Boolean).join("\n");
 }
 
-function blockToPlainText(block: RichBlock): string {
+function blockToPlainText(block: RichBlock, options: PlainTextOptions): string {
     switch (block.type) {
         case "paragraph":
         case "heading":
@@ -46,41 +51,52 @@ function blockToPlainText(block: RichBlock): string {
             return "";
         case "list":
             return block.items
-                .map(item => `${item.label} ${blocksToPlainText(item.blocks)}`.trim())
+                .map(item => `${item.label} ${blocksToPlainText(item.blocks, options)}`.trim())
                 .join("\n");
         case "blockquote":
-            return [blocksToPlainText(block.blocks), block.credit ? richTextToPlainText(block.credit) : ""]
+            return [blocksToPlainText(block.blocks, options), block.credit ? richTextToPlainText(block.credit) : ""]
                 .filter(Boolean)
                 .join(" — ");
         case "collage":
         case "slideshow":
-            return [blocksToPlainText(block.blocks), captionToPlainText(block.caption)]
+            return [blocksToPlainText(block.blocks, options), captionToPlainText(block.caption)]
                 .filter(Boolean)
                 .join("\n");
         case "table": {
             const rows = block.cells.map(row => row
                 .map(cell => cell.text ? richTextToPlainText(cell.text) : "")
-                .join(" | "));
+                .join(" | "))
+                .filter(row => row.replaceAll("|", "").trim().length > 0);
             const caption = block.caption ? richTextToPlainText(block.caption) : "";
             return [caption, ...rows].filter(Boolean).join("\n");
         }
         case "details":
-            return [richTextToPlainText(block.summary), blocksToPlainText(block.blocks)]
+            return [richTextToPlainText(block.summary), blocksToPlainText(block.blocks, options)]
                 .filter(Boolean)
                 .join("\n");
         case "map":
-            return ["[Map]", captionToPlainText(block.caption)].filter(Boolean).join(" ");
+            return [options.includeMediaLabels ? "[Map]" : "", captionToPlainText(block.caption)].filter(Boolean).join(" ");
         case "animation":
-            return ["[Animation]", captionToPlainText(block.caption)].filter(Boolean).join(" ");
+            return [options.includeMediaLabels ? "[Animation]" : "", captionToPlainText(block.caption)].filter(Boolean).join(" ");
         case "audio":
-            return ["[Audio]", captionToPlainText(block.caption)].filter(Boolean).join(" ");
+            return [options.includeMediaLabels ? "[Audio]" : "", captionToPlainText(block.caption)].filter(Boolean).join(" ");
         case "photo":
-            return ["[Photo]", captionToPlainText(block.caption)].filter(Boolean).join(" ");
+            return [options.includeMediaLabels ? "[Photo]" : "", captionToPlainText(block.caption)].filter(Boolean).join(" ");
         case "video":
-            return ["[Video]", captionToPlainText(block.caption)].filter(Boolean).join(" ");
+            return [options.includeMediaLabels ? "[Video]" : "", captionToPlainText(block.caption)].filter(Boolean).join(" ");
         case "voice_note":
-            return ["[Voice note]", captionToPlainText(block.caption)].filter(Boolean).join(" ");
+            return [options.includeMediaLabels ? "[Voice note]" : "", captionToPlainText(block.caption)].filter(Boolean).join(" ");
     }
+}
+
+function normalizeAndLimitPlainText(source: string, maxLength: number): string {
+    const plainText = source
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+    if (plainText.length <= maxLength) return plainText;
+    return `${plainText.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 export function getRichMessagePlainText(
@@ -90,13 +106,22 @@ export function getRichMessagePlainText(
     if (!richMessage) return "";
 
     const source = "blocks" in richMessage
-        ? blocksToPlainText(richMessage.blocks)
+        ? blocksToPlainText(richMessage.blocks, { includeMediaLabels: true })
         : richMessage.markdown || richMessage.html || "";
-    const plainText = source
-        .replace(/[ \t]+\n/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
+    return normalizeAndLimitPlainText(source, maxLength);
+}
 
-    if (plainText.length <= maxLength) return plainText;
-    return `${plainText.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+/**
+ * Extracts semantic user input from an incoming rich message. Pure media
+ * blocks don't become fake form values, while their captions remain usable.
+ */
+export function getRichMessageInputText(
+    richMessage?: RichMessage,
+    maxLength = MAX_RICH_MESSAGE_TEXT_LENGTH,
+): string {
+    if (!richMessage) return "";
+    return normalizeAndLimitPlainText(
+        blocksToPlainText(richMessage.blocks, { includeMediaLabels: false }),
+        maxLength,
+    );
 }

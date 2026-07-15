@@ -2,14 +2,15 @@ import prisma from '../db/core.js';
 import { novaPoshtaService } from './nova-poshta-service.js';
 import logger from '../core/logger.js';
 import { ParcelStatus } from '@prisma/client';
-import { Bot, InlineKeyboard } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
+import { createRichMessageBot } from '../core/rich-message-api.js';
 
-const bot = new Bot(BOT_TOKEN);
+const bot = createRichMessageBot(BOT_TOKEN);
 
 type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED' | 'MANUAL_PROXY';
 

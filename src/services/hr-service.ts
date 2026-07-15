@@ -16,6 +16,7 @@ import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
+import { createRichMessageBot } from "../core/rich-message-api.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -961,10 +962,9 @@ export const hrService = {
 
         // Cleanup old messages (Interview scheduled/links) when interview is completed
         const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
-        const { Bot } = await import("grammy");
         const botToken = process.env.BOT_TOKEN;
         if (botToken) {
-            const bot = new Bot(botToken);
+            const bot = createRichMessageBot(botToken);
             await cleanupUserSessionMessages(bot as any, Number(slot.candidate.user.telegramId));
 
             // The actual message is sent outside this service in some cases, 
@@ -1055,10 +1055,9 @@ export const hrService = {
 
         // Cleanup old messages (Interview scheduled/links)
         const { cleanupUserSessionMessages } = await import("../utils/cleanup.js");
-        const { Bot } = await import("grammy");
         const botToken = process.env.BOT_TOKEN;
         if (botToken) {
-            const bot = new Bot(botToken);
+            const bot = createRichMessageBot(botToken);
             await cleanupUserSessionMessages(bot as any, Number(cand.user.telegramId));
         }
 
