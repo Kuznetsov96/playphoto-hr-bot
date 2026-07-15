@@ -69,19 +69,19 @@ async function renderCompletionModeSelection(ctx: MyContext) {
 }
 
 taskFlowHandlers.callbackQuery(/^task_date_(.+)$/, async (ctx) => {
-    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     ctx.session.taskData.workDate = ctx.match![1]!;
     ctx.session.taskData.step = 'SELECT_MODE';
     await renderCompletionModeSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 taskFlowHandlers.callbackQuery(/^task_mode_(quick|proof)$/, async (ctx) => {
-    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     ctx.session.taskData.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskData.step = 'AWAITING_TEXT';
     await renderTextPrompt(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 async function renderTextPrompt(ctx: MyContext) {
@@ -192,26 +192,26 @@ async function renderDeadlineSelection(ctx: MyContext) {
 }
 
 taskFlowHandlers.callbackQuery(/^task_time_(.+)$/, async (ctx) => {
-    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     const time = ctx.match![1]!;
     ctx.session.taskData.deadlineTime = time === "none" ? null : time;
     ctx.session.taskData.step = 'CONFIRMATION';
     await renderConfirmation(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 taskFlowHandlers.callbackQuery("task_back_text", async (ctx) => {
-    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     ctx.session.taskData.step = 'AWAITING_TEXT';
     await renderTextPrompt(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 taskFlowHandlers.callbackQuery("task_back_date", async (ctx) => {
-    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     ctx.session.taskData.step = 'SELECT_DATE';
     await renderDateSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 async function renderConfirmation(ctx: MyContext) {
@@ -227,10 +227,10 @@ async function renderConfirmation(ctx: MyContext) {
 }
 
 taskFlowHandlers.callbackQuery("task_back_deadline", async (ctx) => {
-    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.");
+    if (!ctx.session.taskData) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     ctx.session.taskData.step = 'SET_DEADLINE';
     await renderDeadlineSelection(ctx);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 taskFlowHandlers.callbackQuery("task_cancel_flow", async (ctx) => {
@@ -239,7 +239,7 @@ taskFlowHandlers.callbackQuery("task_cancel_flow", async (ctx) => {
     if (ctx.session.adminFlow === "TASK") {
         delete ctx.session.adminFlow;
     }
-    await ctx.answerCallbackQuery("Cancelled.");
+    await ctx.answerCallbackQuery("Cancelled.").catch(() => { });
     
     const kb = new InlineKeyboard();
     if (staffId) {

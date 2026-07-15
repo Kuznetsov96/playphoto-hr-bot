@@ -96,7 +96,7 @@ composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
         await ScreenManager.renderScreen(ctx, "⚙️ <b>How do you want to set the task?</b>", keyboard, { pushToStack: true });
     }
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник вибору дати
@@ -106,7 +106,7 @@ composer.callbackQuery("task_add_by_date", async (ctx) => {
     keyboard.text("⬅️ Back", "task_add_start");
 
     await ScreenManager.renderScreen(ctx, "📅 <b>Select execution date:</b>", keyboard, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник вибору дати - перехід до вибору міста
@@ -135,7 +135,7 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
             keyboard,
             { pushToStack: true }
         );
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
@@ -143,7 +143,7 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
     if (ctx.session.taskCreation.selectedStaffIds && ctx.session.taskCreation.selectedStaffIds.length > 0) {
         ctx.session.taskCreation.step = "selecting_mode";
         await renderTaskModeSelection(ctx, "task_add_by_date");
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
@@ -154,13 +154,13 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
     keyboard.text("⬅️ Back", "task_add_by_date");
 
     await ScreenManager.renderScreen(ctx, `📅 Date: ${dateStr}\n🏙️ <b>Select city:</b>`, keyboard, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник вибору міста - перехід до вибору локації
 composer.callbackQuery(/^tas_city_/, async (ctx) => {
     const city = ctx.callbackQuery.data.replace("tas_city_", "");
-    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Error: Session lost");
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Error: Session lost").catch(() => { });
 
     ctx.session.taskCreation.city = city;
     ctx.session.taskCreation.step = "selecting_location";
@@ -193,7 +193,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
             staffKeyboard,
             { pushToStack: true }
         );
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
@@ -202,16 +202,16 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
     keyboard.text("⬅️ Back", `tas_d_${ctx.session.taskCreation.date}`);
 
     await ScreenManager.renderScreen(ctx, `📅 Date: ${ctx.session.taskCreation.date}\n📍 <b>Select location:</b>`, keyboard, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник вибору локації - перехід до вибору співробітника
 composer.callbackQuery(/^tas_loc_/, async (ctx) => {
     const locationId = ctx.callbackQuery.data.replace("tas_loc_", "");
-    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Error: Session lost");
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Error: Session lost").catch(() => { });
 
     const location = await locationRepository.findById(locationId);
-    if (!location) return ctx.answerCallbackQuery("Location not found");
+    if (!location) return ctx.answerCallbackQuery("Location not found").catch(() => { });
 
     ctx.session.taskCreation.locationId = locationId;
     ctx.session.taskCreation.locationName = `${location.name} (${location.city})`;
@@ -237,13 +237,13 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
         keyboard,
         { pushToStack: true }
     );
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник перемикання співробітника
 composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     const staffId = ctx.callbackQuery.data.replace("tas_st_tg_", "");
-    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost");
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
 
     if (!ctx.session.taskCreation.selectedStaffIds) ctx.session.taskCreation.selectedStaffIds = [];
     const index = ctx.session.taskCreation.selectedStaffIds.indexOf(staffId);
@@ -269,13 +269,13 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
         `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (${selectedIds.length} selected):</b>`,
         keyboard
     );
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник завершення вибору співробітників
 composer.callbackQuery("tas_st_done", async (ctx) => {
     if (!ctx.session.taskCreation || !ctx.session.taskCreation.selectedStaffIds || ctx.session.taskCreation.selectedStaffIds.length === 0) {
-        return ctx.answerCallbackQuery("Select at least one staff!");
+        return ctx.answerCallbackQuery("Select at least one staff!").catch(() => { });
     }
 
     const selectedStaff = await staffRepository.findManyByIds(ctx.session.taskCreation.selectedStaffIds);
@@ -283,11 +283,11 @@ composer.callbackQuery("tas_st_done", async (ctx) => {
     ctx.session.taskCreation.staffName = names.length > 30 ? `${selectedStaff.length} photographers` : names;
     ctx.session.taskCreation.step = "selecting_mode";
     await renderTaskModeSelection(ctx, `tas_loc_${ctx.session.taskCreation.locationId}`);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
-    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost");
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
 
     ctx.session.taskCreation.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskCreation.step = "entering_text";
@@ -304,7 +304,7 @@ composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
         keyboard,
         { pushToStack: true }
     );
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Helper to handle task text and media
@@ -593,12 +593,12 @@ composer.on(["message:voice", "message:video_note", "message:audio", "message:an
 composer.callbackQuery(/^tas_time_/, async (ctx) => {
     const time = ctx.callbackQuery.data.replace("tas_time_", "");
     await executeTaskCreation(ctx, time);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник редагування тексту
 composer.callbackQuery("tas_edit_text", async (ctx) => {
-    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost");
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
     ctx.session.taskCreation.step = "entering_text";
     const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
     await ScreenManager.renderScreen(
@@ -607,7 +607,7 @@ composer.callbackQuery("tas_edit_text", async (ctx) => {
         keyboard,
         { pushToStack: true }
     );
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник зміни дати
@@ -617,12 +617,12 @@ composer.callbackQuery("tas_change_date", async (ctx) => {
     const backCall = ctx.session.taskCreation?.taskText ? "tas_edit_done_back" : "task_add_start";
     keyboard.text("⬅️ Back", backCall);
     await ScreenManager.renderScreen(ctx, "📅 <b>Select NEW execution date:</b>", keyboard, { pushToStack: true });
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Кнопка Back з календаря (якщо текст вже є)
 composer.callbackQuery("tas_edit_done_back", async (ctx) => {
-    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost");
+    if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
     const dateStr = ctx.session.taskCreation.date!;
     const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
     const keyboard = new InlineKeyboard();
@@ -634,7 +634,7 @@ composer.callbackQuery("tas_edit_done_back", async (ctx) => {
         `📍 Task for ${ctx.session.taskCreation.staffName}:\n<i>${ctx.session.taskCreation.taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,
         keyboard
     );
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 // Обробник скасування
@@ -647,7 +647,7 @@ composer.callbackQuery("task_creation_cancel", async (ctx) => {
         .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
         .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
     await ScreenManager.renderScreen(ctx, "❌ Task creation cancelled.", kb);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 export default composer;

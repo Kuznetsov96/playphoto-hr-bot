@@ -45,7 +45,7 @@ async function buildInterviewSlotsCreatedKeyboard() {
 
 hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     ctx.session.viewingFromInbox = true; // Show 'Mark as Read' since this comes from notification
     delete ctx.session.selectedSlotId;
     await renderHrCandidateUnified(ctx, candId);
@@ -53,14 +53,14 @@ hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
 
 hrHandlers.callbackQuery(/^hr_back_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     delete ctx.session.selectedSlotId;
     await renderHrCandidateUnified(ctx, candId);
 });
 
 hrHandlers.callbackQuery("hr_main_calendar", async (ctx) => {
     try {
-        await ctx.answerCallbackQuery();
+        await ctx.answerCallbackQuery().catch(() => { });
         const { ScreenManager } = await import("../utils/screen-manager.js");
         await ScreenManager.renderScreen(ctx, "🗓️ <b>Interview Calendar</b>\n\nSelect a date to manage slots: 👇", "hr-dashboard-dates", { pushToStack: true });
     } catch (e) {
@@ -69,14 +69,14 @@ hrHandlers.callbackQuery("hr_main_calendar", async (ctx) => {
 });
 
 hrHandlers.callbackQuery("nav_final_step_pipeline", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const { ScreenManager } = await import("../utils/screen-manager.js");
     await ScreenManager.renderScreen(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu", { pushToStack: true });
 });
 
 hrHandlers.callbackQuery(/^view_candidate_new_(\d+)$/, async (ctx) => {
     const telegramId = Number(ctx.match![1]);
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     const candidate = await candidateRepository.findByTelegramId(telegramId);
     if (!candidate) return ctx.reply("Candidate not found.");
@@ -95,7 +95,7 @@ hrHandlers.callbackQuery(/^view_candidate_new_(\d+)$/, async (ctx) => {
 });
 
 hrHandlers.callbackQuery("hr_cancel_withdraw_reject", async (ctx) => {
-    await ctx.answerCallbackQuery("Cancelled");
+    await ctx.answerCallbackQuery("Cancelled").catch(() => { });
     const candId = ctx.session.candidateData?.id;
     if (!candId) return;
     await renderHrCandidateUnified(ctx, candId);
@@ -105,7 +105,7 @@ hrHandlers.on("callback_query:data", async (ctx, next) => {
     const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "hwr" });
     if (!candId) return next();
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const result = await hrService.rejectCandidateWithdrawalFromStaging(ctx.api, candId);
     if (!result.ok) {
         await ctx.reply("Unable to reject candidate.");
@@ -312,7 +312,7 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
 
 // --- NOTIFY CANDIDATES WHO NEED INTERVIEW SLOTS ---
 hrHandlers.callbackQuery("hr_notify_waitlist", async (ctx) => {
-    await ctx.answerCallbackQuery("Sending slot invites...");
+    await ctx.answerCallbackQuery("Sending slot invites...").catch(() => { });
     try {
         const count = await hrService.notifyWaitlist(ctx.api);
         await ctx.reply(`✅ Sent interview slot invite(s): ${count}`);
@@ -329,18 +329,18 @@ hrHandlers.callbackQuery(/^invite_candidate_(.+)$/, async (ctx) => {
     try {
         const result = await hrService.inviteCandidate(ctx.api, candId);
         if (result.ok) {
-            await ctx.answerCallbackQuery(`✅ Invitation sent!`);
+            await ctx.answerCallbackQuery(`✅ Invitation sent!`).catch(() => { });
         } else if (result.reason === "bot_blocked") {
-            await ctx.answerCallbackQuery("Candidate blocked the bot.");
+            await ctx.answerCallbackQuery("Candidate blocked the bot.").catch(() => { });
         } else if (result.reason === "age_ineligible") {
-            await ctx.answerCallbackQuery("Candidate no longer meets age requirements.");
+            await ctx.answerCallbackQuery("Candidate no longer meets age requirements.").catch(() => { });
         } else if (result.reason === "gender_ineligible") {
-            await ctx.answerCallbackQuery("Candidate does not meet gender requirements.");
+            await ctx.answerCallbackQuery("Candidate does not meet gender requirements.").catch(() => { });
         } else {
-            await ctx.answerCallbackQuery("Invite failed.");
+            await ctx.answerCallbackQuery("Invite failed.").catch(() => { });
         }
     } catch (e) {
         logger.error({ err: e }, "Failed to send individual invitation");
-        await ctx.answerCallbackQuery("Send error ❌");
+        await ctx.answerCallbackQuery("Send error ❌").catch(() => { });
     }
 });

@@ -329,7 +329,7 @@ async function showBirthdayMenu(ctx: MyContext) {
 export async function handleBirthdayMonthCallback(ctx: MyContext, month: number) {
     const text = await getBirthdaysByMonth(month === 0 ? undefined : month);
     const kb = new InlineKeyboard().text("⬅️ Back to Months", "admin_birthdays_back");
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.renderScreen(ctx, text, kb, {
         pushToStack: true,
         manualMenuId: "admin-birthday-list"
@@ -451,7 +451,7 @@ adminChannelMenu.dynamic(async (ctx, range) => {
 
     if (userRole !== "SUPER_ADMIN") {
         range.text("⛔ No access", async (ctx) => {
-            await ctx.answerCallbackQuery({ text: "No access.", show_alert: true });
+            await ctx.answerCallbackQuery({ text: "No access.", show_alert: true }).catch(() => { });
         }).row();
     } else {
         range.text(ADMIN_TEXTS["admin-channel-grant"], async (ctx) => {
@@ -713,7 +713,7 @@ async function confirmAdminReplacementManualSearch(ctx: MyContext) {
         } else if (error?.message === "SHIFT_ALREADY_STARTED") {
             message = "This shift time has already started.";
         }
-        await ctx.answerCallbackQuery({ text: message, show_alert: true });
+        await ctx.answerCallbackQuery({ text: message, show_alert: true }).catch(() => { });
     }
 }
 
@@ -754,18 +754,18 @@ adminTeamHandlers.callbackQuery(/^admin_repl_cancel_(.+)$/, async (ctx) => {
 });
 
 adminTeamHandlers.callbackQuery("back_to_schedule_dates", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-schedule-select-date"], "admin-schedule-dates");
 });
 
 adminTeamHandlers.callbackQuery("team_sync_cancel", async (ctx) => {
-    await ctx.answerCallbackQuery("Sync cancelled");
+    await ctx.answerCallbackQuery("Sync cancelled").catch(() => { });
     delete ctx.session.teamSyncPreview;
     await ctx.editMessageText("❌ <b>Full Sync cancelled.</b>", { parse_mode: "HTML" }).catch(() => { });
 });
 
 adminTeamHandlers.callbackQuery("team_sync_confirm", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     const previewMeta = ctx.session.teamSyncPreview;
     if (!previewMeta) {
@@ -859,7 +859,7 @@ adminScheduleStaffMenu.dynamic(async (ctx, range) => {
     const shifts = await workShiftRepository.findByLocationAndDateRange(locId, date, endOfDay);
 
     if (shifts.length === 0) {
-        range.text("📭 No shifts", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-shifts-none"])).row();
+        range.text("📭 No shifts", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-shifts-none"]).catch(() => { })).row();
     } else {
         const staffMap = new Map<string, any>();
         shifts.forEach((s: any) => staffMap.set(s.staff.id, s.staff));
@@ -932,7 +932,7 @@ adminLocationStaffMenu.dynamic(async (ctx, range) => {
         .sort((a: any, b: any) => a.fullName.localeCompare(b.fullName));
 
     if (staff.length === 0) {
-        range.text("📭 No staff here", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-staff-none-loc"])).row();
+        range.text("📭 No staff here", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-staff-none-loc"]).catch(() => { })).row();
     } else {
         staff.forEach((s: any) => {
             range.text(`👤 ${staffService.shortenName(s.fullName)}`, async (ctx) => {

@@ -315,7 +315,7 @@ hrFinalStepFillingMenu.dynamic(async (ctx, range) => {
         }).row();
     }
     if (candidates.length === 0) {
-        range.text("All candidates submitted! ✨", (ctx) => ctx.answerCallbackQuery()).row();
+        range.text("All candidates submitted! ✨", (ctx) => ctx.answerCallbackQuery().catch(() => { })).row();
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
@@ -335,7 +335,7 @@ hrFinalStepScheduleMenu.dynamic(async (ctx, range) => {
         }).row();
     }
     if (candidates.length === 0) {
-        range.text("No one waiting! 🎉", (ctx) => ctx.answerCallbackQuery()).row();
+        range.text("No one waiting! 🎉", (ctx) => ctx.answerCallbackQuery().catch(() => { })).row();
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
@@ -381,7 +381,7 @@ hrNoSlotQuickMenu.dynamic(async (ctx, range) => {
     } else {
         range.text(`🔔 Notify Needs Slot (${candidates.length})`, async (ctx) => {
             const count = await hrService.notifyWaitlist(ctx.api);
-            await ctx.answerCallbackQuery(`Sent ${count} slot invite(s).`);
+            await ctx.answerCallbackQuery(`Sent ${count} slot invite(s).`).catch(() => { });
             await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
         }).row();
         const reasonCounts = new Map<string | null, number>();
@@ -515,7 +515,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                         await trackUserMessage(result.telegramId, msg.message_id);
                     } catch (e) { logger.warn({ err: e, telegramId: result.telegramId }, "Could not send interview-conducted msg to candidate"); }
                 }
-                await ctx.answerCallbackQuery("Status: CONDUCTED");
+                await ctx.answerCallbackQuery("Status: CONDUCTED").catch(() => { });
                 await ctx.menu.update();
             }).row();
             range.text("🚫 No-show", async (ctx) => {
@@ -525,7 +525,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-rejection-noshow"]);
                     await trackUserMessage(tid, msg.message_id);
                 } catch (e) { logger.warn({ err: e, tid }, "Could not send no-show rejection to candidate"); }
-                await ctx.answerCallbackQuery("Status: NO-SHOW");
+                await ctx.answerCallbackQuery("Status: NO-SHOW").catch(() => { });
                 await ctx.menu.update();
             }).row();
             range.text(STAFF_TEXTS["hr-btn-reschedule"], async (ctx) => {
@@ -537,7 +537,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     });
                     await trackUserMessage(tid, msg.message_id);
                 } catch (e) { logger.warn({ err: e, tid }, "Could not send reschedule msg to candidate"); }
-                await ctx.answerCallbackQuery("Status: RESCHEDULE");
+                await ctx.answerCallbackQuery("Status: RESCHEDULE").catch(() => { });
                 await ctx.menu.update();
             }).row();
         }
@@ -548,15 +548,15 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
         range.text(cand.notificationSent ? "🔔 Remind" : STAFF_TEXTS["hr-btn-invite-individual"], async (ctx) => {
             const result = await hrService.inviteCandidate(ctx.api, cand.id);
             if (result.ok) {
-                await ctx.answerCallbackQuery("Sent! ✅");
+                await ctx.answerCallbackQuery("Sent! ✅").catch(() => { });
             } else if (result.reason === "bot_blocked") {
-                await ctx.answerCallbackQuery("Candidate blocked the bot.");
+                await ctx.answerCallbackQuery("Candidate blocked the bot.").catch(() => { });
             } else if (result.reason === "age_ineligible") {
-                await ctx.answerCallbackQuery("Candidate no longer meets age requirements.");
+                await ctx.answerCallbackQuery("Candidate no longer meets age requirements.").catch(() => { });
             } else if (result.reason === "gender_ineligible") {
-                await ctx.answerCallbackQuery("Candidate does not meet gender requirements.");
+                await ctx.answerCallbackQuery("Candidate does not meet gender requirements.").catch(() => { });
             } else {
-                await ctx.answerCallbackQuery("Invite failed.");
+                await ctx.answerCallbackQuery("Invite failed.").catch(() => { });
             }
             await ctx.menu.update();
         }).row();
@@ -565,12 +565,12 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
     if (cStatus === "MANUAL_REVIEW") {
         range.text("✅ Approve Tattoo", async (ctx) => {
             await hrService.approveTattoo(ctx.api, cand.id);
-            await ctx.answerCallbackQuery("Approved! ✅");
+            await ctx.answerCallbackQuery("Approved! ✅").catch(() => { });
             await ctx.menu.update();
         });
         range.text("❌ Reject", async (ctx) => {
             await hrService.rejectCandidate(ctx.api, cand.id, "APPEARANCE");
-            await ctx.answerCallbackQuery("Rejected ❌");
+            await ctx.answerCallbackQuery("Rejected ❌").catch(() => { });
             await ctx.menu.update();
         }).row();
     }
@@ -578,12 +578,12 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
     if (["INTERVIEW_COMPLETED", "DECISION_PENDING"].includes(cStatus) && !hrDec) {
         range.text(STAFF_TEXTS["hr-btn-accept-offer"], async (ctx) => {
             await hrService.makeDecision(ctx.api, cand.id, "ACCEPTED", ctx.from?.id.toString());
-            await ctx.answerCallbackQuery("Accepted! ✅");
+            await ctx.answerCallbackQuery("Accepted! ✅").catch(() => { });
             await ctx.menu.update();
         });
         range.text(STAFF_TEXTS["hr-btn-reject"], async (ctx) => {
             await hrService.makeDecision(ctx.api, cand.id, "REJECTED", ctx.from?.id.toString());
-            await ctx.answerCallbackQuery("Rejected ❌");
+            await ctx.answerCallbackQuery("Rejected ❌").catch(() => { });
             await ctx.menu.update();
         }).row();
 
@@ -601,7 +601,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 });
                 await trackUserMessage(tid, msg.message_id);
             } catch (e) { logger.warn({ err: e, tid }, "Could not send reschedule msg to candidate"); }
-            await ctx.answerCallbackQuery("Status: RESCHEDULE");
+            await ctx.answerCallbackQuery("Status: RESCHEDULE").catch(() => { });
             await ctx.menu.update();
         }).row();
     }
@@ -613,14 +613,14 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
         if (cStatus === "DISCOVERY_SCHEDULED") {
             range.text("✅ Discovery Passed", async (ctx) => {
                 delete ctx.session.adminFlow;
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const { mentorService } = await import("../services/mentor-service.js");
                 const res = await mentorService.completeDiscovery(ctx.api, cand.id, 'passed');
                 if (res) {
                     await ScreenManager.renderScreen(ctx, `✨ <b>Discovery Passed!</b>\n\nNow please select the <b>Online Internship Date</b> for ${res.candidate.fullName}:`, "mentor-manual-date", { pushToStack: true });
                 }
             }).text("❌ Failed", async (ctx) => {
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const { mentorService } = await import("../services/mentor-service.js");
                 await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
                 await ctx.menu.update();
@@ -636,12 +636,12 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
 
         if (cStatus === "TRAINING_SCHEDULED") {
             range.text("✅ Training Completed", async (ctx) => {
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const { mentorService } = await import("../services/mentor-service.js");
                 await mentorService.completeTraining(ctx.api, cand.id, 'passed');
                 await ctx.menu.update();
             }).text("❌ Failed", async (ctx) => {
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const { mentorService } = await import("../services/mentor-service.js");
                 await mentorService.completeTraining(ctx.api, cand.id, 'failed');
                 await ctx.menu.update();
@@ -657,14 +657,14 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
         if (cStatus === "NDA") {
             range.text("🔔 Ping NDA", async (ctx) => {
                 await hrService.pingNDA(ctx.api, cand.id);
-                await ctx.answerCallbackQuery("Ping sent! 🔔");
+                await ctx.answerCallbackQuery("Ping sent! 🔔").catch(() => { });
             }).row();
         }
 
         if (cStatus === "KNOWLEDGE_TEST") {
             range.text("🔔 Ping Test", async (ctx) => {
                 await hrService.pingTest(ctx.api, cand.id);
-                await ctx.answerCallbackQuery("Ping sent! 🔔");
+                await ctx.answerCallbackQuery("Ping sent! 🔔").catch(() => { });
             }).row();
         }
 
@@ -679,14 +679,14 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             range.text(hasDate ? `📅 ${cand.firstShiftDate!.toLocaleDateString('uk-UA')}` : "📅 Set Date", async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 ctx.session.step = `set_first_shift_date_${cand.id}`;
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const { ADMIN_TEXTS } = await import("../constants/admin-texts.js");
                 await ctx.reply(ADMIN_TEXTS["admin-staging-ask-date"] + "\nExample: 25.02.2026");
             });
             range.text(hasTime ? `⏰ ${cand.firstShiftTime}` : "⏰ Set Time", async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 ctx.session.step = `set_staging_time_${cand.id}`;
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 await ctx.reply("✍️ <b>Enter staging time:</b>\nExample: 10:00-12:00", { parse_mode: "HTML", reply_markup: { force_reply: true } });
             }).row();
             range.text(hasLoc ? `📍 ${cand.location?.name || 'Loc'}` : "📍 Set Loc", async (ctx) => {
@@ -695,7 +695,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             });
             range.text(hasPartner ? `📸 ${formatCompactName(cand.firstShiftPartner?.fullName)}` : "📸 Set Partner", async (ctx) => {
                 if (!hasDate || !hasLoc) {
-                    return ctx.answerCallbackQuery("⚠️ Please set date and location first!");
+                    return ctx.answerCallbackQuery("⚠️ Please set date and location first!").catch(() => { });
                 }
                 ctx.session.selectedCandidateId = cand.id;
                 await ScreenManager.renderScreen(ctx, "🔍 <b>Select a partner:</b>", "hr-staging-confirm", { pushToStack: true });
@@ -707,7 +707,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                     ctx.session.selectedCandidateId = cand.id;
                     const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
                     if (result && 'error' in result) {
-                        await ctx.answerCallbackQuery(`❌ ${result.error}`);
+                        await ctx.answerCallbackQuery(`❌ ${result.error}`).catch(() => { });
                     } else if (result) {
                         const candStatus = result.candidateNotified ? "✅" : "❌";
                         const partnerStatus = result.partnerNotified ? "✅" : "❌";
@@ -715,16 +715,16 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                             `👤 Candidate ${result.candName}: ${candStatus}\n` +
                             `📸 Partner ${result.partnerName}: ${partnerStatus}\n\n` +
                             `Status → <b>Active Staging</b>`;
-                        await ctx.answerCallbackQuery("Notifications sent! ✅");
+                        await ctx.answerCallbackQuery("Notifications sent! ✅").catch(() => { });
                         await ScreenManager.renderScreen(ctx, confirmText, new InlineKeyboard().text("🚀 Final Step Pipeline", "nav_final_step_pipeline"));
                     } else {
-                        await ctx.answerCallbackQuery("Error! Check details. ❌");
+                        await ctx.answerCallbackQuery("Error! Check details. ❌").catch(() => { });
                     }
                 }).row();
             }
 
             range.text("🚫 Withdraw & Reject", async (ctx) => {
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const confirmText = `⚠️ <b>Confirm Rejection</b>\n\n` +
                     `You are about to mark this candidate as <b>REJECTED</b> because she withdrew during offline staging.\n\n` +
                     `After confirmation, we will:\n` +
@@ -745,24 +745,24 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 if (res) {
                     const firstName = extractFirstName(res.candidate.fullName || "");
                     await ctx.api.sendMessage(Number(res.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
-                    await ctx.answerCallbackQuery("Passed! ✅");
+                    await ctx.answerCallbackQuery("Passed! ✅").catch(() => { });
                     await ctx.menu.update();
                 }
             });
             range.text("❌ Fail", async (ctx) => {
                 await hrService.completeOfflineStaging(cand.id, false);
-                await ctx.answerCallbackQuery("Failed. ❌");
+                await ctx.answerCallbackQuery("Failed. ❌").catch(() => { });
                 await ctx.menu.update();
             }).row();
 
             range.text("🔄 Reset to Setup", async (ctx) => {
                 await candidateRepository.update(cand.id, { status: "STAGING_SETUP" as any, notificationSent: false, stagingNotifiedAt: null });
-                await ctx.answerCallbackQuery("Reset to setup mode 🛠");
+                await ctx.answerCallbackQuery("Reset to setup mode 🛠").catch(() => { });
                 await ctx.menu.update();
             }).row();
 
             range.text("🚫 Withdraw & Reject", async (ctx) => {
-                await ctx.answerCallbackQuery();
+                await ctx.answerCallbackQuery().catch(() => { });
                 const confirmText = `⚠️ <b>Confirm Rejection</b>\n\n` +
                     `You are about to mark this candidate as <b>REJECTED</b> because she withdrew during offline staging.\n\n` +
                     `After confirmation, we will:\n` +
@@ -784,14 +784,14 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
         if (userId) {
             await ctx.reply(STAFF_TEXTS["hr-ask-reply"]({ userId: userId.toString() }));
             ctx.session.step = `admin_reply_${userId}`;
-            await ctx.answerCallbackQuery("✓");
+            await ctx.answerCallbackQuery("✓").catch(() => { });
         }
     }).row();
 
     if (cand.hasUnreadMessage && ctx.session.viewingFromInbox) {
         range.text("👁️ Mark as Read", async (ctx) => {
             await candidateRepository.update(cand.id, { hasUnreadMessage: false });
-            await ctx.answerCallbackQuery("Marked as read! ✅");
+            await ctx.answerCallbackQuery("Marked as read! ✅").catch(() => { });
             await ctx.menu.update();
         }).row();
     }
@@ -813,9 +813,9 @@ hrChangeLocationUnifiedMenu.dynamic(async (ctx, range) => {
     locations.forEach(loc => {
         const isCurrent = loc.id === cand.locationId;
         range.text(`${isCurrent ? '✅ ' : ''}${loc.name}`, async (ctx) => {
-            if (isCurrent) return ctx.answerCallbackQuery("Already here.");
+            if (isCurrent) return ctx.answerCallbackQuery("Already here.").catch(() => { });
             await candidateRepository.update(cand.id, { location: { connect: { id: loc.id } } } as any);
-            await ctx.answerCallbackQuery(`Moved! ✅`);
+            await ctx.answerCallbackQuery(`Moved! ✅`).catch(() => { });
 
             const candId = ctx.session.candidateData?.id;
             if (candId) {
@@ -923,7 +923,7 @@ hrInboxMessagesMenu.dynamic(async (ctx, range) => {
 hrBroadcastCitiesMenu.dynamic(async (ctx, range) => {
     const stats = await hrService.getCityRecruitmentStats();
     if (stats.length === 0) {
-        range.text("📭 No active recruitment", (ctx) => ctx.answerCallbackQuery("Everything is full! ✨")).row();
+        range.text("📭 No active recruitment", (ctx) => ctx.answerCallbackQuery("Everything is full! ✨").catch(() => { })).row();
     }
     for (const s of stats) {
         const cityCode = getCityCode(s.city);
@@ -931,7 +931,7 @@ hrBroadcastCitiesMenu.dynamic(async (ctx, range) => {
 
         range.text(label, async (ctx) => {
             if (s.candidateCount === 0) {
-                return ctx.answerCallbackQuery("No new candidates to invite. 📭");
+                return ctx.answerCallbackQuery("No new candidates to invite. 📭").catch(() => { });
             }
             ctx.session.broadcastCity = s.city;
             ctx.session.broadcastLocationId = s.locationId;
@@ -961,7 +961,7 @@ hrBroadcastConfirmMenu.text("✅ Confirm & Send", async (ctx) => {
     if (!city) return;
 
     const newCandidates = await hrService.getBroadcastCandidates(city, false, locationId, limit);
-    await ctx.answerCallbackQuery("Broadcast started...");
+    await ctx.answerCallbackQuery("Broadcast started...").catch(() => { });
     let sent = 0;
     for (const cand of newCandidates) {
         const result = await hrService.inviteCandidate(ctx.api, cand.id);
@@ -983,7 +983,7 @@ hrBroadcastConfirmMenu.text("✅ Confirm & Send", async (ctx) => {
 hrDashboardDatesMenu.dynamic(async (ctx, range) => {
     const uniqueDates = await hrService.getOccupiedDates();
     if (uniqueDates.length === 0) {
-        range.text("Schedule is empty 📭", (ctx) => ctx.answerCallbackQuery("Empty for now...")).row();
+        range.text("Schedule is empty 📭", (ctx) => ctx.answerCallbackQuery("Empty for now...").catch(() => { })).row();
     } else {
         for (const dateStr of uniqueDates) {
             range.text(dateStr, async (ctx) => {
@@ -1002,7 +1002,7 @@ hrDashboardDatesMenu.dynamic(async (ctx, range) => {
             parse_mode: "HTML",
             reply_markup: createDatePickerKb("hr_sb")
         });
-        await ctx.answerCallbackQuery("✓");
+        await ctx.answerCallbackQuery("✓").catch(() => { });
     }).row();
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
@@ -1061,15 +1061,15 @@ hrDayViewMenu.dynamic(async (ctx, range) => {
             range.text("FREE SLOTS").row();
             for (const slot of freeSlots) {
                 const time = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                range.text(`🔘 ${time}`, (ctx) => ctx.answerCallbackQuery("Available"));
+                range.text(`🔘 ${time}`, (ctx) => ctx.answerCallbackQuery("Available").catch(() => { }));
                 range.text("🗑️", async (ctx) => {
                     const res = await hrService.deleteInterviewSlot(slot.id);
                     if (res) {
-                        await ctx.answerCallbackQuery("Deleted ✅");
+                        await ctx.answerCallbackQuery("Deleted ✅").catch(() => { });
                         const text = await getDayViewText(selectedDate);
                         await ScreenManager.renderScreen(ctx, text, "hr-day-view");
                     } else {
-                        await ctx.answerCallbackQuery("Error ❌");
+                        await ctx.answerCallbackQuery("Error ❌").catch(() => { });
                     }
                 }).row();
             }
@@ -1079,11 +1079,11 @@ hrDayViewMenu.dynamic(async (ctx, range) => {
         }
     } catch (e) {
         logger.error({ err: e }, "[HR Dashboard] Critical error in hr-day-view");
-        range.text("❌ Error loading slots", (ctx) => ctx.answerCallbackQuery("Please try again")).row();
+        range.text("❌ Error loading slots", (ctx) => ctx.answerCallbackQuery("Please try again").catch(() => { })).row();
     }
     range.row().text("➕ Add time", async (ctx) => {
         const selectedDate = ctx.session.selectedDate;
-        if (!selectedDate) return ctx.answerCallbackQuery("Error: No date selected");
+        if (!selectedDate) return ctx.answerCallbackQuery("Error: No date selected").catch(() => { });
         delete ctx.session.selectedCandidateId;
         const { createTimePickerKb } = await import("../utils/slot-builder.js");
         const dateParts = selectedDate.split('.');
@@ -1092,7 +1092,7 @@ hrDayViewMenu.dynamic(async (ctx, range) => {
         await ctx.reply(`🕒 <b>Adding time for ${selectedDate}</b>\n\nSelect the <b>Start Time</b>:`, {
             parse_mode: "HTML", reply_markup: createTimePickerKb("hr_sb")
         });
-        await ctx.answerCallbackQuery("✓");
+        await ctx.answerCallbackQuery("✓").catch(() => { });
     }).row();
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates");
@@ -1123,7 +1123,7 @@ hrStagingConfirmMenu.dynamic(async (ctx, range) => {
             const { shortenName } = await import("../utils/string-utils.js");
             range.text(`📸 ${shortenName(member.fullName)}`, async (ctx) => {
                 await candidateRepository.update(candId, { firstShiftPartner: { connect: { id: member.id } } } as any);
-                await ctx.answerCallbackQuery(`Partner: ${shortenName(member.fullName)} ✅`);
+                await ctx.answerCallbackQuery(`Partner: ${shortenName(member.fullName)} ✅`).catch(() => { });
                 // Return to candidate card — admin must explicitly confirm via "Notify & Send"
                 const updatedCand = await hrService.getCandidateDetails(candId);
                 if (updatedCand) {

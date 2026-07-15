@@ -122,9 +122,9 @@ financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
     const raw = await redis.get(`audit:actions:${dateStr}`);
     const actions = raw ? JSON.parse(raw) : null;
 
-    if (!actions?.length) return ctx.answerCallbackQuery("No pending actions. ✨");
+    if (!actions?.length) return ctx.answerCallbackQuery("No pending actions. ✨").catch(() => { });
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     let text = `⚙️ <b>AUDIT ACTION CENTER • ${dateStr}</b>\n\n`;
     const keyboard = new InlineKeyboard();
@@ -149,9 +149,9 @@ financeHandlers.callbackQuery(/^audit_action_detail:(\d+):(.+)$/, async (ctx) =>
     const actions = raw ? JSON.parse(raw) : null;
     const action = actions?.[idx];
 
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
+    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
 
     const typeIcon = action.type === 'Terminal' ? '💳' : '💵';
     const diffStr = action.diff.toLocaleString('uk-UA');
@@ -182,14 +182,14 @@ financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
     const actions = raw ? JSON.parse(raw) : null;
     const action = actions?.[idx];
 
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
+    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
 
     if (action.staffIds.length === 1) {
         // Direct send — inline the send logic instead of broken .execute()
         return await sendAuditAsk(ctx, idx, dateStr, action.staffIds[0], action);
     }
 
-    await ctx.answerCallbackQuery();
+    await ctx.answerCallbackQuery().catch(() => { });
     const keyboard = new InlineKeyboard();
     action.staffIds.forEach((sid: string, sIdx: number) => {
         const name = action.staffNames?.[sIdx] || "Staff";
@@ -257,7 +257,7 @@ async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, target
 
     if (success > 0) {
         const targetName = targetStaffId === 'all' ? 'Everyone' : (staffNames?.[staffIds.indexOf(targetStaffId)] || 'Staff');
-        await ctx.answerCallbackQuery(`✅ Sent to ${targetName}`);
+        await ctx.answerCallbackQuery(`✅ Sent to ${targetName}`).catch(() => { });
 
         // Mark as asked in Redis
         const currentActionsRaw = await redis.get(`audit:actions:${dateStr}`);
@@ -277,7 +277,7 @@ async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, target
             reply_markup: new InlineKeyboard().text("⬅️ Back to Action", `audit_action_detail:${idx}:${dateStr}`)
         });
     } else {
-        await ctx.answerCallbackQuery("❌ Send failed.");
+        await ctx.answerCallbackQuery("❌ Send failed.").catch(() => { });
     }
 }
 
@@ -289,7 +289,7 @@ financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx)
     const raw = await redis.get(`audit:actions:${dateStr}`);
     const actions = raw ? JSON.parse(raw) : null;
     const action = actions?.[idx];
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
+    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
 
     await sendAuditAsk(ctx, idx, dateStr, targetStaffId, action);
 });
@@ -300,7 +300,7 @@ financeHandlers.callbackQuery(/^audit_resolve:(\d+):(.+)$/, async (ctx) => {
     const raw = await redis.get(`audit:actions:${dateStr}`);
     const actions = raw ? JSON.parse(raw) : null;
     const action = actions?.[idx];
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.");
+    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
 
     // Remove resolved action and update Redis
     actions.splice(idx, 1);
@@ -310,7 +310,7 @@ financeHandlers.callbackQuery(/^audit_resolve:(\d+):(.+)$/, async (ctx) => {
         await redis.del(`audit:actions:${dateStr}`);
     }
 
-    await ctx.answerCallbackQuery("✅ Resolved.");
+    await ctx.answerCallbackQuery("✅ Resolved.").catch(() => { });
     const keyboard = actions.length > 0 
         ? new InlineKeyboard().text("⬅️ Back to Action Center", `admin_audit_actions:${dateStr}`)
         : undefined;
