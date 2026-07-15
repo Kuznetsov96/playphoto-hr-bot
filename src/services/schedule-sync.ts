@@ -11,11 +11,10 @@ import { staffRepository } from "../repositories/staff-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
-import type { Api } from "grammy";
+import { Bot, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { parseScheduleHeaderDate, parseScheduleMonth } from "../utils/schedule-sheet-date.js";
-import { createRichMessageBot } from "../core/rich-message-api.js";
 
 interface TeamMember {
     fullName: string;
@@ -1201,7 +1200,7 @@ export class ScheduleSyncService {
 
         try {
             const { replacementService } = await import("./replacement-service.js");
-            const bot = createRichMessageBot(process.env.BOT_TOKEN!);
+            const bot = new Bot(process.env.BOT_TOKEN!);
             await replacementService.closeActiveRequestsChangedBySchedule(bot.api);
         } catch (err) {
             logger.warn({ err }, "Replacement requests schedule-sync reconciliation failed");
