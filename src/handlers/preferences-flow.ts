@@ -198,7 +198,7 @@ async function renderCalendar(ctx: MyContext) {
     } else {
         kb.text(`✅ Готово (${selected.size} дн.)`, "pref_to_comment");
     }
-    kb.row().text("❌ Скасувати", "pref_cancel_flow");
+    kb.row().text("❌ Скасувати", "pref_cancel_flow").danger();
 
     const selectionHint = isCurrentMonth
         ? `<i>(Вибір вихідних доступний з завтрашнього дня)</i>`
@@ -279,7 +279,7 @@ async function renderConfirmation(ctx: MyContext) {
     const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає";
 
     const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${name}</b>\n📅 Місяць: <b>${month} ${year}</b>\n🚫 Вихідні: <b>${daysStr}</b>\n💬 Коментар: ${comment || 'відсутній'}`;
-    const kb = new InlineKeyboard().text("✅ Зберегти", "pref_save_final").text("🔄 Спочатку", "pref_restart_flow").row().text("❌ Скасувати", "pref_cancel_flow");
+    const kb = new InlineKeyboard().text("✅ Зберегти", "pref_save_final").text("🔄 Спочатку", "pref_restart_flow").row().text("❌ Скасувати", "pref_cancel_flow").danger();
 
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
 }

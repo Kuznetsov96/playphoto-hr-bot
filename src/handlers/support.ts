@@ -6,6 +6,7 @@ import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { escapeHtml } from "./admin/utils.js";
+import { getRichMessagePlainText } from "../utils/rich-message.js";
 
 export const supportHandlers = new Composer<MyContext>();
 
@@ -132,7 +133,7 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
         safeContext: { preferredTarget, status: candidate.status }
     });
 
-    const kb = new InlineKeyboard().text("❌ Скасувати", "end_support_chat");
+    const kb = new InlineKeyboard().text("❌ Скасувати", "end_support_chat").danger();
     await ctx.reply(
         `<b>Напишіть ваше питання або повідомлення нижче ⤵️</b>\n` +
         `Ми одразу передамо його відповідальній особі, і ви отримаєте відповідь прямо тут. ✨`,
@@ -163,7 +164,8 @@ supportHandlers.callbackQuery("end_support_chat", async (ctx) => {
 
 function getCandidateSupportPayload(ctx: MyContext) {
     const message = ctx.message;
-    const text = message?.text || message?.caption || "";
+    const richText = getRichMessagePlainText(message?.rich_message);
+    const text = message?.text || message?.caption || richText;
     const media =
         message?.photo?.[message.photo.length - 1]?.file_id ||
         message?.video_note?.file_id ||
@@ -177,7 +179,9 @@ function getCandidateSupportPayload(ctx: MyContext) {
     else if (message?.voice) mediaLabel = "🎙 Voice message";
     else if (message?.video) mediaLabel = "🎥 Video";
 
-    const content = mediaLabel && text ? `${mediaLabel}: ${text}` : (mediaLabel || text);
+    const richLabel = message?.rich_message ? "Rich message" : "";
+    const contentLabel = mediaLabel || richLabel;
+    const content = contentLabel && text ? `${contentLabel}: ${text}` : (contentLabel || text);
 
     return {
         content: content || "Message without text",
@@ -185,16 +189,23 @@ function getCandidateSupportPayload(ctx: MyContext) {
     };
 }
 
-async function copyCandidateMediaToAdmin(ctx: MyContext, adminId: string | number, replyMarkup?: InlineKeyboard) {
+async function copyCandidateOriginalToAdmin(ctx: MyContext, adminId: string | number, replyMarkup?: InlineKeyboard) {
     const message = ctx.message;
-    if (!message?.message_id || !(message.photo || message.video_note || message.voice || message.video)) return;
+    const hasCopyableContent = Boolean(
+        message?.rich_message ||
+        message?.photo ||
+        message?.video_note ||
+        message?.voice ||
+        message?.video,
+    );
+    if (!message?.message_id || !hasCopyableContent) return;
 
     try {
         await ctx.api.copyMessage(Number(adminId), message.chat.id, message.message_id, {
             reply_markup: replyMarkup
         } as any);
     } catch (e) {
-        logger.warn({ err: e, adminId }, "Failed to copy candidate media message to admin");
+        logger.warn({ err: e, adminId }, "Failed to copy candidate original message to admin");
     }
 }
 
@@ -236,7 +247,14 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         }
     }
 
-    if (!ctx.message?.text && !ctx.message?.photo && !ctx.message?.voice && !ctx.message?.video && !ctx.message?.video_note) return false;
+    if (
+        !ctx.message?.text &&
+        !ctx.message?.rich_message &&
+        !ctx.message?.photo &&
+        !ctx.message?.voice &&
+        !ctx.message?.video &&
+        !ctx.message?.video_note
+    ) return false;
 
     try {
         const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
@@ -301,7 +319,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                         parse_mode: "HTML",
                         reply_markup: adminKb
                     });
-                    await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
+                    await copyCandidateOriginalToAdmin(ctx, adminId, adminKb);
                     delivered = true;
                 } catch (e) {
                     logger.warn({ err: e, adminId }, "Failed to deliver setup-stage message to admin");
@@ -380,7 +398,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                         parse_mode: "HTML",
                         reply_markup: adminKb
                     });
-                    await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
+                    await copyCandidateOriginalToAdmin(ctx, adminId, adminKb);
                     delivered = true;
                 } catch (e) {
                     logger.warn({ err: e, adminId }, "Failed to deliver mentor-stage message to main admin");
@@ -492,7 +510,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     if (activeOutgoingTopic) await supportRepository.touchOutgoingTopic(activeOutgoingTopic.id).catch(() => { });
                     // Log to Timeline
                     const { timelineRepository } = await import("../repositories/timeline-repository.js");
-                    await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', ctx.message?.text || ctx.message?.caption || "[Media]", {
+                    await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', getCandidateSupportPayload(ctx).content, {
                         ticketId: activeTicket?.id,
                         outgoingTopicId: activeOutgoingTopic?.id
                     });
@@ -559,7 +577,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     parse_mode: "HTML",
                     reply_markup: adminKb
                 });
-                await copyCandidateMediaToAdmin(ctx, adminId, adminKb);
+                await copyCandidateOriginalToAdmin(ctx, adminId, adminKb);
                 delivered = true;
             } catch (e) { }
         }

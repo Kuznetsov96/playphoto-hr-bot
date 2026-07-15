@@ -729,7 +729,7 @@ export class LogisticsService {
             } else if (triggerStatus === 'ARRIVED') {
                 text = LOGISTICS_TEXTS_STAFF.arrived(parcel.ttn, parcel.location?.name || '');
                 kb.text(LOGISTICS_TEXTS_STAFF.btn_accept, `parcel_accept_${parcel.id}`)
-                    .text(LOGISTICS_TEXTS_STAFF.btn_reject, buildSignedCallback("prj", parcel.id));
+                    .text(LOGISTICS_TEXTS_STAFF.btn_reject, buildSignedCallback("prj", parcel.id)).danger();
             } else if (triggerStatus === 'DELIVERED') {
                 text = parcel.deliveryType === 'Address'
                     ? LOGISTICS_TEXTS_STAFF.delivered_address(parcel.ttn, parcel.location?.name || '')
@@ -1098,7 +1098,7 @@ export class LogisticsService {
 
             const kb = new InlineKeyboard()
                 .text(LOGISTICS_TEXTS_STAFF.btn_accept, `parcel_accept_${parcel.id}`)
-                .text(LOGISTICS_TEXTS_STAFF.btn_reject, buildSignedCallback("prj", parcel.id));
+                .text(LOGISTICS_TEXTS_STAFF.btn_reject, buildSignedCallback("prj", parcel.id)).danger();
 
             await bot.api.sendMessage(
                 Number(tid),

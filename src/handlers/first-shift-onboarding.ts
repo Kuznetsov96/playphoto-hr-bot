@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { FIRST_SHIFT_ONBOARDING_CHAT_ID } from "../config.js";
 import { getAdminRoleByTelegramId } from "../config/roles.js";
 import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../services/first-shift-onboarding-service.js";
+import { getRichMessagePlainText } from "../utils/rich-message.js";
 
 export const firstShiftOnboardingHandlers = new Composer<MyContext>();
 
@@ -131,7 +132,8 @@ export async function handleFirstShiftOnboardingCandidateMessage(ctx: MyContext)
 }
 
 export function buildFirstShiftOnboardingPayload(ctx: MyContext): FirstShiftOnboardingCandidateMessage {
-    const text = ctx.message?.text || ctx.message?.caption || undefined;
+    const richText = getRichMessagePlainText(ctx.message?.rich_message) || undefined;
+    const text = ctx.message?.text || ctx.message?.caption || richText;
     const photoId = ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null;
     const hasMedia = Boolean(
         photoId ||
@@ -141,7 +143,8 @@ export function buildFirstShiftOnboardingPayload(ctx: MyContext): FirstShiftOnbo
         ctx.message?.document ||
         ctx.message?.audio ||
         ctx.message?.animation ||
-        ctx.message?.sticker,
+        ctx.message?.sticker ||
+        ctx.message?.rich_message,
     );
     const hasFormattedText = Boolean(ctx.message?.entities?.length || ctx.message?.caption_entities?.length);
 

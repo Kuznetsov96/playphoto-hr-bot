@@ -69,7 +69,7 @@ function formatStaffShiftTime(shift: {
 function buildTaskProofKeyboard(taskId: string) {
     return new InlineKeyboard()
         .text("✅ Завершити завдання", `staff_task_proof_submit_${taskId}`).row()
-        .text("❌ Скасувати", `staff_task_proof_cancel_${taskId}`);
+        .text("❌ Скасувати", `staff_task_proof_cancel_${taskId}`).danger();
 }
 
 function buildTaskProofText(taskText: string, proofCount: number) {
@@ -412,7 +412,7 @@ export async function showStaffLogistics(ctx: MyContext) {
 
         if (parcel.status === 'ARRIVED') {
             kb.text(`✅ Забрати #${index + 1}`, `parcel_accept_${parcel.id}`)
-                .text(`❌ Відмовитись`, buildSignedCallback("prj", parcel.id)).row();
+                .text(`❌ Відмовитись`, buildSignedCallback("prj", parcel.id)).danger().row();
         } else if (parcel.status === 'DELIVERED') {
             kb.text(`📸 Додати фото вмісту #${index + 1}`, buildSignedCallback("pph", parcel.id)).row();
         }
@@ -623,7 +623,7 @@ export async function startSupportFlow(ctx: MyContext) {
 
     const text = STAFF_TEXTS["support-ask-issue"];
 
-    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", cancelCallback), {
+    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", cancelCallback).danger(), {
         pushToStack: true
     });
 }
@@ -678,7 +678,7 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
             : "Пошук розпочато.\nЗапитаємо фотографів, які можуть вийти цього дня.";
 
         const kb = new InlineKeyboard();
-        if (activeRequest) kb.text("Скасувати пошук", `staff_repl_cancel_${activeRequest.id}`).row();
+        if (activeRequest) kb.text("Скасувати пошук", `staff_repl_cancel_${activeRequest.id}`).danger().row();
         kb.text("🏠 Меню", "staff_hub_nav");
 
         await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true });
@@ -872,7 +872,7 @@ staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {
         `<i>"${escapeHtml(taskPreview)}"</i>\n\n` +
         `Напиши, що саме незрозуміло, і я передам твої слова адміну. ✍️`;
 
-    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", "staff_hub_nav"), {
+    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("❌ Скасувати", "staff_hub_nav").danger(), {
         pushToStack: true
     });
     await ctx.answerCallbackQuery();

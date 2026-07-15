@@ -256,6 +256,7 @@ export const ADMIN_TEXTS = {
   "hr-menu-back": `⬅️ Back`,
   "admin-err-insufficient-perms": `❌ Insufficient permissions.`,
   "admin-prompt-number": `Enter a number. 🔢`,
+  "admin-rich-message-plain-text-required": `Candidate and staff support conversations preserve rich messages, but admin form fields currently require a regular text or media message.`,
   "admin-success-need-updated": (p: { count: string | number }) => `✅ Location need updated: ${p.count}`,
   "admin-success-city-updated": (p: { city: string | number }) => `✅ City changed to: ${p.city}`,
   "admin-success-date-saved": (p: { date: string | number }) => `✅ First shift date saved: ${p.date}`,

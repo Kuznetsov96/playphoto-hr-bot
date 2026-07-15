@@ -87,7 +87,7 @@ export async function processInviteReminders(bot: any) {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard()
                                 .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
-                                .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite")
+                                .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite").danger()
                         });
                     } catch (e: any) {
                         if (isBotBlocked(e)) {

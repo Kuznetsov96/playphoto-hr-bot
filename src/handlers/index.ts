@@ -16,11 +16,13 @@ import { firstShiftOnboardingHandlers, handleFirstShiftOnboardingCandidateMessag
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
+import { shouldRouteMessageToPrivateRoleFlows } from "../utils/message-routing.js";
 import { quizHandlers } from "./quiz-handler.js";
 import { onboardingHandlers } from "./onboarding-handler.js";
 import { accessHandlers } from "./access.js";
 import { broadcastService } from "../services/broadcast.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { slotBuilderHandlers } from "./slot-builder.js";
 import { leadsHandlers } from "./leads.js";
@@ -242,6 +244,11 @@ handlers.on("message", async (ctx, next) => {
     const staffHandled = await handleSupportGroupMessage(ctx, bot);
     if (staffHandled) return;
 
+    // All supported group-message flows are handled above. Stop other group and
+    // service messages (including community_chat_added/removed) before they can
+    // enter private candidate/staff role routing.
+    if (!shouldRouteMessageToPrivateRoleFlows(ctx.chat?.type)) return;
+
     await next();
 });
 
@@ -263,6 +270,11 @@ handlers.use(async (ctx, next) => {
 
     if (adminRole) {
         // --- ADMIN CONTEXT ---
+        if (ctx.chat?.type === "private" && ctx.message?.rich_message) {
+            await ctx.reply(ADMIN_TEXTS["admin-rich-message-plain-text-required"]);
+            return;
+        }
+
         const adminApp = new Composer<MyContext>();
         adminApp.use(slotBuilderHandlers);
         adminApp.use(hrHandlers);

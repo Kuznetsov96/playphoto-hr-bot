@@ -266,8 +266,8 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rb", result.slot.id)).row()
-            .text("❌ Скасувати запис", buildSignedCallback("cb", result.slot.id)).row()
-            .text("🚫 Не планую продовжувати", buildSignedCallback("wi", result.slot.id));
+            .text("❌ Скасувати запис", buildSignedCallback("cb", result.slot.id)).danger().row()
+            .text("🚫 Не планую продовжувати", buildSignedCallback("wi", result.slot.id)).danger();
         if ((result as any).candidate?.gender !== "male") {
             kb.row().text("👩‍💼 Написати HR", "contact_hr");
         }
@@ -334,7 +334,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("✅ Так, скасувати запис", buildSignedCallback("ccb", slotId)).row()
+        .text("✅ Так, скасувати запис", buildSignedCallback("ccb", slotId)).danger().row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
@@ -407,7 +407,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, завершити заявку", buildSignedCallback("cwi", slotId)).row()
+        .text("🚫 Так, завершити заявку", buildSignedCallback("cwi", slotId)).danger().row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
@@ -808,8 +808,8 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rt", slotId)).row()
-            .text("❌ Скасувати запис", buildSignedCallback("ct", slotId)).row()
-            .text("🚫 Не планую продовжувати", buildSignedCallback("wm", slotId)).row()
+            .text("❌ Скасувати запис", buildSignedCallback("ct", slotId)).danger().row()
+            .text("🚫 Не планую продовжувати", buildSignedCallback("wm", slotId)).danger().row()
             .text("👨‍🏫 Написати наставнику", "contact_mentor");
 
         await cleanupMessages(ctx);
@@ -893,7 +893,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("✅ Так, скасувати запис", buildSignedCallback("cct", slotId)).row()
+        .text("✅ Так, скасувати запис", buildSignedCallback("cct", slotId)).danger().row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
@@ -961,7 +961,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, завершити заявку", buildSignedCallback("cwm", slotId)).row()
+        .text("🚫 Так, завершити заявку", buildSignedCallback("cwm", slotId)).danger().row()
         .text("⬅️ Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(

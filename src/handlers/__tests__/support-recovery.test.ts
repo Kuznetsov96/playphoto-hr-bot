@@ -168,4 +168,50 @@ describe("candidate recovery support routing", () => {
         expect(ctx.session.supportData.preferredTarget).toBeUndefined();
         expect(ctx.session.supportData.entryReason).toBeUndefined();
     });
+
+    it("preserves rich candidate messages when routing them to recovery", async () => {
+        const { handleSupportMessage } = await import("../support.js");
+
+        const ctx = {
+            from: { id: 555 },
+            chat: { id: 555 },
+            message: {
+                message_id: 78,
+                rich_message: {
+                    blocks: [{
+                        type: "paragraph",
+                        text: ["Потрібна ", { type: "bold", text: "допомога" }],
+                    }],
+                },
+            },
+            update: { update_id: 2 },
+            session: {
+                step: "support_chat",
+                supportData: {
+                    preferredTarget: "RECOVERY",
+                    entryReason: "RETURNED_AFTER_BOT_BLOCK",
+                },
+            },
+            api: {
+                createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 987 }),
+                sendMessage: vi.fn().mockResolvedValue({}),
+                copyMessage: vi.fn().mockResolvedValue({}),
+            },
+            reply: vi.fn().mockResolvedValue({}),
+        } as any;
+
+        const handled = await handleSupportMessage(ctx);
+
+        expect(handled).toBe(true);
+        expect(ctx.api.copyMessage).toHaveBeenCalledWith(-1003873088973, 555, 78, {
+            message_thread_id: 987,
+        });
+        expect(createTimelineEvent).toHaveBeenCalledWith(
+            "user-1",
+            "MESSAGE",
+            "USER",
+            "Rich message: Потрібна допомога",
+            expect.objectContaining({ category: "Recovery" }),
+        );
+    });
 });

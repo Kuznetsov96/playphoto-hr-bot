@@ -65,6 +65,7 @@ bot.use(async (ctx, next) => {
         chat_type: ctx.chat?.type,
         callback_action: callbackAction,
         has_text: Boolean(ctx.message?.text),
+        has_rich_message: Boolean(ctx.message?.rich_message),
         has_media: Boolean(ctx.message?.photo || ctx.message?.document || ctx.message?.video || ctx.message?.voice),
     });
 
