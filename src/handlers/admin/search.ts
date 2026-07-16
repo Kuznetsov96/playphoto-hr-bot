@@ -8,9 +8,10 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { staffService } from "../../modules/staff/services/index.js";
-import { escapeHtml, formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
+import { buildAdminOutboundReplyKeyboard, escapeHtml, formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
+import { supportConversationService } from "../../services/support-conversation-service.js";
 
 export const adminSearchHandlers = new Composer<MyContext>();
 
@@ -79,8 +80,8 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
 
     const text = `Write message for <b>${displayName}</b>: ✉️\n\n` +
         (canCreateTopic
-            ? `<i>A support ticket and topic will be created automatically after sending.</i>`
-            : `<i>Message will be delivered directly to the user.</i>`);
+            ? ADMIN_TEXTS["admin-msg-route-active-conversation"]
+            : ADMIN_TEXTS["admin-msg-route-direct"]);
 
     await ScreenManager.renderScreen(
         ctx,
@@ -163,14 +164,15 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
             const user = await userRepository.findByTelegramId(BigInt(targetTgId));
             if (!user) throw new Error("User not found in DB");
 
-            // 1. Check if candidate to conditionally show reply button
-            const candidate = await candidateRepository.findByUserId(user.id);
+            const [candidate, staff] = await Promise.all([
+                candidateRepository.findByUserId(user.id),
+                staffRepository.findByUserId(user.id),
+            ]);
 
-            // 2. Deliver to User — reply button only for candidates
-            let outboundReplyMarkup: InlineKeyboard | undefined;
-            if (candidate && candidate.gender !== "male") {
-                outboundReplyMarkup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-            }
+            const outboundReplyMarkup = buildAdminOutboundReplyKeyboard({
+                hasStaffProfile: Boolean(staff),
+                candidateGender: candidate?.gender ?? null,
+            });
             await sendAdminOutboundMessage(
                 ctx,
                 Number(targetTgId),
@@ -178,7 +180,7 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
             );
             await ctx.deleteMessage().catch(() => { });
 
-            // 3. Log to Timeline
+            // Log to Timeline
             const { timelineRepository } = await import("../../repositories/timeline-repository.js");
             await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', messageText, {
                 adminId: ctx.from?.id,
@@ -186,7 +188,7 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
                 directReply: true
             });
 
-            // 4. Mark unread as handled if candidate
+            // Mark unread as handled if candidate
             if (candidate) {
                 await candidateRepository.update(candidate.id, { hasUnreadMessage: false });
             }
@@ -301,12 +303,8 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
     if (SUPPORT_CHAT_ID && canCreateTopic) {
         try {
-            const existingTopic = await supportRepository.findActiveOutgoingTopicByUser(user.id);
             const location = staff?.location || candidate?.location;
-
-            if (existingTopic) {
-                createdTopicId = existingTopic.topicId;
-            } else {
+            const conversation = await supportConversationService.resolveOrCreateOutgoing(user.id, async () => {
                 const surname = displayName.split(' ')[0] || displayName;
                 const formattedLocation = location
                     ? formatLocationName(location.name, location.city)
@@ -318,7 +316,6 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
                 const prefix = isOnboarding ? '🎓 ONBOARDING' : '📤';
                 const topicTitle = `${prefix} | ${surname}${locationPart}`;
                 const topic = await ctx.api.createForumTopic(SUPPORT_CHAT_ID, topicTitle);
-                createdTopicId = topic.message_thread_id;
 
                 let locationText = '';
                 if (formattedLocation) locationText = `📍 ${formattedLocation}`;
@@ -344,27 +341,49 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
                     reply_markup: topicActions
                 });
 
-                await supportRepository.createOutgoingTopic({
+                return supportRepository.createOutgoingTopic({
                     chatId: BigInt(SUPPORT_CHAT_ID),
                     topicId: topic.message_thread_id,
                     staffName: displayName,
                     userId: user.id,
                 });
-            }
-            await sendAdminOutboundMessage(ctx, SUPPORT_CHAT_ID, {
-                messageThreadId: createdTopicId,
-                prefixText: false,
             });
+
+            createdTopicId = conversation.topicId ?? undefined;
+            logger.info({
+                event: "support.admin_outbound_route_selected",
+                user_id: user.id,
+                route_kind: conversation.kind,
+                route_id: conversation.id,
+                topic_id: conversation.topicId,
+                result: "success"
+            }, "Admin outbound support route selected");
+
+            if (createdTopicId) {
+                await sendAdminOutboundMessage(ctx, SUPPORT_CHAT_ID, {
+                    messageThreadId: createdTopicId,
+                    prefixText: false,
+                });
+            } else {
+                logger.warn({
+                    event: "support.admin_outbound_topic_copy_skipped",
+                    user_id: user.id,
+                    route_kind: conversation.kind,
+                    route_id: conversation.id,
+                    result: "skipped",
+                    reason: "missing_topic_id"
+                }, "Admin outbound support topic copy skipped");
+            }
         } catch (e: any) {
             logger.error({ err: e, topicId: createdTopicId, supportChatId: SUPPORT_CHAT_ID }, "Admin conversation topic bootstrap failed");
         }
     }
 
     try {
-        let outboundReplyMarkup: InlineKeyboard | undefined;
-        if (candidate && candidate.gender !== "male") {
-            outboundReplyMarkup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-        }
+        const outboundReplyMarkup = buildAdminOutboundReplyKeyboard({
+            hasStaffProfile: Boolean(staff),
+            candidateGender: candidate?.gender ?? null,
+        });
         await sendAdminOutboundMessage(
             ctx,
             Number(user.telegramId),

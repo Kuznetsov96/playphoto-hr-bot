@@ -53,6 +53,8 @@ export const ADMIN_TEXTS = {
   "admin-btn-back-to-cities": `⬅️ Back to Cities`,
   "admin-msg-success": `✅ Message sent and logged.`,
   "admin-msg-err-delivery": `❌ Send Error: bot blocked or invalid ID.`,
+  "admin-msg-route-active-conversation": `<i>The message will use the active support conversation, or create a new topic if none exists.</i>`,
+  "admin-msg-route-direct": `<i>Message will be delivered directly to the user.</i>`,
   "admin-notif-interview-completed": (p: { name: string | number }) => `🏁 <b>Interview Completed: ${p.name}</b>\n\nTime is up, status updated to "Completed". Please review the profile and make an offer decision! ⚖️🌸`,
   "admin-notif-training-completed": (p: { name: string | number }) => `🏁 <b>Training Completed: ${p.name}</b>\n\nSlot time is up. Please mark the result (Passed/Failed) in the candidate's profile so they can proceed to NDA and test! 🎓🌸`,
   "admin-notif-new-staff-scheduled": (p: { name: string | number }) => `📅 <b>New Staff Scheduled</b>\n\nCandidate <b>${p.name}</b> has completed hiring and has been added to the schedule. 📸\n\nNo separate mentor onboarding is required.`,

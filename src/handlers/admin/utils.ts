@@ -112,6 +112,21 @@ export function getAdminOutboundText(message: MyContext["message"] | undefined):
     return message?.text || message?.caption || "";
 }
 
+export function buildAdminOutboundReplyKeyboard(options: {
+    hasStaffProfile: boolean;
+    candidateGender?: string | null;
+}) {
+    if (options.hasStaffProfile) {
+        return new InlineKeyboard().text("💬 Відповісти", "staff_support_reply");
+    }
+
+    if (options.candidateGender && options.candidateGender !== "male") {
+        return new InlineKeyboard().text("💬 Відповісти", "contact_hr");
+    }
+
+    return undefined;
+}
+
 export async function sendAdminOutboundMessage(
     ctx: MyContext,
     targetChatId: number,
