@@ -7,6 +7,7 @@ import {
     ReplacementSearchWave,
     type Location,
     type ReplacementRequest,
+    type ReplacementResponse,
     type StaffProfile,
     type User,
 } from "@prisma/client";
@@ -41,6 +42,7 @@ type RequestWithRelations = ReplacementRequest & {
     requester?: (StaffProfile & { user: User }) | null;
     replacement?: (StaffProfile & { user: User }) | null;
 };
+type ReplacementMessageRef = Pick<ReplacementResponse, "id" | "requestId" | "chatId" | "messageId">;
 
 export class ReplacementService {
     async listActiveRequestsForAdmin() {
@@ -271,13 +273,33 @@ export class ReplacementService {
         });
 
         if (!response) return "not_found" as const;
-        if (response.request.status !== ReplacementRequestStatus.ACTIVE) return "closed" as const;
-        if (response.status !== ReplacementResponseStatus.SENT) return "already_answered" as const;
+        if (response.status === ReplacementResponseStatus.ACCEPTED) {
+            await this.editCandidateMessage(
+                api,
+                response,
+                this.formatAcceptedReplacementText(response.request),
+                "accepted"
+            );
+            return "already_answered" as const;
+        }
+        if (response.request.status !== ReplacementRequestStatus.ACTIVE) {
+            await this.editCandidateMessage(
+                api,
+                response,
+                this.formatClosedCandidateText(response.request),
+                "closed"
+            );
+            return "closed" as const;
+        }
+        if (response.status !== ReplacementResponseStatus.SENT) {
+            await this.editCandidateMessage(api, response, this.formatAnsweredCandidateText(response.status), "answered");
+            return "already_answered" as const;
+        }
 
         const hasConflict = await this.hasShiftOnDate(staffId, response.request.shiftDate);
         if (hasConflict) return "conflict" as const;
 
-        const accepted = await prisma.$transaction(async (tx) => {
+        const acceptance = await prisma.$transaction(async (tx) => {
             const reqUpdate = await tx.replacementRequest.updateMany({
                 where: {
                     id: requestId,
@@ -293,7 +315,25 @@ export class ReplacementService {
                 }
             });
 
-            if (reqUpdate.count !== 1) return false;
+            if (reqUpdate.count !== 1) {
+                return { accepted: false as const, otherResponses: [] as ReplacementMessageRef[] };
+            }
+
+            // Capture message references before changing the statuses. Telegram edits
+            // happen after the transaction, but must use this pre-update snapshot.
+            const otherResponses = await tx.replacementResponse.findMany({
+                where: {
+                    requestId,
+                    id: { not: response.id },
+                    status: ReplacementResponseStatus.SENT
+                },
+                select: {
+                    id: true,
+                    requestId: true,
+                    chatId: true,
+                    messageId: true
+                }
+            });
 
             await tx.replacementResponse.update({
                 where: { id: response.id },
@@ -312,15 +352,38 @@ export class ReplacementService {
                 data: { status: ReplacementResponseStatus.INACTIVE }
             });
 
-            return true;
+            return { accepted: true as const, otherResponses };
         });
 
-        if (!accepted) return "closed" as const;
+        if (!acceptance.accepted) {
+            const latestRequest = await this.getRequest(requestId);
+            await this.editCandidateMessage(
+                api,
+                response,
+                this.formatClosedCandidateText(latestRequest ?? response.request),
+                "closed"
+            );
+            return "closed" as const;
+        }
 
-        await this.editCandidateMessage(api, response.chatId, response.messageId, this.formatAcceptedReplacementText(response.request));
-        await this.notifyRequesterFound(api, response.request);
-        await this.notifyAdminFound(api, requestId);
-        await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.\nПідміну знайдено, дякуємо.", response.id);
+        await this.editCandidateMessage(
+            api,
+            response,
+            this.formatAcceptedReplacementText(response.request),
+            "accepted"
+        );
+
+        const closedText = this.formatClosedCandidateText({
+            ...response.request,
+            status: ReplacementRequestStatus.FOUND
+        });
+        await Promise.all([
+            this.notifyRequesterFound(api, response.request),
+            this.notifyAdminFound(api, requestId),
+            ...acceptance.otherResponses.map(otherResponse =>
+                this.editCandidateMessage(api, otherResponse, closedText, "closed")
+            )
+        ]);
 
         return "accepted" as const;
     }
@@ -328,12 +391,27 @@ export class ReplacementService {
     async decline(api: Api, staffId: string, requestId: string) {
         const response = await prisma.replacementResponse.findUnique({
             where: { requestId_staffId: { requestId, staffId } },
-            include: { request: true }
+            include: { request: { include: { location: true } } }
         });
 
         if (!response) return "not_found" as const;
-        if (response.request.status !== ReplacementRequestStatus.ACTIVE) return "closed" as const;
-        if (response.status !== ReplacementResponseStatus.SENT) return "already_answered" as const;
+        if (response.status === ReplacementResponseStatus.DECLINED) {
+            await this.editCandidateMessage(api, response, "Дякуємо за відповідь.", "declined");
+            return "already_answered" as const;
+        }
+        if (response.request.status !== ReplacementRequestStatus.ACTIVE) {
+            await this.editCandidateMessage(
+                api,
+                response,
+                this.formatClosedCandidateText(response.request),
+                "closed"
+            );
+            return "closed" as const;
+        }
+        if (response.status !== ReplacementResponseStatus.SENT) {
+            await this.editCandidateMessage(api, response, this.formatAnsweredCandidateText(response.status), "answered");
+            return "already_answered" as const;
+        }
 
         await prisma.replacementResponse.update({
             where: { id: response.id },
@@ -343,7 +421,7 @@ export class ReplacementService {
             }
         });
 
-        await this.editCandidateMessage(api, response.chatId, response.messageId, "Дякуємо за відповідь.");
+        await this.editCandidateMessage(api, response, "Дякуємо за відповідь.", "declined");
 
         const remaining = await prisma.replacementResponse.count({
             where: {
@@ -676,6 +754,29 @@ export class ReplacementService {
         return `Дякуємо. Ви прийняли підміну.\nАдміністратор отримає деталі.\n\nВаша зміна:\n${this.formatShiftDetails(request)}`;
     }
 
+    private formatClosedCandidateText(request: RequestWithRelations) {
+        const details = this.formatShiftDetails(request);
+
+        switch (request.status) {
+            case ReplacementRequestStatus.FOUND:
+                return `Підміну вже знайдено.\nДякуємо, що відгукнулися.\n\n${details}`;
+            case ReplacementRequestStatus.CANCELLED:
+                return `Пошук підміни скасовано.\n\n${details}`;
+            case ReplacementRequestStatus.EXPIRED:
+                return `Пошук завершено: зміна вже почалася.\n\n${details}`;
+            case ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC:
+                return `Пошук закрито: графік уже оновлено.\n\n${details}`;
+            default:
+                return `Пошук підміни завершено.\n\n${details}`;
+        }
+    }
+
+    private formatAnsweredCandidateText(status: ReplacementResponseStatus) {
+        if (status === ReplacementResponseStatus.DECLINED) return "Дякуємо за відповідь.";
+        if (status === ReplacementResponseStatus.ACCEPTED) return "Дякуємо. Підміну вже прийнято вами.";
+        return "Ця пропозиція більше неактивна.";
+    }
+
     private async notifyRequesterFound(api: Api, request: RequestWithRelations) {
         if (!request.requester) return;
 
@@ -799,15 +900,64 @@ export class ReplacementService {
             data: { status: ReplacementResponseStatus.INACTIVE }
         });
 
-        await Promise.all(responses.map(response => this.editCandidateMessage(api, response.chatId, response.messageId, text)));
+        await Promise.all(responses.map(response => this.editCandidateMessage(api, response, text, "closed")));
     }
 
-    private async editCandidateMessage(api: Api, chatId?: bigint | null, messageId?: number | null, text?: string) {
-        if (!chatId || !messageId || !text) return;
-        await api.editMessageText(Number(chatId), messageId, text, {
-            parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [] }
-        }).catch((err) => logger.debug({ err, chatId: chatId.toString(), messageId }, "Replacement message edit skipped"));
+    private async editCandidateMessage(
+        api: Api,
+        response: ReplacementMessageRef,
+        text: string,
+        state: "accepted" | "declined" | "answered" | "closed"
+    ) {
+        if (!response.chatId || !response.messageId) {
+            logger.warn({
+                event: "staff.replacement.message_reconcile_skipped",
+                request_id: response.requestId,
+                response_id: response.id,
+                state,
+                result: "skipped",
+                reason: "missing_message_reference"
+            }, "Replacement message could not be reconciled");
+            return false;
+        }
+
+        try {
+            await api.editMessageText(Number(response.chatId), response.messageId, text, {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: [] }
+            });
+            logger.info({
+                event: "staff.replacement.message_reconciled",
+                request_id: response.requestId,
+                response_id: response.id,
+                state,
+                result: "success"
+            }, "Replacement message reconciled");
+            return true;
+        } catch (err: any) {
+            const description = String(err?.description ?? err?.message ?? "");
+            if (description.toLowerCase().includes("message is not modified")) {
+                logger.debug({
+                    event: "staff.replacement.message_reconciled",
+                    request_id: response.requestId,
+                    response_id: response.id,
+                    state,
+                    result: "already_current"
+                }, "Replacement message was already current");
+                return true;
+            }
+
+            logger.warn({
+                err,
+                event: "staff.replacement.message_reconcile_failed",
+                request_id: response.requestId,
+                response_id: response.id,
+                message_id: response.messageId,
+                state,
+                result: "failure"
+            }, "Replacement message reconciliation failed");
+            return false;
+        }
     }
 
     private async isRequestObsoleteAfterScheduleChange(request: RequestWithRelations) {
