@@ -1,5 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
-import { htmlToPlainText, msgToHtml, sendAdminOutboundMessage } from "../admin/utils.js";
+import {
+    buildAdminOutboundReplyKeyboard,
+    htmlToPlainText,
+    msgToHtml,
+    sendAdminOutboundMessage,
+} from "../admin/utils.js";
+
+describe("buildAdminOutboundReplyKeyboard", () => {
+    it("routes staff replies through the staff support flow even when a candidate record also exists", () => {
+        const keyboard = buildAdminOutboundReplyKeyboard({
+            hasStaffProfile: true,
+            candidateGender: "female",
+        });
+
+        expect(keyboard?.inline_keyboard).toEqual([[
+            { text: "💬 Відповісти", callback_data: "staff_support_reply" },
+        ]]);
+    });
+
+    it("keeps the candidate reply flow for non-staff candidates", () => {
+        const keyboard = buildAdminOutboundReplyKeyboard({
+            hasStaffProfile: false,
+            candidateGender: "female",
+        });
+
+        expect(keyboard?.inline_keyboard).toEqual([[
+            { text: "💬 Відповісти", callback_data: "contact_hr" },
+        ]]);
+    });
+
+    it("does not add a reply button when neither support flow applies", () => {
+        expect(buildAdminOutboundReplyKeyboard({
+            hasStaffProfile: false,
+            candidateGender: "male",
+        })).toBeUndefined();
+    });
+});
 
 describe("msgToHtml", () => {
     it("keeps nested Telegram entities valid when they start at the same offset", () => {

@@ -26,7 +26,7 @@ import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
 import { adminMagnetCounterHandlers, handleAdminMagnetCounterMessage } from "./magnet-counter.js";
 import { handleManualChannelAccess } from "./manual-channel-access.js";
-import { getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
+import { buildAdminOutboundReplyKeyboard, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 
 export { startAdminStaffSearch, startAdminSearch, startAdminMessageFlow };
 
@@ -102,17 +102,19 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
         const replyText = getAdminOutboundText(ctx.message) || "[Media Reply]";
 
         try {
-            const { InlineKeyboard } = await import("grammy");
             const { userRepository } = await import("../../repositories/user-repository.js");
             const { candidateRepository } = await import("../../repositories/candidate-repository.js");
             const user = await userRepository.findByTelegramId(BigInt(targetId));
-            const candidate = user ? await candidateRepository.findByUserId(user.id) : null;
-            const isCandidate = !!candidate;
-
-            let outboundReplyMarkup: InstanceType<typeof InlineKeyboard> | undefined;
-            if (candidate && candidate.gender !== "male") {
-                outboundReplyMarkup = new InlineKeyboard().text("💬 Відповісти", "contact_hr");
-            }
+            const [candidate, staff] = user
+                ? await Promise.all([
+                    candidateRepository.findByUserId(user.id),
+                    staffRepository.findByUserId(user.id),
+                ])
+                : [null, null];
+            const outboundReplyMarkup = buildAdminOutboundReplyKeyboard({
+                hasStaffProfile: Boolean(staff),
+                candidateGender: candidate?.gender ?? null,
+            });
 
             await sendAdminOutboundMessage(
                 ctx,

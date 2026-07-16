@@ -25,6 +25,7 @@ import { getLocationShortcut } from "../../../utils/ticket-card.js";
 import { truncateText } from "../../../utils/task-helpers.js";
 import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../../../services/first-shift-onboarding-service.js";
 import { getRichMessagePlainText } from "../../../utils/rich-message.js";
+import { supportConversationService } from "../../../services/support-conversation-service.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -951,11 +952,15 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
         }
     }
 
-    // Check Active Ticket
-    const activeTicket = await supportRepository.findActiveTicketByUser(user.id);
+    // Resolve one canonical route for both outbound admin messages and staff replies.
+    const activeConversation = await supportConversationService.resolveActive(user.id);
+    const activeTicket = activeConversation?.kind === "ticket" ? activeConversation.ticket : null;
+    const activeOutgoingTopic = activeConversation?.kind === "outgoing" ? activeConversation.outgoingTopic : null;
     logger.debug({
         telegramId,
         userId: user.id,
+        routeKind: activeConversation?.kind,
+        routeId: activeConversation?.id,
         hasActiveTicket: Boolean(activeTicket),
         ticketId: activeTicket?.id,
         topicId: activeTicket?.topicId,
@@ -1012,8 +1017,6 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
         }
     }
 
-    // Check Active Outgoing Topic (admin-initiated conversation)
-    const activeOutgoingTopic = !activeTicket ? await supportRepository.findActiveOutgoingTopicByUser(user.id) : null;
     if (activeOutgoingTopic) {
         logger.debug({ userId: user.id, topicId: activeOutgoingTopic.topicId }, "Active outgoing support topic found");
     }

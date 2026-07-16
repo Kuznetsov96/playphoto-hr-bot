@@ -3,7 +3,6 @@ import { InlineKeyboard, Composer } from "grammy";
 import type { MyContext } from "../../../types/context.js";
 import { userRepository } from "../../../repositories/user-repository.js";
 import { workShiftRepository } from "../../../repositories/work-shift-repository.js";
-import { supportRepository } from "../../../repositories/support-repository.js";
 import { staffService } from "../services/index.js";
 import { taskService } from "../../../services/task-service.js";
 import { taskProofService, mapTelegramMessageToTaskProofInput } from "../../../services/task-proof-service.js";
@@ -18,6 +17,8 @@ import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-
 import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
 import { replacementService } from "../../../services/replacement-service.js";
 import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
+import { supportConversationService } from "../../../services/support-conversation-service.js";
+import { logBusinessEvent } from "../../../core/log-events.js";
 
 export const staffHandlers = new Composer<MyContext>();
 const TASK_PROOF_BLOCKED_STEPS = new Set([
@@ -564,6 +565,28 @@ export async function handleTaskProofMessage(ctx: MyContext): Promise<boolean> {
 /**
  * Shared logic to start support flow from menu
  */
+async function presentSupportEntry(
+    ctx: MyContext,
+    text: string,
+    keyboard: InlineKeyboard,
+    options: { pushToStack?: boolean; forceNew?: boolean } = {}
+) {
+    // A message written by a person is correspondence, not a disposable menu
+    // screen. Never replace the source message when its Reply button is used.
+    const callbackData = ctx.callbackQuery?.data;
+    const isCorrespondenceReply = callbackData === "staff_support_reply" || callbackData === "contact_hr";
+    if (isCorrespondenceReply && ctx.callbackQuery?.message) {
+        await ctx.reply(text, {
+            parse_mode: "HTML",
+            reply_markup: keyboard,
+            link_preview_options: { is_disabled: true }
+        });
+        return;
+    }
+
+    await ScreenManager.renderScreen(ctx, text, keyboard, options);
+}
+
 export async function startSupportFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -573,7 +596,7 @@ export async function startSupportFlow(ctx: MyContext) {
         if (ctx.callbackQuery) {
             await ctx.answerCallbackQuery("Під час онбордінгу питання йдуть у спеціальний topic.").catch(() => { });
         }
-        await ScreenManager.renderScreen(
+        await presentSupportEntry(
             ctx,
             "🚀 <b>Онбордінг першої зміни ще відкритий.</b>\n\nПросто напиши повідомлення сюди, і я передам його в onboarding-topic ментора.",
             new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
@@ -589,27 +612,33 @@ export async function startSupportFlow(ctx: MyContext) {
         return ctx.reply("Помилка: користувача не знайдено. Спробуй натиснути /start.");
     }
 
-    const activeTicket = await supportRepository.findActiveTicketByUser(user.id);
-    if (activeTicket) {
+    const activeConversation = await supportConversationService.resolveActive(user.id);
+    if (activeConversation) {
         if (ctx.callbackQuery)
             await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => { });
-        await ScreenManager.renderScreen(
+        await presentSupportEntry(
             ctx,
             STAFF_TEXTS["support-info-already-open"],
             new InlineKeyboard().text("🏠 Меню", "staff_hub_nav")
         );
-        return;
-    }
-
-    const activeOutgoingTopic = await supportRepository.findActiveOutgoingTopicByUser(user.id);
-    if (activeOutgoingTopic) {
-        if (ctx.callbackQuery)
-            await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => { });
-        await ScreenManager.renderScreen(
-            ctx,
-            "💬 <b>Обговорення відкрито:</b>\nАдміністратор створив діалог з тобою. Просто напиши повідомлення сюди, і я його передам.",
-            new InlineKeyboard().text("🏠 Меню", "staff_hub_nav")
-        );
+        logBusinessEvent({
+            event: "support.staff_reply_prompt_opened",
+            correlationId: ctx.correlationId,
+            updateId: ctx.update.update_id,
+            telegramId,
+            userId: user.id,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "success",
+            module: "staff-menu",
+            operation: "startSupportFlow",
+            safeContext: {
+                routeKind: activeConversation.kind,
+                routeId: activeConversation.id,
+                topicId: activeConversation.topicId,
+                sourceMessageId: ctx.callbackQuery?.message?.message_id,
+            }
+        });
         return;
     }
 
@@ -623,7 +652,7 @@ export async function startSupportFlow(ctx: MyContext) {
 
     const text = STAFF_TEXTS["support-ask-issue"];
 
-    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("✖️ Скасувати", cancelCallback).danger(), {
+    await presentSupportEntry(ctx, text, new InlineKeyboard().text("✖️ Скасувати", cancelCallback).danger(), {
         pushToStack: true
     });
 }
@@ -636,7 +665,10 @@ staffHandlers.command("support", async (ctx) => {
 });
 
 staffHandlers.callbackQuery("open_support_dialog", async (ctx) => {
-    await ctx.answerCallbackQuery();
+    await startSupportFlow(ctx);
+});
+
+staffHandlers.callbackQuery("staff_support_reply", async (ctx) => {
     await startSupportFlow(ctx);
 });
 
