@@ -725,15 +725,32 @@ staffHandlers.callbackQuery(/^staff_repl_accept_(.+)$/, async (ctx) => {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
 
-    const result = await replacementService.accept(ctx.api, user.staffProfile.id, requestId);
-    const messageByResult: Record<typeof result, string> = {
-        accepted: "Дякуємо, підміну прийнято.",
-        already_answered: "Відповідь уже збережено.",
-        closed: "Запит вже закрито.",
-        conflict: "У тебе вже є зміна цього дня.",
-        not_found: "Запит не знайдено."
-    };
-    await ctx.answerCallbackQuery(messageByResult[result]);
+    try {
+        const result = await replacementService.accept(ctx.api, user.staffProfile.id, requestId);
+        const messageByResult: Record<typeof result, string> = {
+            accepted: "Дякуємо, підміну прийнято.",
+            already_answered: "Відповідь уже збережено.",
+            closed: "Запит уже закрито.",
+            conflict: "У тебе вже є зміна цього дня.",
+            not_found: "Запит не знайдено."
+        };
+        await ctx.answerCallbackQuery({
+            text: messageByResult[result],
+            show_alert: result === "closed" || result === "conflict" || result === "not_found"
+        });
+    } catch (err) {
+        logger.error({
+            err,
+            event: "staff.replacement.accept_failed",
+            request_id: requestId,
+            staff_id: user.staffProfile.id,
+            result: "failure"
+        }, "Replacement acceptance failed");
+        await ctx.answerCallbackQuery({
+            text: "Не вдалося зберегти відповідь. Спробуйте ще раз.",
+            show_alert: true
+        }).catch(() => { });
+    }
 });
 
 staffHandlers.callbackQuery(/^staff_repl_decline_(.+)$/, async (ctx) => {
@@ -744,14 +761,31 @@ staffHandlers.callbackQuery(/^staff_repl_decline_(.+)$/, async (ctx) => {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user?.staffProfile) return ctx.answerCallbackQuery("Користувача не знайдено");
 
-    const result = await replacementService.decline(ctx.api, user.staffProfile.id, requestId);
-    const messageByResult: Record<typeof result, string> = {
-        declined: "Дякуємо за відповідь.",
-        already_answered: "Відповідь уже збережено.",
-        closed: "Запит вже закрито.",
-        not_found: "Запит не знайдено."
-    };
-    await ctx.answerCallbackQuery(messageByResult[result]);
+    try {
+        const result = await replacementService.decline(ctx.api, user.staffProfile.id, requestId);
+        const messageByResult: Record<typeof result, string> = {
+            declined: "Дякуємо за відповідь.",
+            already_answered: "Відповідь уже збережено.",
+            closed: "Запит уже закрито.",
+            not_found: "Запит не знайдено."
+        };
+        await ctx.answerCallbackQuery({
+            text: messageByResult[result],
+            show_alert: result === "closed" || result === "not_found"
+        });
+    } catch (err) {
+        logger.error({
+            err,
+            event: "staff.replacement.decline_failed",
+            request_id: requestId,
+            staff_id: user.staffProfile.id,
+            result: "failure"
+        }, "Replacement decline failed");
+        await ctx.answerCallbackQuery({
+            text: "Не вдалося зберегти відповідь. Спробуйте ще раз.",
+            show_alert: true
+        }).catch(() => { });
+    }
 });
 
 staffHandlers.callbackQuery(/^staff_task_proof_start_(.+)$/, async (ctx) => {
