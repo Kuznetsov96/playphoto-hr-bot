@@ -67,6 +67,55 @@ function formatStaffShiftTime(shift: {
     return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
 }
 
+type StaffShiftView = {
+    id: string;
+    staffId: string;
+    locationId: string;
+    date: Date;
+    startTime: Date | null;
+    endTime: Date | null;
+    location: {
+        id: string;
+        name: string;
+        schedule?: string | null;
+    };
+    isAcceptedReplacementPendingSync?: boolean;
+};
+
+function getShiftDateKey(date: Date) {
+    return date.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" });
+}
+
+async function getVisibleStaffShifts(staffId: string, since: Date, limit: number): Promise<StaffShiftView[]> {
+    const [scheduledShifts, acceptedAssignments] = await Promise.all([
+        workShiftRepository.findWithLocationForStaff(staffId, since, limit),
+        replacementService.listAcceptedAssignmentsForStaff(staffId, since, limit)
+    ]);
+
+    const visibleDays = new Set(scheduledShifts.map(shift => getShiftDateKey(shift.date)));
+    const pendingSyncShifts: StaffShiftView[] = acceptedAssignments
+        .filter(assignment => {
+            const dateKey = getShiftDateKey(assignment.shiftDate);
+            if (visibleDays.has(dateKey)) return false;
+            visibleDays.add(dateKey);
+            return true;
+        })
+        .map(assignment => ({
+            id: `replacement:${assignment.id}`,
+            staffId,
+            locationId: assignment.locationId,
+            date: assignment.shiftDate,
+            startTime: assignment.shiftStartTime,
+            endTime: assignment.shiftEndTime,
+            location: assignment.location,
+            isAcceptedReplacementPendingSync: true
+        }));
+
+    return [...scheduledShifts, ...pendingSyncShifts]
+        .sort((left, right) => left.date.getTime() - right.date.getTime())
+        .slice(0, limit);
+}
+
 function buildTaskProofKeyboard(taskId: string) {
     return new InlineKeyboard()
         .text("✅ Завершити завдання", `staff_task_proof_submit_${taskId}`).row()
@@ -131,7 +180,7 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     kyivNow.setHours(0, 0, 0, 0);
 
     const staffProfileId = user.staffProfile?.id;
-    const upcomingShifts = staffProfileId ? await workShiftRepository.findWithLocationForStaff(staffProfileId, kyivNow, 10) : [];
+    const upcomingShifts = staffProfileId ? await getVisibleStaffShifts(staffProfileId, kyivNow, 10) : [];
     const todayShifts = upcomingShifts.filter((shift) => shift.date.getTime() === kyivNow.getTime());
     const hasShiftToday = todayShifts.length > 0;
 
@@ -167,7 +216,10 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
         const shift = todayShifts[0]!;
         shiftLine =
             `📸 <b>Сьогодні зміна</b>\n` +
-            `${escapeHtml(shift.location.name)} · ${escapeHtml(formatStaffShiftTime(shift))}`;
+            `${escapeHtml(shift.location.name)} · ${escapeHtml(formatStaffShiftTime(shift))}` +
+            (shift.isAcceptedReplacementPendingSync
+                ? `\n${STAFF_TEXTS["staff-replacement-pending-sync-hub"]}`
+                : "");
     } else {
         shiftLine = `🏝 <b>Сьогодні вихідний</b>\nВідпочивай та набирайся сил! ✨`;
     }
@@ -203,7 +255,7 @@ export async function showStaffSchedule(ctx: MyContext) {
     const kyivToday = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
     kyivToday.setHours(0, 0, 0, 0);
 
-    const shifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivToday, 100);
+    const shifts = await getVisibleStaffShifts(user.staffProfile.id, kyivToday, 100);
 
     if (shifts.length === 0) {
         const text = "У тебе поки немає призначених змін. 📅\nЯк тільки вони з'являться — я повідомлю!";
@@ -218,6 +270,9 @@ export async function showStaffSchedule(ctx: MyContext) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
         text += `▫️ <code>${dateStr}</code> · ${escapeHtml(formatStaffShiftTime(s))} · ${escapeHtml(s.location.name)}`;
+        if (s.isAcceptedReplacementPendingSync) {
+            text += ` · ${STAFF_TEXTS["staff-replacement-pending-sync-schedule"]}`;
+        }
 
         const colleagues = allColleagues.filter(
             (c) => c.locationId === s.locationId && c.date.getTime() === s.date.getTime()

@@ -6,20 +6,110 @@ import { taskService } from "./task-service.js";
 import logger from "../core/logger.js";
 import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { replacementService } from "./replacement-service.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
+
+const KYIV_TIME_ZONE = "Europe/Kyiv";
+
+const kyivDateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: KYIV_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+});
+
+function getKyivDateParts(date: Date) {
+    const values = kyivDateTimeFormatter.formatToParts(date).reduce<Record<string, string>>((result, part) => {
+        if (part.type !== "literal") result[part.type] = part.value;
+        return result;
+    }, {});
+
+    return {
+        year: Number(values.year),
+        month: Number(values.month),
+        day: Number(values.day),
+        hour: Number(values.hour),
+        minute: Number(values.minute),
+        second: Number(values.second)
+    };
+}
+
+function getKyivUtcOffsetMinutes(date: Date) {
+    const parts = getKyivDateParts(date);
+    const kyivRenderedAsUtc = Date.UTC(
+        parts.year,
+        parts.month - 1,
+        parts.day,
+        parts.hour,
+        parts.minute,
+        parts.second
+    );
+    return (kyivRenderedAsUtc - date.getTime()) / 60000;
+}
+
+function createKyivDateTime(year: number, month: number, day: number, hour: number, minute: number = 0) {
+    const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+    const roughDate = new Date(utcGuess);
+    const firstPass = new Date(utcGuess - getKyivUtcOffsetMinutes(roughDate) * 60_000);
+    return new Date(utcGuess - getKyivUtcOffsetMinutes(firstPass) * 60_000);
+}
+
+function getKyivCalendarDateRange(now: Date) {
+    const parts = getKyivDateParts(now);
+    const start = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+    return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+export function getNextShiftReminderAt(now: Date) {
+    const parts = getKyivDateParts(now);
+    let nextRun = createKyivDateTime(parts.year, parts.month, parts.day, 8);
+
+    if (nextRun <= now) {
+        const tomorrow = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
+        nextRun = createKyivDateTime(
+            tomorrow.getUTCFullYear(),
+            tomorrow.getUTCMonth() + 1,
+            tomorrow.getUTCDate(),
+            8
+        );
+    }
+
+    return nextRun;
+}
 
 export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
     const now = new Date();
-    // Use Kyiv time for the date check
-    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-
-    const startOfDay = new Date(kyivNow);
-    startOfDay.setHours(0, 0, 0, 0);
-
-    const endOfDay = new Date(kyivNow);
-    endOfDay.setHours(23, 59, 59, 999);
+    const { start: startOfDay, end: endOfDay } = getKyivCalendarDateRange(now);
 
     try {
-        const todayShifts = await workShiftRepository.findWithRelationsByDateRange(startOfDay, endOfDay);
+        const [scheduledShifts, acceptedAssignments] = await Promise.all([
+            workShiftRepository.findWithRelationsByDateRange(startOfDay, endOfDay),
+            replacementService.listAcceptedAssignmentsByDateRange(startOfDay, endOfDay)
+        ]);
+
+        const coveredStaffIds = new Set(scheduledShifts.map(shift => shift.staffId));
+        const acceptedPendingSync = acceptedAssignments
+            .filter(assignment => {
+                if (!assignment.replacement || coveredStaffIds.has(assignment.replacement.id)) return false;
+                coveredStaffIds.add(assignment.replacement.id);
+                return true;
+            })
+            .map(assignment => ({
+                id: `replacement:${assignment.id}`,
+                staffId: assignment.replacement!.id,
+                locationId: assignment.locationId,
+                date: assignment.shiftDate,
+                startTime: assignment.shiftStartTime,
+                endTime: assignment.shiftEndTime,
+                staff: assignment.replacement!,
+                location: assignment.location,
+                isAcceptedReplacementPendingSync: true
+            }));
+        const todayShifts = [...scheduledShifts, ...acceptedPendingSync];
 
         if (todayShifts.length === 0) {
             logger.debug({ date: startOfDay.toISOString() }, "Shift reminders skipped because no shifts were found");
@@ -36,8 +126,11 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             }
 
             try {
-                const dateStr = shift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸\nВдалого дня та гарних знімків! ✨`;
+                const dateStr = shift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: KYIV_TIME_ZONE });
+                const pendingSyncText = "isAcceptedReplacementPendingSync" in shift && shift.isAcceptedReplacementPendingSync
+                    ? `\n${STAFF_TEXTS["staff-replacement-pending-sync-reminder"]}`
+                    : "";
+                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸${pendingSyncText}\nВдалого дня та гарних знімків! ✨`;
 
                 const tasks = await taskService.getStaffActiveTasks(staff.id);
                 const activeTasksCount = tasks.filter(t => !t.isCompleted).length;
@@ -67,8 +160,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
 
                 await bot.api.sendMessage(Number(telegramId), fullText, {
                     parse_mode: "HTML",
-                    reply_markup: kb,
-                    disable_notification: true
+                    reply_markup: kb
                 });
                 logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");
             } catch (err) {
@@ -85,6 +177,8 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             operation: "sendDailyShiftReminders",
             safeContext: {
                 shiftsCount: todayShifts.length,
+                scheduledShiftsCount: scheduledShifts.length,
+                acceptedPendingSyncCount: acceptedPendingSync.length
             },
         });
     } catch (error) {
@@ -104,34 +198,33 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
 }
 
 export function startShiftReminderLoop(bot: Bot<MyContext>) {
-    // We want to run this at 08:00 AM Kyiv time every day
-    const now = new Date();
+    const scheduleNextRun = () => {
+        const now = new Date();
+        const nextRun = getNextShiftReminderAt(now);
+        const delay = nextRun.getTime() - now.getTime();
+        logBusinessEvent({
+            event: "staff.shift_reminder_loop.started",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "shift-reminder-service",
+            operation: "startShiftReminderLoop",
+            safeContext: {
+                nextRunAt: nextRun.toISOString(),
+                delayHours: Number((delay / 1000 / 60 / 60).toFixed(2)),
+            },
+        });
 
-    // Calculate 08:00 today in Kyiv
-    let nextRun = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-    nextRun.setHours(8, 0, 0, 0);
+        setTimeout(async () => {
+            try {
+                await sendDailyShiftReminders(bot);
+            } catch (error) {
+                logger.error({ err: error }, "Shift reminder run failed");
+            } finally {
+                scheduleNextRun();
+            }
+        }, delay);
+    };
 
-    // If it's already past 8 AM today, schedule for tomorrow
-    if (now >= nextRun) {
-        nextRun.setDate(nextRun.getDate() + 1);
-    }
-
-    const delay = nextRun.getTime() - now.getTime();
-    logBusinessEvent({
-        event: "staff.shift_reminder_loop.started",
-        actorType: "system",
-        actorRole: "system",
-        result: "success",
-        module: "shift-reminder-service",
-        operation: "startShiftReminderLoop",
-        safeContext: {
-            nextRunAt: nextRun.toISOString(),
-            delayHours: Number((delay / 1000 / 60 / 60).toFixed(2)),
-        },
-    });
-
-    setTimeout(() => {
-        sendDailyShiftReminders(bot).catch(e => logger.error({ err: e }, "Initial shift reminder run failed"));
-        setInterval(() => sendDailyShiftReminders(bot), 24 * 60 * 60 * 1000);
-    }, delay);
+    scheduleNextRun();
 }

@@ -17,6 +17,7 @@ import { defaultQueue } from "../core/queue.js";
 import { scheduleAvailabilityService } from "./schedule-availability-service.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
 
 export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
@@ -74,6 +75,34 @@ export class ReplacementService {
             include: { location: true },
             orderBy: { date: "asc" },
             take: 12
+        });
+    }
+
+    async listAcceptedAssignmentsForStaff(staffId: string, since: Date, take: number = 100) {
+        return prisma.replacementRequest.findMany({
+            where: {
+                replacementStaffId: staffId,
+                status: ReplacementRequestStatus.FOUND,
+                shiftDate: { gte: since }
+            },
+            include: { location: true },
+            orderBy: { shiftDate: "asc" },
+            take
+        });
+    }
+
+    async listAcceptedAssignmentsByDateRange(start: Date, end: Date) {
+        return prisma.replacementRequest.findMany({
+            where: {
+                replacementStaffId: { not: null },
+                status: ReplacementRequestStatus.FOUND,
+                shiftDate: { gte: start, lt: end }
+            },
+            include: {
+                location: true,
+                replacement: { include: { user: true } }
+            },
+            orderBy: { shiftDate: "asc" }
         });
     }
 
@@ -225,7 +254,7 @@ export class ReplacementService {
 
         const request = await this.getRequest(requestId);
         if (request) {
-            await this.inactivateOpenResponses(api, request.id, "Запит вже неактивний.\nПошук скасовано.");
+            await this.inactivateOpenResponses(api, request.id, this.formatClosedCandidateText(request));
             await this.notifyAdminCancelled(api, request.id);
         }
 
@@ -260,7 +289,7 @@ export class ReplacementService {
                     }
                 ).catch((err) => logger.warn({ err, requestId }, "Requester replacement admin-cancel notification failed"));
             }
-            await this.inactivateOpenResponses(api, request.id, "Пошук підміни скасовано адміністратором.");
+            await this.inactivateOpenResponses(api, request.id, this.formatClosedCandidateText(request));
         }
 
         return true;
@@ -296,7 +325,7 @@ export class ReplacementService {
             return "already_answered" as const;
         }
 
-        const hasConflict = await this.hasShiftOnDate(staffId, response.request.shiftDate);
+        const hasConflict = await this.hasShiftConflictOnDate(staffId, response.request.shiftDate, requestId);
         if (hasConflict) return "conflict" as const;
 
         const acceptance = await prisma.$transaction(async (tx) => {
@@ -372,6 +401,14 @@ export class ReplacementService {
             this.formatAcceptedReplacementText(response.request),
             "accepted"
         );
+
+        await api.sendMessage(
+            Number(response.staff.user.telegramId),
+            this.formatAcceptedReplacementText(response.request),
+            { parse_mode: "HTML" }
+        ).catch((err) => logger.warn({ err, requestId, staffId }, "Replacement confirmation delivery failed"));
+
+        await this.inactivateOtherSameDayOffersForStaff(api, staffId, response.request.shiftDate, requestId);
 
         const closedText = this.formatClosedCandidateText({
             ...response.request,
@@ -615,13 +652,22 @@ export class ReplacementService {
         }) as StaffWithUserLocation[];
 
         const candidateIds = candidates.map(c => c.id);
-        const [busyShifts, existingResponses] = await Promise.all([
+        const [busyShifts, acceptedAssignments, existingResponses] = await Promise.all([
             prisma.workShift.findMany({
                 where: {
                     staffId: { in: candidateIds },
                     date: { gte: this.kyivStartOfDay(request.shiftDate), lt: this.nextKyivDay(request.shiftDate) }
                 },
                 select: { staffId: true }
+            }),
+            prisma.replacementRequest.findMany({
+                where: {
+                    id: { not: request.id },
+                    replacementStaffId: { in: candidateIds },
+                    status: ReplacementRequestStatus.FOUND,
+                    shiftDate: { gte: this.kyivStartOfDay(request.shiftDate), lt: this.nextKyivDay(request.shiftDate) }
+                },
+                select: { replacementStaffId: true }
             }),
             prisma.replacementResponse.findMany({
                 where: {
@@ -633,7 +679,10 @@ export class ReplacementService {
             })
         ]);
 
-        const busy = new Set(busyShifts.map(s => s.staffId));
+        const busy = new Set([
+            ...busyShifts.map(s => s.staffId),
+            ...acceptedAssignments.flatMap(assignment => assignment.replacementStaffId ? [assignment.replacementStaffId] : [])
+        ]);
         const alreadyAsked = new Set(existingResponses.map(r => r.staffId));
 
         return candidates
@@ -751,7 +800,7 @@ export class ReplacementService {
     }
 
     private formatAcceptedReplacementText(request: RequestWithRelations) {
-        return `Дякуємо. Ви прийняли підміну.\nАдміністратор отримає деталі.\n\nВаша зміна:\n${this.formatShiftDetails(request)}`;
+        return STAFF_TEXTS["staff-replacement-accepted"]({ details: this.formatShiftDetails(request) });
     }
 
     private formatClosedCandidateText(request: RequestWithRelations) {
@@ -859,7 +908,7 @@ export class ReplacementService {
             }).catch(() => { });
         }
         await this.notifyAdminFailed(api, requestId);
-        await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.");
+        await this.inactivateOpenResponses(api, requestId, this.formatClosedCandidateText(request));
     }
 
     private async closeByScheduleSync(api: Api, requestId: string) {
@@ -881,7 +930,7 @@ export class ReplacementService {
                 parse_mode: "HTML"
             }).catch(() => { });
         }
-        await this.inactivateOpenResponses(api, requestId, "Запит вже закрито.\nГрафік оновлено.");
+        await this.inactivateOpenResponses(api, requestId, this.formatClosedCandidateText(request));
     }
 
     private async inactivateOpenResponses(api: Api, requestId: string, text: string, exceptResponseId?: string) {
@@ -901,6 +950,45 @@ export class ReplacementService {
         });
 
         await Promise.all(responses.map(response => this.editCandidateMessage(api, response, text, "closed")));
+    }
+
+    private async inactivateOtherSameDayOffersForStaff(
+        api: Api,
+        staffId: string,
+        shiftDate: Date,
+        acceptedRequestId: string
+    ) {
+        const responses = await prisma.replacementResponse.findMany({
+            where: {
+                staffId,
+                status: ReplacementResponseStatus.SENT,
+                request: {
+                    id: { not: acceptedRequestId },
+                    status: ReplacementRequestStatus.ACTIVE,
+                    shiftDate: { gte: this.kyivStartOfDay(shiftDate), lt: this.nextKyivDay(shiftDate) }
+                }
+            },
+            include: { request: { include: { location: true } } }
+        });
+
+        if (responses.length === 0) return;
+
+        await prisma.replacementResponse.updateMany({
+            where: { id: { in: responses.map(response => response.id) } },
+            data: {
+                status: ReplacementResponseStatus.INACTIVE,
+                respondedAt: new Date()
+            }
+        });
+
+        await Promise.all(responses.map(response => this.editCandidateMessage(
+            api,
+            response,
+            STAFF_TEXTS["staff-replacement-other-offer-closed"]({
+                details: this.formatShiftDetails(response.request as RequestWithRelations)
+            }),
+            "closed"
+        )));
     }
 
     private async editCandidateMessage(
@@ -992,14 +1080,22 @@ export class ReplacementService {
         });
     }
 
-    private async hasShiftOnDate(staffId: string, date: Date) {
-        const count = await prisma.workShift.count({
-            where: {
-                staffId,
-                date: { gte: this.kyivStartOfDay(date), lt: this.nextKyivDay(date) }
-            }
-        });
-        return count > 0;
+    private async hasShiftConflictOnDate(staffId: string, date: Date, currentRequestId: string) {
+        const range = { gte: this.kyivStartOfDay(date), lt: this.nextKyivDay(date) };
+        const [scheduledShiftCount, acceptedReplacementCount] = await Promise.all([
+            prisma.workShift.count({
+                where: { staffId, date: range }
+            }),
+            prisma.replacementRequest.count({
+                where: {
+                    id: { not: currentRequestId },
+                    replacementStaffId: staffId,
+                    status: ReplacementRequestStatus.FOUND,
+                    shiftDate: range
+                }
+            })
+        ]);
+        return scheduledShiftCount > 0 || acceptedReplacementCount > 0;
     }
 
     private async getRequest(requestId: string): Promise<RequestWithRelations | null> {

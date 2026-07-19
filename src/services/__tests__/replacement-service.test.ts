@@ -8,6 +8,7 @@ const prismaMock = {
         findMany: vi.fn(),
         findFirst: vi.fn(),
         create: vi.fn(),
+        count: vi.fn(),
         update: vi.fn(),
         updateMany: vi.fn(),
     },
@@ -68,6 +69,7 @@ vi.mock("../../core/logger.js", () => ({
 describe("ReplacementService", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        prismaMock.replacementRequest.findMany.mockResolvedValue([]);
         scheduleAvailabilityService.getMonthlyScheduleSheetName.mockReturnValue("Травень 2030");
     });
 
@@ -332,7 +334,14 @@ describe("ReplacementService", () => {
 
         prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 1 });
         prismaMock.replacementRequest.findUnique.mockResolvedValue(request);
-        prismaMock.replacementResponse.findMany.mockResolvedValue([]);
+        prismaMock.replacementResponse.findMany.mockResolvedValue([
+            {
+                id: "response-cancelled",
+                requestId: request.id,
+                chatId: 1311338839n,
+                messageId: 123
+            }
+        ]);
         prismaMock.replacementResponse.updateMany.mockResolvedValue({ count: 0 });
 
         const api = {
@@ -353,6 +362,15 @@ describe("ReplacementService", () => {
             107794048,
             expect.stringContaining("Photographer: Смірнова Дарина\n\n"),
             { parse_mode: "HTML" }
+        );
+        expect(api.editMessageText).toHaveBeenCalledWith(
+            1311338839,
+            123,
+            expect.stringContaining("Пошук підміни скасовано.\n\n12 травня\nFantasy Town\n14:00-21:00"),
+            {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: [] }
+            }
         );
     });
 
@@ -564,7 +582,20 @@ describe("ReplacementService", () => {
             chatId: 7092441172n,
             messageId: 654,
         };
+        const otherSameDayOffer = {
+            id: "response-other-request",
+            requestId: "request-other-same-day",
+            chatId: 1132074881n,
+            messageId: 987,
+            request: {
+                ...request,
+                id: "request-other-same-day",
+                locationId: "location-other",
+                location: { id: "location-other", name: "Інша локація", city: "Київ", schedule: null }
+            }
+        };
         let otherResponseStatus = "SENT";
+        let otherSameDayOfferStatus = "SENT";
 
         prismaMock.replacementResponse.findUnique.mockResolvedValue({
             id: "response-accept",
@@ -577,17 +608,25 @@ describe("ReplacementService", () => {
             staff: replacementStaff,
         });
         prismaMock.workShift.count.mockResolvedValue(0);
+        prismaMock.replacementRequest.count.mockResolvedValue(0);
         prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 1 });
         prismaMock.replacementResponse.update.mockResolvedValue({});
         prismaMock.replacementResponse.findMany.mockImplementation(async ({ where }: any) => {
             if (where?.requestId === request.id && where?.status === "SENT" && otherResponseStatus === "SENT") {
                 return [otherResponse];
             }
+            if (where?.staffId === replacementStaff.id && otherSameDayOfferStatus === "SENT") {
+                return [otherSameDayOffer];
+            }
             return [];
         });
         prismaMock.replacementResponse.updateMany.mockImplementation(async ({ where }: any) => {
             if (where?.requestId === request.id && where?.status === "SENT") {
                 otherResponseStatus = "INACTIVE";
+                return { count: 1 };
+            }
+            if (where?.id?.in?.includes(otherSameDayOffer.id)) {
+                otherSameDayOfferStatus = "INACTIVE";
                 return { count: 1 };
             }
             return { count: 0 };
@@ -610,7 +649,7 @@ describe("ReplacementService", () => {
         expect(api.editMessageText).toHaveBeenCalledWith(
             1132074881,
             321,
-            expect.stringContaining("Ваша зміна:\n15 травня\nSmile Park (Darynok)\n15:00-23:00"),
+            expect.stringContaining("Ця зміна закріплена за вами:\n15 травня\nSmile Park (Darynok)\n15:00-23:00"),
             {
                 parse_mode: "HTML",
                 reply_markup: { inline_keyboard: [] },
@@ -625,7 +664,112 @@ describe("ReplacementService", () => {
                 reply_markup: { inline_keyboard: [] },
             }
         );
+        expect(api.editMessageText).toHaveBeenCalledWith(
+            1132074881,
+            987,
+            expect.stringContaining("Цю пропозицію закрито для вас, бо ви вже підтвердили іншу зміну на цю дату."),
+            {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: [] }
+            }
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            1132074881,
+            expect.stringContaining("Підміну підтверджено"),
+            { parse_mode: "HTML" }
+        );
         expect(otherResponseStatus).toBe("INACTIVE");
+        expect(otherSameDayOfferStatus).toBe("INACTIVE");
+    });
+
+    it("blocks acceptance when the photographer already accepted another replacement that day", async () => {
+        const request: any = {
+            id: "request-conflict",
+            locationId: "location-conflict",
+            city: "Запоріжжя",
+            shiftDate: new Date("2030-05-15T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-15T12:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-15T20:00:00.000Z"),
+            status: "ACTIVE",
+            location: { id: "location-conflict", name: "Volkland 2", city: "Запоріжжя", schedule: null },
+            requester: { id: "requester-conflict", fullName: "Автор Запиту", user: { telegramId: 772086875n } }
+        };
+
+        prismaMock.replacementResponse.findUnique.mockResolvedValue({
+            id: "response-conflict",
+            requestId: request.id,
+            staffId: "replacement-conflict",
+            status: "SENT",
+            chatId: 1132074881n,
+            messageId: 321,
+            request,
+            staff: {
+                id: "replacement-conflict",
+                fullName: "Зайнята Фотографиня",
+                user: { telegramId: 1132074881n }
+            }
+        });
+        prismaMock.workShift.count.mockResolvedValue(0);
+        prismaMock.replacementRequest.count.mockResolvedValue(1);
+
+        const api = { editMessageText: vi.fn(), sendMessage: vi.fn() };
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().accept(api as any, "replacement-conflict", request.id);
+
+        expect(result).toBe("conflict");
+        expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
+        expect(api.editMessageText).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not offer a second same-day replacement to a photographer with an accepted assignment", async () => {
+        const request: any = {
+            id: "request-second-offer",
+            requesterStaffId: null,
+            locationId: "location-second-offer",
+            city: "Запоріжжя",
+            shiftDate: new Date("2030-05-16T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-16T12:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-16T20:00:00.000Z"),
+            status: "ACTIVE",
+            currentWave: null,
+            nextWaveAt: null,
+            location: { id: "location-second-offer", name: "Volkland 2", city: "Запоріжжя", schedule: null },
+            requester: null,
+            replacement: null
+        };
+
+        prismaMock.replacementRequest.findUnique.mockImplementation(async () => ({ ...request }));
+        prismaMock.replacementRequest.findMany.mockResolvedValue([
+            { replacementStaffId: "candidate-busy" }
+        ]);
+        prismaMock.workShift.findFirst.mockResolvedValue(null);
+        prismaMock.location.count.mockResolvedValue(1);
+        prismaMock.replacementResponse.findMany.mockResolvedValue([]);
+        prismaMock.replacementRequest.update.mockImplementation(async ({ data }: any) => {
+            Object.assign(request, data);
+            return { ...request };
+        });
+        scheduleAvailabilityService.getAvailabilityForDateFromSchedule.mockResolvedValue(new Map([
+            ["candidate-busy", "available"]
+        ]));
+        prismaMock.staffProfile.findMany.mockResolvedValue([
+            {
+                id: "candidate-busy",
+                fullName: "Виниченко Вікторія",
+                user: { telegramId: 1311338839n },
+                location: request.location
+            }
+        ]);
+        prismaMock.workShift.findMany.mockResolvedValue([]);
+        defaultQueue.add.mockResolvedValue({ id: "job-second-offer" });
+
+        const api = { sendMessage: vi.fn() };
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().dispatchNextWave(api as any, request.id);
+
+        expect(prismaMock.replacementResponse.create).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
     });
 
     it("reports a closed request when a photographer accepts after another replacement was found", async () => {
@@ -697,6 +841,7 @@ describe("ReplacementService", () => {
             staff: { id: "replacement-race-loser", fullName: "Другий Фотограф", user: { telegramId: 7092441172n } },
         });
         prismaMock.workShift.count.mockResolvedValue(0);
+        prismaMock.replacementRequest.count.mockResolvedValue(0);
         prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 0 });
         prismaMock.replacementRequest.findUnique.mockResolvedValue({
             ...request,
@@ -756,7 +901,7 @@ describe("ReplacementService", () => {
         expect(api.editMessageText).toHaveBeenCalledWith(
             1132074881,
             777,
-            expect.stringContaining("Ваша зміна:"),
+            expect.stringContaining("Підміну підтверджено"),
             {
                 parse_mode: "HTML",
                 reply_markup: { inline_keyboard: [] },
