@@ -90,6 +90,18 @@ Example: 05.02 10:00-14:00`,
   "hr-btn-back-to-calendar": `⬅️ Back to Calendar`,
   "hr-info-invite-new-confirm": (p: { city: string | number, locationName: string | number, count: string | number, totalNeeded: string | number }) => `🌆 City: <b>${p.city}</b>\n📍 Location: <b>${p.locationName}</b>\n👥 New Apps: <b>${p.count}</b>\n💎 Open Positions: <b>${p.totalNeeded}</b>\n\nSend invitation to all new candidates for this location? ✨`,
   "staff-btn-home": `🏠 Меню`,
+  "staff-replacement-accepted": (p: { details: string }) => `✅ <b>Підміну підтверджено</b>
+
+Ця зміна закріплена за вами:
+${p.details}
+
+Більше пропозицій на цю дату бот не надсилатиме. У розділі «Мій графік» зміна може з'явитися трохи пізніше після синхронізації адміністратором.`,
+  "staff-replacement-other-offer-closed": (p: { details: string }) => `Цю пропозицію закрито для вас, бо ви вже підтвердили іншу зміну на цю дату.
+
+${p.details}`,
+  "staff-replacement-pending-sync-hub": `✅ <i>Підміна підтверджена, графік синхронізується</i>`,
+  "staff-replacement-pending-sync-schedule": `✅ <i>підміна підтверджена</i>`,
+  "staff-replacement-pending-sync-reminder": `✅ Підміну підтверджено. Основний графік ще синхронізується.`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,
