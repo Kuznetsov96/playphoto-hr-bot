@@ -1,4 +1,9 @@
 import { ReplacementRequestStatus } from "@prisma/client";
+import {
+    classifyAcceptedReplacement,
+    getScheduleDateKey,
+    type ScheduledShiftIdentity
+} from "../../../services/replacement-schedule-state.js";
 
 type ShiftLocation = {
     id: string;
@@ -18,6 +23,8 @@ type ScheduledShift = {
 
 type ReplacementAssignment = {
     id: string;
+    requesterStaffId: string | null;
+    replacementStaffId: string | null;
     locationId: string;
     shiftDate: Date;
     shiftStartTime: Date | null;
@@ -36,7 +43,7 @@ export type StaffShiftView = ScheduledShift & {
 };
 
 function getShiftDateKey(date: Date) {
-    return date.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" });
+    return getScheduleDateKey(date);
 }
 
 function getShiftFallbackKey(locationId: string, date: Date) {
@@ -48,7 +55,8 @@ export function mergeStaffScheduleView(
     scheduledShifts: ScheduledShift[],
     acceptedAssignments: ReplacementAssignment[],
     outgoingRequests: OutgoingReplacementRequest[],
-    limit: number
+    limit: number,
+    scheduledAssignmentSlots: ScheduledShiftIdentity[] = scheduledShifts
 ): StaffShiftView[] {
     const outgoingByShiftId = new Map(
         outgoingRequests
@@ -97,6 +105,9 @@ export function mergeStaffScheduleView(
     const visibleDays = new Set(visibleShifts.map(shift => getShiftDateKey(shift.date)));
     const acceptedReplacementShifts: StaffShiftView[] = acceptedAssignments
         .filter(assignment => {
+            if (classifyAcceptedReplacement(assignment, scheduledAssignmentSlots) !== "pending") {
+                return false;
+            }
             const dateKey = getShiftDateKey(assignment.shiftDate);
             if (visibleDays.has(dateKey)) return false;
             visibleDays.add(dateKey);

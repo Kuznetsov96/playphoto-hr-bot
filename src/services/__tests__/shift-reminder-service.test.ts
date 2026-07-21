@@ -56,6 +56,7 @@ describe("shift reminder service", () => {
         replacementService.listAcceptedAssignmentsByDateRange.mockResolvedValue([
             {
                 id: "replacement-1",
+                requesterStaffId: "original-staff",
                 replacementStaffId: "staff-1",
                 locationId: "location-1",
                 shiftDate: new Date("2026-07-19T00:00:00.000Z"),
@@ -109,6 +110,7 @@ describe("shift reminder service", () => {
         replacementService.listAcceptedAssignmentsByDateRange.mockResolvedValue([
             {
                 id: "replacement-1",
+                requesterStaffId: "original-staff",
                 replacementStaffId: "staff-1",
                 locationId: "location-1",
                 shiftDate: new Date("2026-07-19T00:00:00.000Z"),
@@ -127,5 +129,87 @@ describe("shift reminder service", () => {
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         expect(sendMessage.mock.calls[0]?.[1]).not.toContain("Основний графік ще синхронізується");
+    });
+
+    it("uses a third-person schedule update instead of a stale accepted replacement", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([{
+            id: "shift-third-person",
+            staffId: "third-staff",
+            locationId: "location-1",
+            date: new Date("2026-07-21T00:00:00.000Z"),
+            staff: {
+                id: "third-staff",
+                fullName: "Гут Ольга",
+                user: { telegramId: 222222222n }
+            },
+            location: { id: "location-1", name: "Dragon Park" }
+        }]);
+        replacementService.listAcceptedAssignmentsByDateRange.mockResolvedValue([{
+            id: "replacement-stale",
+            requesterStaffId: "original-staff",
+            replacementStaffId: "replacement-staff",
+            locationId: "location-1",
+            shiftDate: new Date("2026-07-21T00:00:00.000Z"),
+            shiftStartTime: null,
+            shiftEndTime: null,
+            replacement: {
+                id: "replacement-staff",
+                fullName: "Зубаль Діана",
+                user: { telegramId: 111111111n }
+            },
+            location: { id: "location-1", name: "Dragon Park" }
+        }]);
+
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage).toHaveBeenCalledWith(
+            222222222,
+            expect.stringContaining("Dragon Park"),
+            expect.anything()
+        );
+    });
+
+    it("replaces the original photographer reminder while an accepted assignment is pending sync", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([{
+            id: "shift-original",
+            staffId: "original-staff",
+            locationId: "location-1",
+            date: new Date("2026-07-21T00:00:00.000Z"),
+            staff: {
+                id: "original-staff",
+                fullName: "Бланк Анастасія",
+                user: { telegramId: 222222222n }
+            },
+            location: { id: "location-1", name: "Dragon Park" }
+        }]);
+        replacementService.listAcceptedAssignmentsByDateRange.mockResolvedValue([{
+            id: "replacement-pending",
+            requesterStaffId: "original-staff",
+            replacementStaffId: "replacement-staff",
+            locationId: "location-1",
+            shiftDate: new Date("2026-07-21T00:00:00.000Z"),
+            shiftStartTime: null,
+            shiftEndTime: null,
+            replacement: {
+                id: "replacement-staff",
+                fullName: "Зубаль Діана",
+                user: { telegramId: 111111111n }
+            },
+            location: { id: "location-1", name: "Dragon Park" }
+        }]);
+
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage).toHaveBeenCalledWith(
+            111111111,
+            expect.stringContaining("Основний графік ще синхронізується"),
+            expect.anything()
+        );
     });
 });

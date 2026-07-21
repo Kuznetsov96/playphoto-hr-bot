@@ -18,6 +18,7 @@ import { scheduleAvailabilityService } from "./schedule-availability-service.js"
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
 
 export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
@@ -492,7 +493,7 @@ export class ReplacementService {
         if (!request || request.status !== ReplacementRequestStatus.ACTIVE) return;
 
         if (await this.isRequestObsoleteAfterScheduleChange(request)) {
-            await this.closeByScheduleSync(api, request.id);
+            await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
             return;
         }
 
@@ -547,13 +548,54 @@ export class ReplacementService {
         );
     }
 
-    async closeActiveRequestsChangedBySchedule(api: Api) {
-        const active = await prisma.replacementRequest.findMany({
-            where: { status: ReplacementRequestStatus.ACTIVE },
-            include: { location: true, requester: { include: { user: true } } }
+    async reconcileRequestsChangedBySchedule(api: Api) {
+        const requests = await prisma.replacementRequest.findMany({
+            where: {
+                OR: [
+                    { status: ReplacementRequestStatus.ACTIVE },
+                    {
+                        status: ReplacementRequestStatus.FOUND,
+                        shiftDate: { gte: this.kyivStartOfDay(new Date()) }
+                    }
+                ]
+            },
+            include: {
+                location: true,
+                requester: { include: { user: true } },
+                replacement: { include: { user: true } }
+            }
         });
 
-        for (const request of active) {
+        for (const request of requests) {
+            if (request.status === ReplacementRequestStatus.FOUND) {
+                if (!request.replacementStaffId) continue;
+
+                const dateRange = {
+                    gte: this.kyivStartOfDay(request.shiftDate),
+                    lt: this.nextKyivDay(request.shiftDate)
+                };
+                const scheduledShifts = await prisma.workShift.findMany({
+                    where: {
+                        date: dateRange,
+                        OR: [
+                            { locationId: request.locationId },
+                            { staffId: request.replacementStaffId }
+                        ]
+                    },
+                    select: {
+                        id: true,
+                        staffId: true,
+                        locationId: true,
+                        date: true
+                    }
+                });
+
+                if (classifyAcceptedReplacement(request, scheduledShifts) === "superseded") {
+                    await this.closeByScheduleSync(api, request, ReplacementRequestStatus.FOUND);
+                }
+                continue;
+            }
+
             if (!request.requesterStaffId) {
                 const locationShift = await prisma.workShift.findFirst({
                     where: {
@@ -561,13 +603,15 @@ export class ReplacementService {
                         date: { gte: this.kyivStartOfDay(request.shiftDate), lt: this.nextKyivDay(request.shiftDate) }
                     }
                 });
-                if (locationShift) await this.closeByScheduleSync(api, request.id);
+                if (locationShift) {
+                    await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
+                }
                 continue;
             }
 
             const currentShift = await this.findSameScheduledShift(request);
             if (!currentShift) {
-                await this.closeByScheduleSync(api, request.id);
+                await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
             } else if (request.workShiftId !== currentShift.id) {
                 await prisma.replacementRequest.update({
                     where: { id: request.id },
@@ -924,26 +968,58 @@ export class ReplacementService {
         await this.inactivateOpenResponses(api, requestId, this.formatClosedCandidateText(request));
     }
 
-    private async closeByScheduleSync(api: Api, requestId: string) {
-        await prisma.replacementRequest.updateMany({
-            where: { id: requestId, status: ReplacementRequestStatus.ACTIVE },
-            data: {
-                status: ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC,
-                completedAt: new Date(),
-                closedReason: "schedule_changed",
-                nextWaveAt: null
-            }
+    private async closeByScheduleSync(
+        api: Api,
+        request: RequestWithRelations,
+        expectedStatus: ReplacementRequestStatus
+    ) {
+        const wasAccepted = expectedStatus === ReplacementRequestStatus.FOUND;
+        const result = await prisma.replacementRequest.updateMany({
+            where: { id: request.id, status: expectedStatus },
+            data: wasAccepted
+                ? {
+                    status: ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC,
+                    closedReason: "accepted_replacement_superseded_by_schedule",
+                    nextWaveAt: null
+                }
+                : {
+                    status: ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC,
+                    completedAt: new Date(),
+                    closedReason: "schedule_changed",
+                    nextWaveAt: null
+                }
         });
+        if (result.count !== 1) return;
 
-        const request = await this.getRequest(requestId);
-        if (!request) return;
+        const closedRequest = {
+            ...request,
+            status: ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC
+        };
 
         if (request.requester) {
-            await api.sendMessage(Number(request.requester.user.telegramId), "Пошук закрито.\nГрафік уже оновлено.", {
+            const requesterText = wasAccepted
+                ? STAFF_TEXTS["staff-replacement-overridden-requester"]
+                : "Пошук закрито.\nГрафік уже оновлено.";
+            await api.sendMessage(Number(request.requester.user.telegramId), requesterText, {
                 parse_mode: "HTML"
             }).catch(() => { });
         }
-        await this.inactivateOpenResponses(api, requestId, this.formatClosedCandidateText(request));
+
+        if (wasAccepted && request.replacement) {
+            await api.sendMessage(
+                Number(request.replacement.user.telegramId),
+                STAFF_TEXTS["staff-replacement-overridden-acceptor"]({
+                    details: this.formatShiftDetails(request)
+                }),
+                { parse_mode: "HTML" }
+            ).catch((err) => logger.warn({ err, requestId: request.id }, "Superseded replacement notification failed"));
+        }
+
+        await this.inactivateOpenResponses(
+            api,
+            request.id,
+            this.formatClosedCandidateText(closedRequest)
+        );
     }
 
     private async inactivateOpenResponses(api: Api, requestId: string, text: string, exceptResponseId?: string) {

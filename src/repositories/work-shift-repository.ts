@@ -150,6 +150,29 @@ export class WorkShiftRepository {
         });
     }
 
+    /**
+     * Finds every scheduled photographer for the requested location/date slots.
+     * Used to decide whether an accepted replacement is still pending or has
+     * been superseded by a later manual schedule update.
+     */
+    async findForSlots(shifts: { locationId: string; date: Date }[]) {
+        if (shifts.length === 0) return [];
+
+        const conditions = shifts.map(shift => {
+            const start = new Date(shift.date);
+            start.setUTCHours(0, 0, 0, 0);
+            const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+            return {
+                locationId: shift.locationId,
+                date: { gte: start, lt: end }
+            };
+        });
+
+        return prisma.workShift.findMany({
+            where: { OR: conditions }
+        });
+    }
+
     async countShiftsForStaff(staffId: string, since: Date): Promise<number> {
         return prisma.workShift.count({
             where: {
