@@ -104,6 +104,13 @@ ${p.details}`,
   "staff-replacement-pending-sync-hub": `✅ <i>Підміна підтверджена, графік синхронізується</i>`,
   "staff-replacement-pending-sync-schedule": `✅ <i>підміна підтверджена</i>`,
   "staff-replacement-pending-sync-reminder": `✅ Підміну підтверджено. Основний графік ще синхронізується.`,
+  "staff-replacement-overridden-requester": `Підтверджену підміну закрито: актуальний графік уже змінено.`,
+  "staff-replacement-overridden-acceptor": (p: { details: string }) => `⚠️ <b>Підміну змінено в актуальному графіку</b>
+
+Ця зміна більше не закріплена за тобою:
+${p.details}
+
+Орієнтуйся на розділ «Мій графік». Якщо зміна все ж мала залишитися твоєю, напиши в підтримку.`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,

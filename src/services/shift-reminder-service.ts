@@ -8,6 +8,10 @@ import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { replacementService } from "./replacement-service.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import {
+    classifyAcceptedReplacement,
+    getScheduleSlotKey
+} from "./replacement-schedule-state.js";
 
 const KYIV_TIME_ZONE = "Europe/Kyiv";
 
@@ -92,9 +96,24 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
         ]);
 
         const coveredStaffIds = new Set(scheduledShifts.map(shift => shift.staffId));
+        const replacedScheduledShiftKeys = new Set<string>();
         const acceptedPendingSync = acceptedAssignments
             .filter(assignment => {
                 if (!assignment.replacement || coveredStaffIds.has(assignment.replacement.id)) return false;
+
+                const scheduleState = classifyAcceptedReplacement({
+                    requesterStaffId: assignment.requesterStaffId,
+                    replacementStaffId: assignment.replacementStaffId,
+                    locationId: assignment.locationId,
+                    shiftDate: assignment.shiftDate
+                }, scheduledShifts);
+                if (scheduleState !== "pending") return false;
+
+                if (assignment.requesterStaffId) {
+                    replacedScheduledShiftKeys.add(
+                        `${assignment.requesterStaffId}:${getScheduleSlotKey(assignment.locationId, assignment.shiftDate)}`
+                    );
+                }
                 coveredStaffIds.add(assignment.replacement.id);
                 return true;
             })
@@ -109,7 +128,10 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 location: assignment.location,
                 isAcceptedReplacementPendingSync: true
             }));
-        const todayShifts = [...scheduledShifts, ...acceptedPendingSync];
+        const effectiveScheduledShifts = scheduledShifts.filter(shift => !replacedScheduledShiftKeys.has(
+            `${shift.staffId}:${getScheduleSlotKey(shift.locationId, shift.date)}`
+        ));
+        const todayShifts = [...effectiveScheduledShifts, ...acceptedPendingSync];
 
         if (todayShifts.length === 0) {
             logger.debug({ date: startOfDay.toISOString() }, "Shift reminders skipped because no shifts were found");
@@ -177,7 +199,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             operation: "sendDailyShiftReminders",
             safeContext: {
                 shiftsCount: todayShifts.length,
-                scheduledShiftsCount: scheduledShifts.length,
+                scheduledShiftsCount: effectiveScheduledShifts.length,
                 acceptedPendingSyncCount: acceptedPendingSync.length
             },
         });

@@ -1201,7 +1201,7 @@ export class ScheduleSyncService {
         try {
             const { replacementService } = await import("./replacement-service.js");
             const bot = new Bot(process.env.BOT_TOKEN!);
-            await replacementService.closeActiveRequestsChangedBySchedule(bot.api);
+            await replacementService.reconcileRequestsChangedBySchedule(bot.api);
         } catch (err) {
             logger.warn({ err }, "Replacement requests schedule-sync reconciliation failed");
         }

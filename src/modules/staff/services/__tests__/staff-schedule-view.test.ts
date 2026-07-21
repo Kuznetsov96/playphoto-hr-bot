@@ -18,6 +18,8 @@ function outgoingRequest(status: ReplacementRequestStatus, workShiftId: string |
     return {
         id: "request-1",
         workShiftId,
+        requesterStaffId: "staff-1",
+        replacementStaffId: status === ReplacementRequestStatus.FOUND ? "replacement-staff" : null,
         locationId: location.id,
         shiftDate,
         shiftStartTime: scheduledShift.startTime,
@@ -81,6 +83,8 @@ describe("staff schedule replacement state", () => {
             [],
             [{
                 id: "request-1",
+                requesterStaffId: "staff-1",
+                replacementStaffId: "replacement-staff",
                 locationId: location.id,
                 shiftDate,
                 shiftStartTime: scheduledShift.startTime,
@@ -98,5 +102,34 @@ describe("staff schedule replacement state", () => {
                 isAcceptedReplacementPendingSync: true
             })
         ]);
+    });
+
+    it("hides an accepted replacement superseded by a third photographer in the main schedule", () => {
+        const acceptedAssignment = {
+            id: "request-1",
+            requesterStaffId: "original-staff",
+            replacementStaffId: "replacement-staff",
+            locationId: location.id,
+            shiftDate,
+            shiftStartTime: scheduledShift.startTime,
+            shiftEndTime: scheduledShift.endTime,
+            location
+        };
+
+        const result = mergeStaffScheduleView(
+            "replacement-staff",
+            [],
+            [acceptedAssignment],
+            [],
+            100,
+            [{
+                id: "shift-third-person",
+                staffId: "third-staff",
+                locationId: location.id,
+                date: shiftDate
+            }]
+        );
+
+        expect(result).toEqual([]);
     });
 });

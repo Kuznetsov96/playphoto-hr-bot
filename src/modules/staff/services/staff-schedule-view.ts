@@ -11,5 +11,19 @@ export async function getVisibleStaffShifts(staffId: string, since: Date, limit:
         replacementService.listOutgoingScheduleRequestsForStaff(staffId, since, limit)
     ]);
 
-    return mergeStaffScheduleView(staffId, scheduledShifts, acceptedAssignments, outgoingRequests, limit);
+    const scheduledAssignmentSlots = await workShiftRepository.findForSlots(
+        acceptedAssignments.map(assignment => ({
+            locationId: assignment.locationId,
+            date: assignment.shiftDate
+        }))
+    );
+
+    return mergeStaffScheduleView(
+        staffId,
+        scheduledShifts,
+        acceptedAssignments,
+        outgoingRequests,
+        limit,
+        scheduledAssignmentSlots
+    );
 }

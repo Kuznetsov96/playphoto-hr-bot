@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ReplacementAvailabilityKind, ReplacementSearchWave } from "@prisma/client";
+import {
+    ReplacementAvailabilityKind,
+    ReplacementRequestStatus,
+    ReplacementSearchWave
+} from "@prisma/client";
 
 const prismaMock = {
     $transaction: vi.fn(async (callback: any) => callback(prismaMock)),
@@ -1076,10 +1080,13 @@ describe("ReplacementService", () => {
         prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-resynced" });
         prismaMock.replacementRequest.update.mockResolvedValue({ ...request, workShiftId: "shift-resynced" });
 
-        const api = { sendMessage: vi.fn(), editMessageText: vi.fn() };
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+            editMessageText: vi.fn()
+        };
 
         const { ReplacementService } = await import("../replacement-service.js");
-        await new ReplacementService().closeActiveRequestsChangedBySchedule(api as any);
+        await new ReplacementService().reconcileRequestsChangedBySchedule(api as any);
 
         expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
             where: { id: "request-orphan" },
@@ -1087,6 +1094,68 @@ describe("ReplacementService", () => {
         });
         expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("closes an accepted replacement superseded by a third photographer in the schedule", async () => {
+        const request: any = {
+            id: "request-superseded",
+            workShiftId: null,
+            requesterStaffId: "original-staff",
+            replacementStaffId: "replacement-staff",
+            locationId: "location-1",
+            city: "Львів",
+            shiftDate: new Date("2030-05-13T00:00:00.000Z"),
+            shiftStartTime: null,
+            shiftEndTime: null,
+            status: ReplacementRequestStatus.FOUND,
+            location: { id: "location-1", name: "Dragon Park", city: "Львів", schedule: null },
+            requester: {
+                id: "original-staff",
+                fullName: "Бланк Анастасія",
+                user: { telegramId: 222222222n }
+            },
+            replacement: {
+                id: "replacement-staff",
+                fullName: "Зубаль Діана",
+                user: { telegramId: 111111111n }
+            }
+        };
+
+        prismaMock.replacementRequest.findMany.mockResolvedValue([request]);
+        prismaMock.workShift.findMany.mockResolvedValue([{
+            id: "shift-third-person",
+            staffId: "third-staff",
+            locationId: "location-1",
+            date: request.shiftDate
+        }]);
+        prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 1 });
+        prismaMock.replacementResponse.findMany.mockResolvedValue([]);
+        prismaMock.replacementResponse.updateMany.mockResolvedValue({ count: 0 });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+            editMessageText: vi.fn()
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().reconcileRequestsChangedBySchedule(api as any);
+
+        expect(prismaMock.replacementRequest.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: request.id,
+                status: ReplacementRequestStatus.FOUND
+            },
+            data: {
+                status: ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC,
+                closedReason: "accepted_replacement_superseded_by_schedule",
+                nextWaveAt: null
+            }
+        });
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            111111111,
+            expect.stringContaining("Ця зміна більше не закріплена за тобою"),
+            { parse_mode: "HTML" }
+        );
     });
 
     describe("kyivDateWithTime DST handling", () => {
