@@ -19,6 +19,7 @@ import { replacementService } from "../../../services/replacement-service.js";
 import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
+import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
 
 export const staffHandlers = new Composer<MyContext>();
 const TASK_PROOF_BLOCKED_STEPS = new Set([
@@ -65,55 +66,6 @@ function formatStaffShiftTime(shift: {
     }
 
     return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
-}
-
-type StaffShiftView = {
-    id: string;
-    staffId: string;
-    locationId: string;
-    date: Date;
-    startTime: Date | null;
-    endTime: Date | null;
-    location: {
-        id: string;
-        name: string;
-        schedule?: string | null;
-    };
-    isAcceptedReplacementPendingSync?: boolean;
-};
-
-function getShiftDateKey(date: Date) {
-    return date.toLocaleDateString("en-CA", { timeZone: "Europe/Kyiv" });
-}
-
-async function getVisibleStaffShifts(staffId: string, since: Date, limit: number): Promise<StaffShiftView[]> {
-    const [scheduledShifts, acceptedAssignments] = await Promise.all([
-        workShiftRepository.findWithLocationForStaff(staffId, since, limit),
-        replacementService.listAcceptedAssignmentsForStaff(staffId, since, limit)
-    ]);
-
-    const visibleDays = new Set(scheduledShifts.map(shift => getShiftDateKey(shift.date)));
-    const pendingSyncShifts: StaffShiftView[] = acceptedAssignments
-        .filter(assignment => {
-            const dateKey = getShiftDateKey(assignment.shiftDate);
-            if (visibleDays.has(dateKey)) return false;
-            visibleDays.add(dateKey);
-            return true;
-        })
-        .map(assignment => ({
-            id: `replacement:${assignment.id}`,
-            staffId,
-            locationId: assignment.locationId,
-            date: assignment.shiftDate,
-            startTime: assignment.shiftStartTime,
-            endTime: assignment.shiftEndTime,
-            location: assignment.location,
-            isAcceptedReplacementPendingSync: true
-        }));
-
-    return [...scheduledShifts, ...pendingSyncShifts]
-        .sort((left, right) => left.date.getTime() - right.date.getTime())
-        .slice(0, limit);
 }
 
 function buildTaskProofKeyboard(taskId: string) {
@@ -217,7 +169,9 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
         shiftLine =
             `📸 <b>Сьогодні зміна</b>\n` +
             `${escapeHtml(shift.location.name)} · ${escapeHtml(formatStaffShiftTime(shift))}` +
-            (shift.isAcceptedReplacementPendingSync
+            (shift.isReplacementSearchActive
+                ? `\n${STAFF_TEXTS["staff-replacement-search-active-hub"]}`
+                : shift.isAcceptedReplacementPendingSync
                 ? `\n${STAFF_TEXTS["staff-replacement-pending-sync-hub"]}`
                 : "");
     } else {
@@ -270,7 +224,9 @@ export async function showStaffSchedule(ctx: MyContext) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
         text += `▫️ <code>${dateStr}</code> · ${escapeHtml(formatStaffShiftTime(s))} · ${escapeHtml(s.location.name)}`;
-        if (s.isAcceptedReplacementPendingSync) {
+        if (s.isReplacementSearchActive) {
+            text += ` · ${STAFF_TEXTS["staff-replacement-search-active-schedule"]}`;
+        } else if (s.isAcceptedReplacementPendingSync) {
             text += ` · ${STAFF_TEXTS["staff-replacement-pending-sync-schedule"]}`;
         }
 
