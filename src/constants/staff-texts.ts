@@ -111,6 +111,15 @@ ${p.details}`,
 ${p.details}
 
 Орієнтуйся на розділ «Мій графік». Якщо зміна все ж мала залишитися твоєю, напиши в підтримку.`,
+  "staff-replacement-confirmed-cancelled-requester": `Підтверджену підміну скасовано адміністратором.
+
+Орієнтуйся на актуальний графік у боті. Якщо інформація не відповідає домовленості, напиши в підтримку.`,
+  "staff-replacement-confirmed-cancelled-acceptor": (p: { details: string }) => `⚠️ <b>Підтверджену підміну скасовано адміністратором</b>
+
+Ця зміна більше не закріплена за тобою:
+${p.details}
+
+Орієнтуйся на розділ «Мій графік». Якщо це не відповідає домовленості, напиши в підтримку.`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,

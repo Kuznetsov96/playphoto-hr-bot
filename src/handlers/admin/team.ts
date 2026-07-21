@@ -532,11 +532,22 @@ async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = fal
         return;
     }
 
-    const requests = await replacementService.listActiveRequestsForAdmin();
+    const requests = await replacementService.listManageableRequestsForAdmin();
     const kb = new InlineKeyboard();
 
     requests.slice(0, 8).forEach((request, index) => {
-        kb.text(`✖️ Cancel #${index + 1}`, `admin_repl_cancel_${request.id}`).danger().row();
+        if (request.status === "FOUND") {
+            kb.text(
+                ADMIN_TEXTS["admin-replacement-cancel-confirmed-button"]({ index: index + 1 }),
+                `admin_repl_review_cancel_${request.id}`
+            ).danger().row();
+            return;
+        }
+
+        kb.text(
+            ADMIN_TEXTS["admin-replacement-cancel-search-button"]({ index: index + 1 }),
+            `admin_repl_cancel_${request.id}`
+        ).danger().row();
     });
 
     kb.text("➕ Start manual search", "admin_repl_manual_start").row()
@@ -549,6 +560,48 @@ async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = fal
         kb,
         { forceNew, pushToStack: true }
     );
+    await ctx.answerCallbackQuery().catch(() => { });
+}
+
+async function showAdminConfirmedReplacementCancel(ctx: MyContext, requestId: string) {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const request = await replacementService.getConfirmedRequestForAdmin(requestId);
+    if (!request?.replacement) {
+        await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-replacement-cancel-confirmed-inactive"]).catch(() => { });
+        await showAdminReplacementBoard(ctx, true);
+        return;
+    }
+
+    const date = request.shiftDate.toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        timeZone: "Europe/Kyiv"
+    });
+    const time = formatScheduleNotificationShiftTime({
+        date: request.shiftDate,
+        startTime: request.shiftStartTime,
+        endTime: request.shiftEndTime,
+        location: request.location
+    });
+    const requester = request.requester?.fullName || "empty shift";
+
+    const text = ADMIN_TEXTS["admin-replacement-cancel-confirmed-text"]({
+        date: escapeHtml(date),
+        time: escapeHtml(time),
+        location: escapeHtml(request.location.name),
+        requester: escapeHtml(requester),
+        replacement: escapeHtml(request.replacement.fullName)
+    });
+    const kb = new InlineKeyboard()
+        .text(
+            ADMIN_TEXTS["admin-replacement-cancel-confirmed-confirm"],
+            `admin_repl_do_cancel_found_${request.id}`
+        ).danger().row()
+        .text(ADMIN_TEXTS["admin-btn-back"], "admin_repl_board");
+
+    await ScreenManager.renderScreen(ctx, text, kb, { forceNew: true, pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 }
 
@@ -750,6 +803,38 @@ adminTeamHandlers.callbackQuery(/^admin_repl_cancel_(.+)$/, async (ctx) => {
     const requestId = ctx.match![1]!;
     const cancelled = await replacementService.cancelRequestByAdmin(ctx.api, requestId);
     await ctx.answerCallbackQuery(cancelled ? "Search cancelled" : "Search is already inactive").catch(() => { });
+    await showAdminReplacementBoard(ctx, true);
+});
+
+adminTeamHandlers.callbackQuery(/^admin_repl_review_cancel_(.+)$/, async (ctx) => {
+    await showAdminConfirmedReplacementCancel(ctx, ctx.match![1]!);
+});
+
+adminTeamHandlers.callbackQuery(/^admin_repl_do_cancel_found_(.+)$/, async (ctx) => {
+    if (!(await ensureMainAdmin(ctx))) return;
+
+    const requestId = ctx.match![1]!;
+    const result = await replacementService.cancelConfirmedRequestByAdmin(ctx.api, requestId);
+    const message = result === "cancelled"
+        ? ADMIN_TEXTS["admin-replacement-cancel-confirmed-success"]
+        : result === "replacement_still_scheduled"
+            ? ADMIN_TEXTS["admin-replacement-cancel-confirmed-still-scheduled"]
+            : ADMIN_TEXTS["admin-replacement-cancel-confirmed-inactive"];
+
+    await ctx.answerCallbackQuery(
+        result === "replacement_still_scheduled"
+            ? { text: message, show_alert: true }
+            : message
+    ).catch(() => { });
+    audit({
+        event: "replacement_confirmed_admin_cancelled",
+        result: result === "cancelled" ? "success" : "failed",
+        actorType: "admin",
+        telegramId: ctx.from?.id,
+        entityType: "replacement_request",
+        entityId: requestId,
+        context: { reason: result }
+    });
     await showAdminReplacementBoard(ctx, true);
 });
 

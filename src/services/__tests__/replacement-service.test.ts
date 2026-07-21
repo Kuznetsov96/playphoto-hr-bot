@@ -378,6 +378,128 @@ describe("ReplacementService", () => {
         );
     });
 
+    it("lets the main admin cancel an already confirmed replacement and notifies both photographers", async () => {
+        const request: any = {
+            id: "request-confirmed-cancel",
+            requesterStaffId: "requester-confirmed-cancel",
+            replacementStaffId: "replacement-confirmed-cancel",
+            locationId: "location-confirmed-cancel",
+            city: "Львів",
+            shiftDate: new Date("2030-05-12T00:00:00.000Z"),
+            shiftStartTime: new Date("2030-05-12T11:00:00.000Z"),
+            shiftEndTime: new Date("2030-05-12T18:00:00.000Z"),
+            status: ReplacementRequestStatus.FOUND,
+            location: { id: "location-confirmed-cancel", name: "Dragon Park", city: "Львів", schedule: null },
+            requester: {
+                id: "requester-confirmed-cancel",
+                fullName: "Бланк Анастасія",
+                user: { telegramId: 222222222n }
+            },
+            replacement: {
+                id: "replacement-confirmed-cancel",
+                fullName: "Зубаль Діана",
+                user: { telegramId: 111111111n }
+            }
+        };
+        const acceptedResponse = {
+            id: "response-confirmed-cancel",
+            requestId: request.id,
+            staffId: request.replacementStaffId,
+            chatId: 111111111n,
+            messageId: 42
+        };
+
+        prismaMock.replacementRequest.findUnique.mockResolvedValue(request);
+        prismaMock.workShift.count.mockResolvedValue(0);
+        prismaMock.replacementRequest.updateMany.mockResolvedValue({ count: 1 });
+        prismaMock.replacementResponse.findUnique.mockResolvedValue(acceptedResponse);
+        prismaMock.replacementResponse.findMany.mockResolvedValue([]);
+        prismaMock.replacementResponse.updateMany.mockResolvedValue({ count: 0 });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+            editMessageText: vi.fn().mockResolvedValue({})
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().cancelConfirmedRequestByAdmin(api as any, request.id);
+
+        expect(result).toBe("cancelled");
+        expect(prismaMock.replacementRequest.updateMany).toHaveBeenCalledWith({
+            where: {
+                id: request.id,
+                status: ReplacementRequestStatus.FOUND,
+                replacementStaffId: request.replacementStaffId
+            },
+            data: {
+                status: ReplacementRequestStatus.CANCELLED,
+                closedReason: "accepted_replacement_cancelled_by_admin",
+                nextWaveAt: null
+            }
+        });
+        expect(api.editMessageText).toHaveBeenCalledWith(
+            111111111,
+            42,
+            expect.stringContaining("Підтверджену підміну скасовано адміністратором"),
+            {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: [] }
+            }
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            111111111,
+            expect.stringContaining("Ця зміна більше не закріплена за тобою"),
+            { parse_mode: "HTML" }
+        );
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            222222222,
+            expect.stringContaining("Орієнтуйся на актуальний графік"),
+            { parse_mode: "HTML" }
+        );
+    });
+
+    it("does not use confirmed cancellation for an active or already closed request", async () => {
+        prismaMock.replacementRequest.findUnique.mockResolvedValue({
+            id: "request-not-confirmed",
+            status: ReplacementRequestStatus.ACTIVE,
+            replacementStaffId: null,
+            replacement: null
+        });
+
+        const api = { sendMessage: vi.fn(), editMessageText: vi.fn() };
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().cancelConfirmedRequestByAdmin(api as any, "request-not-confirmed");
+
+        expect(result).toBe("not_found");
+        expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("blocks confirmed cancellation while the replacement is still in the main schedule", async () => {
+        prismaMock.replacementRequest.findUnique.mockResolvedValue({
+            id: "request-still-scheduled",
+            status: ReplacementRequestStatus.FOUND,
+            requesterStaffId: "requester-still-scheduled",
+            replacementStaffId: "replacement-still-scheduled",
+            locationId: "location-still-scheduled",
+            shiftDate: new Date("2030-05-12T00:00:00.000Z"),
+            replacement: {
+                id: "replacement-still-scheduled",
+                fullName: "Зубаль Діана",
+                user: { telegramId: 111111111n }
+            }
+        });
+        prismaMock.workShift.count.mockResolvedValue(1);
+
+        const api = { sendMessage: vi.fn(), editMessageText: vi.fn() };
+        const { ReplacementService } = await import("../replacement-service.js");
+        const result = await new ReplacementService().cancelConfirmedRequestByAdmin(api as any, "request-still-scheduled");
+
+        expect(result).toBe("replacement_still_scheduled");
+        expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
     it("starts a manual admin replacement search without a requester photographer", async () => {
         const location: any = {
             id: "location-admin",

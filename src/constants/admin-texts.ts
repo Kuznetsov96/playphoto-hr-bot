@@ -287,6 +287,28 @@ export const ADMIN_TEXTS = {
   "admin-schedule-select-date": `📅 <b>Select Date:</b>`,
   "admin-schedule-history": `🔙 History`,
   "admin-schedule-history-title": `📅 <b>Past 7 Days</b>`,
+  "admin-replacement-cancel-search-button": (p: { index: string | number }) => `✖️ Cancel search #${p.index}`,
+  "admin-replacement-cancel-confirmed-button": (p: { index: string | number }) => `🛑 Cancel confirmed #${p.index}`,
+  "admin-replacement-cancel-confirmed-confirm": `🛑 Cancel confirmed replacement`,
+  "admin-replacement-cancel-confirmed-text": (p: {
+    date: string | number,
+    time: string | number,
+    location: string | number,
+    requester: string | number,
+    replacement: string | number
+  }) => `🛑 <b>Cancel confirmed replacement?</b>
+
+📅 <b>${p.date}</b> · ${p.time}
+📍 <b>${p.location}</b>
+👤 Original photographer: <b>${p.requester}</b>
+✅ Confirmed replacement: <b>${p.replacement}</b>
+
+This action does not edit Google Sheets. It removes the confirmed assignment from the bot and notifies both photographers.
+
+If the replacement is already in the main schedule, update and sync Google Sheets first.`,
+  "admin-replacement-cancel-confirmed-success": `Confirmed replacement cancelled`,
+  "admin-replacement-cancel-confirmed-inactive": `This confirmed replacement is already inactive`,
+  "admin-replacement-cancel-confirmed-still-scheduled": `This photographer is still assigned in the main schedule. Update and sync Google Sheets first, then cancel the confirmed replacement.`,
   "admin-staff-none-loc": `📭 Staff not assigned.`,
   "support-btn-force-close": `🔒 Force Close`,
   "hr-error-overlap": `✨ This time slot is already occupied. Please choose another window. 📅`
