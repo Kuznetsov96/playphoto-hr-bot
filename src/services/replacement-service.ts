@@ -47,9 +47,17 @@ type RequestWithRelations = ReplacementRequest & {
 type ReplacementMessageRef = Pick<ReplacementResponse, "id" | "requestId" | "chatId" | "messageId">;
 
 export class ReplacementService {
-    async listActiveRequestsForAdmin() {
+    async listManageableRequestsForAdmin() {
         return prisma.replacementRequest.findMany({
-            where: { status: ReplacementRequestStatus.ACTIVE },
+            where: {
+                OR: [
+                    { status: ReplacementRequestStatus.ACTIVE },
+                    {
+                        status: ReplacementRequestStatus.FOUND,
+                        shiftDate: { gte: this.kyivStartOfDay(new Date()) }
+                    }
+                ]
+            },
             include: {
                 location: true,
                 requester: { include: { user: true } },
@@ -57,9 +65,25 @@ export class ReplacementService {
                 responses: true
             },
             orderBy: [
+                { status: "asc" },
                 { shiftDate: "asc" },
                 { createdAt: "asc" }
             ]
+        });
+    }
+
+    async getConfirmedRequestForAdmin(requestId: string) {
+        return prisma.replacementRequest.findFirst({
+            where: {
+                id: requestId,
+                status: ReplacementRequestStatus.FOUND,
+                replacementStaffId: { not: null }
+            },
+            include: {
+                location: true,
+                requester: { include: { user: true } },
+                replacement: { include: { user: true } }
+            }
         });
     }
 
@@ -307,6 +331,86 @@ export class ReplacementService {
         }
 
         return true;
+    }
+
+    async cancelConfirmedRequestByAdmin(api: Api, requestId: string) {
+        const request = await this.getRequest(requestId);
+        if (
+            !request
+            || request.status !== ReplacementRequestStatus.FOUND
+            || !request.replacementStaffId
+            || !request.replacement
+        ) {
+            return "not_found" as const;
+        }
+
+        const replacementIsStillScheduled = await prisma.workShift.count({
+            where: {
+                staffId: request.replacementStaffId,
+                locationId: request.locationId,
+                date: {
+                    gte: this.kyivStartOfDay(request.shiftDate),
+                    lt: this.nextKyivDay(request.shiftDate)
+                }
+            }
+        });
+        if (replacementIsStillScheduled > 0) {
+            return "replacement_still_scheduled" as const;
+        }
+
+        const updated = await prisma.replacementRequest.updateMany({
+            where: {
+                id: requestId,
+                status: ReplacementRequestStatus.FOUND,
+                replacementStaffId: request.replacementStaffId
+            },
+            data: {
+                status: ReplacementRequestStatus.CANCELLED,
+                closedReason: "accepted_replacement_cancelled_by_admin",
+                nextWaveAt: null
+            }
+        });
+        if (updated.count !== 1) return "not_found" as const;
+
+        const details = this.formatShiftDetails(request);
+        const replacementText = STAFF_TEXTS["staff-replacement-confirmed-cancelled-acceptor"]({ details });
+        const acceptedResponse = await prisma.replacementResponse.findUnique({
+            where: {
+                requestId_staffId: {
+                    requestId,
+                    staffId: request.replacementStaffId
+                }
+            }
+        });
+
+        if (acceptedResponse) {
+            await this.editCandidateMessage(api, acceptedResponse, replacementText, "closed");
+        }
+
+        await api.sendMessage(
+            Number(request.replacement.user.telegramId),
+            replacementText,
+            { parse_mode: "HTML" }
+        ).catch((err) => logger.warn({ err, requestId }, "Confirmed replacement admin-cancel notification failed"));
+
+        if (request.requester) {
+            await api.sendMessage(
+                Number(request.requester.user.telegramId),
+                STAFF_TEXTS["staff-replacement-confirmed-cancelled-requester"],
+                { parse_mode: "HTML" }
+            ).catch((err) => logger.warn({ err, requestId }, "Requester confirmed-replacement cancellation notification failed"));
+        }
+
+        await this.inactivateOpenResponses(
+            api,
+            requestId,
+            this.formatClosedCandidateText({
+                ...request,
+                status: ReplacementRequestStatus.CANCELLED
+            })
+        );
+
+        return "cancelled" as const;
     }
 
     async accept(api: Api, staffId: string, requestId: string) {
@@ -1271,13 +1375,15 @@ export class ReplacementService {
         return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(shift.location.name)}\n${escapeHtml(time)}\n\nПочати пошук?`;
     }
 
-    formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listActiveRequestsForAdmin"]>>) {
+    formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listManageableRequestsForAdmin"]>>) {
         if (requests.length === 0) {
-            return "🔎 <b>Replacement searches</b>\n\nNo active replacement searches.";
+            return "🔎 <b>Replacement management</b>\n\nNo active or confirmed replacements.";
         }
 
         const visibleRequests = requests.slice(0, 8);
-        let text = `🔎 <b>Replacement searches</b>\n\nOpen requests: <b>${requests.length}</b>\n`;
+        const activeCount = requests.filter(request => request.status === ReplacementRequestStatus.ACTIVE).length;
+        const confirmedCount = requests.filter(request => request.status === ReplacementRequestStatus.FOUND).length;
+        let text = `🔎 <b>Replacement management</b>\n\nActive searches: <b>${activeCount}</b> · Confirmed: <b>${confirmedCount}</b>\n`;
         if (requests.length > visibleRequests.length) {
             text += `Showing first <b>${visibleRequests.length}</b>. Use Refresh after closing items.\n`;
         }
@@ -1293,11 +1399,17 @@ export class ReplacementService {
             const photographer = request.requester
                 ? this.formatShortName(request.requester.fullName)
                 : "empty shift (main admin)";
+            const status = request.status === ReplacementRequestStatus.FOUND
+                ? "✅ CONFIRMED"
+                : "🔎 ACTIVE";
+            const replacement = request.replacement
+                ? ` → ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
+                : "";
 
             text +=
-                `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b> · ${escapeHtml(request.city)}\n` +
+                `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b> · ${escapeHtml(request.city)} · ${status}\n` +
                 `📅 ${this.formatDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request))}\n` +
-                `👤 ${escapeHtml(photographer)} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
+                `👤 ${escapeHtml(photographer)}${replacement} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
                 `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
         });
 
