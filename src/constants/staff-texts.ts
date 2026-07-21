@@ -99,6 +99,8 @@ ${p.details}
   "staff-replacement-other-offer-closed": (p: { details: string }) => `Цю пропозицію закрито для вас, бо ви вже підтвердили іншу зміну на цю дату.
 
 ${p.details}`,
+  "staff-replacement-search-active-hub": `🔎 <i>Шукаємо підміну. Поки її не підтвердили, ця зміна залишається твоєю.</i>`,
+  "staff-replacement-search-active-schedule": `🔎 <i>шукаємо підміну — зміна поки твоя</i>`,
   "staff-replacement-pending-sync-hub": `✅ <i>Підміна підтверджена, графік синхронізується</i>`,
   "staff-replacement-pending-sync-schedule": `✅ <i>підміна підтверджена</i>`,
   "staff-replacement-pending-sync-reminder": `✅ Підміну підтверджено. Основний графік ще синхронізується.`,

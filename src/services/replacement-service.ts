@@ -91,6 +91,19 @@ export class ReplacementService {
         });
     }
 
+    async listOutgoingScheduleRequestsForStaff(staffId: string, since: Date, take: number = 100) {
+        return prisma.replacementRequest.findMany({
+            where: {
+                requesterStaffId: staffId,
+                status: { in: [ReplacementRequestStatus.ACTIVE, ReplacementRequestStatus.FOUND] },
+                shiftDate: { gte: since }
+            },
+            include: { location: true },
+            orderBy: { shiftDate: "asc" },
+            take
+        });
+    }
+
     async listAcceptedAssignmentsByDateRange(start: Date, end: Date) {
         return prisma.replacementRequest.findMany({
             where: {
