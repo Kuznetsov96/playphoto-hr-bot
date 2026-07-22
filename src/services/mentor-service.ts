@@ -17,6 +17,7 @@ import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 import { googleCalendar } from "./google-calendar.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 export class MentorService {
     private hasBookedOverlap(overlap: {
@@ -133,20 +134,20 @@ export class MentorService {
             logger.error({ candId }, "Candidate user record missing in database");
             return {
                 cand,
-                text: `👤 <b>${cand.fullName}</b>\n` +
+                text: `👤 <b>${escapeHtml(cand.fullName || "Candidate")}</b>\n` +
                     `🎂 Age: ${age}\n` +
-                    `🏙️ City: ${cand.city}\n` +
-                    `📍 Location: ${locName}\n` +
+                    `🏙️ City: ${escapeHtml(cand.city || "—")}\n` +
+                    `📍 Location: ${escapeHtml(locName)}\n` +
                     `⚠️ <b>User record missing in database</b>\n` +
                     `🏷️ Status: <b>${statusMap[cand.status] || cand.status}</b>`
             };
         }
 
-        const text = `👤 <b>${cand.fullName}</b>\n` +
+        const text = `👤 <b>${escapeHtml(cand.fullName || "Candidate")}</b>\n` +
             `🎂 Age: ${age}\n` +
-            `🏙️ City: ${cand.city}\n` +
-            `📍 Location: ${locName}\n` +
-            `📞 Telegram: @${cand.user.username || 'none'}\n` +
+            `🏙️ City: ${escapeHtml(cand.city || "—")}\n` +
+            `📍 Location: ${escapeHtml(locName)}\n` +
+            `📞 Telegram: @${escapeHtml(cand.user.username || 'none')}\n` +
             `🏷️ Status: <b>${statusMap[cand.status] || cand.status}</b>`;
 
         return { cand, text };
@@ -327,12 +328,12 @@ export class MentorService {
     }
 
     private async sendNdaRequest(api: Api, cand: any) {
-        const firstName = extractFirstName(cand.fullName || "");
+        const firstName = escapeHtml(extractFirstName(cand.fullName || ""));
         const staticInfo = getLocationDetails(cand.location?.name);
-        const jobDetails = `\n\n📍 <b>${cand.location?.name || cand.city}</b>\n` +
-            `🏠 ${staticInfo?.address || cand.location?.address || ""}\n` +
-            `📅 ${staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00"}\n` +
-            `💰 ${staticInfo?.salary || cand.location?.salary || "25%"}`;
+        const jobDetails = `\n\n📍 <b>${escapeHtml(cand.location?.name || cand.city || "—")}</b>\n` +
+            `🏠 ${escapeHtml(staticInfo?.address || cand.location?.address || "")}\n` +
+            `📅 ${escapeHtml(staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00")}\n` +
+            `💰 ${escapeHtml(staticInfo?.salary || cand.location?.salary || "25%")}`;
 
         const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
         if (!cand.user) return;
@@ -349,7 +350,7 @@ export class MentorService {
                 const mainAdmin = ADMIN_IDS[0];
                 if (mainAdmin) {
                     api.sendMessage(mainAdmin,
-                        `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${cand.fullName}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${err?.description || err?.message || 'Unknown'}`,
+                        `⚠️ <b>NDA не доставлено!</b>\n\n👤 ${escapeHtml(cand.fullName || "Candidate")}\n📱 TG: ${cand.user.telegramId}\n\nСтатус змінено на NDA, але кандидатка не отримала кнопку.\nПричина: ${escapeHtml(err?.description || err?.message || 'Unknown')}`,
                         { parse_mode: "HTML" }
                     ).catch(() => { });
                 }

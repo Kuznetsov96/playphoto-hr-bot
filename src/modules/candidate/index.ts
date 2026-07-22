@@ -8,10 +8,8 @@ import {
     candidateAppearanceMenu, 
     candidateSourceMenu 
 } from "../../menus/candidate.js";
-import { supportHandlers, handleSupportMessage } from "../../handlers/support.js";
-import { bot } from "../../core/bot.js";
 import { shouldRouteMessageToPrivateRoleFlows } from "../../utils/message-routing.js";
-import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
+import { escapeHtml } from "../../handlers/admin/utils.js";
 
 export const candidateModule = new Composer<MyContext>();
 
@@ -25,18 +23,11 @@ candidateModule.use(candidateSourceMenu);
 // 2. Register specific candidate handlers (screening, commands)
 candidateModule.use(candidateHandlers);
 
-// 2. Register candidate support callbacks
-candidateModule.use(supportHandlers);
-
-// 3. Handle Messages (Support Flow for Candidates)
+// 3. Handle messages not consumed by the root support/funnel router.
 candidateModule.on("message", async (ctx, next) => {
     // Candidate flows are private by design. Group/service messages must never
     // expose candidate status or advance a private funnel session.
     if (!shouldRouteMessageToPrivateRoleFlows(ctx.chat?.type)) return next();
-
-    // Attempt to handle as support message
-    const handled = await handleSupportMessage(ctx);
-    if (handled) return;
 
     // --- CATCH-ALL FOR CANDIDATES ---
     // If we are here, it means the message wasn't caught by screening or support
@@ -46,9 +37,9 @@ candidateModule.on("message", async (ctx, next) => {
     if (candidate) {
         const { showCandidateStatus } = await import("../../utils/candidate-ui.js");
         const fullName = candidate.fullName || ctx.from?.first_name || "Кандидатко";
-        const firstName = fullName.split(" ")[0];
+        const firstName = fullName.split(" ")[0] || "Кандидатко";
         
-        await ctx.reply(`🤔 <b>${firstName}, я не зовсім зрозумів твоє повідомлення.</b>\n\nОсь твій поточний статус: 👇`, { parse_mode: "HTML" });
+        await ctx.reply(`🤔 <b>${escapeHtml(firstName)}, я не зовсім зрозумів твоє повідомлення.</b>\n\nОсь твій поточний статус: 👇`, { parse_mode: "HTML" });
         await showCandidateStatus(ctx, candidate);
         return;
     }

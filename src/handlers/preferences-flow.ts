@@ -8,6 +8,7 @@ import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
 import { formatSurnameNameDot } from "../utils/string-utils.js";
+import { escapeHtml } from "./admin/utils.js";
 
 
 export const preferencesHandlers = new Composer<MyContext>();
@@ -278,7 +279,7 @@ async function renderConfirmation(ctx: MyContext) {
     const name = user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
     const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає";
 
-    const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${name}</b>\n📅 Місяць: <b>${month} ${year}</b>\n🚫 Вихідні: <b>${daysStr}</b>\n💬 Коментар: ${comment || 'відсутній'}`;
+    const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${escapeHtml(name)}</b>\n📅 Місяць: <b>${escapeHtml(month || "—")} ${year}</b>\n🚫 Вихідні: <b>${escapeHtml(daysStr)}</b>\n💬 Коментар: ${escapeHtml(comment || 'відсутній')}`;
     const kb = new InlineKeyboard().text("✅ Зберегти", "pref_save_final").text("🔄 Спочатку", "pref_restart_flow").row().text("✖️ Скасувати", "pref_cancel_flow").danger();
 
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
@@ -439,10 +440,10 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             const { ADMIN_IDS } = await import("../config.js");
             if (ADMIN_IDS.length > 0) {
                 const adminNotifyText = `📅 <b>New Schedule Preferences!</b>\n\n` +
-                    `👤 Staff: <b>${staffNameForTable}</b>\n` +
-                    `📅 Month: <b>${month}</b>\n` +
-                    `🚫 Weekends: <b>${daysStr}</b>\n` +
-                    `💬 Comment: ${comment || 'none'}\n\n` +
+                    `👤 Staff: <b>${escapeHtml(staffNameForTable)}</b>\n` +
+                    `📅 Month: <b>${escapeHtml(month || "—")}</b>\n` +
+                    `🚫 Weekends: <b>${escapeHtml(daysStr)}</b>\n` +
+                    `💬 Comment: ${escapeHtml(comment || 'none')}\n\n` +
                     (shouldMoveToNext ? `⏳ Waiting for the next month to be filled...` :
                         `✅ Auto-hired! Please add shifts to the schedule.`);
 

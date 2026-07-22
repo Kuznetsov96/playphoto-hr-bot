@@ -163,15 +163,25 @@ bot.catch(async (err) => {
     const errMsg = (error?.message || String(err.error)).toLowerCase();
     const errDesc = (error?.description || "").toLowerCase();
 
+    if (errMsg.includes("message is not modified") || errDesc.includes("message is not modified")) {
+        logger.debug({ updateId: ctx.update.update_id }, "Ignored no-op Telegram message edit");
+        return;
+    }
+
+    if (errMsg.includes("query is too old") || errDesc.includes("query is too old")) {
+        logger.warn({ updateId: ctx.update.update_id, telegramId: ctx.from?.id }, "Telegram callback expired before it was answered");
+        return;
+    }
+
     if (
-        errMsg.includes("message is not modified") || 
-        errDesc.includes("message is not modified") ||
         errMsg.includes("message to edit not found") ||
         errDesc.includes("message to edit not found") ||
-        errMsg.includes("query is too old") ||
-        errDesc.includes("query is too old") ||
         errMsg.includes("message identifier is not specified")
     ) {
+        logger.warn({ err: err.error, updateId: ctx.update.update_id }, "Telegram screen could not be updated");
+        if (ctx.chat?.type === "private") {
+            await ctx.reply("Цей екран уже застарів. Натисни /start, щоб відкрити актуальне меню. ✨").catch(() => {});
+        }
         return;
     }
 

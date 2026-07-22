@@ -97,4 +97,6 @@ export const startWorkers = () => {
         operation: "startWorkers",
         safeContext: { workerCount: workers.length },
     });
+
+    return workers;
 };

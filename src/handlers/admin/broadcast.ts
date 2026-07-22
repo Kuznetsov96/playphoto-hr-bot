@@ -1,7 +1,7 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../../types/context.js";
-import { broadcastService } from "../../services/broadcast.js";
+import { broadcastService, type BroadcastStats } from "../../services/broadcast.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { getMessageHtml, normalizeCity } from "./utils.js";
 import { getBroadcastKb, getBroadcastPreview, formatTargetLabel } from "./broadcast-helpers.js";
@@ -31,6 +31,20 @@ function getPendingCount(broadcast: any): number {
 function isBroadcastActive(broadcast: any): boolean {
     const hasActivePing = broadcast.trackedMessages?.some((tracked: any) => Boolean(tracked.nextPingAt)) || false;
     return hasActivePing || getPendingCount(broadcast) > 0;
+}
+
+function formatBroadcastStats(broadcastId: number, stats: BroadcastStats, footer?: string): string {
+    return `📊 <b>Broadcast Statistics (ID: ${broadcastId})</b>\n\n` +
+        `📨 Delivery targets: <b>${stats.deliveryTotal}</b>\n` +
+        `✅ Delivered: <b>${stats.deliverySent}</b>\n` +
+        `⚠️ Failed: <b>${stats.deliveryFailed}</b>\n` +
+        `❔ Pending/uncertain: <b>${stats.deliveryUncertain}</b>\n` +
+        `⏭ Skipped: <b>${stats.deliverySkipped}</b>\n\n` +
+        `🌐 Tracked chats: <b>${stats.totalChats}</b>\n` +
+        `✅ Confirmed: <b>${stats.confirmed}</b>\n` +
+        `❌ Declined: <b>${stats.declined}</b>\n` +
+        `⏳ Awaiting response: <b>${stats.pending}</b>` +
+        (footer ? `\n\n${footer}` : "");
 }
 
 /**
@@ -581,12 +595,11 @@ adminBroadcastListMenu.dynamic(async (ctx, range) => {
                 ctx.session.candidateData.city = b.id.toString();
 
                 const stats = await broadcastService.getStats(b.id);
-                const statsText = `📊 <b>Broadcast Statistics (ID: ${b.id})</b>\n\n` +
-                    `🌐 Total chats: <b>${stats.totalChats}</b>\n` +
-                    `✅ Confirmed: <b>${stats.confirmed}</b>\n` +
-                    `❌ Declined: <b>${stats.declined}</b>\n` +
-                    `⏳ Pending: <b>${stats.pending}</b>\n\n` +
-                    `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`;
+                const statsText = formatBroadcastStats(
+                    b.id,
+                    stats,
+                    `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`,
+                );
 
                 await ScreenManager.renderScreen(ctx, statsText, "admin-broadcast-manage", { pushToStack: true });
             }).row();
@@ -660,11 +673,7 @@ adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
                 ctx.session.candidateData.city = broadcast.id.toString();
 
                 const stats = await broadcastService.getStats(broadcast.id);
-                const statsText = `📊 <b>Broadcast Statistics (ID: ${broadcast.id})</b>\n\n` +
-                    `🌐 Total chats: <b>${stats.totalChats}</b>\n` +
-                    `✅ Confirmed: <b>${stats.confirmed}</b>\n` +
-                    `❌ Declined: <b>${stats.declined}</b>\n` +
-                    `⏳ Pending: <b>${stats.pending}</b>`;
+                const statsText = formatBroadcastStats(broadcast.id, stats);
                 await ScreenManager.renderScreen(ctx, statsText, "admin-broadcast-manage", { pushToStack: true });
             }).row();
         });
@@ -708,12 +717,11 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
 
     range.text("🔄 Refresh Stats", async (ctx) => {
         const freshStats = await broadcastService.getStats(bId);
-        const freshText = `📊 <b>Broadcast Statistics (ID: ${bId})</b>\n\n` +
-            `🌐 Total chats: <b>${freshStats.totalChats}</b>\n` +
-            `✅ Confirmed: <b>${freshStats.confirmed}</b>\n` +
-            `❌ Declined: <b>${freshStats.declined}</b>\n` +
-            `⏳ Pending: <b>${freshStats.pending}</b>\n\n` +
-            `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`;
+        const freshText = formatBroadcastStats(
+            bId,
+            freshStats,
+            `<i>Last updated: ${new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</i>`,
+        );
 
         await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
     }).row()
@@ -722,12 +730,11 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
             await ctx.answerCallbackQuery("Pings stopped").catch(() => { });
 
             const freshStats = await broadcastService.getStats(bId);
-            const freshText = `📊 <b>Broadcast Statistics (ID: ${bId})</b>\n\n` +
-                `🌐 Total chats: <b>${freshStats.totalChats}</b>\n` +
-                `✅ Confirmed: <b>${freshStats.confirmed}</b>\n` +
-                `❌ Declined: <b>${freshStats.declined}</b>\n` +
-                `⏳ Pending: <b>${freshStats.pending}</b>\n\n` +
-                `⏹️ <b>Auto-pings are stopped for this broadcast.</b>`;
+            const freshText = formatBroadcastStats(
+                bId,
+                freshStats,
+                "⏹️ <b>Auto-pings are stopped for this broadcast.</b>",
+            );
             await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
         }).row()
         .text("🗑️ Delete", async (ctx) => {

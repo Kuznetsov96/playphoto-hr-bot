@@ -16,6 +16,7 @@ import { audit } from "../core/audit-logger.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -74,9 +75,9 @@ export async function notifyMentors(api: any, candidate: any) {
     if (!MENTOR_IDS || MENTOR_IDS.length === 0) return;
 
     const msg = `📥 <b>New candidate is waiting for materials!</b>\n\n` +
-        `👤 Name: <b>${candidate.fullName}</b>\n` +
-        `🏙️ City: <b>${candidate.city}</b>\n` +
-        `📍 Location: <b>${candidate.location?.name || '—'}</b>\n\n` +
+        `👤 Name: <b>${escapeHtml(candidate.fullName || "Candidate")}</b>\n` +
+        `🏙️ City: <b>${escapeHtml(candidate.city || "—")}</b>\n` +
+        `📍 Location: <b>${escapeHtml(candidate.location?.name || '—')}</b>\n\n` +
         `Please go to <b>Mentor Hub</b> and send the knowledge base. ✨`;
 
     for (const id of MENTOR_IDS) {
@@ -87,8 +88,6 @@ export async function notifyMentors(api: any, candidate: any) {
 }
 
 function getPostInterviewSummaryText(candidate: any) {
-    const firstName = extractFirstName(candidate.fullName || "");
-
     const loc = candidate.location;
     const staticInfo = getLocationDetails(loc?.name);
 
@@ -99,9 +98,9 @@ function getPostInterviewSummaryText(candidate: any) {
 
     return `<b>Приємно було познайомитися!</b> 😊\n\n` +
         `Твоя майбутня робота в деталях:\n\n` +
-        `📍 <b>Локація</b>\n${locationName}\n${address}\n\n` +
-        `📅 <b>Графік</b>\n${schedule}\n(2–3 зміни на тиждень)\n\n` +
-        `💰 <b>Оплата</b>\n${salary}\n\n` +
+        `📍 <b>Локація</b>\n${escapeHtml(locationName)}\n${escapeHtml(address)}\n\n` +
+        `📅 <b>Графік</b>\n${escapeHtml(schedule)}\n(2–3 зміни на тиждень)\n\n` +
+        `💰 <b>Оплата</b>\n${escapeHtml(salary)}\n\n` +
         `Ми створюємо яскраві емоції та цінуємо розвиток кожного. PlayPhoto — це про людей. ✨\n\n` +
         `<b>Раді бачити тебе в нашій команді!</b> 🤍`;
 }
@@ -120,9 +119,9 @@ export const hrService = {
             : "Кандидатка скасувала погоджене стажування.";
 
         const message = `⚠️ <b>Стажування скасовано</b>\n\n` +
-            `👤 <b>${candidateName}</b>\n` +
-            `📍 <b>${locationName}</b>\n` +
-            `${dateStr ? `🗓 <b>${dateStr} • ${timeStr}</b>\n` : ""}\n` +
+            `👤 <b>${escapeHtml(candidateName)}</b>\n` +
+            `📍 <b>${escapeHtml(locationName)}</b>\n` +
+            `${dateStr ? `🗓 <b>${escapeHtml(dateStr)} • ${escapeHtml(timeStr)}</b>\n` : ""}\n` +
             `${reasonText}`;
 
         try {
@@ -155,7 +154,7 @@ export const hrService = {
         });
 
         const { HR_IDS } = await import("../config.js");
-        const hrMessage = `⚠️ <b>Internship Cancelled!</b>\n\n👤 Candidate: <b>${cand.fullName}</b>\n🏙️ City: ${cand.city}\n\nShe clicked "I can't come".`;
+        const hrMessage = `⚠️ <b>Internship Cancelled!</b>\n\n👤 Candidate: <b>${escapeHtml(cand.fullName || "Candidate")}</b>\n🏙️ City: ${escapeHtml(cand.city || "—")}\n\nShe clicked "I can't come".`;
         for (const hrId of HR_IDS) {
             try {
                 await api.sendMessage(hrId, hrMessage, { parse_mode: "HTML" });

@@ -43,6 +43,26 @@ model Broadcast {
   cancelledAt     DateTime?
   targetSummary   String?
   trackedMessages TrackedMessage[]
+  deliveries      BroadcastDelivery[]
+}
+
+model BroadcastDelivery {
+  id           Int       @id @default(autoincrement())
+  broadcastId  Int
+  chatId       BigInt
+  targetType   String
+  status       String    @default("PENDING")
+  attemptCount Int       @default(0)
+  messageId    Int?
+  lastError    String?
+  startedAt    DateTime?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  broadcast    Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@unique([broadcastId, chatId])
+  @@index([broadcastId, status])
 }
 
 model TrackedMessage {

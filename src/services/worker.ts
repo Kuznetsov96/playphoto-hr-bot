@@ -23,6 +23,7 @@ import { isImpossibleMentorState } from "./funnel-anomaly-detector.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
+import { redis } from "../core/redis.js";
 
 
 /**
@@ -32,9 +33,34 @@ import { getBirthDateRejection } from "../utils/candidate-age.js";
 export async function startWorker(bot: Bot<MyContext>) {
     let iteration = 0;
     let lastAutoCloseSweepAt = 0;
-    setInterval(async () => {
+    let iterationInProgress = false;
+    return setInterval(async () => {
+        if (iterationInProgress) {
+            logger.warn("Candidate workflow worker skipped an overlapping local iteration");
+            return;
+        }
+
+        iterationInProgress = true;
+        const leaseKey = "worker:candidate-workflow:lease";
+        const leaseToken = `${process.pid}:${Date.now()}:${Math.random()}`;
+        let heartbeat: NodeJS.Timeout | undefined;
         iteration++;
         try {
+            const acquired = await redis.set(leaseKey, leaseToken, "PX", 15 * 60 * 1000, "NX");
+            if (acquired !== "OK") {
+                logger.debug("Candidate workflow worker skipped because another instance owns the lease");
+                return;
+            }
+            heartbeat = setInterval(() => {
+                redis.eval(
+                    "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+                    1,
+                    leaseKey,
+                    leaseToken,
+                    String(15 * 60 * 1000),
+                ).catch(error => logger.error({ err: error }, "Failed to renew candidate worker lease"));
+            }, 60 * 1000);
+
             const now = new Date();
             const nowTime = now.getTime();
             logger.debug({
@@ -647,6 +673,15 @@ export async function startWorker(bot: Bot<MyContext>) {
 
         } catch (error) {
             logger.error({ err: error }, "Candidate workflow worker iteration failed");
+        } finally {
+            if (heartbeat) clearInterval(heartbeat);
+            await redis.eval(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                1,
+                leaseKey,
+                leaseToken,
+            ).catch(error => logger.error({ err: error }, "Failed to release candidate worker lease"));
+            iterationInProgress = false;
         }
     }, 5 * 60 * 1000);
 }
@@ -768,7 +803,7 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
             if (ADMIN_IDS.length > 0 && await shouldSendFunnelAlert("FUNNEL_IMPOSSIBLE_MENTOR_STATE", fingerprint, 6)) {
                 const preview = impossibleMentorStates
                     .slice(0, 5)
-                    .map(c => `• ${c.fullName || c.id} — ${c.status}/${c.currentStep}`)
+                    .map(c => `• ${escapeHtml(c.fullName || c.id)} — ${escapeHtml(c.status)}/${escapeHtml(c.currentStep)}`)
                     .join("\n");
                 await bot.api.sendMessage(
                     ADMIN_IDS[0]!,
@@ -992,7 +1027,7 @@ async function alertStaleTrainingScheduledCandidates(bot: Bot<MyContext>) {
                 ? c.trainingSlot.endTime.toLocaleString("uk-UA", { timeZone: "Europe/Kyiv" })
                 : "unknown";
             const location = c.location?.name || c.city || "No location";
-            return `• ${c.fullName || "Candidate"} — ${location} — завершився ${endedAt}`;
+            return `• ${escapeHtml(c.fullName || "Candidate")} — ${escapeHtml(location)} — завершився ${escapeHtml(endedAt)}`;
         })
         .join("\n");
 
@@ -1161,7 +1196,7 @@ async function processAcceptedMaterialsHandoffAlerts(bot: Bot<MyContext>) {
 
         const preview = staleAccepted
             .slice(0, 8)
-            .map(c => `• ${c.fullName || c.id} — ${c.city || "city n/a"} / ${c.location?.name || "location n/a"}`)
+            .map(c => `• ${escapeHtml(c.fullName || c.id)} — ${escapeHtml(c.city || "city n/a")} / ${escapeHtml(c.location?.name || "location n/a")}`)
             .join("\n");
 
         const text = `⚠️ <b>Mentor handoff needs attention</b>\n\n` +
@@ -1204,11 +1239,18 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                 const totalTasks = s.tasks.length;
                 const shift = s.shifts && s.shifts.length > 0 ? s.shifts[0] : null;
 
+                // The dedicated shift reminder already includes active tasks and parcel
+                // context. Mark this digest handled to avoid two near-identical 08:00 DMs.
+                if (shift) {
+                    await taskService.markDigestSent(s.id);
+                    continue;
+                }
+
                 let text = `🌅 <b>Доброго ранку!</b> ✨\n\n`;
 
                 if (shift) {
                     const dateStr = new Date(shift.date).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-                    text += `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸\n\n`;
+                    text += `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${escapeHtml(shift.location.name)}!</b> 📸\n\n`;
                 }
 
                 if (totalTasks > 0) {
@@ -1675,8 +1717,8 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
             try {
                 const name = cand.fullName || "Candidate";
                 const loc = cand.location?.name || cand.city || "";
-                const text = `📸 <b>Staging completed: ${name}</b>\n` +
-                    `📍 ${loc}\n\n` +
+                const text = `📸 <b>Staging completed: ${escapeHtml(name)}</b>\n` +
+                    `📍 ${escapeHtml(loc)}\n\n` +
                     `Please mark the result — did the candidate pass or fail? ⚖️`;
 
                 const kb = new InlineKeyboard()

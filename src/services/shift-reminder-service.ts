@@ -8,6 +8,8 @@ import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { replacementService } from "./replacement-service.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { redis } from "../core/redis.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 import {
     classifyAcceptedReplacement,
     getScheduleSlotKey
@@ -141,18 +143,27 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
         for (const shift of todayShifts) {
             const staff = shift.staff;
             const telegramId = (staff as any).user?.telegramId;
+            const reminderKey = `shift-reminder:${startOfDay.toISOString().slice(0, 10)}:${staff.id}:${shift.id}`;
 
             if (!telegramId) {
                 logger.warn({ staffId: staff.id }, "Shift reminder skipped because staff Telegram ID is missing");
                 continue;
             }
 
+            let reminderClaimed = false;
             try {
+                const claimResult = await redis.set(reminderKey, "sending", "EX", 3 * 24 * 60 * 60, "NX");
+                if (claimResult !== "OK") {
+                    logger.debug({ staffId: staff.id, shiftId: shift.id }, "Shift reminder already handled");
+                    continue;
+                }
+                reminderClaimed = true;
+
                 const dateStr = shift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: KYIV_TIME_ZONE });
                 const pendingSyncText = "isAcceptedReplacementPendingSync" in shift && shift.isAcceptedReplacementPendingSync
                     ? `\n${STAFF_TEXTS["staff-replacement-pending-sync-reminder"]}`
                     : "";
-                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${shift.location.name}!</b> 📸${pendingSyncText}\nВдалого дня та гарних знімків! ✨`;
+                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${escapeHtml(shift.location.name)}!</b> 📸${pendingSyncText}\nВдалого дня та гарних знімків! ✨`;
 
                 const tasks = await taskService.getStaffActiveTasks(staff.id);
                 const activeTasksCount = tasks.filter(t => !t.isCompleted).length;
@@ -175,7 +186,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                     : "";
 
                 const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографине';
-                const greeting = `👋 <b>Доброго ранку, ${firstName}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
+                const greeting = `👋 <b>Доброго ранку, ${escapeHtml(firstName)}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
 
                 const fullText = `${greeting}\n\n${shiftText}${taskSummary}${parcelsSummary}`;
                 const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
@@ -187,6 +198,11 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");
             } catch (err) {
                 logger.error({ err, telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder delivery failed");
+                if (reminderClaimed) {
+                    await redis.del(reminderKey).catch(deleteError => {
+                        logger.error({ err: deleteError, reminderKey }, "Failed to release shift reminder claim");
+                    });
+                }
             }
         }
 

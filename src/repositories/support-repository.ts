@@ -1,17 +1,25 @@
 import prisma from "../db/core.js";
-import { TicketStatus } from "@prisma/client";
+import { Prisma, TicketStatus } from "@prisma/client";
 
 export class SupportRepository {
     async createTicket(data: { userId: string; issueText: string; status?: TicketStatus; isUrgent?: boolean; topicId?: number | null }) {
-        return prisma.supportTicket.create({
-            data: {
-                userId: data.userId,
-                issueText: data.issueText,
-                status: data.status || "OPEN",
-                isUrgent: data.isUrgent || false,
-                topicId: data.topicId ?? null
+        try {
+            return await prisma.supportTicket.create({
+                data: {
+                    userId: data.userId,
+                    issueText: data.issueText,
+                    status: data.status || "OPEN",
+                    isUrgent: data.isUrgent || false,
+                    topicId: data.topicId ?? null
+                }
+            });
+        } catch (error) {
+            if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+                const active = await this.findActiveTicketByUser(data.userId);
+                if (active) return active;
             }
-        });
+            throw error;
+        }
     }
 
     async findTicketById(id: number) {
@@ -141,7 +149,19 @@ export class SupportRepository {
     }
 
     async createOutgoingTopic(data: { chatId: bigint; topicId: number; staffName?: string; userId?: string }) {
-        return prisma.outgoingTopic.create({ data });
+        try {
+            return await prisma.outgoingTopic.create({ data });
+        } catch (error) {
+            if (
+                data.userId &&
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === "P2002"
+            ) {
+                const active = await this.findActiveOutgoingTopicByUser(data.userId);
+                if (active) return active;
+            }
+            throw error;
+        }
     }
 
     async findActiveOutgoingTopicByUser(userId: string) {
