@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { getRichMessageInputText, getRichMessagePlainText } from "../rich-message.js";
+import {
+    getRichMessageHtml,
+    getRichMessageInputText,
+    getRichMessagePlainText,
+} from "../rich-message.js";
+
+describe("getRichMessageHtml", () => {
+    it("converts checklists and key-value tables to stable Telegram HTML", () => {
+        expect(getRichMessageHtml({
+            blocks: [{
+                type: "list",
+                items: [{
+                    label: "☑",
+                    has_checkbox: true,
+                    is_checked: true,
+                    blocks: [{ type: "paragraph", text: "Ready" }],
+                }],
+            }, {
+                type: "table",
+                cells: [[
+                    { text: "Name", is_header: true, align: "left", valign: "top" },
+                    { text: "Olena", align: "left", valign: "top" },
+                ]],
+            }],
+        })).toBe("☑ Ready\n\n<b>Name:</b> Olena");
+    });
+});
 
 describe("getRichMessagePlainText", () => {
     it("extracts a readable preview from nested rich blocks", () => {
@@ -40,6 +66,19 @@ describe("getRichMessagePlainText", () => {
     it("supports outgoing markdown/html payloads and applies the preview limit", () => {
         expect(getRichMessagePlainText({ markdown: "# A report" })).toBe("# A report");
         expect(getRichMessagePlainText({ html: "<h1>A report</h1>" }, 10)).toBe("<h1>A rep…");
+    });
+
+    it("creates labels for outgoing Bot API 10.2 list items", () => {
+        expect(getRichMessagePlainText({
+            blocks: [{
+                type: "list",
+                items: [
+                    { has_checkbox: true, is_checked: true, blocks: [{ type: "paragraph", text: "Profile reviewed" }] },
+                    { value: 2, blocks: [{ type: "paragraph", text: "Invite candidate" }] },
+                    { blocks: [{ type: "paragraph", text: "Add a note" }] },
+                ],
+            }],
+        })).toBe("[x] Profile reviewed\n2. Invite candidate\n• Add a note");
     });
 });
 

@@ -66,12 +66,24 @@ function getBroadcastFollowUpText(buttonType: 'default' | 'preferences' | 'none'
 
 async function sendBroadcastPayload(api: any, chatId: number, text: string, media: BroadcastMediaInput | undefined, extra: any, buttonType: 'default' | 'preferences' | 'none') {
     if (Array.isArray(media) && media.length > 1) {
-        const mediaGroup = media.map((item, index) => ({
-            type: item.type,
-            media: item.fileId,
-        }));
-
-        await api.sendMediaGroup(chatId, mediaGroup);
+        const canSendAsGroup = media.every(item => item.type === 'photo' || item.type === 'video');
+        if (canSendAsGroup) {
+            const mediaGroup = media.map(item => ({
+                type: item.type,
+                media: item.fileId,
+            }));
+            await api.sendMediaGroup(chatId, mediaGroup);
+        } else {
+            for (const item of media) {
+                if (item.type === 'photo') await api.sendPhoto(chatId, item.fileId);
+                else if (item.type === 'video') await api.sendVideo(chatId, item.fileId);
+                else if (item.type === 'document') await api.sendDocument(chatId, item.fileId);
+                else if (item.type === 'voice') await api.sendVoice(chatId, item.fileId);
+                else if (item.type === 'video_note') await api.sendVideoNote(chatId, item.fileId);
+                else if (item.type === 'audio') await api.sendAudio(chatId, item.fileId);
+                else await api.sendAnimation(chatId, item.fileId);
+            }
+        }
 
         if (text || buttonType !== 'none') {
             return await api.sendMessage(chatId, text || getBroadcastFollowUpText(buttonType), extra);

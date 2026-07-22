@@ -9,6 +9,7 @@ import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { sendTaskNotification } from "./utils.js";
 import { getMessageHtml } from "./utils.js";
+import { getRichMessageMedia } from "../../utils/rich-message.js";
 import { TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
 
 export const taskFlowHandlers = new Composer<MyContext>();
@@ -111,6 +112,7 @@ export async function handleTaskText(ctx: MyContext) {
 
     if (step === 'AWAITING_TEXT') {
         const text = getMessageHtml(message).trim();
+        const richMedia = getRichMessageMedia(message.rich_message)[0];
         const media = message.photo
             ? { type: 'photo' as const, fileId: message.photo[message.photo.length - 1]!.file_id }
             : message.video
@@ -125,7 +127,7 @@ export async function handleTaskText(ctx: MyContext) {
                                 ? { type: 'audio' as const, fileId: message.audio.file_id }
                                 : message.animation
                                     ? { type: 'animation' as const, fileId: message.animation.file_id }
-                    : undefined;
+                    : richMedia;
 
         if (!text && !media) return false;
         if (text.length > TASK_TEXT_MAX_LENGTH) {
@@ -136,8 +138,13 @@ export async function handleTaskText(ctx: MyContext) {
         if (media) {
             ctx.session.taskData.fileId = media.fileId;
             ctx.session.taskData.mediaType = media.type;
-            ctx.session.taskData.sourceChatId = ctx.chat?.id;
-            ctx.session.taskData.sourceMessageId = message.message_id;
+            if (!message.rich_message) {
+                ctx.session.taskData.sourceChatId = ctx.chat?.id;
+                ctx.session.taskData.sourceMessageId = message.message_id;
+            } else {
+                delete ctx.session.taskData.sourceChatId;
+                delete ctx.session.taskData.sourceMessageId;
+            }
         }
 
         if (!text) {

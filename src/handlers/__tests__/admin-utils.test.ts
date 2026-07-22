@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
     buildAdminOutboundReplyKeyboard,
+    getMessageHtml,
     htmlToPlainText,
     msgToHtml,
     sendAdminOutboundMessage,
@@ -91,6 +92,103 @@ describe("htmlToPlainText", () => {
 });
 
 describe("sendAdminOutboundMessage", () => {
+    it("converts native Telegram checklists to classic HTML", () => {
+        expect(getMessageHtml({
+            checklist: {
+                title: "Equipment",
+                tasks: [
+                    { id: 1, text: "Charge batteries" },
+                    { id: 2, text: "Pack camera", completion_date: 1 },
+                ],
+            },
+        } as any)).toBe("<b>Equipment</b>\n☐ Charge batteries\n☑ Pack camera");
+    });
+
+    it("converts rich checklists and tables to stable Telegram HTML", async () => {
+        const replyMarkup = { inline_keyboard: [[{ text: "Reply", callback_data: "reply" }]] };
+        const ctx = {
+            chat: { id: 555 },
+            message: {
+                message_id: 77,
+                text: "[x] Profile reviewed\nName | Olena",
+                rich_message: {
+                    blocks: [
+                        {
+                            type: "list",
+                            items: [{
+                                label: "☑",
+                                has_checkbox: true,
+                                is_checked: true,
+                                blocks: [{ type: "paragraph", text: "Profile reviewed" }],
+                            }],
+                        },
+                        {
+                            type: "table",
+                            cells: [[
+                                { text: "Name", is_header: true, align: "left", valign: "top" },
+                                { text: "Olena", align: "left", valign: "top" },
+                            ]],
+                            is_bordered: true,
+                        },
+                    ],
+                },
+            },
+            api: {
+                copyMessage: vi.fn().mockResolvedValue({}),
+                sendMessage: vi.fn().mockResolvedValue({}),
+                sendPhoto: vi.fn().mockResolvedValue({}),
+                sendRichMessage: vi.fn().mockResolvedValue({}),
+            },
+        };
+
+        await sendAdminOutboundMessage(ctx as any, 123, {
+            messageThreadId: 9,
+            replyMarkup: replyMarkup as any,
+        });
+
+        expect(ctx.api.sendMessage).toHaveBeenCalledWith(
+            123,
+            "📩 <b>Повідомлення від PlayPhoto:</b>\n\n☑ Profile reviewed\n\n<b>Name:</b> Olena",
+            { parse_mode: "HTML", message_thread_id: 9, reply_markup: replyMarkup },
+        );
+        expect(ctx.api.sendRichMessage).not.toHaveBeenCalled();
+        expect(ctx.api.copyMessage).not.toHaveBeenCalled();
+    });
+
+    it("converts rich media captions to an HTML-safe description", async () => {
+        const ctx = {
+            chat: { id: 555 },
+            message: {
+                message_id: 77,
+                text: "Portfolio",
+                rich_message: {
+                    blocks: [{
+                        type: "photo",
+                        photo: [{ file_id: "photo-1", file_unique_id: "unique-1", width: 800, height: 600 }],
+                        caption: { text: "Portfolio" },
+                    }],
+                },
+            },
+            api: {
+                copyMessage: vi.fn().mockResolvedValue({}),
+                sendMessage: vi.fn().mockResolvedValue({}),
+                sendPhoto: vi.fn().mockResolvedValue({}),
+                sendRichMessage: vi.fn().mockResolvedValue({}),
+            },
+        };
+
+        await sendAdminOutboundMessage(ctx as any, 123, { messageThreadId: 9 });
+
+        expect(ctx.api.sendPhoto).toHaveBeenCalledWith(123, "photo-1", { message_thread_id: 9 });
+        expect(ctx.api.sendMessage).toHaveBeenCalledWith(
+            123,
+            "📩 <b>Повідомлення від PlayPhoto:</b>\n\n🖼 Фото — Portfolio",
+            { parse_mode: "HTML", message_thread_id: 9 },
+        );
+        expect(ctx.api.sendRichMessage).not.toHaveBeenCalled();
+        expect(ctx.api.copyMessage).not.toHaveBeenCalled();
+    });
+
     it("copies stickers instead of sending an empty text message", async () => {
         const ctx = {
             chat: { id: 555 },
