@@ -3,13 +3,14 @@ import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../../types/context.js";
 import { broadcastService } from "../../services/broadcast.js";
 import { locationRepository } from "../../repositories/location-repository.js";
-import { normalizeCity, msgToHtml } from "./utils.js";
+import { getMessageHtml, normalizeCity } from "./utils.js";
 import { getBroadcastKb, getBroadcastPreview, formatTargetLabel } from "./broadcast-helpers.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import logger from "../../core/logger.js";
 import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import type { BroadcastMediaItem } from "../../types/context.js";
+import { getRichMessageMedia } from "../../utils/rich-message.js";
 
 export const adminBroadcastHandlers = new Composer<MyContext>();
 const ARCHIVE_KEEP_COMPLETED = 50;
@@ -391,7 +392,10 @@ export async function handleBroadcastContent(ctx: MyContext) {
     else if (message.audio) media = { type: 'audio', fileId: message.audio.file_id };
     else if (message.animation) media = { type: 'animation', fileId: message.animation.file_id };
 
-    const textHtml = msgToHtml(message.text || message.caption || "", message.entities || message.caption_entities || []);
+    const richMediaItems = getRichMessageMedia(message.rich_message);
+    if (!media && richMediaItems.length === 1) media = richMediaItems[0];
+
+    const textHtml = getMessageHtml(message);
 
     if (!textHtml && !media) {
         await ctx.reply("❌ Please send some content (text or media).");
@@ -407,6 +411,15 @@ export async function handleBroadcastContent(ctx: MyContext) {
             return true;
         }
         data.text = textHtml;
+    }
+
+    if (!media && richMediaItems.length > 1) {
+        data.mediaItems = richMediaItems;
+        delete data.media;
+        data.step = 'CONFIRMATION';
+        try { await ctx.deleteMessage(); } catch { }
+        await renderReview(ctx);
+        return true;
     }
 
     if (media && media.type !== 'photo') {

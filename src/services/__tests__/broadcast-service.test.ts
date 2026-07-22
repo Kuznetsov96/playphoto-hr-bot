@@ -2,6 +2,33 @@ import { describe, expect, it, vi } from "vitest";
 import { broadcastService } from "../broadcast.js";
 
 describe("broadcastService media delivery", () => {
+    it("sends mixed rich-media fallbacks as standard Telegram media", async () => {
+        const api = {
+            sendPhoto: vi.fn().mockResolvedValue({ message_id: 10 }),
+            sendVoice: vi.fn().mockResolvedValue({ message_id: 11 }),
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 12 }),
+        };
+
+        await broadcastService.sendTestBroadcast(
+            api,
+            123,
+            "<b>Reliable HTML fallback</b>",
+            [
+                { type: "photo", fileId: "photo-file-id" },
+                { type: "voice", fileId: "voice-file-id" },
+            ],
+            "none",
+        );
+
+        expect(api.sendPhoto).toHaveBeenCalledWith(123, "photo-file-id");
+        expect(api.sendVoice).toHaveBeenCalledWith(123, "voice-file-id");
+        expect(api.sendMessage).toHaveBeenCalledWith(
+            123,
+            "<b>Reliable HTML fallback</b>",
+            expect.objectContaining({ parse_mode: "HTML" }),
+        );
+    });
+
     it("sends animation broadcasts and follows up with formatted text/buttons", async () => {
         const api = {
             sendAnimation: vi.fn().mockResolvedValue({ message_id: 10 }),

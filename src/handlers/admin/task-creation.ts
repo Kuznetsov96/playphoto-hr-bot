@@ -8,6 +8,7 @@ import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
 import { getMessageHtml, sendTaskNotification } from "./utils.js";
+import { getRichMessageMedia } from "../../utils/rich-message.js";
 
 const composer = new Composer<MyContext>();
 
@@ -335,7 +336,9 @@ async function handleTaskInput(
         ctx.session.taskCreation.fileId = options.fileId;
         ctx.session.taskCreation.mediaType = options.mediaType || "photo";
         if (options.sourceChatId !== undefined) ctx.session.taskCreation.sourceChatId = options.sourceChatId;
+        else delete ctx.session.taskCreation.sourceChatId;
         if (options.sourceMessageId !== undefined) ctx.session.taskCreation.sourceMessageId = options.sourceMessageId;
+        else delete ctx.session.taskCreation.sourceMessageId;
     }
 
     if (!taskText) {
@@ -489,13 +492,39 @@ composer.on("message:text", async (ctx, next) => {
             return await ScreenManager.renderScreen(ctx, "❌ Access Denied", errKb);
         }
 
-        if (step === "entering_text") await handleTaskInput(ctx, { text: getMessageHtml(ctx.message) });
+        if (step === "entering_text") {
+            const richMedia = getRichMessageMedia(ctx.message.rich_message)[0];
+            await handleTaskInput(ctx, {
+                text: getMessageHtml(ctx.message),
+                ...(richMedia ? {
+                    fileId: richMedia.fileId,
+                    mediaType: richMedia.type,
+                } : {}),
+            });
+        }
         else {
             const timeInput = ctx.message.text.trim();
             if (/^\d{1,2}:\d{2}$/.test(timeInput)) await executeTaskCreation(ctx, timeInput);
             else await ScreenManager.renderScreen(ctx, "❌ Невірний формат часу. Введіть HH:MM (наприклад, 15:00) або скористайтеся кнопками:");
         }
     } else await next();
+});
+
+composer.on("message:checklist", async (ctx, next) => {
+    if (ctx.chat?.type !== "private") return await next();
+    if (ctx.session.adminFlow !== 'TASK' || ctx.session.taskCreation?.step !== "entering_text") {
+        return await next();
+    }
+    await ctx.deleteMessage().catch(() => { });
+    if (!await checkTaskCreationRole(ctx)) {
+        delete ctx.session.taskCreation;
+        return await ScreenManager.renderScreen(
+            ctx,
+            "❌ Access Denied",
+            new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu"),
+        );
+    }
+    await handleTaskInput(ctx, { text: getMessageHtml(ctx.message) });
 });
 
 

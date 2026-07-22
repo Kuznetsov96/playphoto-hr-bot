@@ -1,7 +1,11 @@
 import type { Api } from "grammy";
-import type { RichText } from "grammy/types";
+import type {
+    InputRichBlock,
+    InputRichMessage,
+    InputRichMessageWithoutUpload,
+    RichText,
+} from "grammy/types";
 import { describe, expect, it, vi } from "vitest";
-import type { InputRichBlock, LatestInputRichMessage } from "../../types/telegram-rich-message.js";
 import {
     editLatestRichInlineMessage,
     editLatestRichMessage,
@@ -101,7 +105,7 @@ describe("Bot API 10.2 rich-message senders", () => {
     it("passes every explicit rich text and final block type to sendRichMessage", async () => {
         const sendRichMessageMock = vi.fn().mockResolvedValue({ message_id: 1 });
         const api = { sendRichMessage: sendRichMessageMock } as unknown as Api;
-        const richMessage: LatestInputRichMessage = { blocks: allFinalBlocks };
+        const richMessage: InputRichMessage = { blocks: allFinalBlocks };
 
         await sendLatestRichMessage(api, 42, richMessage, { disable_notification: true });
 
@@ -115,7 +119,7 @@ describe("Bot API 10.2 rich-message senders", () => {
     it("supports HTML/Markdown embedded media introduced in Bot API 10.2", async () => {
         const sendRichMessageMock = vi.fn().mockResolvedValue({ message_id: 1 });
         const api = { sendRichMessage: sendRichMessageMock } as unknown as Api;
-        const richMessage: LatestInputRichMessage = {
+        const richMessage: InputRichMessage = {
             html: "<img src=\"tg://photo?id=portfolio\">",
             media: [{ id: "portfolio", media: { type: "photo", media: "photo-id" } }],
         };
@@ -128,7 +132,7 @@ describe("Bot API 10.2 rich-message senders", () => {
     it("supports the draft-only thinking block", async () => {
         const sendDraftMock = vi.fn().mockResolvedValue(true);
         const api = { sendRichMessageDraft: sendDraftMock } as unknown as Api;
-        const draft: LatestInputRichMessage = {
+        const draft: InputRichMessageWithoutUpload = {
             blocks: [{ type: "thinking", text: "Analyzing candidates…" }],
         };
 
@@ -145,7 +149,7 @@ describe("Bot API 10.2 rich-message senders", () => {
     it("edits a message as rich content only when explicitly requested", async () => {
         const editMessageTextMock = vi.fn().mockResolvedValue({ message_id: 1 });
         const api = { editMessageText: editMessageTextMock } as unknown as Api;
-        const richMessage: LatestInputRichMessage = {
+        const richMessage: InputRichMessage = {
             blocks: [{ type: "heading", size: 2, text: "Updated report" }],
         };
 
@@ -164,7 +168,7 @@ describe("Bot API 10.2 rich-message senders", () => {
     it("edits inline rich content only when explicitly requested", async () => {
         const editInlineMock = vi.fn().mockResolvedValue(true);
         const api = { editMessageTextInline: editInlineMock } as unknown as Api;
-        const richMessage: LatestInputRichMessage = { markdown: "# Updated report" };
+        const richMessage: InputRichMessage = { markdown: "# Updated report" };
 
         await editLatestRichInlineMessage(api, "inline-id", richMessage);
 

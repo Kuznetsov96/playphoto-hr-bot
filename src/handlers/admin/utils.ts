@@ -1,5 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
+import { getRichMessageHtml, getRichMessageMedia } from "../../utils/rich-message.js";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
@@ -109,7 +110,7 @@ function escapeHtmlAttribute(text: string): string {
 }
 
 export function getAdminOutboundText(message: MyContext["message"] | undefined): string {
-    return message?.text || message?.caption || "";
+    return message?.text || message?.caption || message?.checklist?.title || "";
 }
 
 export function buildAdminOutboundReplyKeyboard(options: {
@@ -142,14 +143,24 @@ export async function sendAdminOutboundMessage(
     }
 
     const text = getAdminOutboundText(message);
-    const formattedHtmlText = msgToHtml(
-        text,
-        (message.text ? message.entities : message.caption_entities) || []
-    );
+
+    const formattedHtmlText = getMessageHtml(message);
+    if (message.rich_message) {
+        const mediaOptions = options?.messageThreadId !== undefined
+            ? { message_thread_id: options.messageThreadId }
+            : {};
+        for (const media of getRichMessageMedia(message.rich_message)) {
+            if (media.type === "photo") await ctx.api.sendPhoto(targetChatId, media.fileId, mediaOptions);
+            else if (media.type === "video") await ctx.api.sendVideo(targetChatId, media.fileId, mediaOptions);
+            else if (media.type === "voice") await ctx.api.sendVoice(targetChatId, media.fileId, mediaOptions);
+            else if (media.type === "audio") await ctx.api.sendAudio(targetChatId, media.fileId, mediaOptions);
+            else await ctx.api.sendAnimation(targetChatId, media.fileId, mediaOptions);
+        }
+    }
     // Telegram keeps adding copyable non-text message types. Treat only actual
     // text messages as text so stickers and other payloads are not sent as an
     // empty sendMessage call.
-    const shouldCopyMessage = !message.text;
+    const shouldCopyMessage = !message.text && !message.rich_message && !message.checklist;
 
     if (shouldCopyMessage) {
         const copyOptions: Record<string, unknown> = {};
@@ -346,6 +357,15 @@ export async function sendLongHtmlMessage(
 
 export function getMessageHtml(message: MyContext["message"] | undefined): string {
     if (!message) return "";
+    if (message.rich_message) return getRichMessageHtml(message.rich_message);
+    if (message.checklist) {
+        const title = msgToHtml(message.checklist.title, message.checklist.title_entities || []);
+        const tasks = message.checklist.tasks.map(task => {
+            const marker = task.completion_date ? "☑" : "☐";
+            return `${marker} ${msgToHtml(task.text, task.text_entities || [])}`;
+        });
+        return [`<b>${title}</b>`, ...tasks].join("\n");
+    }
     const text = message.text || message.caption || "";
     const entities = message.text ? message.entities : message.caption_entities;
     return msgToHtml(text, entities || []);
