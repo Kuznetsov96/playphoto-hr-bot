@@ -470,7 +470,7 @@ export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
 
 import { reportsQueue } from "../core/queue.js";
 
-export async function startDailyReportLoop(bot: Bot<MyContext>) {
+export async function startDailyReportLoop(_bot: Bot<MyContext>) {
     logBusinessEvent({
         event: "finance.report_loop.started",
         actorType: "system",
@@ -480,38 +480,47 @@ export async function startDailyReportLoop(bot: Bot<MyContext>) {
         operation: "startDailyReportLoop",
     });
 
-    let lastReportDate: string | null = null;
-    let lastAuditDate: string | null = null;
-
-    // Check every minute
-    setInterval(async () => {
+    const enqueueDueReports = async () => {
         const now = new Date();
         const kievTime = now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" });
         const localDate = new Date(kievTime);
-        const todayStr = localDate.toLocaleDateString("uk-UA", { timeZone: 'Europe/Kyiv' });
+        const todayKey = [
+            localDate.getFullYear(),
+            String(localDate.getMonth() + 1).padStart(2, "0"),
+            String(localDate.getDate()).padStart(2, "0"),
+        ].join("-");
+        const minuteOfDay = localDate.getHours() * 60 + localDate.getMinutes();
 
-        // 08:00 Audit Report (for Yesterday)
-        if (localDate.getHours() === 8 && localDate.getMinutes() === 0) {
-            if (lastAuditDate !== todayStr) {
+        try {
+            // Stable BullMQ job IDs provide cross-process deduplication and allow a
+            // delayed startup to catch up any time after the intended schedule.
+            if (minuteOfDay >= 8 * 60) {
                 const yesterday = new Date(localDate);
                 yesterday.setDate(yesterday.getDate() - 1);
 
-                await reportsQueue.add('send-morning-audit', { dateIso: yesterday.toISOString() });
-                lastAuditDate = todayStr;
-            } else {
-                logger.debug({ reportDate: todayStr }, "Finance morning audit already queued for this day");
+                await reportsQueue.add("send-morning-audit", { dateIso: yesterday.toISOString() }, {
+                    jobId: `finance-audit-${todayKey}`,
+                    attempts: 3,
+                    backoff: { type: "exponential", delay: 10_000 },
+                });
             }
-        }
 
-        // 21:40 Daily Income Report (for Today)
-        if (localDate.getHours() === 21 && localDate.getMinutes() === 40) {
-            if (lastReportDate !== todayStr) {
-                await reportsQueue.add('send-daily-income', { chatId: null }); // null = auto recipients
-
-                lastReportDate = todayStr;
-            } else {
-                logger.debug({ reportDate: todayStr }, "Finance daily income report already queued for this day");
+            if (minuteOfDay >= 21 * 60 + 40) {
+                await reportsQueue.add("send-daily-income", { chatId: null }, {
+                    jobId: `finance-income-${todayKey}`,
+                    attempts: 3,
+                    backoff: { type: "exponential", delay: 10_000 },
+                });
             }
+        } catch (error) {
+            logger.error({ err: error, reportDate: todayKey }, "Failed to enqueue scheduled finance report");
         }
+    };
+
+    await enqueueDueReports();
+    return setInterval(() => {
+        enqueueDueReports().catch(error => {
+            logger.error({ err: error }, "Finance report scheduler tick failed");
+        });
     }, 60 * 1000);
 }

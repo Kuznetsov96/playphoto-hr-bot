@@ -3,41 +3,32 @@ import { redis } from "./redis.js";
 import type { MyContext, SessionData } from "../types/context.js";
 import logger from "./logger.js";
 
-interface CacheEntry {
-    data: SessionData;
-    dirty: boolean;
-    lastAccessed: number;
-    flushTimer?: NodeJS.Timeout | null;
-}
-
-const sessionCache = new Map<string, CacheEntry>();
-const RAM_TTL_MS = 1000 * 60 * 30; // 30 minutes in RAM
 const REDIS_TTL_SEC = 86400; // 24 hours in Redis
-const DEBOUNCE_MS = 500; // 500ms debounce for Redis writes
+const SESSION_CLEARED = Symbol("session-cleared");
 
-export const bigIntReplacer = (key: string, value: any) =>
-    typeof value === 'bigint' ? value.toString() : value;
+export const bigIntReplacer = (_key: string, value: unknown) =>
+    typeof value === "bigint" ? value.toString() : value;
 
 function serialize(data: Partial<SessionData>): Record<string, string> {
-    const res: Record<string, string> = {};
-    for (const [k, v] of Object.entries(data)) {
-        if (v !== undefined) {
-            res[k] = JSON.stringify(v, bigIntReplacer);
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+            result[key] = JSON.stringify(value, bigIntReplacer);
         }
     }
-    return res;
+    return result;
 }
 
 function deserialize(hash: Record<string, string>): SessionData {
-    const res: any = {};
-    for (const [k, v] of Object.entries(hash)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(hash)) {
         try {
-            res[k] = JSON.parse(v);
+            result[key] = JSON.parse(value);
         } catch {
-            res[k] = v; // Fallback
+            result[key] = value;
         }
     }
-    return res as SessionData;
+    return result as unknown as SessionData;
 }
 
 function getDefaultSession(): SessionData {
@@ -45,125 +36,83 @@ function getDefaultSession(): SessionData {
         step: "idle",
         navStack: [],
         candidateData: {},
-        messagesToDelete: []
+        messagesToDelete: [],
     };
 }
 
-async function flushToRedis(key: string, entry: CacheEntry) {
-    if (!entry.dirty) return;
+function getRedisKey(ctx: MyContext): string | null {
+    const userId = ctx.from?.id;
+    const chatId = ctx.chat?.id;
+    const rawKey = userId !== undefined && chatId !== undefined
+        ? `${chatId}:${userId}`
+        : (chatId ?? userId)?.toString();
+    return rawKey ? `session:${rawKey}` : null;
+}
 
-    const serialized = serialize(entry.data);
-    if (Object.keys(serialized).length === 0) return;
+async function persistSession(redisKey: string, data: SessionData): Promise<void> {
+    const serialized = serialize(data);
 
     try {
-        const pipeline = redis.pipeline();
-        pipeline.hset(key, serialized);
-        pipeline.expire(key, REDIS_TTL_SEC);
-        await pipeline.exec();
-        entry.dirty = false;
-        logger.trace(`💾 [SESSION] Flushed ${key} to Redis Hash`);
-    } catch (err) {
-        logger.error({ err, key }, "❌ [SESSION] Failed to flush session to Redis");
-    }
-}
-
-function scheduleFlush(key: string, entry: CacheEntry) {
-    entry.dirty = true;
-    if (entry.flushTimer) {
-        clearTimeout(entry.flushTimer);
-    }
-    entry.flushTimer = setTimeout(() => {
-        entry.flushTimer = null;
-        flushToRedis(key, entry).catch(() => { });
-    }, DEBOUNCE_MS);
-}
-
-// Memory cleanup interval
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of sessionCache.entries()) {
-        if (now - entry.lastAccessed > RAM_TTL_MS) {
-            if (entry.dirty) {
-                flushToRedis(key, entry).finally(() => sessionCache.delete(key));
-            } else {
-                sessionCache.delete(key);
-            }
+        // Replace the complete hash atomically. HSET alone leaves deleted fields behind,
+        // which can resurrect an old flow after a process restart.
+        const transaction = redis.multi();
+        transaction.del(redisKey);
+        if (Object.keys(serialized).length > 0) {
+            transaction.hset(redisKey, serialized);
+            transaction.expire(redisKey, REDIS_TTL_SEC);
         }
+        const results = await transaction.exec();
+        if (results === null || results.some(([error]) => error !== null)) {
+            throw new Error("Redis session transaction failed");
+        }
+        logger.trace({ redisKey }, "💾 [SESSION] Persisted atomically");
+    } catch (err) {
+        logger.error({ err, redisKey }, "❌ [SESSION] Failed to persist session");
     }
-}, 1000 * 60 * 5); // Clean every 5 min
+}
 
 export function lazySession(): Middleware<MyContext> {
     return async (ctx, next) => {
-        const userId = ctx.from?.id;
-        const chatId = ctx.chat?.id;
+        const redisKey = getRedisKey(ctx);
+        if (!redisKey) return next();
 
-        // Scope session to both chat and actor to avoid shared state inside group chats/topics.
-        const rawKey = userId !== undefined && chatId !== undefined
-            ? `${chatId}:${userId}`
-            : (chatId ?? userId)?.toString();
-        if (!rawKey) {
-            // No session possible for this update
-            return next();
+        let data: SessionData;
+        try {
+            const hash = await redis.hgetall(redisKey);
+            data = Object.keys(hash).length > 0 ? deserialize(hash) : getDefaultSession();
+            logger.trace({ redisKey }, "📂 [SESSION] Loaded from Redis");
+        } catch (err) {
+            logger.error({ err, redisKey }, "❌ [SESSION] Error reading from Redis, using default");
+            data = getDefaultSession();
         }
 
-        const redisKey = `session:${rawKey}`;
-        let entry = sessionCache.get(redisKey);
+        if (!data.candidateData) data.candidateData = {};
+        if (!data.step) data.step = "idle";
 
-        if (!entry) {
-            try {
-                const hash = await redis.hgetall(redisKey);
-                let data: SessionData;
-                if (Object.keys(hash).length > 0) {
-                    data = deserialize(hash);
-                } else {
-                    data = getDefaultSession();
-                }
-
-                // Provide defaults if fields missing
-                if (!data.candidateData) data.candidateData = {};
-                if (!data.step) data.step = "idle";
-
-                entry = { data, dirty: false, lastAccessed: Date.now() };
-                sessionCache.set(redisKey, entry);
-                logger.trace({ redisKey }, "📂 [SESSION] Loaded from Redis to RAM");
-            } catch (err) {
-                logger.error({ err, redisKey }, "❌ [SESSION] Error reading from Redis, using default");
-                entry = { data: getDefaultSession(), dirty: true, lastAccessed: Date.now() };
-                sessionCache.set(redisKey, entry);
-            }
-        } else {
-            entry.lastAccessed = Date.now();
-        }
-
-        // Expose session on ctx
-        (ctx as any).session = entry.data;
-
-        const initialHashStr = JSON.stringify(entry.data, bigIntReplacer);
+        (ctx as MyContext & { [SESSION_CLEARED]?: boolean }).session = data;
+        (ctx as MyContext & { [SESSION_CLEARED]?: boolean })[SESSION_CLEARED] = false;
+        const initialState = JSON.stringify(data, bigIntReplacer);
 
         try {
             await next();
         } finally {
-            // Check if mutated
-            if (initialHashStr !== JSON.stringify((ctx as any).session, bigIntReplacer)) {
-                entry.data = (ctx as any).session;
-                scheduleFlush(redisKey, entry);
+            const sessionContext = ctx as MyContext & { [SESSION_CLEARED]?: boolean };
+            if (
+                !sessionContext[SESSION_CLEARED] &&
+                initialState !== JSON.stringify(sessionContext.session, bigIntReplacer)
+            ) {
+                await persistSession(redisKey, sessionContext.session);
             }
         }
     };
 }
 
-export async function clearSession(ctx: MyContext) {
-    const rawKey = ctx.from?.id !== undefined && ctx.chat?.id !== undefined
-        ? `${ctx.chat.id}:${ctx.from.id}`
-        : (ctx.chat?.id ?? ctx.from?.id)?.toString();
-    if (!rawKey) return;
-    const redisKey = `session:${rawKey}`;
-
-    const entry = sessionCache.get(redisKey);
-    if (entry?.flushTimer) clearTimeout(entry.flushTimer);
-    sessionCache.delete(redisKey);
+export async function clearSession(ctx: MyContext): Promise<void> {
+    const redisKey = getRedisKey(ctx);
+    if (!redisKey) return;
 
     ctx.session = getDefaultSession();
+    (ctx as MyContext & { [SESSION_CLEARED]?: boolean })[SESSION_CLEARED] = true;
     try {
         await redis.del(redisKey);
     } catch (err) {

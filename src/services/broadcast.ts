@@ -7,6 +7,7 @@ import { broadcastRepository } from "../repositories/broadcast-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
+import { broadcastDeliveryRepository } from "../repositories/broadcast-delivery-repository.js";
 import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
@@ -14,11 +15,16 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import fs from "fs";
 import type { BroadcastMediaItem } from "../types/context.js";
 
-interface BroadcastStats {
+export interface BroadcastStats {
     totalChats: number;
     pending: number;
     confirmed: number;
     declined: number;
+    deliveryTotal: number;
+    deliverySent: number;
+    deliveryFailed: number;
+    deliveryUncertain: number;
+    deliverySkipped: number;
 }
 
 export interface BroadcastTarget {
@@ -275,16 +281,29 @@ export const broadcastService = {
 
         // 3. Add to Queue
         const { broadcastQueue } = await import("../core/queue.js");
-        await broadcastQueue.add('send-broadcast', {
-            broadcastId: broadcast.id,
-            initiatorId,
-            messageText,
-            target,
-            media,
-            botUsername,
-            pingOptions,
-            api: null // API object cannot be serialized, worker must use its own bot instance
-        });
+        try {
+            await broadcastQueue.add('send-broadcast', {
+                broadcastId: broadcast.id,
+                initiatorId,
+                messageText,
+                target,
+                media,
+                botUsername,
+                pingOptions,
+                api: null // API object cannot be serialized, worker must use its own bot instance
+            }, {
+                jobId: `broadcast-${broadcast.id}`,
+                attempts: 3,
+                backoff: { type: "exponential", delay: 5_000 },
+                removeOnComplete: 500,
+                removeOnFail: 1_000,
+            });
+        } catch (error) {
+            await broadcastRepository.update(broadcast.id, { cancelledAt: new Date() }).catch(updateError => {
+                logger.error({ err: updateError, broadcastId: broadcast.id }, "Failed to mark unqueued broadcast as cancelled");
+            });
+            throw error;
+        }
 
         logToDebug(`📥 [SERVICE] Added to queue: ${broadcast.id}`);
         return chats.length + users.length;
@@ -298,6 +317,11 @@ export const broadcastService = {
         logToDebug(`📡 [WORKER] Targets: ${chats.length} chats, ${users.length} users`);
 
         let sentCount = 0;
+
+        await broadcastDeliveryRepository.createMany([
+            ...chats.map(chatId => ({ broadcastId, chatId: BigInt(chatId), targetType: "GROUP" })),
+            ...users.map(userId => ({ broadcastId, chatId: BigInt(userId), targetType: "USER" })),
+        ]);
 
         const initialDelay = pingOptions?.initialDelayMs || (20 * 60 * 60 * 1000);
         const repeatInterval = pingOptions?.repeatIntervalMs || null;
@@ -314,6 +338,11 @@ export const broadcastService = {
         };
 
         for (const chatId of chats) {
+            const delivery = await broadcastDeliveryRepository.findUnique(broadcastId, BigInt(chatId));
+            if (!delivery || delivery.status !== "PENDING") continue;
+            const claimed = await broadcastDeliveryRepository.claimPending(delivery.id);
+            if (claimed.count !== 1) continue;
+
             try {
                 const sentMsg = await send(chatId, true);
                 if (buttonType !== 'none' && sentMsg) {
@@ -326,9 +355,13 @@ export const broadcastService = {
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
+                await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, chatId }, "Failed to broadcast to chat");
+                await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
+                    logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
+                });
             }
         }
 
@@ -341,12 +374,18 @@ export const broadcastService = {
         }
 
         for (const userId of users) {
+            const delivery = await broadcastDeliveryRepository.findUnique(broadcastId, BigInt(userId));
+            if (!delivery || delivery.status !== "PENDING") continue;
+            const claimed = await broadcastDeliveryRepository.claimPending(delivery.id);
+            if (claimed.count !== 1) continue;
+
             try {
                 // Skip users who already filled preferences for this month (via menu button)
                 if (prefMonthName) {
                     const alreadyFilled = await redis.get(`pref_filled:${userId}:${prefMonthName}`);
                     if (alreadyFilled) {
                         logger.debug({ userId, month: prefMonthName }, "Preferences broadcast skipped because it was already completed");
+                        await broadcastDeliveryRepository.markSkipped(delivery.id, "PREFERENCES_ALREADY_FILLED");
                         continue;
                     }
                 }
@@ -365,12 +404,27 @@ export const broadcastService = {
                         user: { connect: { telegramId: BigInt(userId) } }
                     });
                 }
+                await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, userId }, "Failed to broadcast to user");
+                await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
+                    logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
+                });
             }
         }
 
+        const deliveryStats = await broadcastDeliveryRepository.getStats(broadcastId);
+        const failedCount = deliveryStats.FAILED || 0;
+        const uncertainCount = (deliveryStats.SENDING || 0) + (deliveryStats.PENDING || 0);
+
+        if (failedCount > 0 || uncertainCount > 0) {
+            throw new Error(
+                `Broadcast ${broadcastId} incomplete: ${failedCount} failed, ${uncertainCount} pending or uncertain`,
+            );
+        }
+
+        await broadcastRepository.update(broadcastId, { completedAt: new Date() });
         logToDebug(`✅ [WORKER] Broadcast ${broadcastId} completed. Sent: ${sentCount}`);
         return sentCount;
     },
@@ -526,7 +580,10 @@ export const broadcastService = {
     },
 
     async getStats(broadcastId: number): Promise<BroadcastStats> {
-        const tracked = await trackedMessageRepository.findManyWithReplies(broadcastId);
+        const [tracked, deliveryStats] = await Promise.all([
+            trackedMessageRepository.findManyWithReplies(broadcastId),
+            broadcastDeliveryRepository.getStats(broadcastId),
+        ]);
 
         let pending = 0;
         let confirmed = 0;
@@ -540,7 +597,22 @@ export const broadcastService = {
             });
         });
 
-        return { totalChats: tracked.length, pending, confirmed, declined };
+        const deliverySent = deliveryStats.SENT || 0;
+        const deliveryFailed = deliveryStats.FAILED || 0;
+        const deliverySkipped = deliveryStats.SKIPPED || 0;
+        const deliveryUncertain = (deliveryStats.SENDING || 0) + (deliveryStats.PENDING || 0);
+
+        return {
+            totalChats: tracked.length,
+            pending,
+            confirmed,
+            declined,
+            deliveryTotal: deliverySent + deliveryFailed + deliverySkipped + deliveryUncertain,
+            deliverySent,
+            deliveryFailed,
+            deliveryUncertain,
+            deliverySkipped,
+        };
     },
 
     async getRecentBroadcasts(limit = 20) {

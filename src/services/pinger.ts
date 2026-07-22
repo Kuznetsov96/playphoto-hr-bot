@@ -11,6 +11,7 @@ import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { handleBlockedCandidate } from "../utils/bot-blocked.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -63,7 +64,7 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
             const adminId = ADMIN_IDS[0];
             if (adminId) {
                 const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
-                    `👤 <b>${staffName}</b> blocked the bot.\n\n` +
+                    `👤 <b>${escapeHtml(staffName)}</b> blocked the bot.\n\n` +
                     `Automatic actions completed:\n` +
                     `• Status → <b>Offboarded</b>\n` +
                     `• Channel access — removed\n` +
@@ -211,8 +212,8 @@ async function runPinger(bot: Bot<MyContext>) {
                 // Group chat reminder with mentions
                 const mentions = activePendingReplies.map((p: any) => {
                     const user = p.user;
-                    if (user.username) return `@${user.username}`;
-                    return `<a href="tg://user?id=${user.telegramId}">${user.firstName || 'User'}</a>`;
+                    if (user.username) return `@${escapeHtml(user.username)}`;
+                    return `<a href="tg://user?id=${user.telegramId}">${escapeHtml(user.firstName || 'User')}</a>`;
                 }).join(", ");
 
                 text = `🔔 <b>Нагадування!</b>\nПрохання підтвердити ознайомлення з повідомленням вище 👆\n\nНе відповіли: ${mentions}`;

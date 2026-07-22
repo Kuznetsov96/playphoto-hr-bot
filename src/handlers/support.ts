@@ -46,42 +46,45 @@ async function ensureRecoveryTopic(ctx: MyContext, candidate: NonNullable<Awaite
     const { RECOVERY_CHAT_ID } = await import("../config.js");
     const { supportRepository } = await import("../repositories/support-repository.js");
 
-    const existingTopic = await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id);
-    if (existingTopic && Number(existingTopic.chatId) === RECOVERY_CHAT_ID) {
-        return existingTopic;
-    }
+    const { supportConversationService } = await import("../services/support-conversation-service.js");
+    return supportConversationService.withUserLock(candidate.user.id, async () => {
+        const existingTopic = await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id);
+        if (existingTopic && Number(existingTopic.chatId) === RECOVERY_CHAT_ID) {
+            return existingTopic;
+        }
 
-    const surname = (candidate.fullName || "Candidate").trim().split(/\s+/)[0] || "Candidate";
-    const locationLabel = candidate.location?.name || candidate.city || "No location";
-    const topic = await ctx.api.createForumTopic(RECOVERY_CHAT_ID, `🛟 RECOVERY | ${surname} | ${locationLabel}`);
-    const topicId = topic.message_thread_id;
-    const topicKeyboard = new InlineKeyboard()
-        .text("Reopen to WAITLIST_HR", `recovery_reopen_${candidate.id}_${topicId}`)
-        .text("Close Recovery", `close_topic_${topicId}`);
+        const surname = (candidate.fullName || "Candidate").trim().split(/\s+/)[0] || "Candidate";
+        const locationLabel = candidate.location?.name || candidate.city || "No location";
+        const topic = await ctx.api.createForumTopic(RECOVERY_CHAT_ID, `🛟 RECOVERY | ${surname} | ${locationLabel}`);
+        const topicId = topic.message_thread_id;
+        const topicKeyboard = new InlineKeyboard()
+            .text("Reopen to WAITLIST_HR", `recovery_reopen_${candidate.id}_${topicId}`)
+            .text("Close Recovery", `close_topic_${topicId}`);
 
-    const usernameLabel = candidate.user.username
-        ? `@${escapeHtml(candidate.user.username)}`
-        : "not set";
+        const usernameLabel = candidate.user.username
+            ? `@${escapeHtml(candidate.user.username)}`
+            : "not set";
 
-    const infoCard =
-        `🛟 <b>Recovery Case</b>\n` +
-        `👤 <b>Candidate:</b> ${escapeHtml(candidate.fullName || "Candidate")}\n` +
-        `🔗 <b>Username:</b> ${usernameLabel}\n` +
-        `📍 <b>Location:</b> ${escapeHtml(locationLabel)}\n` +
-        `📊 <b>Current Status:</b> ${escapeHtml(candidate.status)}\n` +
-        `📝 <b>Delivery Issue:</b> ${escapeHtml(candidate.candidateDecision || "Bot delivery was previously blocked")}`;
+        const infoCard =
+            `🛟 <b>Recovery Case</b>\n` +
+            `👤 <b>Candidate:</b> ${escapeHtml(candidate.fullName || "Candidate")}\n` +
+            `🔗 <b>Username:</b> ${usernameLabel}\n` +
+            `📍 <b>Location:</b> ${escapeHtml(locationLabel)}\n` +
+            `📊 <b>Current Status:</b> ${escapeHtml(candidate.status)}\n` +
+            `📝 <b>Delivery Issue:</b> ${escapeHtml(candidate.candidateDecision || "Bot delivery was previously blocked")}`;
 
-    await ctx.api.sendMessage(RECOVERY_CHAT_ID, infoCard, {
-        parse_mode: "HTML",
-        message_thread_id: topicId,
-        reply_markup: topicKeyboard,
-    });
+        await ctx.api.sendMessage(RECOVERY_CHAT_ID, infoCard, {
+            parse_mode: "HTML",
+            message_thread_id: topicId,
+            reply_markup: topicKeyboard,
+        });
 
-    return supportRepository.createOutgoingTopic({
-        chatId: BigInt(RECOVERY_CHAT_ID),
-        topicId,
-        staffName: candidate.fullName || "Candidate",
-        userId: candidate.user.id,
+        return supportRepository.createOutgoingTopic({
+            chatId: BigInt(RECOVERY_CHAT_ID),
+            topicId,
+            staffName: candidate.fullName || "Candidate",
+            userId: candidate.user.id,
+        });
     });
 }
 
@@ -291,18 +294,6 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         if (isSetupStage) {
             const payload = getCandidateSupportPayload(ctx);
             const msgText = payload.content;
-            logBusinessEvent({
-                event: "candidate.support.message_sent",
-                correlationId: ctx.correlationId,
-                updateId: ctx.update.update_id,
-                telegramId,
-                candidateId: candidate.id,
-                actorType: "candidate",
-                stage: "SETUP",
-                result: "success",
-                module: "support",
-                safeContext: { routing: "admin_dm", status: candidate.status }
-            });
             const adminMsgText =
                 `💬 <b>Message from Candidate (Admin/Setup)</b>\n` +
                 `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
@@ -327,10 +318,34 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             }
 
             if (!delivered) {
+                logBusinessEvent({
+                    event: "candidate.support.message_sent",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId,
+                    candidateId: candidate.id,
+                    actorType: "candidate",
+                    stage: "SETUP",
+                    result: "failure",
+                    module: "support",
+                    safeContext: { routing: "admin_dm", status: candidate.status }
+                });
                 await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
-                ctx.session.step = "idle";
                 return true;
             }
+
+            logBusinessEvent({
+                event: "candidate.support.message_sent",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId,
+                candidateId: candidate.id,
+                actorType: "candidate",
+                stage: "SETUP",
+                result: "success",
+                module: "support",
+                safeContext: { routing: "admin_dm", status: candidate.status }
+            });
 
             try {
                 const { messageRepository } = await import("../repositories/message-repository.js");
@@ -361,24 +376,11 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         if (isMentorOwnedFlow) {
             const payload = getCandidateSupportPayload(ctx);
             const msgText = payload.content;
-            logBusinessEvent({
-                event: "candidate.support.message_sent",
-                correlationId: ctx.correlationId,
-                updateId: ctx.update.update_id,
-                telegramId,
-                candidateId: candidate.id,
-                actorType: "candidate",
-                stage: "MENTOR",
-                result: "success",
-                module: "support",
-                safeContext: { routing: "admin_dm", status: candidate.status }
-            });
             let categoryLabel = "Admin (Mentor)";
             let targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
 
             if (targetAdminIds.length === 0) {
                 await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
-                ctx.session.step = "idle";
                 return true;
             }
 
@@ -404,6 +406,36 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     logger.warn({ err: e, adminId }, "Failed to deliver mentor-stage message to main admin");
                 }
             }
+
+            if (!delivered) {
+                logBusinessEvent({
+                    event: "candidate.support.message_sent",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId,
+                    candidateId: candidate.id,
+                    actorType: "candidate",
+                    stage: "MENTOR",
+                    result: "failure",
+                    module: "support",
+                    safeContext: { routing: "admin_dm", status: candidate.status }
+                });
+                await ctx.reply("Не вдалося доставити повідомлення адміністратору. Спробуйте ще раз трохи пізніше.");
+                return true;
+            }
+
+            logBusinessEvent({
+                event: "candidate.support.message_sent",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId,
+                candidateId: candidate.id,
+                actorType: "candidate",
+                stage: "MENTOR",
+                result: "success",
+                module: "support",
+                safeContext: { routing: "admin_dm", status: candidate.status }
+            });
 
             try {
                 const { messageRepository } = await import("../repositories/message-repository.js");
@@ -439,9 +471,27 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 ? activeOutgoingTopic
                 : await ensureRecoveryTopic(ctx, candidate);
 
-            await ctx.api.copyMessage(Number(topic.chatId), ctx.chat!.id, ctx.message!.message_id, {
-                message_thread_id: topic.topicId
-            });
+            try {
+                await ctx.api.copyMessage(Number(topic.chatId), ctx.chat!.id, ctx.message!.message_id, {
+                    message_thread_id: topic.topicId
+                });
+            } catch (e) {
+                logger.error({ err: e, candidateId: candidate.id, topicId: topic.topicId }, "Failed to forward recovery message");
+                logBusinessEvent({
+                    event: "candidate.support.message_sent",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId,
+                    candidateId: candidate.id,
+                    actorType: "candidate",
+                    stage: "RECOVERY",
+                    result: "failure",
+                    module: "support",
+                    safeContext: { routing: "recovery_topic", topicId: topic.topicId, chatId: String(topic.chatId) }
+                });
+                await ctx.reply("Не вдалося доставити повідомлення в recovery-чергу. Спробуйте ще раз трохи пізніше.");
+                return true;
+            }
 
             try {
                 const { messageRepository } = await import("../repositories/message-repository.js");
@@ -490,6 +540,9 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             const targetChatId = activeTicket ? TEAM_CHATS.SUPPORT : Number(activeOutgoingTopic?.chatId || TEAM_CHATS.SUPPORT);
             try {
                 if (ctx.message && topicId) {
+                    await ctx.api.copyMessage(targetChatId, ctx.chat!.id, ctx.message.message_id, {
+                        message_thread_id: topicId
+                    });
                     logBusinessEvent({
                         event: "candidate.support.message_sent",
                         correlationId: ctx.correlationId,
@@ -501,9 +554,6 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                         result: "success",
                         module: "support",
                         safeContext: { routing: activeTicket ? "support_ticket_topic" : "outgoing_topic", ticketId: activeTicket?.id, topicId }
-                    });
-                    await ctx.api.copyMessage(targetChatId, ctx.chat!.id, ctx.message.message_id, {
-                        message_thread_id: topicId
                     });
                     // Touch updatedAt
                     if (activeTicket) await supportRepository.touchTicket(activeTicket.id).catch(() => { });
@@ -517,7 +567,20 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 }
             } catch (e) {
                 logger.error({ err: e }, "Failed to forward candidate message to topic");
+                logBusinessEvent({
+                    event: "candidate.support.message_sent",
+                    correlationId: ctx.correlationId,
+                    updateId: ctx.update.update_id,
+                    telegramId,
+                    candidateId: candidate.id,
+                    actorType: "candidate",
+                    stage: isHRStage ? "HR" : "SUPPORT",
+                    result: "failure",
+                    module: "support",
+                    safeContext: { routing: activeTicket ? "support_ticket_topic" : "outgoing_topic", ticketId: activeTicket?.id, topicId }
+                });
                 await ctx.reply("Сталася помилка при відправці повідомлення. Спробуйте пізніше.");
+                return true;
             }
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
@@ -579,12 +642,51 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 });
                 await copyCandidateOriginalToAdmin(ctx, adminId, adminKb);
                 delivered = true;
-            } catch (e) { }
+            } catch (e) {
+                logger.warn({ err: e, adminId }, "Failed to deliver candidate support message");
+            }
         }
 
         if (!delivered && ADMIN_IDS.length > 0) {
-            await ctx.api.sendMessage(Number(ADMIN_IDS[0]!), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb }).catch(() => { });
+            const fallbackAdminId = ADMIN_IDS[0]!;
+            try {
+                await ctx.api.sendMessage(Number(fallbackAdminId), adminMsgText, { parse_mode: "HTML", reply_markup: adminKb });
+                await copyCandidateOriginalToAdmin(ctx, fallbackAdminId, adminKb);
+                delivered = true;
+            } catch (e) {
+                logger.warn({ err: e, adminId: fallbackAdminId }, "Failed to deliver candidate support message to fallback admin");
+            }
         }
+
+        if (!delivered) {
+            logBusinessEvent({
+                event: "candidate.support.message_sent",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId,
+                candidateId: candidate.id,
+                actorType: "candidate",
+                stage: isHRStage ? "HR" : "SUPPORT",
+                result: "failure",
+                module: "support",
+                safeContext: { routing: "admin_dm", status: candidate.status }
+            });
+            await ctx.reply("Не вдалося доставити повідомлення. Спробуйте ще раз трохи пізніше.");
+            return true;
+        }
+
+        logBusinessEvent({
+            event: "candidate.support.message_sent",
+            correlationId: ctx.correlationId,
+            updateId: ctx.update.update_id,
+            telegramId,
+            candidateId: candidate.id,
+            actorType: "candidate",
+            stage: isHRStage ? "HR" : "SUPPORT",
+            result: "success",
+            module: "support",
+            safeContext: { routing: "admin_dm", status: candidate.status }
+        });
 
         try {
             const { messageRepository } = await import("../repositories/message-repository.js");
@@ -603,7 +705,9 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 entryReason,
             });
             await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
-        } catch (e) { }
+        } catch (e) {
+            logger.error({ err: e, candidateId: candidate.id }, "Failed to log candidate support message");
+        }
 
         ctx.session.step = "idle";
         clearSupportRouteData(ctx);
@@ -613,6 +717,12 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
     } catch (e) {
         logger.error({ err: e }, "Error in handleSupportMessage");
+        if (step === "support_chat") {
+            await ctx.reply("Не вдалося обробити повідомлення через технічну помилку. Спробуйте ще раз трохи пізніше.").catch(replyError => {
+                logger.error({ err: replyError, telegramId }, "Failed to notify candidate about support error");
+            });
+            return true;
+        }
         return false;
     }
 }

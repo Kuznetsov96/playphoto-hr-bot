@@ -18,10 +18,16 @@ const prismaMock = {
     }
 };
 
+const redisMock = {
+    set: vi.fn(),
+    del: vi.fn()
+};
+
 vi.mock("../../repositories/work-shift-repository.js", () => ({ workShiftRepository }));
 vi.mock("../replacement-service.js", () => ({ replacementService }));
 vi.mock("../task-service.js", () => ({ taskService }));
 vi.mock("../../db/core.js", () => ({ default: prismaMock }));
+vi.mock("../../core/redis.js", () => ({ redis: redisMock }));
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
 vi.mock("../../core/logger.js", () => ({
     default: {
@@ -39,6 +45,8 @@ describe("shift reminder service", () => {
         replacementService.listAcceptedAssignmentsByDateRange.mockResolvedValue([]);
         taskService.getStaffActiveTasks.mockResolvedValue([]);
         prismaMock.parcel.count.mockResolvedValue(0);
+        redisMock.set.mockResolvedValue("OK");
+        redisMock.del.mockResolvedValue(1);
     });
 
     it("schedules 08:00 Kyiv correctly in summer and winter", async () => {
@@ -211,5 +219,30 @@ describe("shift reminder service", () => {
             expect.stringContaining("Основний графік ще синхронізується"),
             expect.anything()
         );
+    });
+
+    it("does not send the same shift reminder twice across scheduler instances", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([{
+            id: "shift-deduped",
+            staffId: "staff-1",
+            locationId: "location-1",
+            date: new Date(),
+            staff: {
+                id: "staff-1",
+                fullName: "Вікторія <Admin>",
+                user: { telegramId: 1311338839n }
+            },
+            location: { id: "location-1", name: "Park & <Hall>" }
+        }]);
+        redisMock.set.mockResolvedValueOnce("OK").mockResolvedValueOnce(null);
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledOnce();
+        expect(sendMessage.mock.calls[0]?.[1]).toContain("Park &amp; &lt;Hall&gt;");
+        expect(sendMessage.mock.calls[0]?.[1]).not.toContain("<Admin>");
     });
 });

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findActiveTicketByUser = vi.fn();
 const findActiveOutgoingTopicByUser = vi.fn();
+const redisSet = vi.fn();
+const redisEval = vi.fn();
 
 vi.mock("../../repositories/support-repository.js", () => ({
     supportRepository: {
@@ -9,10 +11,14 @@ vi.mock("../../repositories/support-repository.js", () => ({
         findActiveOutgoingTopicByUser,
     },
 }));
+vi.mock("../../core/redis.js", () => ({ redis: { set: redisSet, eval: redisEval } }));
+vi.mock("../../core/logger.js", () => ({ default: { error: vi.fn() } }));
 
 describe("SupportConversationService", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        redisSet.mockResolvedValue("OK");
+        redisEval.mockResolvedValue(1);
     });
 
     it("uses an active user ticket as the canonical route", async () => {
@@ -76,5 +82,17 @@ describe("SupportConversationService", () => {
             outgoingTopic,
         });
         expect(createOutgoing).toHaveBeenCalledOnce();
+    });
+
+    it("does not create a second topic while another process owns the user lock", async () => {
+        redisSet.mockResolvedValueOnce(null);
+        const createOutgoing = vi.fn();
+        const { SupportConversationService } = await import("../support-conversation-service.js");
+
+        await expect(
+            new SupportConversationService().resolveOrCreateOutgoing("user-1", createOutgoing),
+        ).rejects.toThrow("another process");
+
+        expect(createOutgoing).not.toHaveBeenCalled();
     });
 });

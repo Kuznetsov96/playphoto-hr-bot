@@ -10,6 +10,18 @@ let candidateLimit: any = null;
 let staffLimit: any = null;
 let adminLimit: any = null;
 
+async function notifyRateLimit(ctx: MyContext, text: string): Promise<void> {
+    try {
+        if (ctx.callbackQuery) {
+            await ctx.answerCallbackQuery({ text, show_alert: true });
+        } else {
+            await ctx.reply(text);
+        }
+    } catch (error) {
+        logger.debug({ err: error, telegramId: ctx.from?.id }, "Failed to show rate-limit notification");
+    }
+}
+
 function getCandidateRateLimit(redis: any) {
     if (!candidateLimit) {
         candidateLimit = limit<MyContext, any>({
@@ -19,9 +31,7 @@ function getCandidateRateLimit(redis: any) {
             keyGenerator: (ctx) => ctx.from?.id.toString(),
             onLimitExceeded: async (ctx) => {
                 logger.warn(`⚠️ [LIMIT] Candidate ${ctx.from?.id} exceeded limit`);
-                try {
-                    await ctx.reply("🧘‍♀️ Ви надсилаєте повідомлення занадто часто. Будь ласка, зачекайте хвилинку. ✨");
-                } catch (e) { }
+                await notifyRateLimit(ctx, "🧘‍♀️ Ви виконуєте дії занадто часто. Будь ласка, зачекайте хвилинку. ✨");
             }
         });
     }
@@ -37,9 +47,7 @@ function getStaffRateLimit(redis: any) {
             keyGenerator: (ctx) => `staff:${ctx.from?.id.toString()}`,
             onLimitExceeded: async (ctx) => {
                 logger.warn(`⚠️ [LIMIT] Staff ${ctx.from?.id} exceeded limit`);
-                try {
-                    await ctx.reply("⚠️ Забагато дій за короткий час. Зачекай кілька секунд і спробуй ще раз.");
-                } catch (e) { }
+                await notifyRateLimit(ctx, "⚠️ Забагато дій за короткий час. Зачекай кілька секунд і спробуй ще раз.");
             }
         });
     }
@@ -55,9 +63,7 @@ function getAdminRateLimit(redis: any) {
             keyGenerator: (ctx) => `admin:${ctx.from?.id.toString()}`,
             onLimitExceeded: async (ctx) => {
                 logger.warn(`⚠️ [LIMIT] Admin ${ctx.from?.id} exceeded limit`);
-                try {
-                    await ctx.answerCallbackQuery({ text: "Too many actions. Slow down a bit.", show_alert: true });
-                } catch (e) { }
+                await notifyRateLimit(ctx, "Too many actions. Slow down a bit.");
             }
         });
     }

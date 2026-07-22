@@ -1,7 +1,7 @@
 import { Composer } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { staffHandlers, handleTaskProofMessage } from "./handlers/menu.js";
-import { staffSupportHandlers, handleStaffMessage } from "./handlers/support.js";
+import { handleStaffMessage } from "./handlers/support.js";
 import { handlePreferenceComment } from "../../handlers/preferences-flow.js";
 import { bot } from "../../core/bot.js";
 
@@ -9,9 +9,6 @@ export const staffModule = new Composer<MyContext>();
 
 // 1. Register Staff Menu and features
 staffModule.use(staffHandlers);
-
-// 2. Register Staff Support callbacks
-staffModule.use(staffSupportHandlers);
 
 // 3. Handle Messages (Support Flow for Staff)
 staffModule.on("message", async (ctx, next) => {

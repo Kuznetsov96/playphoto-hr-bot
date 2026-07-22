@@ -22,9 +22,9 @@ export class MonthlyPreferencesTrigger {
 
         const triggerKey = `monthly_pref_triggered:${kyivNow.getFullYear()}-${kyivNow.getMonth() + 1}`;
         
-        // 1. Double check in Redis (Atomic check-and-set would be better but this is sufficient for 1-minute interval)
-        const alreadyTriggered = await redis.get(triggerKey);
-        if (alreadyTriggered) {
+        // Atomically acquire the monthly trigger so parallel instances cannot enqueue twice.
+        const acquired = await redis.set(triggerKey, "true", "EX", 32 * 24 * 60 * 60, "NX");
+        if (acquired !== "OK") {
             logger.debug(`[MonthlyPref] Already triggered for ${monthName}, skipping.`);
             logBusinessEvent({
                 event: "staff.preferences_monthly_trigger.skipped",
@@ -44,10 +44,7 @@ export class MonthlyPreferencesTrigger {
         const messageText = `📢 <b>Побажання на ${monthName}</b>\n\nПривіт! Час планувати графік на наступний місяць. 😊\n\nБудь ласка, познач дні, коли ти <b>НЕ ЗМОЖЕШ</b> вийти на зміну. \n\nДедлайн: <b>2 дні</b>. Після цього бот почне нагадувати тобі кожні 4 години! ⏳\n\nНатисни кнопку нижче, щоб заповнити:`;
 
         try {
-            // 2. Mark as triggered in Redis BEFORE sending to prevent race conditions during long async operations
-            await redis.set(triggerKey, "true", "EX", 32 * 24 * 60 * 60); // Expire in 32 days
-
-            // 3. Send broadcast to all staff PMs
+            // Queue the broadcast after acquiring the distributed monthly lock.
             const totalSent = await broadcastService.createBroadcast(
                 bot.api,
                 0, // System initiator (ID 0 for system messages)
@@ -90,8 +87,10 @@ export class MonthlyPreferencesTrigger {
                 },
                 error: e,
             });
-            // Optional: reset triggerKey if it failed completely? 
-            // Better to leave it and let admin trigger manually if needed.
+            // Enqueue failed, so release the key and allow the next scheduler tick to retry.
+            await redis.del(triggerKey).catch(deleteError => {
+                logger.error({ err: deleteError, triggerKey }, "Failed to release monthly preference trigger key");
+            });
         }
     }
 
@@ -103,8 +102,8 @@ export class MonthlyPreferencesTrigger {
         // Use Kyiv time for consistent date checking
         const kyivDate = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         
-        // Trigger on the 23rd, at 10:00 AM Kyiv time
-        if (kyivDate.getDate() === 23 && kyivDate.getHours() === 10 && kyivDate.getMinutes() === 0) {
+        // Catch up after 10:00 if the service was restarting at the exact scheduled minute.
+        if (kyivDate.getDate() === 23 && kyivDate.getHours() >= 10) {
             await this.trigger(bot);
         }
     }

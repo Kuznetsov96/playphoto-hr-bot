@@ -23,11 +23,14 @@ import { startAuditCleanupLoop } from "./services/audit-cleanup-service.js";
 import { startSecurityCleanupLoop } from "./services/security-cleanup-service.js";
 import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
+import { queues } from "./core/queue.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 
 let runner: RunnerHandle | undefined;
+let queueWorkers: ReturnType<typeof startWorkers> = [];
+let shuttingDown = false;
 
 async function bootstrap() {
     configureContainer();
@@ -122,6 +125,18 @@ async function bootstrap() {
             operation: "registerHandlers",
         });
 
+        // Switch from webhook mode without discarding updates accumulated during downtime.
+        await bot.api.deleteWebhook({ drop_pending_updates: false });
+        logBusinessEvent({
+            event: "bot.webhook.cleared",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "main",
+            operation: "deleteWebhook",
+            safeContext: { pendingUpdatesPreserved: true },
+        });
+
         // Start background services
         startWorker(bot as any);
         startBirthdayLoop(bot);
@@ -136,18 +151,7 @@ async function bootstrap() {
         remindersService.startRemindersLoop(bot.api);
         
         webhookService.listen(bot.api);
-        startWorkers();
-
-        // Ensure clean start
-        await bot.api.deleteWebhook({ drop_pending_updates: true });
-        logBusinessEvent({
-            event: "bot.webhook.cleared",
-            actorType: "system",
-            actorRole: "system",
-            result: "success",
-            module: "main",
-            operation: "deleteWebhook",
-        });
+        queueWorkers = startWorkers();
 
         // Start the bot with runner for parallel processing
         runner = run(bot, {
@@ -188,12 +192,37 @@ async function bootstrap() {
 }
 
 async function shutdown(signal: string) {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info(`\n🛑 [SHUTDOWN] Отримано сигнал ${signal}. Зупинка бота...`);
-    if (runner?.isRunning()) {
-        await runner.stop();
+
+    try {
+        if (runner?.isRunning()) {
+            await runner.stop();
+        }
+
+        await webhookService.close();
+
+        const closeResults = await Promise.allSettled([
+            ...queueWorkers.map(worker => worker.close()),
+            ...queues.map(queue => queue.close()),
+        ]);
+        for (const result of closeResults) {
+            if (result.status === "rejected") {
+                logger.error({ err: result.reason }, "Failed to close a queue resource cleanly");
+            }
+        }
+
+        if (redis.status !== "end") {
+            await redis.quit();
+        }
+        await prisma.$disconnect();
+    } catch (error) {
+        logger.error({ err: error }, "Error during graceful shutdown");
+        process.exitCode = 1;
+    } finally {
+        process.exit(process.exitCode ?? 0);
     }
-    await prisma.$disconnect();
-    process.exit(0);
 }
 
 bootstrap();

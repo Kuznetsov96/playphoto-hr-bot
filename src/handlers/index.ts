@@ -30,6 +30,7 @@ import { blockShield } from "../middleware/block-shield.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { canConfirmNDA } from "../utils/final-step-flow.js";
+import { escapeHtml } from "./admin/utils.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -128,7 +129,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         return;
     }
 
-    const firstName = extractFirstName(cand.fullName || "");
+    const firstName = escapeHtml(extractFirstName(cand.fullName || ""));
     const { NDA_LINK } = await import("../config.js");
     const { InlineKeyboard } = await import("grammy");
 
@@ -258,6 +259,33 @@ handlers.callbackQuery("staff_hub_nav", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
+const adminApp = new Composer<MyContext>();
+adminApp.use(slotBuilderHandlers);
+adminApp.use(hrHandlers);
+adminApp.use(adminHandlers);
+adminApp.use(mentorHandlers);
+const adminMiddleware = adminApp.middleware();
+
+const staffApp = new Composer<MyContext>();
+staffApp.use(mentorHandlers);
+staffApp.use(staffLogisticsHandlers);
+staffApp.use(staffModule);
+const staffMiddleware = staffApp.middleware();
+
+const guestApp = new Composer<MyContext>();
+guestApp.on("message", async (ctx, next) => {
+    const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
+    if (firstShiftHandled) return;
+
+    const handled = await handleSupportMessage(ctx);
+    if (handled) return;
+    await next();
+});
+guestApp.use(onboardingHandlers);
+guestApp.use(bookingHandlers);
+guestApp.use(candidateModule);
+const guestMiddleware = guestApp.middleware();
+
 // 3. Role-Based Routing (Staff vs Candidate)
 handlers.use(async (ctx, next) => {
     const telegramId = ctx.from?.id;
@@ -269,14 +297,7 @@ handlers.use(async (ctx, next) => {
     const adminRole = await getUserAdminRole(BigInt(telegramId));
 
     if (adminRole) {
-        // --- ADMIN CONTEXT ---
-        const adminApp = new Composer<MyContext>();
-        adminApp.use(slotBuilderHandlers);
-        adminApp.use(hrHandlers);
-        adminApp.use(adminHandlers);
-        adminApp.use(mentorHandlers);
-
-        await adminApp.middleware()(ctx, next);
+        await adminMiddleware(ctx, next);
         return;
     }
 
@@ -292,8 +313,6 @@ handlers.use(async (ctx, next) => {
             }
         }
 
-        // --- STAFF CONTEXT ---
-
         // Shield: Block deactivated staff from accessing any staff features
         if (!user.staffProfile.isActive) {
             if (ctx.chat?.type === "private") {
@@ -307,33 +326,8 @@ handlers.use(async (ctx, next) => {
             return; // Block further processing for this user
         }
 
-        const staffApp = new Composer<MyContext>();
-        // Mentors who are NOT lead-mentors (not in adminRole) still need mentorHandlers
-        staffApp.use(mentorHandlers);
-        staffApp.use(staffLogisticsHandlers);
-        staffApp.use(staffModule);
-        await staffApp.middleware()(ctx, next);
+        await staffMiddleware(ctx, next);
     } else {
-        // --- CANDIDATE / GUEST CONTEXT ---
-        const guestApp = new Composer<MyContext>();
-
-        // 1. Support & Communication Priority
-        guestApp.on("message", async (ctx, next) => {
-            const firstShiftHandled = await handleFirstShiftOnboardingCandidateMessage(ctx);
-            if (firstShiftHandled) return;
-
-            const handled = await handleSupportMessage(ctx);
-            if (handled) return;
-            await next();
-        });
-
-        // 2. Automated Funnels
-        guestApp.use(onboardingHandlers);
-        guestApp.use(bookingHandlers);
-
-        // 3. Module Logic & Catch-all
-        guestApp.use(candidateModule);
-
-        await guestApp.middleware()(ctx, next);
+        await guestMiddleware(ctx, next);
     }
 });

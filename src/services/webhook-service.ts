@@ -4,13 +4,15 @@ import { Api } from "grammy";
 import logger from "../core/logger.js";
 
 export class WebhookService {
+    private server: http.Server | undefined;
+
     /**
      * FEATURE SEMI-DISABLED: Only Health Check is active.
      */
-    listen(api: Api) {
+    listen(_api: Api) {
         const port = Number(process.env.HEALTH_PORT) || 8080;
 
-        http.createServer(async (req, res) => {
+        this.server = http.createServer(async (req, res) => {
             const parsedUrl = url.parse(req.url || "", true);
 
             // 1. Health Check (Required for Docker/Deployment)
@@ -24,6 +26,18 @@ export class WebhookService {
             res.end();
         }).listen(port, '0.0.0.0', () => {
             logger.debug({ port }, "Webhook health-check server listening");
+        });
+
+        return this.server;
+    }
+
+    async close(): Promise<void> {
+        const server = this.server;
+        this.server = undefined;
+        if (!server) return;
+
+        await new Promise<void>((resolve, reject) => {
+            server.close(error => error ? reject(error) : resolve());
         });
     }
 }
