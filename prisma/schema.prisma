@@ -75,6 +75,9 @@ model TrackedMessage {
   pingIntervalMs Int?
   pendingReplies PendingReply[]
   broadcast      Broadcast      @relation(fields: [broadcastId], references: [id])
+
+  @@index([nextPingAt])
+  @@index([broadcastId])
 }
 
 model PendingReply {
@@ -85,6 +88,9 @@ model PendingReply {
   respondedAt      DateTime?
   trackedMessage   TrackedMessage @relation(fields: [trackedMessageId], references: [id])
   user             User           @relation(fields: [userId], references: [telegramId])
+
+  @@index([userId, status])
+  @@index([trackedMessageId])
 }
 
 model Candidate {
@@ -346,6 +352,9 @@ model TrainingSlot {
   candidate          Candidate?      @relation("CandidateTrainingSlot")
   candidateDiscovery Candidate?      @relation("CandidateDiscoverySlot")
   trainingSession    TrainingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([startTime])
+  @@index([sessionId])
 }
 
 model Message {
@@ -357,6 +366,8 @@ model Message {
   createdAt   DateTime  @default(now())
   candidateId String
   candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, createdAt])
 }
 
 model Session {
@@ -394,6 +405,9 @@ model StaffProfile {
   replacementResponses ReplacementResponse[]
   firstShiftCandidates Candidate[] @relation("CandidateFirstShift")
   parcels              Parcel[]    @relation("ResponsibleStaff")
+
+  @@index([isActive])
+  @@index([locationId, isActive])
 }
 
 model Parcel {
@@ -617,6 +631,10 @@ model SupportTicket {
   updatedAt       DateTime     @updatedAt
   user            User         @relation("UserTickets", fields: [userId], references: [id])
   assignedAdmin   User?        @relation("AssignedTickets", fields: [assignedAdminId], references: [id])
+
+  @@index([userId, status])
+  @@index([status])
+  @@index([topicId])
 }
 
 model FinanceLog {

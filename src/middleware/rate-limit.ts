@@ -105,10 +105,11 @@ export function createRateLimitMiddleware(redis: any, userRepositoryResolver: ()
             return getStaffRateLimit(redis)(ctx, next);
         }
 
-        // Defer resolution of userRepository until middleware is executed
-        const userRepository = userRepositoryResolver();
-        // Check if user is staff
-        const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(userId));
+        // Reuse the user loaded once per update; fall back to a direct query
+        // when the middleware runs outside the standard chain (e.g. tests).
+        const user = ctx.dbUser !== undefined
+            ? ctx.dbUser
+            : await userRepositoryResolver().findWithStaffProfileByTelegramId(BigInt(userId));
 
         if (user?.staffProfile?.isActive) {
             return getStaffRateLimit(redis)(ctx, next);

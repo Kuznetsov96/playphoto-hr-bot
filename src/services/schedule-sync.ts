@@ -603,9 +603,7 @@ export class ScheduleSyncService {
             }
 
             // 2. Optional: Unblock users who were removed from the sheet
-            // Fetch all currently blocked users from DB
-            const allUsers = await userRepository.findAll();
-            const currentlyBlockedInDb = allUsers.filter((u: any) => u.isBlocked);
+            const currentlyBlockedInDb = await userRepository.findBlocked();
 
             for (const user of currentlyBlockedInDb) {
                 if (!blockedIds.has(user.telegramId)) {
