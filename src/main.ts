@@ -20,6 +20,7 @@ import { startMonthlyPreferencesLoop } from "./services/monthly-preferences-trig
 import { startLogisticsLoop } from "./services/logistics-worker.js";
 import { startLogCleanupLoop } from "./services/log-cleanup-service.js";
 import { startAuditCleanupLoop } from "./services/audit-cleanup-service.js";
+import { startChatLogRetentionLoop } from "./services/chat-log-retention-service.js";
 import { startSecurityCleanupLoop } from "./services/security-cleanup-service.js";
 import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
@@ -147,6 +148,7 @@ async function bootstrap() {
         startLogisticsLoop(bot as any);
         startLogCleanupLoop();
         startAuditCleanupLoop();
+        startChatLogRetentionLoop();
         startSecurityCleanupLoop();
         remindersService.startRemindersLoop(bot.api);
         
