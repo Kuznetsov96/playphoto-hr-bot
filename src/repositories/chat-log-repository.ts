@@ -67,6 +67,33 @@ export class ChatLogRepository {
             }
         });
     }
+
+    /**
+     * Retention policy delete:
+     * - active staff: never deleted;
+     * - former staff: kept until `formerStaffDeactivatedBefore` (3y archive after dismissal),
+     *   profiles without deactivatedAt are kept as a safety net;
+     * - everyone else (candidates, unregistered): deleted once older than `before`.
+     * Matches staff both via ChatLog.userId and via telegramId, so pre-registration
+     * rows of current staff are preserved too.
+     */
+    async deleteExpired(before: Date, formerStaffDeactivatedBefore: Date): Promise<number> {
+        return prisma.$executeRaw`
+            DELETE FROM "ChatLog" cl
+            WHERE cl."createdAt" < ${before}
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "User" u
+                JOIN "StaffProfile" sp ON sp."userId" = u.id
+                WHERE (u.id = cl."userId" OR u."telegramId" = cl."telegramId")
+                  AND (
+                    sp."isActive" = true
+                    OR sp."deactivatedAt" IS NULL
+                    OR sp."deactivatedAt" >= ${formerStaffDeactivatedBefore}
+                  )
+              )
+        `;
+    }
 }
 
 export const chatLogRepository = new ChatLogRepository();
