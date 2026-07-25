@@ -98,6 +98,12 @@ export class UserRepository {
         return prisma.user.findMany();
     }
 
+    async findBlocked() {
+        return prisma.user.findMany({
+            where: { isBlocked: true }
+        });
+    }
+
     async findAllWithStaff() {
         return prisma.user.findMany({
             include: { staffProfile: true }

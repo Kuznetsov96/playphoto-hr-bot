@@ -58,6 +58,9 @@ interface NPApiResponseEnvelope<T = any> {
 
 export class NovaPoshtaService {
     private readonly apiUrl = 'https://api.novaposhta.ua/v2.0/json/';
+    // Remembers the last warning set per method so identical warnings from
+    // hourly polling are logged at debug instead of spamming warn.
+    private readonly lastWarningSignatures = new Map<string, string>();
 
     private isShipmentLockedError(message: string): boolean {
         const loweredError = message.toLowerCase();
@@ -131,7 +134,11 @@ export class NovaPoshtaService {
             }
 
             if (data.warnings && data.warnings.length > 0) {
-                logger.warn({
+                const signatureKey = `${modelName}:${calledMethod}`;
+                const signature = JSON.stringify(data.warnings);
+                const isRepeat = this.lastWarningSignatures.get(signatureKey) === signature;
+                this.lastWarningSignatures.set(signatureKey, signature);
+                logger[isRepeat ? 'debug' : 'warn']({
                     modelName,
                     calledMethod,
                     safeContext: {

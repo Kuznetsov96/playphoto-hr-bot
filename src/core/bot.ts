@@ -71,10 +71,38 @@ bot.use(async (ctx, next) => {
         has_media: Boolean(ctx.message?.photo || ctx.message?.document || ctx.message?.video || ctx.message?.voice),
     });
 
+    const startedAt = Date.now();
+    try {
+        await next();
+    } finally {
+        const durationMs = Date.now() - startedAt;
+        const level = durationMs > 3000 ? "warn" : "info";
+        logger[level]({
+            event: "telegram.update.completed",
+            correlation_id: correlationId,
+            update_id: updateId,
+            update_type: updateType,
+            duration_ms: durationMs,
+        });
+    }
+});
+
+// 2. Load DB user once per update; downstream middleware reads ctx.dbUser instead of re-querying.
+bot.use(async (ctx, next) => {
+    if (ctx.from && !ctx.from.is_bot) {
+        try {
+            ctx.dbUser = await di.cradle.userRepository.findWithStaffProfileByTelegramId(BigInt(ctx.from.id));
+        } catch (e) {
+            logger.error({ err: e, telegramId: ctx.from.id }, "Failed to load user for update");
+            ctx.dbUser = null;
+        }
+    } else {
+        ctx.dbUser = null;
+    }
     await next();
 });
 
-// 2. Rate Limiting (Using resolver function to break circular cycles and avoid eager DI resolution)
+// 3. Rate Limiting (Using resolver function to break circular cycles and avoid eager DI resolution)
 bot.use(createRateLimitMiddleware(redis, () => di.cradle.userRepository));
 
 // 3. Global Context Initialization
@@ -100,10 +128,9 @@ bot.use(async (ctx, next) => {
     const from = ctx.from;
     if (from && !from.is_bot) {
         try {
-            const telegramId = BigInt(from.id);
             const { userRepository } = di.cradle;
-            const user = await userRepository.findByTelegramId(telegramId);
-            
+            const user = ctx.dbUser;
+
             if (user) {
                 const currentUsername = from.username || null;
                 const currentFirstName = from.first_name || null;
@@ -121,6 +148,9 @@ bot.use(async (ctx, next) => {
                         firstName: currentFirstName,
                         lastName: currentLastName
                     });
+                    user.username = currentUsername;
+                    user.firstName = currentFirstName;
+                    user.lastName = currentLastName;
                 }
             }
         } catch (e) {

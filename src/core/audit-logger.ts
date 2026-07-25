@@ -44,6 +44,16 @@ const auditLogger = pino(
     ])
 );
 
+// File-only variant for events that are also emitted via securityLogger,
+// so each security event reaches stdout exactly once.
+const auditFileLogger = pino(
+    {
+        level: "info",
+        redact: REDACT_CONFIG,
+    },
+    auditDestination
+);
+
 const securityLogger = pino(
     {
         level: "info",
@@ -98,6 +108,6 @@ export function securityAudit(params: SecurityAuditParams): void {
         telegramId: telegramId != null ? String(telegramId) : undefined,
     };
 
-    auditLogger.warn(payload);
+    auditFileLogger.warn(payload);
     securityLogger.warn(payload);
 }

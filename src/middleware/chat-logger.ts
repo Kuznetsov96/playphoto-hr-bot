@@ -14,11 +14,14 @@ export const chatLoggerMiddleware: MiddlewareFn<MyContext> = async (ctx, next) =
     if (ctx.chat?.type === "private" && ctx.from) {
         const telegramId = BigInt(ctx.from.id);
 
-        // Resolve userId (fire-and-forget, don't block)
-        const userPromise = prisma.user.findUnique({
-            where: { telegramId },
-            select: { id: true }
-        }).catch(() => null);
+        // Reuse the user loaded once per update; fall back to a query
+        // only when the middleware runs outside the standard chain.
+        const userPromise: Promise<{ id: string } | null> = ctx.dbUser !== undefined
+            ? Promise.resolve(ctx.dbUser)
+            : prisma.user.findUnique({
+                where: { telegramId },
+                select: { id: true }
+            }).catch(() => null);
 
         let contentType = "text";
         let text: string | null = null;

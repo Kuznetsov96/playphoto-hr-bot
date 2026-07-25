@@ -1,6 +1,12 @@
 import type { Context, SessionFlavor } from "grammy";
 import type { ConversationFlavor } from "@grammyjs/conversations";
 import type { MenuFlavor } from "@grammyjs/menu";
+import type { User, StaffProfile, Candidate, Location } from "@prisma/client";
+
+export type CtxDbUser = User & {
+    staffProfile: (StaffProfile & { location: Location | null }) | null;
+    candidate: (Candidate & { location: Location | null }) | null;
+};
 
 // CI Trigger Comment
 export type MenuId =
@@ -199,4 +205,6 @@ export interface SessionData {
 export type MyContext = Context & SessionFlavor<SessionData> & ConversationFlavor<Context & SessionFlavor<SessionData>> & MenuFlavor & {
     di: any;
     correlationId?: string;
+    /** DB user loaded once per update (null = not registered, undefined = not loaded). */
+    dbUser?: CtxDbUser | null;
 };
