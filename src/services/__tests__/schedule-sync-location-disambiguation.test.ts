@@ -50,3 +50,11 @@ describe("ScheduleSyncService staff label disambiguation", () => {
         ], locations[0], locations)).toBeNull();
     });
 });
+
+describe("ScheduleSyncService shift code normalization", () => {
+    const service = new ScheduleSyncService() as any;
+
+    it.each(["K", "К", "Ч"])("normalizes Karamel schedule code %s", (code) => {
+        expect(service.getShiftCode(code)).toBe("K");
+    });
+});

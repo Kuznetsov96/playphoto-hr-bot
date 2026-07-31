@@ -112,6 +112,12 @@ const LOCATION_CODE_MAP: Record<string, string> = {
     'DH': 'dytyache horyshche',
 };
 
+/** Spreadsheet aliases that should resolve through the canonical location code. */
+const LOCATION_CODE_ALIASES: Record<string, string> = {
+    'К': 'K',
+    'Ч': 'K',
+};
+
 export class ScheduleSyncService {
     private auth: any;
     private sheets: any;
@@ -1614,7 +1620,8 @@ export class ScheduleSyncService {
     private getShiftCode(cell: string): string | null {
         if (this.isIgnorableScheduleCell(cell)) return null;
         const upper = cell.trim().toUpperCase();
-        return LOCATION_CODE_MAP[upper] ? upper : null;
+        const normalizedCode = LOCATION_CODE_ALIASES[upper] ?? upper;
+        return LOCATION_CODE_MAP[normalizedCode] ? normalizedCode : null;
     }
 
     private isIgnorableScheduleCell(cell: string): boolean {
