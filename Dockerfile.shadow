@@ -1,0 +1,51 @@
+FROM node:20-bookworm-slim AS builder
+
+WORKDIR /app
+
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        make \
+        g++ \
+        libcairo2-dev \
+        libpango1.0-dev \
+        libjpeg-dev \
+        libgif-dev \
+        librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+COPY prisma ./prisma/
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src/
+RUN npm run build
+
+FROM node:20-bookworm-slim AS shadow
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install --no-save --omit=dev --ignore-scripts \
+        @prisma/client@6.19.2 \
+        dotenv@17.2.3 \
+    && npm cache clean --force
+
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+COPY --from=builder /app/dist/shadow-main.js ./dist/shadow-main.js
+COPY --from=builder /app/dist/shadow ./dist/shadow
+
+USER node
+
+STOPSIGNAL SIGTERM
+
+CMD ["node", "dist/shadow-main.js"]
+
