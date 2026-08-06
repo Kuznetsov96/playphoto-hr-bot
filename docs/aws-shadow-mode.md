@@ -14,7 +14,7 @@ It intentionally does not:
 
 ```text
 BOT_STARTUP_MODE=shadow
-DATABASE_URL=postgresql://<read-only-user>:<password>@<host>:5432/playphoto_bot?sslmode=require
+DATABASE_SECRET_FILE=/run/secrets/database.json
 SHADOW_EXPECTED_DATABASE=playphoto_bot
 SHADOW_HEALTH_INTERVAL_MS=60000
 ```
@@ -23,8 +23,12 @@ Build the dedicated minimal image and start it without a command override:
 
 ```bash
 docker build -f Dockerfile.shadow -t playphoto-bot-shadow .
-docker run --read-only --cap-drop=ALL --security-opt=no-new-privileges playphoto-bot-shadow
+docker run --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+  --mount type=bind,src=/run/playphoto-bot-shadow/database.json,dst=/run/secrets/database.json,readonly \
+  playphoto-bot-shadow
 ```
+
+The mounted file is a root-managed Secrets Manager JSON document with `username`, `password`, `host`, `port`, and `dbname`. Do not pass `DATABASE_URL`, `BOT_TOKEN`, or `REDIS_URL` to the shadow container.
 
 The regular production image must not be used for shadow mode. It contains Telegram and browser runtime dependencies that the connection probe does not need.
 
