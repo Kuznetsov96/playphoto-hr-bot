@@ -24,22 +24,33 @@ COPY tsconfig.json ./
 COPY src ./src/
 RUN npm run build
 
-FROM node:20-bookworm-slim AS shadow
+FROM node:20-alpine AS prisma-client
+
+WORKDIR /app
+
+RUN apk add --no-cache openssl \
+    && npm init -y >/dev/null \
+    && npm install --no-save --ignore-scripts \
+        prisma@6.19.2 \
+        @prisma/client@6.19.2
+
+COPY prisma ./prisma/
+RUN npx prisma generate --schema=prisma/schema.prisma
+
+FROM node:20-alpine AS shadow
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssl \
-    && rm -rf /var/lib/apt/lists/* \
+RUN apk add --no-cache ca-certificates openssl \
     && npm install --no-save --omit=dev --ignore-scripts \
         @prisma/client@6.19.2 \
         dotenv@17.2.3 \
     && npm cache clean --force
 
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+COPY --from=prisma-client /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=prisma-client /app/node_modules/@prisma/client ./node_modules/@prisma/client
 COPY --from=builder /app/dist/shadow-main.js ./dist/shadow-main.js
 COPY --from=builder /app/dist/shadow ./dist/shadow
 
@@ -48,4 +59,3 @@ USER node
 STOPSIGNAL SIGTERM
 
 CMD ["node", "dist/shadow-main.js"]
-
