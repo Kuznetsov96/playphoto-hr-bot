@@ -11,6 +11,7 @@
     "dev": "nodemon --watch src --watch prisma/schema.prisma --ignore db/ --exec \"tsx src/main.ts\"",
     "build": "tsc",
     "start": "npx prisma migrate deploy && node dist/main.js",
+    "start:shadow": "node dist/shadow-main.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check-cycles": "node scripts/check-cycles.mjs",
