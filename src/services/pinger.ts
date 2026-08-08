@@ -6,7 +6,7 @@ import { staffRepository } from "../repositories/staff-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { CandidateStatus } from "@prisma/client";
-import { PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
+import { BUSINESS_DATA_SOURCE, PING_CONFIG, ADMIN_IDS, HR_IDS } from "../config.js";
 import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
@@ -35,6 +35,35 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
         // --- Staff ---
         if (staff?.isActive) {
             const staffName = staff.surnameNameDot || staff.fullName;
+            if (BUSINESS_DATA_SOURCE === "aws") {
+                logger.warn({ telegramId, staffId: staff.id }, "Staff blocked bot; AWS owner notification started");
+                await scheduleSyncService.markStaffBotBlocked(telegramId);
+                logSecurityEvent({
+                    event: "security.staff.bot_blocked",
+                    telegramId,
+                    userId: userWithProfile.id,
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "pinger",
+                    operation: "handleBlockedUser",
+                    safeContext: {
+                        staffId: staff.id,
+                        staffName,
+                        action: "owner_notification_required",
+                        businessStatusChanged: false,
+                    },
+                });
+                const adminId = ADMIN_IDS[0];
+                if (adminId) {
+                    const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
+                        `👤 <b>${escapeHtml(staffName)}</b> blocked the bot.\n\n` +
+                        `Статус сотрудника в AWS <b>не изменён автоматически</b>. Проверьте ситуацию и, если сотрудник действительно уволен, деактивируйте его в основной базе.`;
+                    await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => { });
+                }
+                return;
+            }
+
             logger.warn({ telegramId, staffId: staff.id }, "Staff blocked bot; auto-deactivation started");
 
             await staffRepository.update(staff.id, {

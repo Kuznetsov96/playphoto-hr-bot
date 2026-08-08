@@ -1,0 +1,25 @@
+version: 0.0
+os: linux
+
+files:
+  - source: /
+    destination: /opt/playphoto-bot
+    overwrite: true
+
+hooks:
+  BeforeInstall:
+    - location: hooks/before-install.sh
+      timeout: 120
+      runas: root
+  AfterInstall:
+    - location: hooks/after-install.sh
+      timeout: 120
+      runas: root
+  ApplicationStart:
+    - location: hooks/start.sh
+      timeout: 900
+      runas: root
+  ValidateService:
+    - location: hooks/validate.sh
+      timeout: 300
+      runas: root

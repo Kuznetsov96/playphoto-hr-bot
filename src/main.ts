@@ -28,10 +28,13 @@ import { queues } from "./core/queue.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
+import { BUSINESS_DATA_SOURCE } from "./config.js";
+import { awsBusinessSyncService } from "./services/aws-business-sync.js";
 
 let runner: RunnerHandle | undefined;
 let queueWorkers: ReturnType<typeof startWorkers> = [];
 let shuttingDown = false;
+let awsBusinessSyncTimer: NodeJS.Timeout | undefined;
 
 async function bootstrap() {
     configureContainer();
@@ -65,6 +68,11 @@ async function bootstrap() {
         }
 
         await prisma.$connect();
+
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            await awsBusinessSyncService.syncAll();
+            awsBusinessSyncTimer = awsBusinessSyncService.startLoop();
+        }
 
         if (redis.status === 'wait') {
             await redis.connect();
@@ -199,6 +207,7 @@ async function shutdown(signal: string) {
     logger.info(`\n🛑 [SHUTDOWN] Отримано сигнал ${signal}. Зупинка бота...`);
 
     try {
+        if (awsBusinessSyncTimer) clearInterval(awsBusinessSyncTimer);
         if (runner?.isRunning()) {
             await runner.stop();
         }
