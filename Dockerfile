@@ -1,6 +1,6 @@
 # --- SYNCHRONIZED VERSIONS ---
 # Base image version should match package.json playwright version
-ARG PLAYWRIGHT_VERSION=1.50.1
+ARG PLAYWRIGHT_VERSION=1.62.1
 FROM node:20-slim AS base
 WORKDIR /app
 
