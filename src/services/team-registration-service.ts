@@ -2,7 +2,8 @@ import { existsSync } from "fs";
 import { google } from "googleapis";
 import path from "path";
 import logger from "../core/logger.js";
-import { SPREADSHEET_ID_TEAM } from "../config.js";
+import { BUSINESS_DATA_SOURCE, SPREADSHEET_ID_TEAM } from "../config.js";
+import { awsBusinessClient } from "./aws-business-client.js";
 
 export interface TeamMemberData {
     fullName: string;
@@ -14,6 +15,7 @@ export interface TeamMemberData {
     iban: string;
     city: string;
     locationName: string;
+    locationCode?: string | null;
     birthDate?: Date | string | null;
 }
 
@@ -114,6 +116,38 @@ class TeamRegistrationService {
      * Adds a new hire to the 'В роботі' sheet.
      */
     async registerNewHire(data: TeamMemberData) {
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            if (!data.locationCode) {
+                throw new Error("Candidate location is not mapped to an AWS canonical location code");
+            }
+            const [lastName, firstName, ...patronymicParts] = data.fullName.replace(/\s+/gu, " ").trim().split(" ");
+            if (!firstName || !lastName) {
+                throw new Error("Candidate full name must contain at least surname and first name");
+            }
+            const birthDate = data.birthDate ? new Date(data.birthDate) : null;
+            const patronymic = patronymicParts.join(" ");
+            const phone = data.phone === "—" ? "" : data.phone;
+            const telegramUsername = data.username === "—" ? "" : data.username;
+            const birthDateValue = birthDate && !Number.isNaN(birthDate.getTime())
+                ? birthDate.toISOString().slice(0, 10)
+                : "";
+            await awsBusinessClient.upsertEmployee({
+                telegramId: data.telegramId,
+                firstName,
+                lastName,
+                ...(patronymic ? { patronymic } : {}),
+                ...(phone ? { phone } : {}),
+                ...(telegramUsername ? { telegramUsername } : {}),
+                ...(birthDateValue ? { birthDate: birthDateValue } : {}),
+                hiredAt: new Date().toISOString().slice(0, 10),
+                locationCode: data.locationCode,
+            });
+            logger.info(
+                { telegramId: data.telegramId, locationCode: data.locationCode },
+                "Candidate registered in AWS business database",
+            );
+            return true;
+        }
         try {
             const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
             const sheetLocation = this.formatLocationForSheet(data.locationName, data.city);

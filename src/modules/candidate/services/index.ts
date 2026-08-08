@@ -47,12 +47,13 @@ export class CandidateService {
                 iban: candidate.iban || "—",
                 city: candidate.city || "—",
                 locationName: loc?.name || "—",
+                ...(loc?.canonicalCode ? { locationCode: loc.canonicalCode } : {}),
                 birthDate: candidate.birthDate
             });
 
             if (regResult && ADMIN_IDS[0]) {
                 const locName = loc?.name || candidate.city || "—";
-                await api.sendMessage(ADMIN_IDS[0], `✅ <b>${fullName}</b> auto-added to TEAM sheet!\n📍 ${locName}`, { parse_mode: "HTML" }).catch(() => { });
+                await api.sendMessage(ADMIN_IDS[0], `✅ <b>${fullName}</b> added to the employee database.\n📍 ${locName}`, { parse_mode: "HTML" }).catch(() => { });
             }
 
             logBusinessEvent({

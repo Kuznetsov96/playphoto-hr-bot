@@ -1,0 +1,253 @@
+name: Deploy AWS production standby
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playphoto-production-bot
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    name: Verify bot release candidate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: test_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7.4.2-alpine
+        ports: ["6379:6379"]
+
+    env:
+      DATABASE_URL: "postgresql://user:password@localhost:5432/test_db"
+      REDIS_URL: "redis://localhost:6379"
+      NODE_ENV: test
+      BOT_TOKEN: "123456:ABC-DEF"
+      SUPPORT_CHAT_ID: -10012345678
+      RECOVERY_CHAT_ID: -10012345678
+      TEAM_HUB_CHAT_ID: -10012345678
+      TEAM_CHANNEL_ID: -10012345678
+      ADMIN_IDS: 12345678
+      CO_FOUNDER_IDS: 12345678
+      SUPPORT_IDS: 12345678
+      MENTOR_IDS: 12345678
+      HR_IDS: 12345678
+      FINANCE_IDS: 12345678
+      SPREADSHEET_ID_TEAM: dummy
+      SPREADSHEET_ID_SCHEDULE: dummy
+      SPREADSHEET_ID_DDS: dummy
+      SPREADSHEET_ID_TECH_CASH: dummy
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci --prefer-offline --no-audit
+      - name: Validate database migrations
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          npx prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code
+      - run: npm run build
+      - run: npm run check-cycles
+      - run: npm run check-menu-ids
+      - run: npm test
+
+  build:
+    name: Build, scan and publish ARM64 image
+    needs: quality
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+      REPOSITORY: playphoto-staging-bot
+      IMAGE_TAG: git-${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Configure short-lived AWS build credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_BOT_BUILD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: PlayPhotoProductionBotBuild
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2
+      - name: Find an existing immutable image
+        id: existing
+        run: |
+          digest="$(aws ecr describe-images \
+            --repository-name "$REPOSITORY" \
+            --image-ids "imageTag=${IMAGE_TAG}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text 2>/dev/null || true)"
+          [[ "$digest" == sha256:* ]] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build and push the production bot image
+        id: image
+        if: steps.existing.outputs.exists != 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=playphoto-production-bot-arm64
+          cache-to: type=gha,mode=max,scope=playphoto-production-bot-arm64
+      - name: Block vulnerable images
+        run: scripts/aws/check-ecr-scan.sh "$REPOSITORY" "$IMAGE_TAG"
+      - name: Record immutable image digest
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          DIGEST: ${{ steps.image.outputs.digest || steps.existing.outputs.digest }}
+        run: |
+          [[ "$DIGEST" == sha256:* ]] || { echo "Missing immutable image digest." >&2; exit 1; }
+          install -d "${RUNNER_TEMP}/release"
+          printf '%s\n' "${REGISTRY}/${REPOSITORY}@${DIGEST}" > "${RUNNER_TEMP}/release/bot.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-bot-image
+          path: ${{ runner.temp }}/release/bot.txt
+          retention-days: 1
+          if-no-files-found: error
+
+  deploy:
+    name: Transfer secrets and deploy standby
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+      RUNTIME_SECRET_ID: playphoto/production/bot-runtime
+      CODEDEPLOY_APPLICATION: playphoto-production-bot
+      CODEDEPLOY_GROUP: playphoto-production-bot
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Configure short-lived AWS deployment credentials
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_BOT_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: PlayPhotoProductionBotDeploy
+      - name: Transfer existing GitHub runtime secrets into AWS
+        env:
+          DOCKER_ENV: ${{ secrets.DOCKER_ENV }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          RECOVERY_CHAT_ID: ${{ secrets.RECOVERY_CHAT_ID }}
+        run: |
+          umask 077
+          printf '%s' "$DOCKER_ENV" > "${RUNNER_TEMP}/docker.env"
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > "${RUNNER_TEMP}/google.json"
+          jq -e . "${RUNNER_TEMP}/google.json" >/dev/null
+          if ! aws secretsmanager get-secret-value \
+            --secret-id "$RUNTIME_SECRET_ID" \
+            --query SecretString \
+            --output text > "${RUNNER_TEMP}/current.json" 2>/dev/null
+          then
+            printf '{}\n' > "${RUNNER_TEMP}/current.json"
+          fi
+          jq -e 'type == "object"' "${RUNNER_TEMP}/current.json" >/dev/null
+          jq -n \
+            --slurpfile current "${RUNNER_TEMP}/current.json" \
+            --rawfile dockerEnv "${RUNNER_TEMP}/docker.env" \
+            --rawfile googleServiceAccountJson "${RUNNER_TEMP}/google.json" \
+            --arg recoveryChatId "$RECOVERY_CHAT_ID" \
+            '($current[0] // {}) + {
+              dockerEnv: $dockerEnv,
+              googleServiceAccountJson: $googleServiceAccountJson,
+              recoveryChatId: $recoveryChatId
+            }' > "${RUNNER_TEMP}/next.json"
+          aws secretsmanager put-secret-value \
+            --secret-id "$RUNTIME_SECRET_ID" \
+            --secret-string "file://${RUNNER_TEMP}/next.json" >/dev/null
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-bot-image
+          path: ${{ runner.temp }}/release
+      - name: Build immutable standby revision
+        id: revision
+        run: |
+          BOT_IMAGE="$(<"${RUNNER_TEMP}/release/bot.txt")"
+          [[ "$BOT_IMAGE" == *@sha256:* ]] || { echo "Bot image is not immutable." >&2; exit 1; }
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          artifact_bucket="playphoto-production-bot-deployments-${account_id}"
+          artifact_key="releases/${GITHUB_SHA}/${GITHUB_RUN_ATTEMPT}.zip"
+          revision_directory="${RUNNER_TEMP}/playphoto-bot-revision"
+          revision_archive="${RUNNER_TEMP}/playphoto-bot-${GITHUB_SHA}.zip"
+          install -d "${revision_directory}/hooks" "${revision_directory}/scripts/aws"
+          install -m 0644 deploy/aws/appspec.yml "${revision_directory}/appspec.yml"
+          install -m 0644 compose.aws.yaml "${revision_directory}/compose.aws.yaml"
+          install -m 0755 deploy/aws/hooks/*.sh "${revision_directory}/hooks/"
+          install -m 0755 scripts/aws/deploy-production-bot.sh "${revision_directory}/scripts/aws/"
+          {
+            printf 'AWS_REGION=%q\n' "$AWS_REGION"
+            printf 'RUNTIME_SECRET_ID=%q\n' "$RUNTIME_SECRET_ID"
+            printf 'BOT_RUNTIME_MODE=%q\n' standby
+            printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
+            printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
+          } > "${revision_directory}/release.env"
+          (cd "$revision_directory" && zip -qr "$revision_archive" .)
+          aws s3 cp "$revision_archive" "s3://${artifact_bucket}/${artifact_key}" --only-show-errors
+          echo "bucket=${artifact_bucket}" >> "$GITHUB_OUTPUT"
+          echo "key=${artifact_key}" >> "$GITHUB_OUTPUT"
+      - name: Start standby CodeDeploy release
+        id: deployment
+        env:
+          ARTIFACT_BUCKET: ${{ steps.revision.outputs.bucket }}
+          ARTIFACT_KEY: ${{ steps.revision.outputs.key }}
+        run: |
+          deployment_id="$(aws deploy create-deployment \
+            --application-name "$CODEDEPLOY_APPLICATION" \
+            --deployment-group-name "$CODEDEPLOY_GROUP" \
+            --description "PlayPhoto production bot standby ${GITHUB_SHA}" \
+            --revision "revisionType=S3,s3Location={bucket=${ARTIFACT_BUCKET},key=${ARTIFACT_KEY},bundleType=zip}" \
+            --file-exists-behavior OVERWRITE \
+            --query deploymentId \
+            --output text)"
+          echo "deployment_id=${deployment_id}" >> "$GITHUB_OUTPUT"
+      - name: Wait for health validation and automatic rollback
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          if ! aws deploy wait deployment-successful --deployment-id "$DEPLOYMENT_ID"; then
+            aws deploy get-deployment --deployment-id "$DEPLOYMENT_ID" --output json
+            exit 1
+          fi
+      - name: Write deployment summary
+        run: |
+          {
+            echo '### AWS production bot standby succeeded'
+            echo
+            echo '- Telegram polling: **disabled by deployment policy**'
+            echo '- Business source: AWS API'
+            echo '- Commit: `'$GITHUB_SHA'`'
+            echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -6,8 +6,9 @@
  */
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
+import { fileURLToPath } from "url";
 
-const SRC_DIR = new URL("../src", import.meta.url).pathname;
+const SRC_DIR = fileURLToPath(new URL("../src", import.meta.url));
 
 function walkFiles(dir) {
     const entries = readdirSync(dir);

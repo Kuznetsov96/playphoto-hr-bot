@@ -16,9 +16,28 @@ TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
 mkdir -p "$BACKUP_DIR" "$PROJECT_DIR/logs"
 cd "$PROJECT_DIR"
 
-# Load env variables
-if [ -f "$PROJECT_DIR/.env" ]; then
-    set -a; source "$PROJECT_DIR/.env"; set +a
+# Load runtime variables from an explicit file or the two supported deployment paths.
+ENV_FILE="${BOT_ENV_FILE:-}"
+if [ -z "$ENV_FILE" ]; then
+    for candidate in "$PROJECT_DIR/.env" /root/playphoto-secrets/bot.env; do
+        if [ -r "$candidate" ]; then
+            ENV_FILE="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$ENV_FILE" ] || [ ! -r "$ENV_FILE" ]; then
+    echo "[$(date)] ERROR: no readable bot runtime environment file was found." >&2
+    exit 1
+fi
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+if [ -z "${BACKUP_PASSPHRASE:-}" ]; then
+    echo "[$(date)] ERROR: BACKUP_PASSPHRASE is missing; refusing to create an unencrypted backup." >&2
+    exit 1
 fi
 
 DB_USER="${POSTGRES_USER:-postgres}"
@@ -35,17 +54,17 @@ fi
 
 # 2. Perform Dump (with encryption)
 BACKUP_FILE="$BACKUP_DIR/backup_${TIMESTAMP}.sql.gz.enc"
+PARTIAL_FILE="${BACKUP_FILE}.partial"
+trap 'rm -f "$PARTIAL_FILE"' EXIT
+umask 077
 
-if [ -n "${BACKUP_PASSPHRASE:-}" ]; then
-    $DOCKER_COMPOSE_CMD exec -T postgres /bin/bash -c "pg_dump -U $DB_USER -d $DB_NAME --clean --if-exists --no-owner" \
-    | gzip | openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"$BACKUP_PASSPHRASE" > "$BACKUP_FILE"
-    echo "[$(date)] 🔒 Backup created and ENCRYPTED (AES-256)"
-else
-    BACKUP_FILE="$BACKUP_DIR/backup_${TIMESTAMP}.sql.gz"
-    $DOCKER_COMPOSE_CMD exec -T postgres /bin/bash -c "pg_dump -U $DB_USER -d $DB_NAME --clean --if-exists --no-owner" \
-    | gzip > "$BACKUP_FILE"
-    echo "[$(date)] ⚠️ WARNING: BACKUP_PASSPHRASE not set. Backup created UNENCRYPTED."
-fi
+$DOCKER_COMPOSE_CMD exec -T postgres /bin/bash -c "pg_dump -U $DB_USER -d $DB_NAME --clean --if-exists --no-owner" \
+| gzip | openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:BACKUP_PASSPHRASE > "$PARTIAL_FILE"
+
+openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BACKUP_PASSPHRASE -in "$PARTIAL_FILE" | gzip -t
+mv "$PARTIAL_FILE" "$BACKUP_FILE"
+chmod 0600 "$BACKUP_FILE"
+echo "[$(date)] 🔒 Encrypted backup created and stream-verified (AES-256/PBKDF2)"
 
 # 3. Verify
 FILESIZE=$(stat -c%s "$BACKUP_FILE" 2>/dev/null || stat -f%z "$BACKUP_FILE" 2>/dev/null || echo "0")

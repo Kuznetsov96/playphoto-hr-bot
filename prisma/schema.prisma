@@ -31,14 +31,14 @@ model User {
   magnetCountRuns      MagnetCountRun[]
   lastSupportMessageId Int?
   isBlocked            Boolean             @default(false)
-  botBlockedAt         DateTime?           // Auto-set when bot gets 403, cleared on /start
+  botBlockedAt         DateTime? // Auto-set when bot gets 403, cleared on /start
 }
 
 model Broadcast {
-  id              Int              @id @default(autoincrement())
+  id              Int                 @id @default(autoincrement())
   initiatorId     BigInt
   messageText     String?
-  createdAt       DateTime         @default(now())
+  createdAt       DateTime            @default(now())
   completedAt     DateTime?
   cancelledAt     DateTime?
   targetSummary   String?
@@ -94,59 +94,59 @@ model PendingReply {
 }
 
 model Candidate {
-  id                   String          @id @default(cuid())
-  userId               String          @unique
-  fullName             String?
-  phone                String?
-  birthDate            DateTime?
-  gender               String?
-  city                 String?
-  source               String?
-  clickSource          String? // Технічне джерело з deep-link (start=source_...)
-  status               CandidateStatus @default(SCREENING)
-  locationId           String?
-  interviewSlotId      String?         @unique
-  discoverySlotId      String?         @unique
-  trainingSlotId       String?         @unique
-  googleMeetLink       String?
-  trainingMeetLink     String?
-  currentStep          FunnelStep      @default(INITIAL_TEST)
-  isWaitlisted         Boolean         @default(false)
-  isOtherCity          Boolean         @default(false)
-  isHRLocked           Boolean         @default(false)
-  isMentorLocked       Boolean         @default(true)
-  interviewCompletedAt DateTime?
-  discoveryCompletedAt DateTime?
-  trainingCompletedAt  DateTime?
-  hrDecision           String?
-  notificationSent     Boolean         @default(false)
-  stagingNotifiedAt    DateTime?
-  interviewInvitedAt   DateTime?
+  id                      String          @id @default(cuid())
+  userId                  String          @unique
+  fullName                String?
+  phone                   String?
+  birthDate               DateTime?
+  gender                  String?
+  city                    String?
+  source                  String?
+  clickSource             String? // Технічне джерело з deep-link (start=source_...)
+  status                  CandidateStatus @default(SCREENING)
+  locationId              String?
+  interviewSlotId         String?         @unique
+  discoverySlotId         String?         @unique
+  trainingSlotId          String?         @unique
+  googleMeetLink          String?
+  trainingMeetLink        String?
+  currentStep             FunnelStep      @default(INITIAL_TEST)
+  isWaitlisted            Boolean         @default(false)
+  isOtherCity             Boolean         @default(false)
+  isHRLocked              Boolean         @default(false)
+  isMentorLocked          Boolean         @default(true)
+  interviewCompletedAt    DateTime?
+  discoveryCompletedAt    DateTime?
+  trainingCompletedAt     DateTime?
+  hrDecision              String?
+  notificationSent        Boolean         @default(false)
+  stagingNotifiedAt       DateTime?
+  interviewInvitedAt      DateTime?
   interviewWaitlistReason String?
-  materialsSent        Boolean         @default(false)
-  materialsSentAt      DateTime?
-  candidateDecision    String?
-  lossStage            String?
-  lossReason           String?
-  lostAt               DateTime?
-  hrScore              Int?
-  mentorScore          Int?
-  hrComment            String?
-  mentorComment        String?
-  appearance           String?
-  tattooPhotoId        String?
-  hasUnreadMessage     Boolean         @default(false)
-  lastSystemMessageId  Int?
-  testPassed           Boolean?
-  ndaConfirmedAt       DateTime?
-  ndaSentAt            DateTime?
-  ndaReminderSentAt    DateTime?
-  mentorReminderSent   Boolean         @default(false)
-  mentorReminderSentAt DateTime?
+  materialsSent           Boolean         @default(false)
+  materialsSentAt         DateTime?
+  candidateDecision       String?
+  lossStage               String?
+  lossReason              String?
+  lostAt                  DateTime?
+  hrScore                 Int?
+  mentorScore             Int?
+  hrComment               String?
+  mentorComment           String?
+  appearance              String?
+  tattooPhotoId           String?
+  hasUnreadMessage        Boolean         @default(false)
+  lastSystemMessageId     Int?
+  testPassed              Boolean?
+  ndaConfirmedAt          DateTime?
+  ndaSentAt               DateTime?
+  ndaReminderSentAt       DateTime?
+  mentorReminderSent      Boolean         @default(false)
+  mentorReminderSentAt    DateTime?
   mentorManualContactedAt DateTime?
-  firstShiftDate       DateTime?
-  firstShiftTime       String?
-  firstShiftPartnerId  String?
+  firstShiftDate          DateTime?
+  firstShiftTime          String?
+  firstShiftPartnerId     String?
 
   // Onboarding & Legal Data
   iban                String?
@@ -161,19 +161,19 @@ model Candidate {
   passportPhotoIds    String? // Comma-separated file IDs
 
   // Quiz results
-  quizScore         Int?
-  quizAnswers       String? // JSON string of answers
-  statusChangedAt   DateTime? // When status last changed
-  pipelineTouchedAt DateTime        @default(now()) // Any meaningful candidate pipeline action
-  applications      Application[]
-  interviewSlot     InterviewSlot? @relation(fields: [interviewSlotId], references: [id])
-  location          Location?      @relation(fields: [locationId], references: [id])
-  discoverySlot     TrainingSlot?  @relation("CandidateDiscoverySlot", fields: [discoverySlotId], references: [id])
-  trainingSlot      TrainingSlot?  @relation("CandidateTrainingSlot", fields: [trainingSlotId], references: [id])
-  firstShiftPartner StaffProfile?  @relation("CandidateFirstShift", fields: [firstShiftPartnerId], references: [id])
-  user              User           @relation(fields: [userId], references: [id])
-  messages          Message[]
-  lead              Lead?
+  quizScore                Int?
+  quizAnswers              String? // JSON string of answers
+  statusChangedAt          DateTime? // When status last changed
+  pipelineTouchedAt        DateTime                  @default(now()) // Any meaningful candidate pipeline action
+  applications             Application[]
+  interviewSlot            InterviewSlot?            @relation(fields: [interviewSlotId], references: [id])
+  location                 Location?                 @relation(fields: [locationId], references: [id])
+  discoverySlot            TrainingSlot?             @relation("CandidateDiscoverySlot", fields: [discoverySlotId], references: [id])
+  trainingSlot             TrainingSlot?             @relation("CandidateTrainingSlot", fields: [trainingSlotId], references: [id])
+  firstShiftPartner        StaffProfile?             @relation("CandidateFirstShift", fields: [firstShiftPartnerId], references: [id])
+  user                     User                      @relation(fields: [userId], references: [id])
+  messages                 Message[]
+  lead                     Lead?
   firstShiftOnboardingCase FirstShiftOnboardingCase?
 
   @@index([status])
@@ -251,16 +251,18 @@ enum TaskProofItemType {
 }
 
 model Location {
-  id                     String         @id @default(cuid())
+  id                     String               @id @default(cuid())
+  awsPublicId            String?              @unique
+  canonicalCode          String?              @unique
   name                   String
   city                   String
   address                String?
   npRef                  String? // Nova Poshta Department/Postomat Ref
   npAddressRef           String? // Nova Poshta Address Ref (for courier delivery)
-  neededCount            Int            @default(0)
+  neededCount            Int                  @default(0)
   summaryTemplate        String?
-  isHidden               Boolean        @default(false)
-  isHiddenFromCandidates Boolean        @default(false)
+  isHidden               Boolean              @default(false)
+  isHiddenFromCandidates Boolean              @default(false)
   googleMapsLink         String?
   salary                 String?
   schedule               String?
@@ -268,8 +270,8 @@ model Location {
   sheet                  String?
   terminalId             String?
   searchId               Int?
-  hasAcquiring           Boolean        @default(false)
-  cashInEnvelope         Boolean        @default(false)
+  hasAcquiring           Boolean              @default(false)
+  cashInEnvelope         Boolean              @default(false)
   fopId                  String?
   telegramChatId         BigInt?
   candidates             Candidate[]
@@ -377,34 +379,35 @@ model Session {
 }
 
 model StaffProfile {
-  id                   String      @id @default(cuid())
-  userId               String      @unique
+  id                   String                @id @default(cuid())
+  awsEmployeePublicId  String?               @unique
+  userId               String                @unique
   fullName             String
   surnameNameDot       String?
   phone                String?
   npPhone              String? // Phone number for Nova Poshta authorization
   birthDate            DateTime?
-  onboardingDate       DateTime?   @default(now())
+  onboardingDate       DateTime?             @default(now())
   fopName              String?
-  salaryBalance        Float       @default(0)
-  isActive             Boolean     @default(true)
+  salaryBalance        Float                 @default(0)
+  isActive             Boolean               @default(true)
   deactivatedAt        DateTime?
   deactivatedBy        String?
   deactivatedSource    String?
   deactivatedReason    String?
-  isWelcomeSent        Boolean     @default(false)
+  isWelcomeSent        Boolean               @default(false)
   locationId           String?
   lastTaskDigestAt     DateTime?
-  location             Location?   @relation(fields: [locationId], references: [id])
-  user                 User        @relation(fields: [userId], references: [id])
+  location             Location?             @relation(fields: [locationId], references: [id])
+  user                 User                  @relation(fields: [userId], references: [id])
   tasks                Task[]
   taskProofSubmissions TaskProofSubmission[]
   shifts               WorkShift[]
   replacementRequests  ReplacementRequest[]  @relation("ReplacementRequester")
   acceptedReplacements ReplacementRequest[]  @relation("ReplacementAcceptor")
   replacementResponses ReplacementResponse[]
-  firstShiftCandidates Candidate[] @relation("CandidateFirstShift")
-  parcels              Parcel[]    @relation("ResponsibleStaff")
+  firstShiftCandidates Candidate[]           @relation("CandidateFirstShift")
+  parcels              Parcel[]              @relation("ResponsibleStaff")
 
   @@index([isActive])
   @@index([locationId, isActive])
@@ -417,16 +420,16 @@ model Parcel {
   locationId String?
   location   Location?    @relation(fields: [locationId], references: [id])
 
-  npAddressRef   String? // NP RecipientAddress Ref (for auto-mapping)
-  npCity         String? // City from NP (for fallback mapping)
-  npAddress      String? // Full address description from NP
-  recipientPhone String? // For authorization/proxies
-  npTrusteeOrderRef    String? // NP change request Ref for recipient updates
-  npTrusteeOrderNumber String? // NP change request Number for recipient updates
-  npTrusteeError       String? // Last NP trustee creation error
+  npAddressRef           String? // NP RecipientAddress Ref (for auto-mapping)
+  npCity                 String? // City from NP (for fallback mapping)
+  npAddress              String? // Full address description from NP
+  recipientPhone         String? // For authorization/proxies
+  npTrusteeOrderRef      String? // NP change request Ref for recipient updates
+  npTrusteeOrderNumber   String? // NP change request Number for recipient updates
+  npTrusteeError         String? // Last NP trustee creation error
   npTrusteeLastAttemptAt DateTime? // Last time trustee creation was attempted
-  description    String?
-  deliveryType   String // "Warehouse", "Postomat", "Address"
+  description            String?
+  deliveryType           String // "Warehouse", "Postomat", "Address"
 
   scheduledDate DateTime? // Expected delivery date
   arrivedAt     DateTime?
@@ -434,12 +437,12 @@ model Parcel {
   responsibleStaffId String?
   responsibleStaff   StaffProfile? @relation("ResponsibleStaff", fields: [responsibleStaffId], references: [id])
 
-  acceptedAt      DateTime? // When responsibleStaffId was last assigned (for handoff guard)
+  acceptedAt DateTime? // When responsibleStaffId was last assigned (for handoff guard)
 
   rejectionCount  Int       @default(0)
   lastRejectionAt DateTime?
 
-  contentPhotoIds      String[] @default([]) // Telegram file_ids
+  contentPhotoIds        String[]  @default([]) // Telegram file_ids
   photoReminderSentAt    DateTime? // When the "please upload photo" reminder was sent
   shiftEndReminderSentAt DateTime? // When the shift-end pickup reminder was sent
   staleAlertSentAt       DateTime? // When the "parcel delayed" support alert was sent
@@ -463,15 +466,16 @@ enum ParcelStatus {
 }
 
 model WorkShift {
-  id         String       @id @default(cuid())
-  staffId    String
-  locationId String
-  date       DateTime
-  startTime  DateTime?
-  endTime    DateTime?
-  location   Location     @relation(fields: [locationId], references: [id])
-  staff      StaffProfile @relation(fields: [staffId], references: [id])
-  replacementRequests ReplacementRequest[]
+  id                        String               @id @default(cuid())
+  awsScheduledShiftPublicId String?              @unique
+  staffId                   String
+  locationId                String
+  date                      DateTime
+  startTime                 DateTime?
+  endTime                   DateTime?
+  location                  Location             @relation(fields: [locationId], references: [id])
+  staff                     StaffProfile         @relation(fields: [staffId], references: [id])
+  replacementRequests       ReplacementRequest[]
 
   @@index([date])
 }
@@ -507,29 +511,29 @@ enum ReplacementAvailabilityKind {
 }
 
 model ReplacementRequest {
-  id                String                   @id @default(cuid())
-  workShiftId       String?
-  requesterStaffId  String?
+  id                 String                   @id @default(cuid())
+  workShiftId        String?
+  requesterStaffId   String?
   replacementStaffId String?
-  locationId        String
-  city              String
-  shiftDate         DateTime
-  shiftStartTime    DateTime?
-  shiftEndTime      DateTime?
-  status            ReplacementRequestStatus @default(ACTIVE)
-  currentWave       ReplacementSearchWave?
-  nextWaveAt        DateTime?
-  completedAt       DateTime?
-  closedReason      String?
-  adminNotifiedAt   DateTime?
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
+  locationId         String
+  city               String
+  shiftDate          DateTime
+  shiftStartTime     DateTime?
+  shiftEndTime       DateTime?
+  status             ReplacementRequestStatus @default(ACTIVE)
+  currentWave        ReplacementSearchWave?
+  nextWaveAt         DateTime?
+  completedAt        DateTime?
+  closedReason       String?
+  adminNotifiedAt    DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
-  workShift         WorkShift?               @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
-  requester         StaffProfile?            @relation("ReplacementRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
-  replacement       StaffProfile?            @relation("ReplacementAcceptor", fields: [replacementStaffId], references: [id])
-  location          Location                 @relation(fields: [locationId], references: [id])
-  responses         ReplacementResponse[]
+  workShift   WorkShift?            @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
+  requester   StaffProfile?         @relation("ReplacementRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
+  replacement StaffProfile?         @relation("ReplacementAcceptor", fields: [replacementStaffId], references: [id])
+  location    Location              @relation(fields: [locationId], references: [id])
+  responses   ReplacementResponse[]
 
   @@index([status, nextWaveAt])
   @@index([requesterStaffId, status])
@@ -548,8 +552,8 @@ model ReplacementResponse {
   respondedAt      DateTime?
   deliveryError    String?
 
-  request          ReplacementRequest          @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  staff            StaffProfile                @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  request ReplacementRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  staff   StaffProfile       @relation(fields: [staffId], references: [id], onDelete: Cascade)
 
   @@unique([requestId, staffId])
   @@index([requestId, status])
@@ -557,23 +561,23 @@ model ReplacementResponse {
 }
 
 model Task {
-  id                     String       @id @default(cuid())
+  id                     String               @id @default(cuid())
   staffId                String
   taskText               String
   workDate               DateTime?
   deadlineTime           String?
-  completionMode         TaskCompletionMode @default(QUICK)
-  isCompleted            Boolean      @default(false)
+  completionMode         TaskCompletionMode   @default(QUICK)
+  isCompleted            Boolean              @default(false)
   completedAt            DateTime?
   city                   String?
   locationName           String?
   fileId                 String?
   createdById            String
-  createdAt              DateTime     @default(now())
-  updatedAt              DateTime     @updatedAt
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
   reminderSentAt         DateTime?
   overdueAdminNotifiedAt DateTime?
-  staff                  StaffProfile @relation(fields: [staffId], references: [id])
+  staff                  StaffProfile         @relation(fields: [staffId], references: [id])
   proofSubmission        TaskProofSubmission?
 
   @@index([workDate])
@@ -582,23 +586,23 @@ model Task {
 }
 
 model TaskProofSubmission {
-  id          String                    @id @default(cuid())
-  taskId       String                    @unique
-  staffId      String
-  status       TaskProofSubmissionStatus @default(DRAFT)
-  supportChatId BigInt?
-  supportTopicId Int?
-  supportTopicStatus TaskProofSupportTopicStatus?
+  id                   String                       @id @default(cuid())
+  taskId               String                       @unique
+  staffId              String
+  status               TaskProofSubmissionStatus    @default(DRAFT)
+  supportChatId        BigInt?
+  supportTopicId       Int?
+  supportTopicStatus   TaskProofSupportTopicStatus?
   supportTopicOpenedAt DateTime?
   supportTopicClosedAt DateTime?
   supportLastMessageAt DateTime?
-  submittedAt  DateTime?
-  createdAt    DateTime                  @default(now())
-  updatedAt    DateTime                  @updatedAt
-  lastItemAt   DateTime?
-  task         Task                      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  staff        StaffProfile              @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  items        TaskProofItem[]
+  submittedAt          DateTime?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  lastItemAt           DateTime?
+  task                 Task                         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  staff                StaffProfile                 @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  items                TaskProofItem[]
 
   @@index([staffId])
   @@index([status])
@@ -666,23 +670,23 @@ model OutgoingTopic {
 }
 
 model FirstShiftOnboardingCase {
-  id          String                     @id @default(cuid())
-  candidateId String                    @unique
-  status      FirstShiftOnboardingStatus @default(OPEN)
-  chatId      BigInt?
-  topicId     Int?
-  statusMessageId Int?
+  id                     String                     @id @default(cuid())
+  candidateId            String                     @unique
+  status                 FirstShiftOnboardingStatus @default(OPEN)
+  chatId                 BigInt?
+  topicId                Int?
+  statusMessageId        Int?
   entryMessageLeaseUntil DateTime?
-  entryMessageSentAt DateTime?
-  currentStepKey String?
-  startedAt   DateTime?
-  completedAt DateTime?
-  failureReason String?
-  mentorFinalNote String?
-  createdAt   DateTime                  @default(now())
-  updatedAt   DateTime                  @updatedAt
+  entryMessageSentAt     DateTime?
+  currentStepKey         String?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  failureReason          String?
+  mentorFinalNote        String?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
 
-  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  candidate Candidate                  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   steps     FirstShiftOnboardingStep[]
 
   @@index([status, updatedAt])
@@ -690,25 +694,25 @@ model FirstShiftOnboardingCase {
 }
 
 model FirstShiftOnboardingStep {
-  id          String                         @id @default(cuid())
-  caseId      String
-  key         String
-  block       String
-  title       String
-  prompt      String
-  order       Int
-  inputType   FirstShiftOnboardingInputType
-  status      FirstShiftOnboardingStepStatus @default(LOCKED)
-  requiresMentorApproval Boolean             @default(true)
-  submittedText String?
-  photoIds    String?
-  mentorComment String?
-  submittedAt DateTime?
-  approvedAt  DateTime?
-  rejectedAt  DateTime?
-  completedAt DateTime?
-  createdAt   DateTime                       @default(now())
-  updatedAt   DateTime                       @updatedAt
+  id                     String                         @id @default(cuid())
+  caseId                 String
+  key                    String
+  block                  String
+  title                  String
+  prompt                 String
+  order                  Int
+  inputType              FirstShiftOnboardingInputType
+  status                 FirstShiftOnboardingStepStatus @default(LOCKED)
+  requiresMentorApproval Boolean                        @default(true)
+  submittedText          String?
+  photoIds               String?
+  mentorComment          String?
+  submittedAt            DateTime?
+  approvedAt             DateTime?
+  rejectedAt             DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
 
   case FirstShiftOnboardingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
@@ -718,20 +722,20 @@ model FirstShiftOnboardingStep {
 }
 
 model MagnetCountRun {
-  id                 String                 @id @default(cuid())
-  adminUserId        String
-  photoFileId        String
-  estimatedTotal     Int
-  finalTotal         Int?
-  confidence         MagnetCountConfidence
-  stackCounts        String?
-  notes              String?
-  model              String?
-  isManuallyCorrected Boolean              @default(false)
-  finalizedAt        DateTime?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  adminUser          User                  @relation(fields: [adminUserId], references: [id])
+  id                  String                @id @default(cuid())
+  adminUserId         String
+  photoFileId         String
+  estimatedTotal      Int
+  finalTotal          Int?
+  confidence          MagnetCountConfidence
+  stackCounts         String?
+  notes               String?
+  model               String?
+  isManuallyCorrected Boolean               @default(false)
+  finalizedAt         DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  adminUser           User                  @relation(fields: [adminUserId], references: [id])
 
   @@index([adminUserId, createdAt])
   @@index([createdAt])
@@ -805,6 +809,7 @@ enum FinanceLogType {
   INCOME
   EXPENSE
 }
+
 enum CandidateStatus {
   SCREENING
   WAITLIST
@@ -833,7 +838,6 @@ enum CandidateStatus {
   STAGING_ACTIVE
   READY_FOR_HIRE
 }
-
 
 enum FunnelStep {
   INITIAL_TEST
@@ -866,7 +870,7 @@ model ChatLog {
   text        String?
   mediaFileId String?
   createdAt   DateTime @default(now())
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([telegramId])
   @@index([userId])
