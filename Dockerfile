@@ -1,7 +1,4 @@
-# --- SYNCHRONIZED VERSIONS ---
-# Base image version should match package.json playwright version
-ARG PLAYWRIGHT_VERSION=1.62.1
-FROM node:20-slim AS base
+FROM node:22-bookworm-slim AS base
 WORKDIR /app
 
 # --- BUILDER STAGE ---
@@ -33,19 +30,25 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev && npx prisma generate
 
 # --- RUNTIME STAGE ---
-FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble AS runner
+# Install only Chromium and its runtime libraries. The full Playwright image also
+# ships Firefox/WebKit multimedia stacks that this bot never executes.
+FROM base AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Install minimal runtime utils
-RUN apt-get update && apt-get install -y \
-    curl zip \
+COPY --from=deps /app/node_modules ./node_modules
+
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates curl zip libcairo2 libpango-1.0-0 libjpeg62-turbo libgif7 librsvg2-2 \
+    && npx playwright install-deps chromium \
+    && npx playwright install chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy artifacts from previous stages
-COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/scripts ./scripts
 COPY package.json ./
