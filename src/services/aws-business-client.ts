@@ -59,7 +59,22 @@ const snapshotSchema = z.object({
     shifts: z.array(shiftSchema),
 }).strict();
 
+const employeeScheduleSchema = z.object({
+    schemaVersion: z.literal(1),
+    generatedAt: z.string().datetime(),
+    employeePublicId: z.string().uuid(),
+    scheduleWindow: z.object({ from: z.string().date(), to: z.string().date() }).strict(),
+    shifts: z.array(z.object({
+        publicId: z.string().uuid(),
+        locationPublicId: z.string().uuid(),
+        localDate: z.string().date(),
+        startsAt: z.string().datetime(),
+        endsAt: z.string().datetime(),
+    }).strict()),
+}).strict();
+
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
+export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -85,6 +100,19 @@ export class AwsBusinessClient {
             method: "POST",
             body: JSON.stringify(employee),
         });
+    }
+
+    async employeeSchedule(employeePublicId: string, from: string, to: string): Promise<AwsEmployeeSchedule> {
+        const query = new URLSearchParams({ from, to });
+        const value = await this.request(
+            `/employees/${encodeURIComponent(employeePublicId)}/schedule?${query.toString()}`,
+            { method: "GET" },
+        );
+        const schedule = employeeScheduleSchema.parse(value);
+        if (schedule.employeePublicId !== employeePublicId) {
+            throw new Error("AWS business API returned a schedule for another employee");
+        }
+        return schedule;
     }
 
     private async request(path: string, init: RequestInit): Promise<unknown> {
