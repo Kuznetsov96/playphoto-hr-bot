@@ -205,8 +205,12 @@ jobs:
           install -d "${revision_directory}/hooks" "${revision_directory}/scripts/aws"
           install -m 0644 deploy/aws/appspec.yml "${revision_directory}/appspec.yml"
           install -m 0644 compose.aws.yaml "${revision_directory}/compose.aws.yaml"
+          install -m 0644 compose.aws.live.yaml "${revision_directory}/compose.aws.live.yaml"
           install -m 0755 deploy/aws/hooks/*.sh "${revision_directory}/hooks/"
-          install -m 0755 scripts/aws/deploy-production-bot.sh "${revision_directory}/scripts/aws/"
+          install -m 0755 \
+            scripts/aws/deploy-production-bot.sh \
+            scripts/aws/set-production-mode.sh \
+            "${revision_directory}/scripts/aws/"
           {
             printf 'AWS_REGION=%q\n' "$AWS_REGION"
             printf 'RUNTIME_SECRET_ID=%q\n' "$RUNTIME_SECRET_ID"
