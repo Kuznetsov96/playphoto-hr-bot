@@ -31,7 +31,8 @@ services:
         awslogs-create-group: "false"
 
   redis:
-    image: redis:7.4.2-alpine
+    # Must remain compatible with the production RDB restored from Hetzner.
+    image: redis:8.6.1-alpine
     restart: unless-stopped
     init: true
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
