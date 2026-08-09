@@ -7,6 +7,7 @@ set -euo pipefail
 AWS_REGION="${AWS_REGION:-eu-north-1}"
 BOT_RUNTIME_MODE="${BOT_RUNTIME_MODE:-live}"
 AWS_SCHEDULE_SHADOW_READ_ENABLED="${AWS_SCHEDULE_SHADOW_READ_ENABLED:-false}"
+AWS_SCHEDULE_CANONICAL_READ_ENABLED="${AWS_SCHEDULE_CANONICAL_READ_ENABLED:-false}"
 DEPLOY_DIRECTORY="${DEPLOY_DIRECTORY:-/opt/playphoto-bot}"
 ROLLBACK_DIRECTORY="$DEPLOY_DIRECTORY/.rollback"
 ACTION="${1:-deploy}"
@@ -21,6 +22,10 @@ if [[ "$BOT_IMAGE" != *@sha256:* ]]; then
 fi
 if [[ "$AWS_SCHEDULE_SHADOW_READ_ENABLED" != "true" && "$AWS_SCHEDULE_SHADOW_READ_ENABLED" != "false" ]]; then
   echo "AWS_SCHEDULE_SHADOW_READ_ENABLED must be true or false." >&2
+  exit 1
+fi
+if [[ "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" != "true" && "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" != "false" ]]; then
+  echo "AWS_SCHEDULE_CANONICAL_READ_ENABLED must be true or false." >&2
   exit 1
 fi
 if [[ "$ACTION" != "deploy" && "$ACTION" != "rollback" ]]; then
@@ -200,6 +205,7 @@ set_env REDIS_URL "$(jq -r '.redisUrl // "redis://redis:6379"' "$runtime_json_fi
 set_env AWS_BUSINESS_MIN_EMPLOYEES "$(jq -r '.minimumEmployees // 50' "$runtime_json_file")"
 set_env AWS_BUSINESS_MIN_LOCATIONS "$(jq -r '.minimumLocations // 19' "$runtime_json_file")"
 set_env AWS_SCHEDULE_SHADOW_READ_ENABLED "$AWS_SCHEDULE_SHADOW_READ_ENABLED"
+set_env AWS_SCHEDULE_CANONICAL_READ_ENABLED "$AWS_SCHEDULE_CANONICAL_READ_ENABLED"
 
 chmod 0600 "$environment_file" "$google_file"
 mv "$environment_file" "$DEPLOY_DIRECTORY/.env"

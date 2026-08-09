@@ -66,6 +66,7 @@ describe("AwsBusinessClient", () => {
     });
 
     it("requests and validates one employee's minimal canonical schedule", async () => {
+        const timeout = vi.spyOn(AbortSignal, "timeout");
         vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
             schemaVersion: 1,
             generatedAt: "2026-08-09T12:00:00.000Z",
@@ -85,6 +86,7 @@ describe("AwsBusinessClient", () => {
             "22222222-2222-4222-8222-222222222222",
             "2026-08-09",
             "2026-08-31",
+            { timeoutMs: 3_000 },
         );
 
         expect(value.shifts).toHaveLength(1);
@@ -92,6 +94,7 @@ describe("AwsBusinessClient", () => {
             "https://api.example.test/api/v1/internal/bot/employees/22222222-2222-4222-8222-222222222222/schedule?from=2026-08-09&to=2026-08-31",
             expect.objectContaining({ method: "GET" }),
         );
+        expect(timeout).toHaveBeenCalledWith(3_000);
     });
 
     it("does not include an upstream response body in an HTTP error", async () => {

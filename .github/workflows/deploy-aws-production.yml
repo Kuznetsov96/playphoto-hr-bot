@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      canonical_schedule_enabled:
+        description: Use canonical backend schedule for the Telegram My Schedule view
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -223,6 +228,7 @@ jobs:
             printf 'RUNTIME_SECRET_ID=%q\n' "$RUNTIME_SECRET_ID"
             printf 'BOT_RUNTIME_MODE=%q\n' live
             printf 'AWS_SCHEDULE_SHADOW_READ_ENABLED=%q\n' "${{ inputs.schedule_shadow_enabled }}"
+            printf 'AWS_SCHEDULE_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.canonical_schedule_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -269,11 +275,12 @@ jobs:
           ARTIFACT_KEY: ${{ steps.revision.outputs.key }}
           LIVE_SAFE_BASELINE: ${{ steps.rollback_baseline.outputs.safe }}
           SCHEDULE_SHADOW_ENABLED: ${{ inputs.schedule_shadow_enabled }}
+          CANONICAL_SCHEDULE_ENABLED: ${{ inputs.canonical_schedule_enabled }}
         run: |
           rollback_override=()
           if [[ "$LIVE_SAFE_BASELINE" != "true" ]]; then
-            [[ "$SCHEDULE_SHADOW_ENABLED" == "false" ]] || {
-              echo "Bootstrap live-safe deployment requires schedule shadow telemetry to remain disabled." >&2
+            [[ "$SCHEDULE_SHADOW_ENABLED" == "false" && "$CANONICAL_SCHEDULE_ENABLED" == "false" ]] || {
+              echo "Bootstrap live-safe deployment requires schedule migration flags to remain disabled." >&2
               exit 1
             }
             # The currently installed revisions predate live-safe rollback and are labelled
@@ -308,6 +315,7 @@ jobs:
             echo '- Telegram polling: **live**'
             echo '- Business source: AWS API'
             echo '- Schedule shadow telemetry: `${{ inputs.schedule_shadow_enabled }}`'
+            echo '- Canonical schedule read: `${{ inputs.canonical_schedule_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'
