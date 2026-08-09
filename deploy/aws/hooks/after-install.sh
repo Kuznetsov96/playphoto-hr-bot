@@ -12,6 +12,7 @@ chmod 0750 /opt/playphoto-bot/scripts/aws/deploy-production-bot.sh \
 
 bash -n /opt/playphoto-bot/scripts/aws/deploy-production-bot.sh
 bash -n /opt/playphoto-bot/scripts/aws/set-production-mode.sh
+bash -n /opt/playphoto-bot/hooks/before-install.sh
 bash -n /opt/playphoto-bot/hooks/start.sh
 bash -n /opt/playphoto-bot/hooks/validate.sh
 

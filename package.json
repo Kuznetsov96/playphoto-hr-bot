@@ -18,6 +18,7 @@
     "test:coverage": "vitest run --coverage",
     "check-cycles": "node scripts/check-cycles.mjs",
     "check-menu-ids": "node scripts/check-menu-ids.mjs",
+    "check-production-deploy": "node scripts/aws/check-production-deploy-contract.mjs && node scripts/aws/test-production-deploy-contract.mjs",
     "studio": "prisma studio"
   },
   "keywords": [],
