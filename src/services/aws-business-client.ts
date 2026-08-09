@@ -102,11 +102,17 @@ export class AwsBusinessClient {
         });
     }
 
-    async employeeSchedule(employeePublicId: string, from: string, to: string): Promise<AwsEmployeeSchedule> {
+    async employeeSchedule(
+        employeePublicId: string,
+        from: string,
+        to: string,
+        options: { timeoutMs?: number } = {}
+    ): Promise<AwsEmployeeSchedule> {
         const query = new URLSearchParams({ from, to });
         const value = await this.request(
             `/employees/${encodeURIComponent(employeePublicId)}/schedule?${query.toString()}`,
             { method: "GET" },
+            options.timeoutMs,
         );
         const schedule = employeeScheduleSchema.parse(value);
         if (schedule.employeePublicId !== employeePublicId) {
@@ -115,7 +121,7 @@ export class AwsBusinessClient {
         return schedule;
     }
 
-    private async request(path: string, init: RequestInit): Promise<unknown> {
+    private async request(path: string, init: RequestInit, timeoutMs: number = 20_000): Promise<unknown> {
         const base = AWS_BUSINESS_API_URL.replace(/\/$/u, "");
         const response = await fetch(`${base}${path}`, {
             ...init,
@@ -125,7 +131,7 @@ export class AwsBusinessClient {
                 "x-request-id": `telegram-bot:${randomUUID()}`,
                 ...init.headers,
             },
-            signal: AbortSignal.timeout(20_000),
+            signal: AbortSignal.timeout(timeoutMs),
         });
         if (!response.ok) {
             throw new Error(`AWS business API request failed with HTTP ${response.status}`);

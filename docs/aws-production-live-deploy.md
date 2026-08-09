@@ -9,6 +9,7 @@ unknown command.
 - The image is an ECR reference pinned to an immutable `sha256` digest.
 - `BUSINESS_DATA_SOURCE=aws` is rebuilt from Secrets Manager on every release.
 - The schedule shadow flag is an explicit workflow input and defaults to `false`.
+- The canonical schedule-read flag is a separate explicit workflow input and defaults to `false`.
 - `BeforeInstall` verifies that the installed immutable image matches the running container.
 - `BeforeInstall` records the actual `start:live` or `start:standby` command rather than trusting an
   older `release.env` label.
@@ -44,7 +45,7 @@ The deployment group configuration itself is not changed.
 4. Dispatch the workflow for the reviewed commit with `schedule_shadow_enabled=false`.
 5. Wait for build, ECR scan, CodeDeploy hooks and 60-second live validation to complete.
 6. Confirm the container still runs `start:live`, uses `BUSINESS_DATA_SOURCE=aws`, and has the expected
-   schedule shadow flag.
+   schedule shadow and canonical-read flags.
 7. Confirm no second poller exists before considering the release complete.
 
 Do not enable schedule shadow telemetry in the same deployment that introduces a new bot image.

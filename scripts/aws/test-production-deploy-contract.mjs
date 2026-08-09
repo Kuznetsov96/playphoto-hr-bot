@@ -63,7 +63,7 @@ const writeRuntime = () => {
     writeFileSync(join(deployDirectory, "compose.aws.live.yaml"), "services: {}\n");
     writeFileSync(
         join(deployDirectory, "release.env"),
-        `BOT_IMAGE=${newImage}\nBOT_RUNTIME_MODE=live\nAWS_SCHEDULE_SHADOW_READ_ENABLED=false\n`
+        `BOT_IMAGE=${newImage}\nBOT_RUNTIME_MODE=live\nAWS_SCHEDULE_SHADOW_READ_ENABLED=false\nAWS_SCHEDULE_CANONICAL_READ_ENABLED=false\n`
     );
     writeFileSync(join(rollbackDirectory, ".env"), "ROLLBACK_ENV=true\n", { mode: 0o600 });
     writeFileSync(join(rollbackDirectory, "google-service-account.json"), "{}\n", { mode: 0o600 });
@@ -93,6 +93,7 @@ const run = (failDeploy) => {
             RUNTIME_SECRET_ID: "test/runtime",
             AWS_REGION: "eu-north-1",
             AWS_SCHEDULE_SHADOW_READ_ENABLED: "false",
+            AWS_SCHEDULE_CANONICAL_READ_ENABLED: "false",
             DEPLOY_DIRECTORY: deployDirectory,
             DEPLOY_TEST_STATE: root,
             FAIL_DEPLOY: failDeploy ? "true" : "false"
@@ -106,6 +107,9 @@ try {
     const deployedEnv = readFileSync(join(deployDirectory, ".env"), "utf8");
     if (!deployedEnv.includes("AWS_SCHEDULE_SHADOW_READ_ENABLED=false")) {
         throw new Error("Live deploy did not force the reviewed shadow flag");
+    }
+    if (!deployedEnv.includes("AWS_SCHEDULE_CANONICAL_READ_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed canonical flag");
     }
 
     const failure = run(true);

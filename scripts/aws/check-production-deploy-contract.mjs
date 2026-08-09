@@ -31,8 +31,10 @@ const requirements = [
     ["deploy restores the captured runtime", content.deploy, "restore_rollback_runtime"],
     ["deploy validates stable health", content.deploy, "wait_for_stable_container"],
     ["deploy sets the reviewed shadow flag", content.deploy, "set_env AWS_SCHEDULE_SHADOW_READ_ENABLED"],
+    ["deploy sets the reviewed canonical flag", content.deploy, "set_env AWS_SCHEDULE_CANONICAL_READ_ENABLED"],
     ["validate checks live command", content.validate, 'expected_command="start:live"'],
     ["validate checks the shadow flag", content.validate, "actual_shadow_flag"],
+    ["validate checks the canonical flag", content.validate, "actual_canonical_flag"],
     ["validate invokes rollback on failure", content.validate, "deploy-production-bot.sh rollback"]
 ];
 

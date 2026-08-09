@@ -20,8 +20,10 @@ trap rollback_on_error ERR
 
 : "${BOT_RUNTIME_MODE:?BOT_RUNTIME_MODE is required}"
 : "${AWS_SCHEDULE_SHADOW_READ_ENABLED:?AWS_SCHEDULE_SHADOW_READ_ENABLED is required}"
+: "${AWS_SCHEDULE_CANONICAL_READ_ENABLED:?AWS_SCHEDULE_CANONICAL_READ_ENABLED is required}"
 [[ "$BOT_RUNTIME_MODE" == "live" || "$BOT_RUNTIME_MODE" == "standby" ]]
 [[ "$AWS_SCHEDULE_SHADOW_READ_ENABLED" == "true" || "$AWS_SCHEDULE_SHADOW_READ_ENABLED" == "false" ]]
+[[ "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" == "true" || "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" == "false" ]]
 
 base=(docker compose --env-file /opt/playphoto-bot/.env -f /opt/playphoto-bot/compose.aws.yaml)
 selected=("${base[@]}")
@@ -69,6 +71,11 @@ actual_shadow_flag="$(docker inspect \
   "$container_id" | awk -F= '$1 == "AWS_SCHEDULE_SHADOW_READ_ENABLED" { print $2 }')"
 [[ "${actual_shadow_flag:-false}" == "$AWS_SCHEDULE_SHADOW_READ_ENABLED" ]]
 
+actual_canonical_flag="$(docker inspect \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  "$container_id" | awk -F= '$1 == "AWS_SCHEDULE_CANONICAL_READ_ENABLED" { print $2 }')"
+[[ "${actual_canonical_flag:-false}" == "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" ]]
+
 trap - ERR
 "${selected[@]}" ps
-echo "Production bot $BOT_RUNTIME_MODE is stable; schedule shadow flag is $AWS_SCHEDULE_SHADOW_READ_ENABLED."
+echo "Production bot $BOT_RUNTIME_MODE is stable; schedule shadow=$AWS_SCHEDULE_SHADOW_READ_ENABLED canonical=$AWS_SCHEDULE_CANONICAL_READ_ENABLED."
