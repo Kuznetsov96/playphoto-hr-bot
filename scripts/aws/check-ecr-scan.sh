@@ -6,11 +6,21 @@ image_tag="${2:?ECR image tag is required}"
 aws_region="${AWS_REGION:-eu-north-1}"
 attempts="${ECR_SCAN_ATTEMPTS:-36}"
 delay_seconds="${ECR_SCAN_DELAY_SECONDS:-10}"
+allowlist_file="${ECR_CVE_ALLOWLIST_FILE:-$(dirname "$0")/ecr-cve-allowlist.txt}"
 
 temporary_response="$(mktemp)"
 temporary_error="$(mktemp)"
-trap 'rm -f "$temporary_response" "$temporary_error"' EXIT
+temporary_findings="$(mktemp)"
+temporary_allowlist="$(mktemp)"
+temporary_unexpected="$(mktemp)"
+trap 'rm -f "$temporary_response" "$temporary_error" "$temporary_findings" "$temporary_allowlist" "$temporary_unexpected"' EXIT
 scan_requested=false
+
+if [[ ! -f "$allowlist_file" ]]; then
+  echo "ECR CVE allowlist is missing: $allowlist_file" >&2
+  exit 1
+fi
+sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$allowlist_file" | sort -u >"$temporary_allowlist"
 
 for ((attempt = 1; attempt <= attempts; attempt += 1)); do
   if aws ecr describe-image-scan-findings \
@@ -25,10 +35,16 @@ for ((attempt = 1; attempt <= attempts; attempt += 1)); do
       critical="$(jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0' "$temporary_response")"
       high="$(jq -r '.imageScanFindings.findingSeverityCounts.HIGH // 0' "$temporary_response")"
       echo "$repository_name:$image_tag scan complete: critical=$critical high=$high"
-      if ((critical > 0 || high > 0)); then
-        echo "Deployment blocked by high-severity ECR findings." >&2
+      jq -r '.imageScanFindings.findings[]? | select(.severity == "CRITICAL" or .severity == "HIGH") | .name' \
+        "$temporary_response" | sort -u >"$temporary_findings"
+      comm -23 "$temporary_findings" "$temporary_allowlist" >"$temporary_unexpected"
+      if [[ -s "$temporary_unexpected" ]]; then
+        echo "Deployment blocked by unexpected high-severity ECR findings:" >&2
+        sed -n '1,50p' "$temporary_unexpected" >&2
         exit 1
       fi
+      allowed_count="$(wc -l <"$temporary_findings" | tr -d ' ')"
+      echo "ECR gate passed with $allowed_count reviewed CVE(s); every unlisted CRITICAL/HIGH finding remains blocked."
       exit 0
     fi
     if [[ "$scan_status" == "FAILED" || "$scan_status" == "UNSUPPORTED_IMAGE" ]]; then
