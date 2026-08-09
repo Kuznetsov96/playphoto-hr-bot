@@ -7,5 +7,5 @@ set -a
 source /opt/playphoto-bot/release.env
 set +a
 
-export AWS_REGION BOT_IMAGE BOT_RUNTIME_MODE RUNTIME_SECRET_ID
+export AWS_REGION AWS_SCHEDULE_SHADOW_READ_ENABLED BOT_IMAGE BOT_RUNTIME_MODE RUNTIME_SECRET_ID
 /opt/playphoto-bot/scripts/aws/deploy-production-bot.sh

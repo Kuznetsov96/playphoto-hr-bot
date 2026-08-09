@@ -7,27 +7,68 @@ set -a
 source /opt/playphoto-bot/release.env
 set +a
 
-compose=(docker compose --env-file /opt/playphoto-bot/.env -f /opt/playphoto-bot/compose.aws.yaml)
+rollback_on_error() {
+  exit_code="$?"
+  trap - ERR
+  echo "Deployment validation failed; restoring the captured runtime." >&2
+  /opt/playphoto-bot/scripts/aws/deploy-production-bot.sh rollback || {
+    echo "Validation rollback failed." >&2
+  }
+  exit "$exit_code"
+}
+trap rollback_on_error ERR
+
+: "${BOT_RUNTIME_MODE:?BOT_RUNTIME_MODE is required}"
+: "${AWS_SCHEDULE_SHADOW_READ_ENABLED:?AWS_SCHEDULE_SHADOW_READ_ENABLED is required}"
+[[ "$BOT_RUNTIME_MODE" == "live" || "$BOT_RUNTIME_MODE" == "standby" ]]
+[[ "$AWS_SCHEDULE_SHADOW_READ_ENABLED" == "true" || "$AWS_SCHEDULE_SHADOW_READ_ENABLED" == "false" ]]
+
+base=(docker compose --env-file /opt/playphoto-bot/.env -f /opt/playphoto-bot/compose.aws.yaml)
+selected=("${base[@]}")
+expected_command="start:standby"
+if [[ "$BOT_RUNTIME_MODE" == "live" ]]; then
+  selected+=( -f /opt/playphoto-bot/compose.aws.live.yaml )
+  expected_command="start:live"
+fi
+
+container_id=""
+initial_restarts=""
 
 for attempt in {1..40}; do
-  container_id="$("${compose[@]}" ps --quiet bot)"
+  container_id="$("${selected[@]}" ps --quiet bot)"
   if [[ -n "$container_id" ]]; then
     health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")"
-    if [[ "$health" == "healthy" ]]; then
-      mode="$(docker inspect --format '{{json .Config.Cmd}}' "$container_id")"
-      [[ "$mode" == *"start:standby"* ]] || {
-        echo "Safety check failed: deployed bot is not in standby mode." >&2
-        exit 1
-      }
-      "${compose[@]}" ps
-      echo "Production bot standby is healthy; Telegram polling remains disabled."
-      exit 0
+    command="$(docker inspect --format '{{json .Config.Cmd}}' "$container_id")"
+    if [[ "$health" == "healthy" && "$command" == *"$expected_command"* ]]; then
+      initial_restarts="$(docker inspect --format '{{.RestartCount}}' "$container_id")"
+      break
     fi
   fi
-  echo "Waiting for bot standby health ($attempt/40)."
+  echo "Waiting for bot $BOT_RUNTIME_MODE health ($attempt/40)."
   sleep 5
 done
 
-"${compose[@]}" ps >&2
-"${compose[@]}" logs --tail=100 bot >&2
-exit 1
+[[ -n "$initial_restarts" ]] || {
+  "${selected[@]}" ps >&2
+  "${selected[@]}" logs --tail=100 bot >&2
+  false
+}
+
+# Require one minute of stable health and an unchanged container before accepting polling.
+for attempt in {1..12}; do
+  sleep 5
+  current_id="$("${selected[@]}" ps --quiet bot)"
+  [[ "$current_id" == "$container_id" ]]
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")"
+  restarts="$(docker inspect --format '{{.RestartCount}}' "$container_id")"
+  [[ "$health" == "healthy" && "$restarts" == "$initial_restarts" ]]
+done
+
+actual_shadow_flag="$(docker inspect \
+  --format '{{range .Config.Env}}{{println .}}{{end}}' \
+  "$container_id" | awk -F= '$1 == "AWS_SCHEDULE_SHADOW_READ_ENABLED" { print $2 }')"
+[[ "${actual_shadow_flag:-false}" == "$AWS_SCHEDULE_SHADOW_READ_ENABLED" ]]
+
+trap - ERR
+"${selected[@]}" ps
+echo "Production bot $BOT_RUNTIME_MODE is stable; schedule shadow flag is $AWS_SCHEDULE_SHADOW_READ_ENABLED."

@@ -21,9 +21,10 @@ does not write canonical business data.
 1. Deploy the backend endpoint with the flag still absent or `false` in the bot runtime secret.
 2. Verify an authenticated request for a known mapped employee returns HTTP 200 and a minimal
    schema-versioned response.
-3. Deploy the bot code with `AWS_SCHEDULE_SHADOW_READ_ENABLED=false`.
-4. Set `AWS_SCHEDULE_SHADOW_READ_ENABLED=true` in the production bot runtime secret and redeploy the
-   bot. Do not change `BUSINESS_DATA_SOURCE` during this step.
+3. Dispatch `Deploy AWS production bot` with `schedule_shadow_enabled=false`. The workflow must
+   replace an already-live AWS poller and validate 60 seconds of stable `start:live` health.
+4. In a separate controlled deployment, dispatch the same workflow with
+   `schedule_shadow_enabled=true`. Do not change `BUSINESS_DATA_SOURCE` during this step.
 5. Monitor `bot.aws_schedule_shadow.compared`, `bot.aws_schedule_shadow.failed`, and
    `bot.aws_schedule_shadow.skipped` events for an agreed observation window.
 
@@ -36,9 +37,9 @@ does not write canonical business data.
 
 ## Rollback
 
-Set `AWS_SCHEDULE_SHADOW_READ_ENABLED=false` and redeploy the bot. No data rollback or backfill is
-required because the slice performs only reads and telemetry logging. The legacy user-visible path
-remains unchanged.
+Dispatch `Deploy AWS production bot` for the last known-good commit with
+`schedule_shadow_enabled=false`. No data rollback or backfill is required because the slice performs
+only reads and telemetry logging. The legacy user-visible path remains unchanged.
 
 Do not switch the user-visible result to the canonical API until the agreed parity threshold is met
 and mismatches have been classified. Do not delete `WorkShift` or disable the snapshot projection as

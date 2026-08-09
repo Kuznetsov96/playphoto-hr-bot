@@ -1,7 +1,13 @@
-name: Deploy AWS production standby
+name: Deploy AWS production bot
 
 on:
   workflow_dispatch:
+    inputs:
+      schedule_shadow_enabled:
+        description: Enable aggregate-only schedule shadow telemetry
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,6 +72,7 @@ jobs:
       - run: npm run build
       - run: npm run check-cycles
       - run: npm run check-menu-ids
+      - run: npm run check-production-deploy
       - run: npm test
 
   build:
@@ -135,7 +142,7 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    name: Transfer secrets and deploy standby
+    name: Transfer secrets and deploy live bot
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -192,7 +199,7 @@ jobs:
         with:
           name: production-bot-image
           path: ${{ runner.temp }}/release
-      - name: Build immutable standby revision
+      - name: Build immutable live revision
         id: revision
         run: |
           BOT_IMAGE="$(<"${RUNNER_TEMP}/release/bot.txt")"
@@ -214,7 +221,9 @@ jobs:
           {
             printf 'AWS_REGION=%q\n' "$AWS_REGION"
             printf 'RUNTIME_SECRET_ID=%q\n' "$RUNTIME_SECRET_ID"
-            printf 'BOT_RUNTIME_MODE=%q\n' standby
+            printf 'BOT_RUNTIME_MODE=%q\n' live
+            printf 'AWS_SCHEDULE_SHADOW_READ_ENABLED=%q\n' "${{ inputs.schedule_shadow_enabled }}"
+            printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
           } > "${revision_directory}/release.env"
@@ -222,18 +231,64 @@ jobs:
           aws s3 cp "$revision_archive" "s3://${artifact_bucket}/${artifact_key}" --only-show-errors
           echo "bucket=${artifact_bucket}" >> "$GITHUB_OUTPUT"
           echo "key=${artifact_key}" >> "$GITHUB_OUTPUT"
-      - name: Start standby CodeDeploy release
+      - name: Detect a live-safe CodeDeploy rollback baseline
+        id: rollback_baseline
+        run: |
+          safe=false
+          deployment_id="$(aws deploy get-deployment-group \
+            --application-name "$CODEDEPLOY_APPLICATION" \
+            --deployment-group-name "$CODEDEPLOY_GROUP" \
+            --query 'deploymentGroupInfo.lastSuccessfulDeployment.deploymentId' \
+            --output text)"
+          if [[ "$deployment_id" == d-* ]]; then
+            bucket="$(aws deploy get-deployment \
+              --deployment-id "$deployment_id" \
+              --query 'deploymentInfo.revision.s3Location.bucket' \
+              --output text)"
+            key="$(aws deploy get-deployment \
+              --deployment-id "$deployment_id" \
+              --query 'deploymentInfo.revision.s3Location.key' \
+              --output text)"
+            previous_archive="${RUNNER_TEMP}/previous-bot-revision.zip"
+            previous_release="${RUNNER_TEMP}/previous-release.env"
+            if [[ "$bucket" != "None" && "$key" != "None" ]] && \
+              aws s3 cp "s3://${bucket}/${key}" "$previous_archive" --only-show-errors && \
+              unzip -p "$previous_archive" release.env >"$previous_release" && \
+              grep -qx 'LIVE_SAFE_ROLLBACK_VERSION=1' "$previous_release" && \
+              grep -qx 'BOT_RUNTIME_MODE=live' "$previous_release"
+            then
+              safe=true
+            fi
+          fi
+          echo "safe=${safe}" >> "$GITHUB_OUTPUT"
+          echo "Live-safe rollback baseline available: ${safe}"
+      - name: Start live CodeDeploy release
         id: deployment
         env:
           ARTIFACT_BUCKET: ${{ steps.revision.outputs.bucket }}
           ARTIFACT_KEY: ${{ steps.revision.outputs.key }}
+          LIVE_SAFE_BASELINE: ${{ steps.rollback_baseline.outputs.safe }}
+          SCHEDULE_SHADOW_ENABLED: ${{ inputs.schedule_shadow_enabled }}
         run: |
+          rollback_override=()
+          if [[ "$LIVE_SAFE_BASELINE" != "true" ]]; then
+            [[ "$SCHEDULE_SHADOW_ENABLED" == "false" ]] || {
+              echo "Bootstrap live-safe deployment requires schedule shadow telemetry to remain disabled." >&2
+              exit 1
+            }
+            # The currently installed revisions predate live-safe rollback and are labelled
+            # standby even though the container is live. The lifecycle hooks capture and restore
+            # the real runtime for this one bootstrap deployment. After it succeeds, normal
+            # CodeDeploy automatic rollback is safe again.
+            rollback_override=(--auto-rollback-configuration enabled=false)
+          fi
           deployment_id="$(aws deploy create-deployment \
             --application-name "$CODEDEPLOY_APPLICATION" \
             --deployment-group-name "$CODEDEPLOY_GROUP" \
-            --description "PlayPhoto production bot standby ${GITHUB_SHA}" \
+            --description "PlayPhoto production bot live ${GITHUB_SHA}" \
             --revision "revisionType=S3,s3Location={bucket=${ARTIFACT_BUCKET},key=${ARTIFACT_KEY},bundleType=zip}" \
             --file-exists-behavior OVERWRITE \
+            "${rollback_override[@]}" \
             --query deploymentId \
             --output text)"
           echo "deployment_id=${deployment_id}" >> "$GITHUB_OUTPUT"
@@ -248,10 +303,12 @@ jobs:
       - name: Write deployment summary
         run: |
           {
-            echo '### AWS production bot standby succeeded'
+            echo '### AWS production bot live deployment succeeded'
             echo
-            echo '- Telegram polling: **disabled by deployment policy**'
+            echo '- Telegram polling: **live**'
             echo '- Business source: AWS API'
+            echo '- Schedule shadow telemetry: `${{ inputs.schedule_shadow_enabled }}`'
+            echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'
           } >> "$GITHUB_STEP_SUMMARY"
