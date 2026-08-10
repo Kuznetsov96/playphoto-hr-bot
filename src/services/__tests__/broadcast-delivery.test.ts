@@ -44,7 +44,11 @@ vi.mock("../../core/redis.js", () => ({ redis: { get: vi.fn() } }));
 vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock("../../config.js", () => ({ TEAM_CHATS: { HUB: -1001 } }));
+vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
+vi.mock("../aws-business-client.js", () => ({
+    awsBusinessClient: { missingSchedulePreferences: vi.fn() },
+}));
+vi.mock("../../config.js", () => ({ TEAM_CHATS: { HUB: -1001 }, AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: false }));
 vi.mock("../../handlers/admin/utils.js", () => ({ normalizeCity: (value: string) => value }));
 
 describe("broadcast delivery reliability", () => {
