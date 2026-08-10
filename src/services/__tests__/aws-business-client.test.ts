@@ -165,6 +165,31 @@ describe("AwsBusinessClient", () => {
         });
     });
 
+    it("posts recognised telegram links to the backend", async () => {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ updated: 1 }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        const result = await new AwsBusinessClient().reportTelegramLinks([
+            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+        ]);
+
+        expect(fetch).toHaveBeenCalledWith(
+            "https://api.example.test/api/v1/internal/bot/telegram-links",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    authorization: `Bearer ${"a".repeat(32)}`,
+                }),
+            }),
+        );
+        const call = vi.mocked(fetch).mock.calls.at(0);
+        const requestInit = call?.[1];
+        expect(JSON.parse(requestInit?.body as string)).toEqual({
+            links: [{ telegramId: "486213975", found: true, username: "ivan_petrov" }],
+        });
+        expect(result).toEqual({ updated: 1 });
+    });
+
     describe("missingSchedulePreferences", () => {
         // Mirrors the backend's real `listMissingForBot` response shape
         // (Webapp PlayPhoto/apps/api/src/schedule-preferences/schedule-preferences.service.ts):

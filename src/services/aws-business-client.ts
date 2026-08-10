@@ -326,6 +326,21 @@ export class AwsBusinessClient {
         );
     }
 
+    /**
+     * Reports which telegram ids the bot recognises (a row exists in its own
+     * `User` table). This is advisory only — it drives the backend's onboarding
+     * verification badge and never affects scheduling — so callers must swallow
+     * failures rather than let them interrupt a sync.
+     */
+    async reportTelegramLinks(
+        links: Array<{ telegramId: string; found: boolean; username?: string }>
+    ): Promise<{ updated: number }> {
+        return this.request("/telegram-links", {
+            method: "POST",
+            body: JSON.stringify({ links }),
+        }) as Promise<{ updated: number }>;
+    }
+
     async previewReplacement(input: {
         scheduledShiftPublicId: string;
         requesterEmployeePublicId: string;
