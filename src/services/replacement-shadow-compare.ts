@@ -24,12 +24,8 @@ export function compareReplacementCandidates(
     canonicalWaves: CanonicalWave[]
 ): CandidateComparison {
     const legacyByEmployee = new Map<string, string>();
-    let nullIdCount = 0;
     for (const candidate of legacy) {
-        if (!candidate.awsEmployeePublicId) {
-            nullIdCount += 1;
-            continue;
-        }
+        if (!candidate.awsEmployeePublicId) continue;
         legacyByEmployee.set(candidate.awsEmployeePublicId, candidate.availabilityKind);
     }
 
@@ -53,6 +49,7 @@ export function compareReplacementCandidates(
 
     const missingInCanonicalCount = legacyByEmployee.size - matchedCount;
     const missingInLegacyCount = canonicalByEmployee.size - matchedCount;
+    // Includes both rows with no employee ID (null awsEmployeePublicId) and rows dropped as duplicates by Map deduplication.
     const unmappedLegacyCount = legacy.length - legacyByEmployee.size;
 
     return {
