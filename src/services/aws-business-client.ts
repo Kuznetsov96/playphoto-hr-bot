@@ -93,6 +93,20 @@ const schedulePreferenceReadSchema = z.union([
         .strict(),
 ]);
 
+const missingPreferencesSchema = z
+    .object({
+        month: z.string().min(1),
+        employees: z.array(
+            z
+                .object({
+                    publicId: z.string().uuid(),
+                    telegramId: z.string().regex(/^\d+$/u),
+                })
+                .strict()
+        ),
+    })
+    .strict();
+
 const snapshotSchema = z.object({
     schemaVersion: z.literal(1),
     generatedAt: z.string().datetime(),
@@ -195,6 +209,7 @@ export type AwsScheduleNotificationShiftSnapshot = z.infer<typeof scheduleNotifi
 export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
 export type ReplacementRequestView = { publicId: string; status: string };
 export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
+export type MissingSchedulePreferences = z.infer<typeof missingPreferencesSchema>;
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -413,6 +428,19 @@ export class AwsBusinessClient {
             undefined,
             { expectsBody: false },
         );
+    }
+
+    /**
+     * Lists employees who have not yet submitted a schedule preference for
+     * `month`, replacing the Redis `pref_filled:*` TTL-key lookup the bot
+     * previously used to decide who to remind.
+     */
+    async missingSchedulePreferences(month: string): Promise<MissingSchedulePreferences> {
+        const body = await this.request(
+            `/schedule-preferences/missing?month=${encodeURIComponent(month)}`,
+            { method: "GET" }
+        );
+        return missingPreferencesSchema.parse(body);
     }
 
     private async request(
