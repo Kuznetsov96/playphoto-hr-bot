@@ -89,4 +89,33 @@ describe("compareReplacementCandidates", () => {
         expect(result.canonicalCount).toBe(1);
         expect(result.parity).toBe(true);
     });
+
+    it("accounts for duplicate legacy entries in unmappedLegacyCount and maintains invariant", () => {
+        const result = compareReplacementCandidates(
+            [
+                { awsEmployeePublicId: "emp-1", availabilityKind: "AVAILABLE" },
+                { awsEmployeePublicId: "emp-1", availabilityKind: "AVAILABLE" }
+            ],
+            [
+                {
+                    wave: "SAME_LOCATION_AVAILABLE",
+                    candidates: [{ employeePublicId: "emp-1", availabilityKind: "AVAILABLE" }]
+                }
+            ]
+        );
+        expect(result).toEqual({
+            parity: true,
+            legacyCount: 2,
+            canonicalCount: 1,
+            matchedCount: 1,
+            missingInCanonicalCount: 0,
+            missingInLegacyCount: 0,
+            unmappedLegacyCount: 1,
+            limitedOnlyInLegacyCount: 0
+        });
+        expect(
+            result.legacyCount ===
+                result.matchedCount + result.missingInCanonicalCount + result.unmappedLegacyCount
+        ).toBe(true);
+    });
 });
