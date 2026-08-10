@@ -21,6 +21,8 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
 import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDay } from "./kyiv-date.js";
 import { replacementShadowService } from "./replacement-shadow.js";
+import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
+import { startCanonicalReplacement } from "./replacement-canonical.js";
 
 export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
@@ -180,6 +182,21 @@ export class ReplacementService {
         if (existing?.status === ReplacementRequestStatus.FOUND) throw new Error("REQUEST_ALREADY_FOUND");
         if (existing?.status === ReplacementRequestStatus.FAILED) throw new Error("REQUEST_PREVIOUSLY_FAILED");
 
+        let awsReplacementPublicId: string | null = null;
+        if (AWS_REPLACEMENTS_CANONICAL_ENABLED) {
+            const canonicalResult = await startCanonicalReplacement({
+                workShiftId: shift.id,
+                requesterStaffId,
+                requesterTelegramId: String(shift.staff.user.telegramId),
+                locationId: shift.locationId,
+                shiftDate: shift.date,
+            });
+            if (!canonicalResult.ok) {
+                throw new Error(`CANONICAL_REPLACEMENT_FAILED:${canonicalResult.reasonCode}`);
+            }
+            awsReplacementPublicId = canonicalResult.replacementPublicId;
+        }
+
         const request = await this.createActiveRequest({
             workShiftId: shift.id,
             requesterStaffId,
@@ -188,6 +205,7 @@ export class ReplacementService {
             shiftDate: shift.date,
             shiftStartTime: shift.startTime,
             shiftEndTime: shift.endTime,
+            awsReplacementPublicId,
         });
 
         await this.notifyAdminStarted(api, request.id);
