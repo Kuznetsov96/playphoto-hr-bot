@@ -31,6 +31,7 @@ import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callba
 import { ScreenManager } from "../utils/screen-manager.js";
 import { canConfirmNDA } from "../utils/final-step-flow.js";
 import { escapeHtml } from "./admin/utils.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -173,6 +174,38 @@ handlers.on("callback_query:data", async (ctx, next) => {
         ctx,
         CANDIDATE_TEXTS["nda-confirmed-start-onboarding"],
         new InlineKeyboard().text("📝 Почати оформлення", "start_onboarding_data")
+    );
+});
+
+// Schedule change notification acknowledgement.
+// This records that the photographer SAW the notification. It never cancels or
+// changes a shift — the backend owns the schedule and there is currently no
+// endpoint to record the acknowledgement, so we only log it and confirm receipt.
+handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const confirmed = data.startsWith("cb:snack:");
+    const notificationPublicId = readCallbackPayload(data, { code: confirmed ? "snack" : "sndec" });
+    if (!notificationPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    logBusinessEvent({
+        event: "bot.schedule_notifications.acknowledged",
+        telegramId: ctx.from?.id,
+        actorType: "staff",
+        actorRole: "staff",
+        result: "success",
+        reasonCode: confirmed ? "ACKNOWLEDGED_CONFIRMED" : "ACKNOWLEDGED_DECLINED",
+        module: "schedule-notification-dispatcher",
+        operation: "acknowledge",
+        safeContext: { notificationPublicId },
+    });
+
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery(
+        confirmed
+            ? STAFF_TEXTS["schedule-notif-ans-confirmed"]
+            : STAFF_TEXTS["schedule-notif-ans-declined"]
     );
 });
 

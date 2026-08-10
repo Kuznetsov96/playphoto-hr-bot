@@ -17,6 +17,7 @@ const envSchema = z.object({
     AWS_BUSINESS_MIN_LOCATIONS: z.coerce.number().int().min(1).default(19),
     AWS_SCHEDULE_SHADOW_READ_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_SCHEDULE_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
+    AWS_SCHEDULE_NOTIFICATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
 
     // Staff Ids (Comma-separated integers)
     ADMIN_IDS: z.string().default(""),
@@ -113,6 +114,7 @@ export const AWS_BUSINESS_MIN_EMPLOYEES = env.AWS_BUSINESS_MIN_EMPLOYEES;
 export const AWS_BUSINESS_MIN_LOCATIONS = env.AWS_BUSINESS_MIN_LOCATIONS;
 export const AWS_SCHEDULE_SHADOW_READ_ENABLED = env.AWS_SCHEDULE_SHADOW_READ_ENABLED === "true";
 export const AWS_SCHEDULE_CANONICAL_READ_ENABLED = env.AWS_SCHEDULE_CANONICAL_READ_ENABLED === "true";
+export const AWS_SCHEDULE_NOTIFICATIONS_ENABLED = env.AWS_SCHEDULE_NOTIFICATIONS_ENABLED === "true";
 
 // Helper to parse number arrays
 const parseNumArray = (str: string) => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));

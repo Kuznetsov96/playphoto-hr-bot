@@ -73,8 +73,25 @@ const employeeScheduleSchema = z.object({
     }).strict()),
 }).strict();
 
+const scheduleNotificationSchema = z.object({
+    publicId: z.string().min(1),
+    employeePublicId: z.string().min(1),
+    telegramId: z.string().regex(/^\d+$/u).nullable(),
+    changeKind: z.enum(["SHIFT_ADDED", "SHIFT_REMOVED", "SHIFT_MOVED", "SHIFT_REASSIGNED"]),
+    urgency: z.enum(["NORMAL", "URGENT"]),
+    batchId: z.string().min(1).nullable(),
+    payload: z.record(z.string(), z.unknown()),
+});
+
+const pendingScheduleNotificationsSchema = z.object({
+    items: z.array(scheduleNotificationSchema),
+});
+
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
 export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
+export type AwsScheduleNotification = z.infer<typeof scheduleNotificationSchema>;
+export type AwsScheduleChangeKind = AwsScheduleNotification["changeKind"];
+export type AwsScheduleNotificationUrgency = AwsScheduleNotification["urgency"];
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -121,7 +138,39 @@ export class AwsBusinessClient {
         return schedule;
     }
 
-    private async request(path: string, init: RequestInit, timeoutMs: number = 20_000): Promise<unknown> {
+    async pendingScheduleNotifications(limit: number): Promise<AwsScheduleNotification[]> {
+        const query = new URLSearchParams({ limit: String(limit) });
+        const value = await this.request(
+            `/schedule-notifications/pending?${query.toString()}`,
+            { method: "GET" },
+        );
+        return pendingScheduleNotificationsSchema.parse(value).items;
+    }
+
+    async markScheduleNotificationDelivered(publicId: string): Promise<void> {
+        await this.request(
+            `/schedule-notifications/${encodeURIComponent(publicId)}/delivered`,
+            { method: "POST", body: JSON.stringify({}) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async markScheduleNotificationFailed(publicId: string, reason: string): Promise<void> {
+        await this.request(
+            `/schedule-notifications/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    private async request(
+        path: string,
+        init: RequestInit,
+        timeoutMs: number = 20_000,
+        options: { expectsBody?: boolean } = {},
+    ): Promise<unknown> {
         const base = AWS_BUSINESS_API_URL.replace(/\/$/u, "");
         const response = await fetch(`${base}${path}`, {
             ...init,
@@ -135,6 +184,9 @@ export class AwsBusinessClient {
         });
         if (!response.ok) {
             throw new Error(`AWS business API request failed with HTTP ${response.status}`);
+        }
+        if (options.expectsBody === false) {
+            return undefined;
         }
         return response.json();
     }
