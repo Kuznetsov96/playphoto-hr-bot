@@ -8,6 +8,7 @@ import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { AWS_REMINDERS_CANONICAL_READ_ENABLED } from "../config.js";
 import { awsScheduleCanonicalReadService } from "./aws-schedule-canonical-read.js";
+import { mapWithConcurrency } from "./concurrency.js";
 import { replacementService } from "./replacement-service.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { redis } from "../core/redis.js";
@@ -18,6 +19,15 @@ import {
 } from "./replacement-schedule-state.js";
 
 const KYIV_TIME_ZONE = "Europe/Kyiv";
+
+// Caps concurrent canonical schedule reads for the daily reminder fan-out.
+// With ~75 active mapped staff and a 3-second per-request timeout on
+// findForStaff, firing all requests at once (bare Promise.all) means one
+// slow or rate-limited response can stall/discard the whole batch and push
+// every reminder onto the legacy fallback path. Keeping only a handful of
+// requests in flight bounds worst-case latency to a few timeout windows
+// instead of one, while still finishing well inside the 08:00 reminder job.
+const CANONICAL_SHIFT_READ_CONCURRENCY = 8;
 
 const kyivDateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: KYIV_TIME_ZONE,
@@ -137,10 +147,10 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 }
 
                 const staffById = new Map(staff.map(profile => [profile.id, profile]));
-                const perStaff = await Promise.all(
-                    staff.map(profile =>
-                        awsScheduleCanonicalReadService.findForStaff(profile.id, startOfDay, 5)
-                    )
+                const perStaff = await mapWithConcurrency(
+                    staff,
+                    CANONICAL_SHIFT_READ_CONCURRENCY,
+                    profile => awsScheduleCanonicalReadService.findForStaff(profile.id, startOfDay, 5)
                 );
 
                 // The canonical projection carries no staff relation, but the
