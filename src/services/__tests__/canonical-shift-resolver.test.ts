@@ -85,4 +85,48 @@ describe("resolveCanonicalShift", () => {
             reasonCode: "EMPLOYEE_NOT_MAPPED",
         });
     });
+
+    it("brackets the correct Kyiv calendar day for late-evening UTC (same Kyiv day)", async () => {
+        findUniqueShift.mockResolvedValue({ awsScheduledShiftPublicId: null });
+        findManyShift.mockResolvedValue([{ awsScheduledShiftPublicId: "shift-uuid" }]);
+        // 2026-08-15T20:30:00.000Z is 23:30 on 2026-08-15 in Kyiv (UTC+3)
+        await expect(resolveCanonicalShift({ ...input, workShiftId: null, shiftDate: new Date("2026-08-15T20:30:00.000Z") })).resolves.toEqual({
+            ok: true,
+            scheduledShiftPublicId: "shift-uuid",
+            employeePublicId: "emp-uuid",
+        });
+        // Verify the query bracketed 2026-08-15 in Kyiv
+        expect(findManyShift).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    date: {
+                        gte: new Date("2026-08-15T00:00:00.000Z"),
+                        lt: new Date("2026-08-16T00:00:00.000Z"),
+                    },
+                }),
+            })
+        );
+    });
+
+    it("brackets the correct Kyiv calendar day for late-evening UTC (next Kyiv day)", async () => {
+        findUniqueShift.mockResolvedValue({ awsScheduledShiftPublicId: null });
+        findManyShift.mockResolvedValue([{ awsScheduledShiftPublicId: "shift-uuid" }]);
+        // 2026-08-15T21:30:00.000Z is 00:30 on 2026-08-16 in Kyiv (UTC+3)
+        await expect(resolveCanonicalShift({ ...input, workShiftId: null, shiftDate: new Date("2026-08-15T21:30:00.000Z") })).resolves.toEqual({
+            ok: true,
+            scheduledShiftPublicId: "shift-uuid",
+            employeePublicId: "emp-uuid",
+        });
+        // Verify the query bracketed 2026-08-16 in Kyiv
+        expect(findManyShift).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    date: {
+                        gte: new Date("2026-08-16T00:00:00.000Z"),
+                        lt: new Date("2026-08-17T00:00:00.000Z"),
+                    },
+                }),
+            })
+        );
+    });
 });

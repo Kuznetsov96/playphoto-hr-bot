@@ -19,6 +19,7 @@ import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
+import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDay } from "./kyiv-date.js";
 
 export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
@@ -1496,21 +1497,11 @@ export class ReplacementService {
     }
 
     private kyivStartOfDay(date: Date) {
-        const parts = new Intl.DateTimeFormat("en-US", {
-            timeZone: KYIV_TIMEZONE,
-            year: "numeric",
-            month: "2-digit",
-            day: "2-digit"
-        }).formatToParts(date);
-        const year = Number(parts.find(p => p.type === "year")?.value);
-        const month = Number(parts.find(p => p.type === "month")?.value);
-        const day = Number(parts.find(p => p.type === "day")?.value);
-        return new Date(Date.UTC(year, month - 1, day));
+        return sharedKyivStartOfDay(date);
     }
 
     private nextKyivDay(date: Date) {
-        const start = this.kyivStartOfDay(date);
-        return new Date(start.getTime() + 24 * 60 * 60 * 1000);
+        return sharedNextKyivDay(date);
     }
 
     private kyivDateWithTime(date: Date, hour: number, minute: number) {

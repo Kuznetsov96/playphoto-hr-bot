@@ -1,4 +1,5 @@
 import prisma from "../db/core.js";
+import { kyivStartOfDay, nextKyivDay } from "./kyiv-date.js";
 
 export type CanonicalShiftResolveReason =
     | "EMPLOYEE_NOT_MAPPED"
@@ -62,16 +63,3 @@ export async function resolveCanonicalShift(
     };
 }
 
-function kyivStartOfDay(date: Date): Date {
-    const key = new Intl.DateTimeFormat("en-CA", {
-        timeZone: "Europe/Kyiv",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-    }).format(date);
-    return new Date(`${key}T00:00:00.000Z`);
-}
-
-function nextKyivDay(date: Date): Date {
-    return new Date(kyivStartOfDay(date).getTime() + 24 * 60 * 60 * 1000);
-}
