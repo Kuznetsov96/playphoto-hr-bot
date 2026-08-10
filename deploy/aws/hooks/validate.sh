@@ -21,9 +21,11 @@ trap rollback_on_error ERR
 : "${BOT_RUNTIME_MODE:?BOT_RUNTIME_MODE is required}"
 : "${AWS_SCHEDULE_SHADOW_READ_ENABLED:?AWS_SCHEDULE_SHADOW_READ_ENABLED is required}"
 : "${AWS_SCHEDULE_CANONICAL_READ_ENABLED:?AWS_SCHEDULE_CANONICAL_READ_ENABLED is required}"
+: "${AWS_SCHEDULE_NOTIFICATIONS_ENABLED:?AWS_SCHEDULE_NOTIFICATIONS_ENABLED is required}"
 [[ "$BOT_RUNTIME_MODE" == "live" || "$BOT_RUNTIME_MODE" == "standby" ]]
 [[ "$AWS_SCHEDULE_SHADOW_READ_ENABLED" == "true" || "$AWS_SCHEDULE_SHADOW_READ_ENABLED" == "false" ]]
 [[ "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" == "true" || "$AWS_SCHEDULE_CANONICAL_READ_ENABLED" == "false" ]]
+[[ "$AWS_SCHEDULE_NOTIFICATIONS_ENABLED" == "true" || "$AWS_SCHEDULE_NOTIFICATIONS_ENABLED" == "false" ]]
 
 base=(docker compose --env-file /opt/playphoto-bot/.env -f /opt/playphoto-bot/compose.aws.yaml)
 selected=("${base[@]}")

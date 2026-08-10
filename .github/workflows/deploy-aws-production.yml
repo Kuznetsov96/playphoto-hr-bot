@@ -13,6 +13,11 @@ on:
         required: true
         type: boolean
         default: false
+      schedule_notifications_enabled:
+        description: Deliver schedule change notifications to photographers in Telegram
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -229,6 +234,7 @@ jobs:
             printf 'BOT_RUNTIME_MODE=%q\n' live
             printf 'AWS_SCHEDULE_SHADOW_READ_ENABLED=%q\n' "${{ inputs.schedule_shadow_enabled }}"
             printf 'AWS_SCHEDULE_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.canonical_schedule_enabled }}"
+            printf 'AWS_SCHEDULE_NOTIFICATIONS_ENABLED=%q\n' "${{ inputs.schedule_notifications_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
