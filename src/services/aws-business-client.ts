@@ -81,6 +81,18 @@ const replacementRequestSchema = z
     })
     .passthrough();
 
+const schedulePreferenceReadSchema = z.union([
+    z.object({ exists: z.literal(false) }).strict(),
+    z
+        .object({
+            exists: z.literal(true),
+            version: z.number().int(),
+            status: z.enum(["SUBMITTED", "DECLINED"]),
+            days: z.array(z.object({ localDate: z.string(), kind: z.string() }).strict()),
+        })
+        .strict(),
+]);
+
 const snapshotSchema = z.object({
     schemaVersion: z.literal(1),
     generatedAt: z.string().datetime(),
@@ -182,6 +194,7 @@ export type AwsScheduleNotificationPayload = z.infer<typeof scheduleNotification
 export type AwsScheduleNotificationShiftSnapshot = z.infer<typeof scheduleNotificationSnapshotSchema>;
 export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
 export type ReplacementRequestView = { publicId: string; status: string };
+export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -361,6 +374,45 @@ export class AwsBusinessClient {
             { method: "POST", body: JSON.stringify(input) },
         );
         return replacementRequestSchema.parse(body);
+    }
+
+    /**
+     * Reads the current monthly preference submission, if any, so the caller
+     * can echo its `version` back on write. `telegramId` is required by the
+     * backend and validated against the employee's stored id — a mismatch is
+     * a 404, deliberately, so the bot cannot read a version it would then
+     * fail to write with.
+     */
+    async getSchedulePreference(
+        employeePublicId: string,
+        month: string,
+        telegramId: string,
+    ): Promise<SchedulePreferenceRead> {
+        const query = new URLSearchParams({ telegramId });
+        const body = await this.request(
+            `/schedule-preferences/${encodeURIComponent(employeePublicId)}/${encodeURIComponent(month)}?${query.toString()}`,
+            { method: "GET" },
+        );
+        return schedulePreferenceReadSchema.parse(body);
+    }
+
+    async upsertSchedulePreference(
+        employeePublicId: string,
+        month: string,
+        body: {
+            status: "SUBMITTED" | "DECLINED";
+            days: Array<{ localDate: string; kind: "UNAVAILABLE" }>;
+            comment?: string;
+            telegramId: string;
+            version?: number;
+        },
+    ): Promise<void> {
+        await this.request(
+            `/schedule-preferences/${encodeURIComponent(employeePublicId)}/${encodeURIComponent(month)}`,
+            { method: "PUT", body: JSON.stringify(body) },
+            undefined,
+            { expectsBody: false },
+        );
     }
 
     private async request(
