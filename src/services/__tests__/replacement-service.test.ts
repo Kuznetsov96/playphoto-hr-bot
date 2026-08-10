@@ -62,6 +62,10 @@ vi.mock("../../core/queue.js", () => ({
 }));
 
 vi.mock("../../core/logger.js", () => ({
+    REDACT_CONFIG: {
+        paths: [],
+        censor: "[PROTECTED]",
+    },
     default: {
         debug: vi.fn(),
         info: vi.fn(),
