@@ -574,4 +574,5 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-ans-confirmed": `Дякуємо! Ми записали твоє підтвердження ✨`,
   "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Щоб змінити цю зміну, напиши в підтримку 🌸`,
   "schedule-notif-ans-expired": `Це сповіщення вже неактуальне 🌸`,
+  "schedule-notif-ans-unavailable": `Не вдалося зберегти відповідь. Спробуй ще раз, а якщо не вийде — напиши в підтримку 🌸`,
 };

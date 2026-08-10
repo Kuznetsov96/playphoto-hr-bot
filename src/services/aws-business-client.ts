@@ -245,6 +245,24 @@ export class AwsBusinessClient {
         );
     }
 
+    /**
+     * Records the photographer's answer to an urgent schedule change. The backend
+     * verifies the employee against the notification's own recipient and never
+     * changes a shift in response — a refusal surfaces to the owner, who decides.
+     */
+    async acknowledgeScheduleNotification(
+        publicId: string,
+        employeePublicId: string,
+        acknowledgement: "ACCEPTED" | "REFUSED"
+    ): Promise<void> {
+        await this.request(
+            `/schedule-notifications/${encodeURIComponent(publicId)}/acknowledge`,
+            { method: "POST", body: JSON.stringify({ employeePublicId, acknowledgement }) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
     private async request(
         path: string,
         init: RequestInit,
