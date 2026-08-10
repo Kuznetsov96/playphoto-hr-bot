@@ -14,6 +14,8 @@ export interface ReplacementShadowInput {
     locationId: string;
     shiftDate: Date;
     legacyCandidates: LegacyCandidate[];
+    /** Name of the wave `legacyCandidates` was searched for — compared against the canonical wave of the same name, not the flattened union of all canonical waves. */
+    wave: string;
 }
 
 export class ReplacementShadowService {
@@ -81,7 +83,12 @@ export class ReplacementShadowService {
             requesterTelegramId: input.requesterTelegramId
         });
 
-        const comparison = compareReplacementCandidates(input.legacyCandidates, preview.waves);
+        const comparison = compareReplacementCandidates(input.legacyCandidates, preview.waves, input.wave);
+        const reasonCode = comparison.parity
+            ? undefined
+            : comparison.canonicalWaveFound
+                ? "REPLACEMENT_CANDIDATE_MISMATCH"
+                : "REPLACEMENT_CANONICAL_WAVE_NOT_FOUND";
 
         logBusinessEvent({
             event: "bot.replacement_shadow.compared",
@@ -89,7 +96,7 @@ export class ReplacementShadowService {
             actorType: "system",
             actorRole: "system",
             result: comparison.parity ? "parity" : "mismatch",
-            reasonCode: comparison.parity ? undefined : "REPLACEMENT_CANDIDATE_MISMATCH",
+            reasonCode,
             module: "replacement-shadow",
             operation: "compare",
             durationMs: Date.now() - startedAt,

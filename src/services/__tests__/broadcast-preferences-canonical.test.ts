@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     findActive: vi.fn(),
+    findMappedTelegramIds: vi.fn(),
     findAllLocations: vi.fn(),
     broadcastCreate: vi.fn(),
     broadcastUpdate: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock("../aws-business-client.js", () => ({
     awsBusinessClient: { missingSchedulePreferences: mocks.missingSchedulePreferences },
 }));
 vi.mock("../../repositories/staff-repository.js", () => ({
-    staffRepository: { findActive: mocks.findActive },
+    staffRepository: { findActive: mocks.findActive, findMappedTelegramIds: mocks.findMappedTelegramIds },
 }));
 vi.mock("../../repositories/location-repository.js", () => ({
     locationRepository: { findAll: mocks.findAllLocations },
@@ -69,6 +70,7 @@ describe("preferences broadcast — canonical missing-list skip check", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.findActive.mockResolvedValue([staffMember(FILLED_USER_ID), staffMember(MISSING_USER_ID)]);
+        mocks.findMappedTelegramIds.mockResolvedValue([String(FILLED_USER_ID), String(MISSING_USER_ID)]);
         mocks.broadcastCreate.mockResolvedValue({ id: 1 });
         mocks.deliveryCreateMany.mockResolvedValue({ count: 2 });
         mocks.deliveryFindUnique.mockImplementation(async (_broadcastId: number, chatId: bigint) => ({
@@ -89,8 +91,9 @@ describe("preferences broadcast — canonical missing-list skip check", () => {
     it("(a) skips a user absent from /missing and sends to a user present in it", async () => {
         mocks.missingSchedulePreferences.mockResolvedValue({
             month: "2026-09",
-            employees: [{ publicId: "11111111-1111-4111-8111-111111111111", telegramId: String(MISSING_USER_ID) }],
+            items: [{ employeePublicId: "11111111-1111-4111-8111-111111111111", telegramId: String(MISSING_USER_ID) }],
         });
+        mocks.findMappedTelegramIds.mockResolvedValue([String(FILLED_USER_ID), String(MISSING_USER_ID)]);
 
         await broadcastService.processBroadcast(
             {
@@ -102,7 +105,7 @@ describe("preferences broadcast — canonical missing-list skip check", () => {
             botApi,
         );
 
-        // FILLED_USER_ID is not in the /missing set → skipped, never sent to.
+        // FILLED_USER_ID is canonically mapped and not in the /missing set → skipped, never sent to.
         expect(mocks.deliveryMarkSkipped).toHaveBeenCalledWith(FILLED_USER_ID, "PREFERENCES_ALREADY_FILLED");
         // MISSING_USER_ID is in the /missing set → sent to.
         expect(mocks.deliveryMarkSent).toHaveBeenCalledWith(MISSING_USER_ID, 99);
@@ -112,8 +115,9 @@ describe("preferences broadcast — canonical missing-list skip check", () => {
     it("(b) calls /missing exactly once per run, not once per recipient", async () => {
         mocks.missingSchedulePreferences.mockResolvedValue({
             month: "2026-09",
-            employees: [{ publicId: "11111111-1111-4111-8111-111111111111", telegramId: String(MISSING_USER_ID) }],
+            items: [{ employeePublicId: "11111111-1111-4111-8111-111111111111", telegramId: String(MISSING_USER_ID) }],
         });
+        mocks.findMappedTelegramIds.mockResolvedValue([String(FILLED_USER_ID), String(MISSING_USER_ID)]);
 
         await broadcastService.processBroadcast(
             {
@@ -126,6 +130,35 @@ describe("preferences broadcast — canonical missing-list skip check", () => {
         );
 
         expect(mocks.missingSchedulePreferences).toHaveBeenCalledTimes(1);
+        expect(mocks.findMappedTelegramIds).toHaveBeenCalledTimes(1);
+    });
+
+    it("(d) falls through to Redis for a user who is not canonically mapped, instead of assuming filled", async () => {
+        mocks.missingSchedulePreferences.mockResolvedValue({
+            month: "2026-09",
+            items: [],
+        });
+        // Neither user is canonically mapped.
+        mocks.findMappedTelegramIds.mockResolvedValue([]);
+        mocks.redisGet.mockImplementation(async (key: string) =>
+            key.startsWith(`pref_filled:${FILLED_USER_ID}:`) ? "1" : null,
+        );
+
+        await broadcastService.processBroadcast(
+            {
+                broadcastId: 1,
+                messageText: "Заповни побажання",
+                target: { type: "pm_all" },
+                pingOptions: { buttonType: "preferences" },
+            },
+            botApi,
+        );
+
+        // Both are absent from /missing, but neither is canonically mapped, so the
+        // decision must fall through to Redis rather than treating absence as filled.
+        expect(mocks.deliveryMarkSkipped).toHaveBeenCalledWith(FILLED_USER_ID, "PREFERENCES_ALREADY_FILLED");
+        expect(mocks.deliveryMarkSent).toHaveBeenCalledWith(MISSING_USER_ID, 99);
+        expect(mocks.redisGet).toHaveBeenCalled();
     });
 
     it("(c) falls back to the Redis check when /missing fails, instead of sending to everyone", async () => {

@@ -102,10 +102,40 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
 
             const startedAt = Date.now();
             try {
+                const activeStaffCount = await prisma.staffProfile.count({ where: { isActive: true } });
                 const staff = await prisma.staffProfile.findMany({
                     where: { isActive: true, awsEmployeePublicId: { not: null } },
                     include: { user: true }
                 });
+
+                // The canonical query narrows to mapped staff only; an active
+                // photographer without a canonical mapping would otherwise
+                // silently lose their 08:00 reminder with nothing thrown to
+                // trigger the legacy fallback below. Make the gap observable,
+                // and if it swallows everyone, treat that as a failure rather
+                // than deliver nothing.
+                const unmappedActiveStaffCount = activeStaffCount - staff.length;
+                if (activeStaffCount > 0 && staff.length === 0) {
+                    throw new Error("Canonical reminder read excluded all active staff for lack of a mapping");
+                }
+                if (unmappedActiveStaffCount > 0) {
+                    logBusinessEvent({
+                        event: "bot.reminders_canonical_read.unmapped_staff",
+                        level: "warn",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "success",
+                        reasonCode: "STAFF_NOT_CANONICALLY_MAPPED",
+                        module: "shift-reminder",
+                        operation: "read",
+                        safeContext: {
+                            activeStaffCount,
+                            mappedStaffCount: staff.length,
+                            unmappedActiveStaffCount
+                        }
+                    });
+                }
+
                 const staffById = new Map(staff.map(profile => [profile.id, profile]));
                 const perStaff = await Promise.all(
                     staff.map(profile =>

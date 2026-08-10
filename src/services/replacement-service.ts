@@ -865,6 +865,7 @@ export class ReplacementService {
                     awsEmployeePublicId: candidate.staff.awsEmployeePublicId,
                     availabilityKind: candidate.availabilityKind,
                 })),
+                wave,
             });
         }
 

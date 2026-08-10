@@ -31,6 +31,7 @@ function input(overrides: Record<string, unknown> = {}) {
         locationId: "location-1",
         shiftDate: new Date("2026-08-15T00:00:00.000Z"),
         legacyCandidates: [{ awsEmployeePublicId: "emp-1", availabilityKind: "LIMITED" }],
+        wave: "SAME_LOCATION_AVAILABLE",
         ...overrides
     };
 }
@@ -66,6 +67,52 @@ describe("replacementShadowService", () => {
         expect(event.safeContext.limitedOnlyInLegacyCount).toBe(1);
         expect(JSON.stringify(event)).not.toContain("emp-1");
         expect(JSON.stringify(event)).not.toContain("12345");
+    });
+
+    it("compares only the canonical wave with the same name as the one legacy searched", async () => {
+        // The canonical preview has a matching candidate, but only in a
+        // DIFFERENT wave than the one legacy just searched. Flattening every
+        // canonical wave (the pre-fix behaviour) would report a match here;
+        // comparing like-for-like must not.
+        previewReplacement.mockResolvedValue({
+            waves: [
+                { wave: "SAME_LOCATION_AVAILABLE", candidates: [] },
+                {
+                    wave: "SAME_CITY_AVAILABLE",
+                    candidates: [{ employeePublicId: "emp-1", availabilityKind: "LIMITED" }]
+                }
+            ]
+        });
+
+        replacementShadowService.compareInBackground(input({ wave: "SAME_LOCATION_AVAILABLE" }));
+        await flush();
+
+        const event = logBusinessEvent.mock.calls.at(-1)![0];
+        expect(event.event).toBe("bot.replacement_shadow.compared");
+        expect(event.result).toBe("mismatch");
+        expect(event.safeContext.canonicalWaveFound).toBe(true);
+        expect(event.safeContext.missingInCanonicalCount).toBe(1);
+        expect(event.safeContext.canonicalCount).toBe(0);
+    });
+
+    it("reports a wave-name mismatch as a distinct, visible failure instead of an empty set", async () => {
+        // The canonical preview has waves, but none named after the wave legacy
+        // searched — a genuine contract/naming mismatch, not "canonical found
+        // nobody". It must be counted and logged, not silently swallowed.
+        previewReplacement.mockResolvedValue({
+            waves: [
+                { wave: "SAME_CITY_AVAILABLE", candidates: [] }
+            ]
+        });
+
+        replacementShadowService.compareInBackground(input({ wave: "SAME_LOCATION_AVAILABLE" }));
+        await flush();
+
+        const event = logBusinessEvent.mock.calls.at(-1)![0];
+        expect(event.event).toBe("bot.replacement_shadow.compared");
+        expect(event.result).toBe("mismatch");
+        expect(event.reasonCode).toBe("REPLACEMENT_CANONICAL_WAVE_NOT_FOUND");
+        expect(event.safeContext.canonicalWaveFound).toBe(false);
     });
 
     it("skips and logs a reason when the shift cannot be resolved", async () => {

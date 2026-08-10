@@ -17,6 +17,13 @@ describe("replacement-service shadow wiring", () => {
         expect(source).toContain("legacyCandidates");
     });
 
+    it("hands the wave being searched to the shadow comparison", () => {
+        // Without this, the shadow compare cannot tell which canonical wave to
+        // compare against and ends up flattening every wave, comparing
+        // mismatched populations.
+        expect(source).toMatch(/compareInBackground\(\{[\s\S]*?wave,?[\s\S]*?\}\)/u);
+    });
+
     it("does not await the shadow comparison in the user path", () => {
         expect(source).not.toMatch(/await\s+replacementShadowService\.compareInBackground/u);
     });

@@ -96,10 +96,10 @@ const schedulePreferenceReadSchema = z.union([
 const missingPreferencesSchema = z
     .object({
         month: z.string().min(1),
-        employees: z.array(
+        items: z.array(
             z
                 .object({
-                    publicId: z.string().uuid(),
+                    employeePublicId: z.string().uuid(),
                     telegramId: z.string().regex(/^\d+$/u),
                 })
                 .strict()

@@ -26,4 +26,13 @@ describe("shift-reminder canonical source", () => {
         // projection has no staff relation. Without this the reminder throws at runtime.
         expect(source).toMatch(/staffById|staff:\s*profile/u);
     });
+
+    it("warns when active staff are excluded for lack of a canonical mapping", () => {
+        expect(source).toContain("bot.reminders_canonical_read.unmapped_staff");
+        expect(source).toContain("STAFF_NOT_CANONICALLY_MAPPED");
+    });
+
+    it("falls back to legacy when all active staff are unmapped", () => {
+        expect(source).toMatch(/staff\.length === 0/u);
+    });
 });

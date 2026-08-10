@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     canonicalFindForStaff: vi.fn(),
     legacyFindWithRelations: vi.fn(),
     staffProfileFindMany: vi.fn(),
+    staffProfileCount: vi.fn(),
     listAcceptedAssignmentsByDateRange: vi.fn(),
     getStaffActiveTasks: vi.fn(),
     parcelCount: vi.fn(),
@@ -34,7 +35,7 @@ vi.mock("../task-service.js", () => ({
 }));
 vi.mock("../../db/core.js", () => ({
     default: {
-        staffProfile: { findMany: mocks.staffProfileFindMany },
+        staffProfile: { findMany: mocks.staffProfileFindMany, count: mocks.staffProfileCount },
         parcel: { count: mocks.parcelCount }
     }
 }));
@@ -76,6 +77,7 @@ describe("sendDailyShiftReminders canonical wiring", () => {
         mocks.redisSet.mockResolvedValue("OK");
         mocks.redisDel.mockResolvedValue(1);
         mocks.staffProfileFindMany.mockResolvedValue([staffProfile]);
+        mocks.staffProfileCount.mockResolvedValue(1);
         mocks.legacyFindWithRelations.mockResolvedValue([]);
     });
 
@@ -156,5 +158,87 @@ describe("sendDailyShiftReminders canonical wiring", () => {
         await expect(sendDailyShiftReminders({ api: { sendMessage } } as any)).resolves.not.toThrow();
 
         expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("warns (counters only) when some active staff are unmapped, but still delivers canonically", async () => {
+        // 3 active staff overall, only 1 is canonically mapped and returned by findMany.
+        mocks.staffProfileCount.mockResolvedValue(3);
+        mocks.staffProfileFindMany.mockResolvedValue([staffProfile]);
+
+        const now = new Date();
+        const kyivToday = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Europe/Kyiv",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+        }).format(now);
+        const todayUtcMidnight = new Date(`${kyivToday}T00:00:00.000Z`);
+        mocks.canonicalFindForStaff.mockResolvedValue([canonicalShiftFor(todayUtcMidnight)]);
+
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(mocks.legacyFindWithRelations).not.toHaveBeenCalled();
+        expect(sendMessage).toHaveBeenCalledWith(
+            1311338839,
+            expect.stringContaining("Volkland 3"),
+            expect.objectContaining({ parse_mode: "HTML" })
+        );
+
+        const warnEvent = mocks.logEvent.mock.calls.find(
+            (call) => call[0]?.event === "bot.reminders_canonical_read.unmapped_staff"
+        )?.[0];
+        expect(warnEvent).toBeDefined();
+        expect(warnEvent.reasonCode).toBe("STAFF_NOT_CANONICALLY_MAPPED");
+        expect(warnEvent.safeContext).toEqual({
+            activeStaffCount: 3,
+            mappedStaffCount: 1,
+            unmappedActiveStaffCount: 2
+        });
+        // Counters only — no identifiers.
+        expect(JSON.stringify(warnEvent)).not.toContain("staff-1");
+        expect(JSON.stringify(warnEvent)).not.toContain("1311338839");
+    });
+
+    it("falls back to the legacy path when every active staff member is unmapped", async () => {
+        mocks.staffProfileCount.mockResolvedValue(2);
+        mocks.staffProfileFindMany.mockResolvedValue([]);
+        mocks.legacyFindWithRelations.mockResolvedValue([{
+            id: "legacy-shift-1",
+            staffId: "staff-1",
+            locationId: "location-1",
+            date: new Date(),
+            staff: staffProfile,
+            location
+        }]);
+
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(mocks.legacyFindWithRelations).toHaveBeenCalledOnce();
+        expect(mocks.canonicalFindForStaff).not.toHaveBeenCalled();
+        expect(sendMessage).toHaveBeenCalledWith(
+            1311338839,
+            expect.stringContaining("Volkland 3"),
+            expect.objectContaining({ parse_mode: "HTML" })
+        );
+        expect(mocks.logEvent).toHaveBeenCalledWith(expect.objectContaining({
+            event: "bot.reminders_canonical_read.fallback",
+            result: "fallback",
+            reasonCode: "CANONICAL_SCHEDULE_UNAVAILABLE"
+        }));
+    });
+
+    it("does not warn when every active staff member is mapped", async () => {
+        mocks.staffProfileCount.mockResolvedValue(1);
+        mocks.staffProfileFindMany.mockResolvedValue([staffProfile]);
+        mocks.canonicalFindForStaff.mockResolvedValue([]);
+
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(mocks.logEvent.mock.calls.some(
+            (call) => call[0]?.event === "bot.reminders_canonical_read.unmapped_staff"
+        )).toBe(false);
     });
 });

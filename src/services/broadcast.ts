@@ -191,11 +191,21 @@ function redisAlreadyFilledCheck(prefMonthName: string): AlreadyFilledCheck {
  *
  * Flag OFF → byte-identical to the pre-canonical behaviour: per-user Redis
  * TTL-key reads. Flag ON → a single `/missing` fetch for the month builds
- * the set of telegramIds still missing a submission; anyone NOT in that set
- * has filled in. If the month can't be converted to YYYY-MM, or the fetch
- * fails, this falls back to the Redis check rather than skipping the filter —
- * failing open here would re-pester everyone who already filled in, while
- * falling back to the old approximation is at worst what runs today anyway.
+ * the set of telegramIds still missing a submission, alongside a single
+ * staff query for which telegramIds are canonically mapped at all. `/missing`
+ * only ever lists canonical employees (ACTIVE + telegramId set); a bot user
+ * who is not canonically mapped is simply absent from it whether or not they
+ * filled anything in, so absence alone cannot mean "filled" for them:
+ *
+ * - in `/missing` → not filled → send;
+ * - canonically mapped and NOT in `/missing` → filled → skip;
+ * - NOT canonically mapped → unknown → fall through to the Redis check.
+ *
+ * If the month can't be converted to YYYY-MM, or the `/missing` fetch fails,
+ * this falls back to the Redis check entirely rather than skipping the
+ * filter — failing open here would re-pester everyone who already filled in,
+ * while falling back to the old approximation is at worst what runs today
+ * anyway.
  *
  * `prefMonthYear` must be the calendar year of `prefMonthName`'s month (not
  * necessarily the current year — e.g. a December run targets next month,
@@ -222,9 +232,19 @@ async function resolveAlreadyFilledCheck(prefMonthName: string, prefMonthYear: n
     }
 
     try {
-        const missing = await awsBusinessClient.missingSchedulePreferences(canonicalMonth);
-        const missingTelegramIds = new Set(missing.employees.map((employee) => employee.telegramId));
-        return async (userId) => !missingTelegramIds.has(String(userId));
+        const [missing, mappedTelegramIds] = await Promise.all([
+            awsBusinessClient.missingSchedulePreferences(canonicalMonth),
+            staffRepository.findMappedTelegramIds(),
+        ]);
+        const missingTelegramIds = new Set(missing.items.map((item) => item.telegramId));
+        const mappedTelegramIdSet = new Set(mappedTelegramIds);
+
+        return async (userId) => {
+            const userIdStr = String(userId);
+            if (missingTelegramIds.has(userIdStr)) return false;
+            if (mappedTelegramIdSet.has(userIdStr)) return true;
+            return redisFallback(userId);
+        };
     } catch (error) {
         logBusinessEvent({
             event: "bot.preferences_missing_check.fallback",
