@@ -22,6 +22,7 @@ export class ReplacementShadowService {
     compareInBackground(input: ReplacementShadowInput): void {
         if (BUSINESS_DATA_SOURCE !== "aws" || !AWS_REPLACEMENTS_SHADOW_ENABLED) return;
         const now = Date.now();
+        this.pruneStale(now);
         const lastStartedAt = this.lastStartedAt.get(input.requestId) ?? 0;
         if (now - lastStartedAt < SHADOW_COMPARE_COOLDOWN_MS) return;
         this.lastStartedAt.set(input.requestId, now);
@@ -41,6 +42,14 @@ export class ReplacementShadowService {
                 }
             });
         });
+    }
+
+    private pruneStale(now: number): void {
+        for (const [requestId, startedAt] of this.lastStartedAt) {
+            if (now - startedAt >= SHADOW_COMPARE_COOLDOWN_MS) {
+                this.lastStartedAt.delete(requestId);
+            }
+        }
     }
 
     private async compare(input: ReplacementShadowInput): Promise<void> {

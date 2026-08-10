@@ -101,4 +101,37 @@ describe("replacementShadowService", () => {
 
         expect(previewReplacement).toHaveBeenCalledTimes(1);
     });
+
+    it("suppresses within the cooldown window but prunes and re-runs once it elapses", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            previewReplacement.mockResolvedValue({ waves: [] });
+            const first = input({ requestId: "request-a" });
+
+            replacementShadowService.compareInBackground(first);
+            await flush();
+            expect(previewReplacement).toHaveBeenCalledTimes(1);
+
+            // Still inside the 5-minute cooldown window: repeat call is suppressed.
+            vi.setSystemTime(Date.now() + 4 * 60 * 1000);
+            replacementShadowService.compareInBackground(first);
+            await flush();
+            expect(previewReplacement).toHaveBeenCalledTimes(1);
+
+            // Past the cooldown window: a call for a different request triggers
+            // pruning of the stale "request-a" entry.
+            vi.setSystemTime(Date.now() + 2 * 60 * 1000);
+            const second = input({ requestId: "request-b" });
+            replacementShadowService.compareInBackground(second);
+            await flush();
+            expect(previewReplacement).toHaveBeenCalledTimes(2);
+
+            // "request-a" is no longer in the cooldown map, so it must run again.
+            replacementShadowService.compareInBackground(first);
+            await flush();
+            expect(previewReplacement).toHaveBeenCalledTimes(3);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
