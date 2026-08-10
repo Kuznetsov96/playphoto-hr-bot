@@ -182,6 +182,11 @@ describe("AwsBusinessClient", () => {
                 }),
             }),
         );
+        const call = vi.mocked(fetch).mock.calls.at(0);
+        const requestInit = call?.[1];
+        expect(JSON.parse(requestInit?.body as string)).toEqual({
+            links: [{ telegramId: "486213975", found: true, username: "ivan_petrov" }],
+        });
         expect(result).toEqual({ updated: 1 });
     });
 });
