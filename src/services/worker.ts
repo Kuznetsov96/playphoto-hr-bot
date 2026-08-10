@@ -6,7 +6,8 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED } from "../config.js";
+import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
@@ -684,6 +685,45 @@ export async function startWorker(bot: Bot<MyContext>) {
             iterationInProgress = false;
         }
     }, 5 * 60 * 1000);
+}
+
+const SCHEDULE_NOTIFICATION_POLL_MS = 60 * 1000;
+
+/**
+ * Polls the backend for schedule-change notifications it has already decided to
+ * send, and renders them in Telegram. Urgency, recipients, and deduplication all
+ * stay in the backend; duplicate sends are prevented by the dispatcher's own
+ * Redis lease. Disabled unless AWS_SCHEDULE_NOTIFICATIONS_ENABLED is true.
+ */
+export function startScheduleNotificationDispatcher(bot: Bot<MyContext>) {
+    if (!AWS_SCHEDULE_NOTIFICATIONS_ENABLED) {
+        logBusinessEvent({
+            event: "bot.schedule_notifications.disabled",
+            actorType: "system",
+            actorRole: "system",
+            result: "skipped",
+            reasonCode: "FEATURE_FLAG_OFF",
+            module: "worker",
+            operation: "startScheduleNotificationDispatcher",
+        });
+        return undefined;
+    }
+
+    logBusinessEvent({
+        event: "bot.schedule_notifications.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "worker",
+        operation: "startScheduleNotificationDispatcher",
+        safeContext: { pollIntervalMs: SCHEDULE_NOTIFICATION_POLL_MS },
+    });
+
+    return setInterval(() => {
+        scheduleNotificationDispatcher.runOnce(bot.api).catch(error => {
+            logger.error({ err: error }, "Schedule notification dispatcher iteration failed");
+        });
+    }, SCHEDULE_NOTIFICATION_POLL_MS);
 }
 
 type AlertState = {

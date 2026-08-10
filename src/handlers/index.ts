@@ -31,6 +31,9 @@ import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callba
 import { ScreenManager } from "../utils/screen-manager.js";
 import { canConfirmNDA } from "../utils/final-step-flow.js";
 import { escapeHtml } from "./admin/utils.js";
+import { logBusinessEvent } from "../core/log-events.js";
+import prisma from "../db/core.js";
+import { awsBusinessClient } from "../services/aws-business-client.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -173,6 +176,90 @@ handlers.on("callback_query:data", async (ctx, next) => {
         ctx,
         CANDIDATE_TEXTS["nda-confirmed-start-onboarding"],
         new InlineKeyboard().text("📝 Почати оформлення", "start_onboarding_data")
+    );
+});
+
+// Schedule change notification acknowledgement.
+// This records that the photographer saw the change and how they answered. It
+// never cancels or reassigns a shift: the backend owns the schedule, and a
+// refusal surfaces to the owner rather than acting on its own.
+handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const confirmed = data.startsWith("cb:snack:");
+    const notificationPublicId = readCallbackPayload(data, { code: confirmed ? "snack" : "sndec" });
+    if (!notificationPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    const telegramId = ctx.from?.id;
+    const staff = telegramId
+        ? await prisma.staffProfile.findFirst({
+            where: { user: { telegramId: BigInt(telegramId) } },
+            select: { awsEmployeePublicId: true }
+        })
+        : null;
+
+    // Without a canonical employee id the backend cannot verify who is answering,
+    // so there is nothing safe to record. Say so rather than implying it landed.
+    if (!staff?.awsEmployeePublicId) {
+        logBusinessEvent({
+            event: "bot.schedule_notifications.acknowledge_failed",
+            level: "warn",
+            telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failure",
+            reasonCode: "EMPLOYEE_NOT_MAPPED",
+            module: "schedule-notification-dispatcher",
+            operation: "acknowledge",
+            safeContext: { notificationPublicId },
+        });
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-unavailable"]);
+    }
+
+    try {
+        await awsBusinessClient.acknowledgeScheduleNotification(
+            notificationPublicId,
+            staff.awsEmployeePublicId,
+            confirmed ? "ACCEPTED" : "REFUSED"
+        );
+    } catch (error) {
+        logBusinessEvent({
+            event: "bot.schedule_notifications.acknowledge_failed",
+            level: "warn",
+            telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failure",
+            reasonCode: "ACKNOWLEDGE_REQUEST_FAILED",
+            module: "schedule-notification-dispatcher",
+            operation: "acknowledge",
+            safeContext: {
+                notificationPublicId,
+                errorType: error instanceof Error ? error.constructor.name : "UnknownError"
+            },
+        });
+        // The buttons stay in place so the photographer can try again.
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-unavailable"]);
+    }
+
+    logBusinessEvent({
+        event: "bot.schedule_notifications.acknowledged",
+        telegramId,
+        actorType: "staff",
+        actorRole: "staff",
+        result: "success",
+        reasonCode: confirmed ? "ACKNOWLEDGED_CONFIRMED" : "ACKNOWLEDGED_DECLINED",
+        module: "schedule-notification-dispatcher",
+        operation: "acknowledge",
+        safeContext: { notificationPublicId },
+    });
+
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery(
+        confirmed
+            ? STAFF_TEXTS["schedule-notif-ans-confirmed"]
+            : STAFF_TEXTS["schedule-notif-ans-declined"]
     );
 });
 
