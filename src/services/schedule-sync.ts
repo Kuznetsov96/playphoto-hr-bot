@@ -10,11 +10,12 @@ import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
-import { SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
+import { BUSINESS_DATA_SOURCE, SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
 import { Bot, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { parseScheduleHeaderDate, parseScheduleMonth } from "../utils/schedule-sheet-date.js";
+import { awsBusinessSyncService } from "./aws-business-sync.js";
 
 interface TeamMember {
     fullName: string;
@@ -353,6 +354,9 @@ export class ScheduleSyncService {
     }
 
     async previewTeamSync(requestedBy?: number | bigint) {
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            return awsBusinessSyncService.previewTeamSync(requestedBy);
+        }
         this.ensureSheets();
 
         const activeBefore = await staffRepository.countActive();
@@ -492,6 +496,19 @@ export class ScheduleSyncService {
      * Finds the row by telegramId in column R (index 17).
      */
     async markStaffBotBlocked(telegramId: number): Promise<boolean> {
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            logSecurityEvent({
+                event: "security.staff.bot_block_reported_without_business_deactivation",
+                telegramId,
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "schedule-sync",
+                operation: "markStaffBotBlocked",
+                safeContext: { businessSource: "AWS", action: "notification_only" },
+            });
+            return true;
+        }
         this.ensureSheets();
         try {
             const res = await this.sheets.spreadsheets.values.get({
@@ -660,6 +677,9 @@ export class ScheduleSyncService {
      * Syncs team members from Google Sheet to Database
      */
     async syncTeam(api?: Api) {
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            return awsBusinessSyncService.syncTeam(api);
+        }
         this.ensureSheets();
         const blocklistRes = await this.syncBlocklist();
         await this.fixLocations();
@@ -1033,6 +1053,9 @@ export class ScheduleSyncService {
 
 
     async syncSchedule(sheetName: string = "Актуальний розклад", existingTeamMap?: TeamMemberMap) {
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            return awsBusinessSyncService.syncSchedule();
+        }
         this.ensureSheets();
         const teamMap = existingTeamMap || await this.fetchTeamMapping();
         const { hiddenRows, hiddenColumns } = await this.fetchHiddenScheduleIndexes(sheetName);
@@ -1667,6 +1690,13 @@ export class ScheduleSyncService {
      * Updates Column G (First Shift) in the Team spreadsheet for a specific photographer.
      */
     async updateFirstShiftDateInSheet(telegramId: string, date: Date) {
+        if (BUSINESS_DATA_SOURCE === "aws") {
+            logger.info(
+                { telegramId, date: date.toISOString() },
+                "First-shift Google Sheet write skipped because AWS is the business source",
+            );
+            return;
+        }
         this.ensureSheets();
         try {
             const res = await this.sheets.spreadsheets.values.get({
