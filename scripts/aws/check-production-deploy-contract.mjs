@@ -32,6 +32,22 @@ const requirements = [
     ["deploy validates stable health", content.deploy, "wait_for_stable_container"],
     ["deploy sets the reviewed shadow flag", content.deploy, "set_env AWS_SCHEDULE_SHADOW_READ_ENABLED"],
     ["deploy sets the reviewed canonical flag", content.deploy, "set_env AWS_SCHEDULE_CANONICAL_READ_ENABLED"],
+    ["deploy sets the reviewed replacements shadow flag", content.deploy, "set_env AWS_REPLACEMENTS_SHADOW_ENABLED"],
+    [
+        "deploy sets the reviewed replacements canonical flag",
+        content.deploy,
+        "set_env AWS_REPLACEMENTS_CANONICAL_ENABLED"
+    ],
+    [
+        "deploy sets the reviewed reminders canonical read flag",
+        content.deploy,
+        "set_env AWS_REMINDERS_CANONICAL_READ_ENABLED"
+    ],
+    [
+        "deploy sets the reviewed preferences canonical write flag",
+        content.deploy,
+        "set_env AWS_PREFERENCES_CANONICAL_WRITE_ENABLED"
+    ],
     ["validate checks live command", content.validate, 'expected_command="start:live"'],
     ["validate checks the shadow flag", content.validate, "actual_shadow_flag"],
     ["validate checks the canonical flag", content.validate, "actual_canonical_flag"],
