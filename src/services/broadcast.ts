@@ -8,12 +8,15 @@ import { userRepository } from "../repositories/user-repository.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
 import { broadcastDeliveryRepository } from "../repositories/broadcast-delivery-repository.js";
-import { TEAM_CHATS } from "../config.js";
+import { TEAM_CHATS, AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import fs from "fs";
 import type { BroadcastMediaItem } from "../types/context.js";
+import { awsBusinessClient } from "./aws-business-client.js";
+import { toCanonicalMonth } from "./preference-month.js";
+import { logBusinessEvent } from "../core/log-events.js";
 
 export interface BroadcastStats {
     totalChats: number;
@@ -169,6 +172,95 @@ function hasPendingReplies(trackedMessages: any[]): boolean {
     return trackedMessages.some((tracked) =>
         (tracked.pendingReplies || []).some((reply: any) => reply.status === "pending")
     );
+}
+
+/**
+ * A user-check function for "has this photographer already filled preferences
+ * for this month?" — resolved once per broadcast run, then called once per
+ * user, so the canonical branch does a single `/missing` fetch instead of an
+ * HTTP call per recipient.
+ */
+type AlreadyFilledCheck = (userId: number | bigint) => Promise<boolean>;
+
+function redisAlreadyFilledCheck(prefMonthName: string): AlreadyFilledCheck {
+    return async (userId) => Boolean(await redis.get(`pref_filled:${userId}:${prefMonthName}`));
+}
+
+/**
+ * Resolves how to decide "already filled" for this run.
+ *
+ * Flag OFF → byte-identical to the pre-canonical behaviour: per-user Redis
+ * TTL-key reads. Flag ON → a single `/missing` fetch for the month builds
+ * the set of telegramIds still missing a submission, alongside a single
+ * staff query for which telegramIds are canonically mapped at all. `/missing`
+ * only ever lists canonical employees (ACTIVE + telegramId set); a bot user
+ * who is not canonically mapped is simply absent from it whether or not they
+ * filled anything in, so absence alone cannot mean "filled" for them:
+ *
+ * - in `/missing` → not filled → send;
+ * - canonically mapped and NOT in `/missing` → filled → skip;
+ * - NOT canonically mapped → unknown → fall through to the Redis check.
+ *
+ * If the month can't be converted to YYYY-MM, or the `/missing` fetch fails,
+ * this falls back to the Redis check entirely rather than skipping the
+ * filter — failing open here would re-pester everyone who already filled in,
+ * while falling back to the old approximation is at worst what runs today
+ * anyway.
+ *
+ * `prefMonthYear` must be the calendar year of `prefMonthName`'s month (not
+ * necessarily the current year — e.g. a December run targets next month,
+ * which is January of the following year).
+ */
+async function resolveAlreadyFilledCheck(prefMonthName: string, prefMonthYear: number): Promise<AlreadyFilledCheck> {
+    const redisFallback = redisAlreadyFilledCheck(prefMonthName);
+    if (!AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) return redisFallback;
+
+    const canonicalMonth = toCanonicalMonth(prefMonthName, prefMonthYear);
+    if (!canonicalMonth) {
+        logBusinessEvent({
+            event: "bot.preferences_missing_check.fallback",
+            level: "warn",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            reasonCode: "PREFERENCE_MONTH_UNRESOLVED",
+            module: "broadcast",
+            operation: "resolveAlreadyFilledCheck",
+            safeContext: {},
+        });
+        return redisFallback;
+    }
+
+    try {
+        const [missing, mappedTelegramIds] = await Promise.all([
+            awsBusinessClient.missingSchedulePreferences(canonicalMonth),
+            staffRepository.findMappedTelegramIds(),
+        ]);
+        const missingTelegramIds = new Set(missing.items.map((item) => item.telegramId));
+        const mappedTelegramIdSet = new Set(mappedTelegramIds);
+
+        return async (userId) => {
+            const userIdStr = String(userId);
+            if (missingTelegramIds.has(userIdStr)) return false;
+            if (mappedTelegramIdSet.has(userIdStr)) return true;
+            return redisFallback(userId);
+        };
+    } catch (error) {
+        logBusinessEvent({
+            event: "bot.preferences_missing_check.fallback",
+            level: "warn",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            reasonCode: "CANONICAL_BACKEND_UNAVAILABLE",
+            module: "broadcast",
+            operation: "resolveAlreadyFilledCheck",
+            safeContext: {
+                errorType: error instanceof Error ? error.constructor.name : "UnknownError",
+            },
+        });
+        return redisFallback;
+    }
 }
 
 export const broadcastService = {
@@ -365,12 +457,16 @@ export const broadcastService = {
             }
         }
 
-        // For preferences broadcasts, determine the target month to check if users already filled
+        // For preferences broadcasts, determine the target month to check if users already filled.
+        // Resolved once per run (not per user): the canonical branch does a single
+        // `/missing` fetch for the whole month rather than one HTTP call per recipient.
         let prefMonthName: string | null = null;
+        let alreadyFilledCheck: AlreadyFilledCheck | null = null;
         if (buttonType === 'preferences') {
             const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
             const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
             prefMonthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
+            alreadyFilledCheck = await resolveAlreadyFilledCheck(prefMonthName, nextMonth.getFullYear());
         }
 
         for (const userId of users) {
@@ -381,13 +477,10 @@ export const broadcastService = {
 
             try {
                 // Skip users who already filled preferences for this month (via menu button)
-                if (prefMonthName) {
-                    const alreadyFilled = await redis.get(`pref_filled:${userId}:${prefMonthName}`);
-                    if (alreadyFilled) {
-                        logger.debug({ userId, month: prefMonthName }, "Preferences broadcast skipped because it was already completed");
-                        await broadcastDeliveryRepository.markSkipped(delivery.id, "PREFERENCES_ALREADY_FILLED");
-                        continue;
-                    }
+                if (alreadyFilledCheck && await alreadyFilledCheck(userId)) {
+                    logger.debug({ userId, month: prefMonthName }, "Preferences broadcast skipped because it was already completed");
+                    await broadcastDeliveryRepository.markSkipped(delivery.id, "PREFERENCES_ALREADY_FILLED");
+                    continue;
                 }
 
                 const sentMsg = await send(userId, false);

@@ -18,6 +18,26 @@ on:
         required: true
         type: boolean
         default: false
+      replacements_shadow_enabled:
+        description: Enable aggregate-only replacements shadow telemetry
+        required: true
+        type: boolean
+        default: false
+      canonical_replacements_enabled:
+        description: Use canonical backend replacements for the Telegram replacements flow
+        required: true
+        type: boolean
+        default: false
+      reminders_canonical_read_enabled:
+        description: Use canonical backend reads for reminder delivery
+        required: true
+        type: boolean
+        default: false
+      preferences_canonical_write_enabled:
+        description: Write photographer preferences to the canonical backend
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -235,6 +255,10 @@ jobs:
             printf 'AWS_SCHEDULE_SHADOW_READ_ENABLED=%q\n' "${{ inputs.schedule_shadow_enabled }}"
             printf 'AWS_SCHEDULE_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.canonical_schedule_enabled }}"
             printf 'AWS_SCHEDULE_NOTIFICATIONS_ENABLED=%q\n' "${{ inputs.schedule_notifications_enabled }}"
+            printf 'AWS_REPLACEMENTS_SHADOW_ENABLED=%q\n' "${{ inputs.replacements_shadow_enabled }}"
+            printf 'AWS_REPLACEMENTS_CANONICAL_ENABLED=%q\n' "${{ inputs.canonical_replacements_enabled }}"
+            printf 'AWS_REMINDERS_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.reminders_canonical_read_enabled }}"
+            printf 'AWS_PREFERENCES_CANONICAL_WRITE_ENABLED=%q\n' "${{ inputs.preferences_canonical_write_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -322,6 +346,10 @@ jobs:
             echo '- Business source: AWS API'
             echo '- Schedule shadow telemetry: `${{ inputs.schedule_shadow_enabled }}`'
             echo '- Canonical schedule read: `${{ inputs.canonical_schedule_enabled }}`'
+            echo '- Replacements shadow telemetry: `${{ inputs.replacements_shadow_enabled }}`'
+            echo '- Canonical replacements: `${{ inputs.canonical_replacements_enabled }}`'
+            echo '- Canonical reminders read: `${{ inputs.reminders_canonical_read_enabled }}`'
+            echo '- Canonical preferences write: `${{ inputs.preferences_canonical_write_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'

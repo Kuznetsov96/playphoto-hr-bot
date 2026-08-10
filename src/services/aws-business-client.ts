@@ -48,6 +48,65 @@ const shiftSchema = z.object({
     endsAt: z.string().datetime(),
 }).strict();
 
+const replacementCandidateSchema = z
+    .object({
+        employeePublicId: z.string().uuid(),
+        displayName: z.string().min(1),
+        availabilityKind: z.string().min(1),
+    })
+    .strict();
+
+const replacementWaveSchema = z
+    .object({
+        wave: z.string().min(1),
+        candidates: z.array(replacementCandidateSchema),
+    })
+    .strict();
+
+const replacementPreviewSchema = z
+    .object({
+        scheduledShiftPublicId: z.string().uuid(),
+        requesterEmployeePublicId: z.string().uuid(),
+        locationPublicId: z.string().uuid(),
+        shiftStartsAt: z.string().datetime(),
+        shiftEndsAt: z.string().datetime(),
+        waves: z.array(replacementWaveSchema),
+    })
+    .strict();
+
+const replacementRequestSchema = z
+    .object({
+        publicId: z.string().uuid(),
+        status: z.string().min(1),
+    })
+    .passthrough();
+
+const schedulePreferenceReadSchema = z.union([
+    z.object({ exists: z.literal(false) }).strict(),
+    z
+        .object({
+            exists: z.literal(true),
+            version: z.number().int(),
+            status: z.enum(["SUBMITTED", "DECLINED"]),
+            days: z.array(z.object({ localDate: z.string(), kind: z.string() }).strict()),
+        })
+        .strict(),
+]);
+
+const missingPreferencesSchema = z
+    .object({
+        month: z.string().min(1),
+        items: z.array(
+            z
+                .object({
+                    employeePublicId: z.string().uuid(),
+                    telegramId: z.string().regex(/^\d+$/u),
+                })
+                .strict()
+        ),
+    })
+    .strict();
+
 const snapshotSchema = z.object({
     schemaVersion: z.literal(1),
     generatedAt: z.string().datetime(),
@@ -147,6 +206,10 @@ export type AwsScheduleChangeKind = AwsScheduleNotification["changeKind"];
 export type AwsScheduleNotificationUrgency = AwsScheduleNotification["urgency"];
 export type AwsScheduleNotificationPayload = z.infer<typeof scheduleNotificationPayloadSchema>;
 export type AwsScheduleNotificationShiftSnapshot = z.infer<typeof scheduleNotificationSnapshotSchema>;
+export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
+export type ReplacementRequestView = { publicId: string; status: string };
+export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
+export type MissingSchedulePreferences = z.infer<typeof missingPreferencesSchema>;
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -276,6 +339,123 @@ export class AwsBusinessClient {
             method: "POST",
             body: JSON.stringify({ links }),
         }) as Promise<{ updated: number }>;
+    }
+
+    async previewReplacement(input: {
+        scheduledShiftPublicId: string;
+        requesterEmployeePublicId: string;
+        requesterTelegramId: string;
+    }): Promise<ReplacementPreview> {
+        const body = await this.request("/replacements/preview", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+        return replacementPreviewSchema.parse(body);
+    }
+
+    async createReplacement(input: {
+        scheduledShiftPublicId: string;
+        requesterEmployeePublicId: string;
+        requesterTelegramId: string;
+    }): Promise<ReplacementRequestView> {
+        const body = await this.request("/replacements", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+        return replacementRequestSchema.parse(body);
+    }
+
+    async dispatchReplacementWave(publicId: string): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/${encodeURIComponent(publicId)}/dispatch-next-wave`,
+            { method: "POST", body: JSON.stringify({}) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    async acceptReplacementOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/offers/${encodeURIComponent(offerPublicId)}/accept`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    async declineReplacementOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/offers/${encodeURIComponent(offerPublicId)}/decline`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    async cancelReplacement(
+        publicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/${encodeURIComponent(publicId)}/cancel`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    /**
+     * Reads the current monthly preference submission, if any, so the caller
+     * can echo its `version` back on write. `telegramId` is required by the
+     * backend and validated against the employee's stored id — a mismatch is
+     * a 404, deliberately, so the bot cannot read a version it would then
+     * fail to write with.
+     */
+    async getSchedulePreference(
+        employeePublicId: string,
+        month: string,
+        telegramId: string,
+    ): Promise<SchedulePreferenceRead> {
+        const query = new URLSearchParams({ telegramId });
+        const body = await this.request(
+            `/schedule-preferences/${encodeURIComponent(employeePublicId)}/${encodeURIComponent(month)}?${query.toString()}`,
+            { method: "GET" },
+        );
+        return schedulePreferenceReadSchema.parse(body);
+    }
+
+    async upsertSchedulePreference(
+        employeePublicId: string,
+        month: string,
+        body: {
+            status: "SUBMITTED" | "DECLINED";
+            days: Array<{ localDate: string; kind: "UNAVAILABLE" }>;
+            comment?: string;
+            telegramId: string;
+            version?: number;
+        },
+    ): Promise<void> {
+        await this.request(
+            `/schedule-preferences/${encodeURIComponent(employeePublicId)}/${encodeURIComponent(month)}`,
+            { method: "PUT", body: JSON.stringify(body) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    /**
+     * Lists employees who have not yet submitted a schedule preference for
+     * `month`, replacing the Redis `pref_filled:*` TTL-key lookup the bot
+     * previously used to decide who to remind.
+     */
+    async missingSchedulePreferences(month: string): Promise<MissingSchedulePreferences> {
+        const body = await this.request(
+            `/schedule-preferences/missing?month=${encodeURIComponent(month)}`,
+            { method: "GET" }
+        );
+        return missingPreferencesSchema.parse(body);
     }
 
     private async request(

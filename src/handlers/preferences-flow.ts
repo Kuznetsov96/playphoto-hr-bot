@@ -9,6 +9,10 @@ import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
 import { formatSurnameNameDot } from "../utils/string-utils.js";
 import { escapeHtml } from "./admin/utils.js";
+import { AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
+import { saveCanonicalPreference } from "../services/canonical-preferences-writer.js";
+import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
+import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 
 
 export const preferencesHandlers = new Composer<MyContext>();
@@ -32,6 +36,20 @@ function getPreferenceTableName(user: any, fallback = "Фотограф") {
 
     const fullName = profile?.fullName || user?.candidate?.fullName || fallback;
     return formatSurnameNameDot(fullName) || fullName || fallback;
+}
+
+/**
+ * The month a reminder broadcast is asking active staff about: after the 23rd
+ * it is next month (mirrors startPreferencesFlow's monthOffset for active
+ * staff), otherwise the current month. Used when a photographer opts out via
+ * the broadcast button directly, without ever opening the calendar flow —
+ * `ctx.session.preferencesData` is empty in that case, so there is no month to
+ * read from session.
+ */
+function getActiveStaffTargetMonthDate(kyivNow: Date) {
+    const isLateInMonth = kyivNow.getDate() >= 23;
+    const monthOffset = isLateInMonth ? 1 : 0;
+    return new Date(kyivNow.getFullYear(), kyivNow.getMonth() + monthOffset, 1);
 }
 
 async function ensureActiveStaffTargetsNextMonth(ctx: MyContext) {
@@ -86,20 +104,49 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
         { status: "declined", respondedAt: new Date() }
     );
 
-    // Log opt-out to Google Sheets so admin sees who refused
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
-        const fullName = getPreferenceTableName(user, "Невідомий");
-        const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
 
-        await preferencesService.savePreference({
-            timestamp,
-            fullNameDot: fullName,
-            unworkableDays: "🚫 Відмовилась заповнювати",
-            comment: ""
-        });
+        if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) {
+            const sessionData = ctx.session.preferencesData;
+            const targetDate = getActiveStaffTargetMonthDate(getKyivNow());
+            const month = sessionData?.month ?? getMonthName(targetDate);
+            const year = sessionData?.year ?? targetDate.getFullYear();
+            const canonicalMonth = toCanonicalMonth(month, year);
+            const staffId = user?.staffProfile?.id;
+            if (!canonicalMonth || !staffId) {
+                logger.error({ userId, month, year }, "Preference month could not be converted to YYYY-MM");
+                await ctx.answerCallbackQuery();
+                await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                return;
+            }
+            const saved = await saveCanonicalPreference({
+                staffId,
+                month: canonicalMonth,
+                selectedDays: [],
+                comment: null,
+                telegramId: String(userId),
+                declined: true
+            });
+            if (!saved.ok) {
+                await ctx.answerCallbackQuery();
+                await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                return;
+            }
+        } else {
+            // Log opt-out to Google Sheets so admin sees who refused
+            const fullName = getPreferenceTableName(user, "Невідомий");
+            const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
+
+            await preferencesService.savePreference({
+                timestamp,
+                fullNameDot: fullName,
+                unworkableDays: "🚫 Відмовилась заповнювати",
+                comment: ""
+            });
+        }
     } catch (e) {
-        logger.error({ err: e, userId }, "Failed to log pref opt-out to Sheets");
+        logger.error({ err: e, userId }, "Failed to log pref opt-out");
     }
 
     await ctx.answerCallbackQuery("🚫 Нагадування вимкнено.");
@@ -129,8 +176,11 @@ export async function startPreferencesFlow(ctx: MyContext) {
 
     const fullName = user?.staffProfile?.fullName || user?.candidate?.fullName || "";
 
-    // Check if photographer already filled preferences — offer to update
-    if (!isNewCandidate && fullName) {
+    // Check if photographer already filled preferences — offer to update.
+    // Legacy-only: the canonical PUT is idempotent per month, so this
+    // pre-check is unnecessary (and would need a canonical read) once the
+    // flag is on.
+    if (!AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && !isNewCandidate && fullName) {
         const alreadyFilled = await preferencesService.hasExistingPreference(fullName);
         if (alreadyFilled && !ctx.session.preferencesData?.forceEdit) {
             const kb = new InlineKeyboard()
@@ -163,11 +213,7 @@ async function renderCalendar(ctx: MyContext) {
 
     const kyivNow = getKyivNow();
 
-    const monthsMap: Record<string, number> = {
-        'січень': 0, 'лютий': 1, 'березень': 2, 'квітень': 3, 'травень': 4, 'червень': 5,
-        'липень': 6, 'серпень': 7, 'вересень': 8, 'жовтень': 9, 'листопад': 10, 'грудень': 11
-    };
-    const targetMonthIndex = monthsMap[month?.toLowerCase() || ''];
+    const targetMonthIndex = UKRAINIAN_MONTH_INDEX[month?.toLowerCase() || ''];
     const isCurrentMonth = targetMonthIndex === kyivNow.getMonth() && year === kyivNow.getFullYear();
 
     const daysInMonth = new Date(year || kyivNow.getFullYear(), (targetMonthIndex ?? 0) + 1, 0).getDate();
@@ -323,17 +369,14 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         const currentMonthName = kyivNow.toLocaleString('uk-UA', { month: 'long' });
         const isCurrentMonth = (month || "").toLowerCase() === currentMonthName.toLowerCase();
         const shouldMoveToNext = !!ctx.session.preferencesData.forceNextMonth && isCurrentMonth;
-        const shouldPersistToSheet = !wasNewCandidate || !shouldMoveToNext;
+        const shouldPersist = !wasNewCandidate || !shouldMoveToNext;
 
-        const prefData: PreferenceData = {
-            timestamp,
-            fullNameDot: staffNameForTable,
-            unworkableDays: daysStr,
-            comment: comment || ""
-        };
-
-        if (shouldPersistToSheet) {
-            if (wasNewCandidate && !user?.staffProfile && user?.candidate) {
+        if (shouldPersist) {
+            // A brand-new candidate has no StaffProfile yet; both the sheet
+            // write and the canonical write (which resolves staffId →
+            // awsEmployeePublicId) need one to attribute the submission to.
+            let staffProfileId = user?.staffProfile?.id;
+            if (wasNewCandidate && !staffProfileId && user?.candidate) {
                 const { staffRepository } = await import("../repositories/staff-repository.js");
                 const createData: any = {
                     user: { connect: { id: user.id } },
@@ -341,18 +384,49 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     isActive: true
                 };
                 if (user.candidate.locationId) createData.location = { connect: { id: user.candidate.locationId } };
-                await staffRepository.create(createData);
+                const newProfile = await staffRepository.create(createData);
+                staffProfileId = newProfile.id;
                 createdStaffProfile = true;
             }
 
-            try {
-                const { preferencesQueue } = await import("../core/queue.js");
-                await preferencesQueue.add('save-pref', prefData, { attempts: 5, backoff: { type: 'exponential', delay: 10000 } });
-            } catch {
-                await preferencesService.savePreference(prefData);
+            if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) {
+                const canonicalMonth = toCanonicalMonth(month, ctx.session.preferencesData.year);
+                if (!canonicalMonth || !staffProfileId) {
+                    logger.error({ telegramId, month, year: ctx.session.preferencesData.year }, "Preference month could not be converted to YYYY-MM");
+                    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
+                    await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                    return;
+                }
+                const saved = await saveCanonicalPreference({
+                    staffId: staffProfileId,
+                    month: canonicalMonth,
+                    selectedDays: selectedDays ?? [],
+                    comment: comment || null,
+                    telegramId: String(telegramId),
+                    declined: false
+                });
+                if (!saved.ok) {
+                    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
+                    await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                    return;
+                }
+            } else {
+                const prefData: PreferenceData = {
+                    timestamp,
+                    fullNameDot: staffNameForTable,
+                    unworkableDays: daysStr,
+                    comment: comment || ""
+                };
+
+                try {
+                    const { preferencesQueue } = await import("../core/queue.js");
+                    await preferencesQueue.add('save-pref', prefData, { attempts: 5, backoff: { type: 'exponential', delay: 10000 } });
+                } catch {
+                    await preferencesService.savePreference(prefData);
+                }
             }
         } else {
-            logger.info({ telegramId, month }, "Skipping sheet write for candidate current-month preferences; admin notification only");
+            logger.info({ telegramId, month }, "Skipping preference write for candidate current-month preferences; admin notification only");
         }
 
         // Mark pending reply as confirmed → stops pinger reminders

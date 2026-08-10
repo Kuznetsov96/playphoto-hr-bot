@@ -91,6 +91,26 @@ export class StaffRepository {
         }) as unknown as Promise<StaffWithRelations[]>;
     }
 
+    /**
+     * Telegram ids of staff who are canonically mapped (`awsEmployeePublicId`
+     * set), regardless of bot-side `isActive`. Used to distinguish "known
+     * canonical employee absent from /missing" (filled) from "unmapped, we
+     * simply don't know" (fall through to the legacy check) — the backend's
+     * `/missing` list only ever covers canonical employees, so absence from
+     * it is meaningless for anyone this bot cannot account for canonically.
+     */
+    async findMappedTelegramIds(): Promise<string[]> {
+        const rows = await prisma.staffProfile.findMany({
+            where: { awsEmployeePublicId: { not: null } },
+            include: { user: true }
+        }) as unknown as StaffWithRelations[];
+
+        return rows
+            .map(row => row.user?.telegramId)
+            .filter((telegramId): telegramId is bigint => telegramId != null)
+            .map(telegramId => String(telegramId));
+    }
+
     async create(data: Prisma.StaffProfileCreateInput): Promise<StaffProfile> {
         const profile = await prisma.staffProfile.create({
             data,

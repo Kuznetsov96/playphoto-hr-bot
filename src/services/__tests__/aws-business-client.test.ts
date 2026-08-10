@@ -189,4 +189,56 @@ describe("AwsBusinessClient", () => {
         });
         expect(result).toEqual({ updated: 1 });
     });
+
+    describe("missingSchedulePreferences", () => {
+        // Mirrors the backend's real `listMissingForBot` response shape
+        // (Webapp PlayPhoto/apps/api/src/schedule-preferences/schedule-preferences.service.ts):
+        // `{ month, items: [{ employeePublicId, telegramId }] }`. The bot's schema
+        // previously expected `employees`/`publicId`, which the real backend never
+        // sends — every call threw under `.strict()`. This test exercises the real
+        // schema against a stubbed fetch, not a mocked awsBusinessClient, so a future
+        // contract drift is caught here rather than only in a mock that always agrees
+        // with itself.
+        const backendShapeBody = {
+            month: "2026-09",
+            items: [
+                {
+                    employeePublicId: "44444444-4444-4444-8444-444444444444",
+                    telegramId: "123456789",
+                },
+            ],
+        };
+
+        it("parses the backend's real response shape", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(backendShapeBody), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            const result = await new AwsBusinessClient().missingSchedulePreferences("2026-09");
+
+            expect(result.month).toBe("2026-09");
+            expect(result.items).toEqual([
+                { employeePublicId: "44444444-4444-4444-8444-444444444444", telegramId: "123456789" },
+            ]);
+            expect(fetch).toHaveBeenCalledWith(
+                "https://api.example.test/api/v1/internal/bot/schedule-preferences/missing?month=2026-09",
+                expect.objectContaining({ method: "GET" }),
+            );
+        });
+
+        it("rejects the old, wrong shape (employees/publicId) the bot used to expect", async () => {
+            const oldWrongShapeBody = {
+                month: "2026-09",
+                employees: [
+                    {
+                        publicId: "44444444-4444-4444-8444-444444444444",
+                        telegramId: "123456789",
+                    },
+                ],
+            };
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(oldWrongShapeBody), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            await expect(new AwsBusinessClient().missingSchedulePreferences("2026-09")).rejects.toThrow();
+        });
+    });
 });

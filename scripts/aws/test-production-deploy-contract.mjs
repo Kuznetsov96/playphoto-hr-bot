@@ -63,7 +63,7 @@ const writeRuntime = () => {
     writeFileSync(join(deployDirectory, "compose.aws.live.yaml"), "services: {}\n");
     writeFileSync(
         join(deployDirectory, "release.env"),
-        `BOT_IMAGE=${newImage}\nBOT_RUNTIME_MODE=live\nAWS_SCHEDULE_SHADOW_READ_ENABLED=false\nAWS_SCHEDULE_CANONICAL_READ_ENABLED=false\nAWS_SCHEDULE_NOTIFICATIONS_ENABLED=false\n`
+        `BOT_IMAGE=${newImage}\nBOT_RUNTIME_MODE=live\nAWS_SCHEDULE_SHADOW_READ_ENABLED=false\nAWS_SCHEDULE_CANONICAL_READ_ENABLED=false\nAWS_SCHEDULE_NOTIFICATIONS_ENABLED=false\nAWS_REPLACEMENTS_SHADOW_ENABLED=false\nAWS_REPLACEMENTS_CANONICAL_ENABLED=false\nAWS_REMINDERS_CANONICAL_READ_ENABLED=false\nAWS_PREFERENCES_CANONICAL_WRITE_ENABLED=false\n`
     );
     writeFileSync(join(rollbackDirectory, ".env"), "ROLLBACK_ENV=true\n", { mode: 0o600 });
     writeFileSync(join(rollbackDirectory, "google-service-account.json"), "{}\n", { mode: 0o600 });
@@ -95,6 +95,10 @@ const run = (failDeploy) => {
             AWS_SCHEDULE_SHADOW_READ_ENABLED: "false",
             AWS_SCHEDULE_CANONICAL_READ_ENABLED: "false",
             AWS_SCHEDULE_NOTIFICATIONS_ENABLED: "false",
+            AWS_REPLACEMENTS_SHADOW_ENABLED: "false",
+            AWS_REPLACEMENTS_CANONICAL_ENABLED: "false",
+            AWS_REMINDERS_CANONICAL_READ_ENABLED: "false",
+            AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: "false",
             DEPLOY_DIRECTORY: deployDirectory,
             DEPLOY_TEST_STATE: root,
             FAIL_DEPLOY: failDeploy ? "true" : "false"
@@ -114,6 +118,18 @@ try {
     }
     if (!deployedEnv.includes("AWS_SCHEDULE_CANONICAL_READ_ENABLED=false")) {
         throw new Error("Live deploy did not force the reviewed canonical flag");
+    }
+    if (!deployedEnv.includes("AWS_REPLACEMENTS_SHADOW_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed replacements shadow flag");
+    }
+    if (!deployedEnv.includes("AWS_REPLACEMENTS_CANONICAL_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed replacements canonical flag");
+    }
+    if (!deployedEnv.includes("AWS_REMINDERS_CANONICAL_READ_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed reminders canonical read flag");
+    }
+    if (!deployedEnv.includes("AWS_PREFERENCES_CANONICAL_WRITE_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed preferences canonical write flag");
     }
 
     const failure = run(true);
