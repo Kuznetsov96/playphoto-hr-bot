@@ -89,12 +89,13 @@ describe("ReplacementService.startRequest canonical wiring", () => {
 
         const shift = buildShift();
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
-        prismaMock.replacementRequest.create.mockResolvedValue({ id: "request-1", ...shift });
+        prismaMock.replacementRequest.create.mockResolvedValue({ ...shift, id: "request-1" });
 
         const { ReplacementService } = await import("../replacement-service.js");
-        await new ReplacementService().startRequest(api as any, "requester-1", "shift-1");
+        const created = await new ReplacementService().startRequest(api as any, "requester-1", "shift-1");
 
         expect(startCanonicalReplacement).not.toHaveBeenCalled();
+        expect(created.id).toBe("request-1");
         expect(prismaMock.replacementRequest.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
                 workShiftId: "shift-1",
@@ -110,10 +111,10 @@ describe("ReplacementService.startRequest canonical wiring", () => {
 
         const shift = buildShift();
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
-        prismaMock.replacementRequest.create.mockResolvedValue({ id: "request-2", ...shift });
+        prismaMock.replacementRequest.create.mockResolvedValue({ ...shift, id: "request-2" });
 
         const { ReplacementService } = await import("../replacement-service.js");
-        await new ReplacementService().startRequest(api as any, "requester-1", "shift-1");
+        const created = await new ReplacementService().startRequest(api as any, "requester-1", "shift-1");
 
         expect(startCanonicalReplacement).toHaveBeenCalledWith({
             workShiftId: "shift-1",
@@ -122,6 +123,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
             locationId: "location-1",
             shiftDate: shift.date,
         });
+        expect(created.id).toBe("request-2");
         expect(prismaMock.replacementRequest.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
                 awsReplacementPublicId: "aws-pub-123",
