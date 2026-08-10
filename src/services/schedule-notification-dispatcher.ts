@@ -19,6 +19,12 @@ const PENDING_LIMIT = 100;
 const MAX_FAILURE_REASON_LENGTH = 500;
 
 /**
+ * Reported for a row whose payload does not match the agreed contract. A fixed
+ * code, deliberately carrying no field names and no values from the payload.
+ */
+const INVALID_PAYLOAD_REASON = "SCHEDULE_NOTIFICATION_PAYLOAD_INVALID";
+
+/**
  * One Telegram message to one photographer.
  *
  * A published batch collapses into a single group keyed by
@@ -254,7 +260,13 @@ export class ScheduleNotificationDispatcher {
             }, LEASE_HEARTBEAT_MS);
 
             const pending = await awsBusinessClient.pendingScheduleNotifications(PENDING_LIMIT);
-            const groups = groupForDelivery(pending);
+
+            // Rows that failed validation are retired individually before any
+            // delivery, so one malformed payload costs exactly one notification
+            // instead of the whole pass.
+            await this.reportInvalid(pending.invalidPublicIds, pending.unidentifiableCount);
+
+            const groups = groupForDelivery(pending.items);
 
             for (const group of groups) {
                 await this.deliverGroup(api, group);
@@ -268,9 +280,11 @@ export class ScheduleNotificationDispatcher {
                 module: "schedule-notification-dispatcher",
                 operation: "runOnce",
                 safeContext: {
-                    pendingCount: pending.length,
+                    pendingCount: pending.items.length,
                     groupCount: groups.length,
-                    skippedWithoutTelegram: pending.filter(item => item.telegramId === null).length
+                    invalidCount: pending.invalidPublicIds.length,
+                    unidentifiableCount: pending.unidentifiableCount,
+                    skippedWithoutTelegram: pending.items.filter(item => item.telegramId === null).length
                 }
             });
         } catch (error) {
@@ -304,6 +318,38 @@ export class ScheduleNotificationDispatcher {
             }));
             this.iterationInProgress = false;
         }
+    }
+
+    /**
+     * Retires rows the payload schema rejected.
+     *
+     * The reason is a fixed code, never the Zod issue text: validation messages
+     * quote the offending values, which is exactly the payload data that must
+     * not leave the bot.
+     */
+    private async reportInvalid(publicIds: string[], unidentifiableCount: number): Promise<void> {
+        if (publicIds.length === 0 && unidentifiableCount === 0) return;
+
+        logBusinessEvent({
+            event: "bot.schedule_notifications.invalid_payload",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "failed",
+            reasonCode: INVALID_PAYLOAD_REASON,
+            module: "schedule-notification-dispatcher",
+            operation: "reportInvalid",
+            safeContext: {
+                invalidCount: publicIds.length,
+                // Rows without a usable publicId cannot be reported at all; they
+                // are surfaced here so the backend contract drift is still visible.
+                unidentifiableCount
+            }
+        });
+
+        await this.report(publicIds, publicId =>
+            awsBusinessClient.markScheduleNotificationFailed(publicId, INVALID_PAYLOAD_REASON)
+        );
     }
 
     private async deliverGroup(

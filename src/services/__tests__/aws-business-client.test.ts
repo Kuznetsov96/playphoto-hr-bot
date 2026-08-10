@@ -104,4 +104,64 @@ describe("AwsBusinessClient", () => {
         await expect(new AwsBusinessClient().snapshot("2026-08-01", "2026-08-31"))
             .rejects.toThrow("AWS business API request failed with HTTP 503");
     });
+
+    describe("pendingScheduleNotifications", () => {
+        const validNotification = {
+            publicId: "n-good",
+            employeePublicId: "e-1",
+            telegramId: "100",
+            changeKind: "SHIFT_MOVED",
+            urgency: "URGENT",
+            batchId: null,
+            payload: {
+                after: {
+                    startsAtLocal: "2026-08-11T12:00:00",
+                    endsAtLocal: "2026-08-11T20:00:00",
+                    timezone: "Europe/Kyiv",
+                    locationPublicId: "11111111-1111-4111-8111-111111111111",
+                    locationName: "Location",
+                    locationCity: "Kyiv",
+                },
+            },
+        };
+
+        it("keeps the valid rows and separates a malformed one instead of throwing", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+                items: [
+                    validNotification,
+                    // Payload fails the strict snapshot schema. Parsing the array as
+                    // a whole made this throw and lose the valid row alongside it.
+                    { ...validNotification, publicId: "n-bad", payload: { after: { startsAtLocal: 42 } } },
+                ],
+            }), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            const result = await new AwsBusinessClient().pendingScheduleNotifications(100);
+
+            expect(result.items.map(item => item.publicId)).toEqual(["n-good"]);
+            expect(result.invalidPublicIds).toEqual(["n-bad"]);
+            expect(result.unidentifiableCount).toBe(0);
+        });
+
+        it("counts a malformed row that has no usable publicId to report", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+                items: [validNotification, { nothing: "useful" }],
+            }), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            const result = await new AwsBusinessClient().pendingScheduleNotifications(100);
+
+            expect(result.items.map(item => item.publicId)).toEqual(["n-good"]);
+            expect(result.invalidPublicIds).toEqual([]);
+            expect(result.unidentifiableCount).toBe(1);
+        });
+
+        it("still rejects a response whose envelope is not the agreed shape", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ nope: true }), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            // Per-row tolerance must not become tolerance for a wholly wrong response.
+            await expect(new AwsBusinessClient().pendingScheduleNotifications(100)).rejects.toThrow();
+        });
+    });
 });

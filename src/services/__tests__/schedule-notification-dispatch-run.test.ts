@@ -35,19 +35,28 @@ const urgentNotification = {
     payload: { after: shiftSnapshot }
 };
 
+/** The client's fetch result: valid rows, plus rows it rejected as malformed. */
+function pendingResult(
+    items: unknown[],
+    invalidPublicIds: string[] = [],
+    unidentifiableCount = 0
+) {
+    return { items, invalidPublicIds, unidentifiableCount };
+}
+
 describe("ScheduleNotificationDispatcher.runOnce", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         redisMock.set.mockResolvedValue("OK");
         redisMock.eval.mockResolvedValue(1);
-        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue([]);
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([]));
         awsBusinessClientMock.markScheduleNotificationDelivered.mockResolvedValue(undefined);
         awsBusinessClientMock.markScheduleNotificationFailed.mockResolvedValue(undefined);
     });
 
     it("sends nothing when another bot instance owns the lease", async () => {
         redisMock.set.mockResolvedValue(null);
-        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue([urgentNotification]);
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([urgentNotification]));
         const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
         const sendMessage = vi.fn();
 
@@ -78,10 +87,10 @@ describe("ScheduleNotificationDispatcher.runOnce", () => {
     });
 
     it("reports delivered once per notification after a successful send", async () => {
-        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue([
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([
             { ...urgentNotification, publicId: "a", urgency: "NORMAL" as const, batchId: "b1" },
             { ...urgentNotification, publicId: "b", urgency: "NORMAL" as const, batchId: "b1" }
-        ]);
+        ]));
         const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
         const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
 
@@ -97,7 +106,7 @@ describe("ScheduleNotificationDispatcher.runOnce", () => {
     });
 
     it("reports a safe non-PII reason when the Telegram send fails", async () => {
-        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue([urgentNotification]);
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([urgentNotification]));
         const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
         const sendMessage = vi.fn().mockRejectedValue(
             new Error("Forbidden: bot was blocked by Олена +380671234567")
@@ -125,7 +134,7 @@ describe("ScheduleNotificationDispatcher.runOnce", () => {
     });
 
     it("skips an overlapping local iteration on the same instance", async () => {
-        let releasePending: (value: unknown[]) => void = () => { };
+        let releasePending: (value: ReturnType<typeof pendingResult>) => void = () => { };
         awsBusinessClientMock.pendingScheduleNotifications.mockReturnValue(
             new Promise(resolve => { releasePending = resolve; })
         );
@@ -136,7 +145,46 @@ describe("ScheduleNotificationDispatcher.runOnce", () => {
         await dispatcher.runOnce({ sendMessage: vi.fn() });
 
         expect(redisMock.set).toHaveBeenCalledTimes(1);
-        releasePending([]);
+        releasePending(pendingResult([]));
         await first;
+    });
+
+    it("delivers the good rows and reports only the malformed one", async () => {
+        // The reported failure mode: one bad payload used to throw during the
+        // array-wide parse, so the catch-all abandoned the entire pass and every
+        // other photographer's notification went undelivered with it.
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult(
+            [
+                { ...urgentNotification, publicId: "good-1", urgency: "NORMAL" as const, batchId: "b1" },
+                { ...urgentNotification, publicId: "good-2", urgency: "NORMAL" as const, batchId: "b1" }
+            ],
+            ["bad-1"]
+        ));
+        const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        await new ScheduleNotificationDispatcher().runOnce({ sendMessage });
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(awsBusinessClientMock.markScheduleNotificationDelivered.mock.calls.map(call => call[0]))
+            .toEqual(["good-1", "good-2"]);
+        expect(awsBusinessClientMock.markScheduleNotificationFailed)
+            .toHaveBeenCalledWith("bad-1", "SCHEDULE_NOTIFICATION_PAYLOAD_INVALID");
+        expect(awsBusinessClientMock.markScheduleNotificationFailed).toHaveBeenCalledTimes(1);
+    });
+
+    it("still completes the pass when a malformed row cannot even be identified", async () => {
+        // A row without a usable publicId cannot be reported, but it must not
+        // stop the rows that can be delivered.
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(
+            pendingResult([urgentNotification], [], 1)
+        );
+        const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        await new ScheduleNotificationDispatcher().runOnce({ sendMessage });
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(awsBusinessClientMock.markScheduleNotificationFailed).not.toHaveBeenCalled();
     });
 });

@@ -112,9 +112,33 @@ const scheduleNotificationSchema = z.object({
     payload: scheduleNotificationPayloadSchema,
 });
 
-const pendingScheduleNotificationsSchema = z.object({
-    items: z.array(scheduleNotificationSchema),
+/**
+ * The envelope is parsed separately from its rows.
+ *
+ * Parsing `items` as `z.array(scheduleNotificationSchema)` made one malformed
+ * row throw for the whole response, which abandoned the entire delivery pass —
+ * every other photographer's notification included. Rows are validated one by
+ * one instead, so a bad row is isolated rather than contagious.
+ */
+const pendingScheduleNotificationsEnvelopeSchema = z.object({
+    items: z.array(z.unknown()),
 });
+
+/**
+ * Just enough of a row to report it back to the backend when the full schema
+ * rejects it. Without a usable `publicId` a bad row cannot be marked failed and
+ * would be re-offered forever, so that case is counted separately.
+ */
+const scheduleNotificationIdentitySchema = z.object({
+    publicId: z.string().min(1),
+});
+
+/** Valid rows plus the ids of rows that failed validation and must be reported. */
+export interface AwsPendingScheduleNotifications {
+    items: AwsScheduleNotification[];
+    invalidPublicIds: string[];
+    unidentifiableCount: number;
+}
 
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
 export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
@@ -169,13 +193,38 @@ export class AwsBusinessClient {
         return schedule;
     }
 
-    async pendingScheduleNotifications(limit: number): Promise<AwsScheduleNotification[]> {
+    /**
+     * Fetches the pending rows, validating each one on its own.
+     *
+     * A row the strict schema rejects is separated out rather than thrown, so a
+     * single malformed payload cannot abort delivery for everyone else in the
+     * same pass. The caller reports the rejected ids so the backend can retire
+     * them instead of re-offering them indefinitely.
+     */
+    async pendingScheduleNotifications(limit: number): Promise<AwsPendingScheduleNotifications> {
         const query = new URLSearchParams({ limit: String(limit) });
         const value = await this.request(
             `/schedule-notifications/pending?${query.toString()}`,
             { method: "GET" },
         );
-        return pendingScheduleNotificationsSchema.parse(value).items;
+        const envelope = pendingScheduleNotificationsEnvelopeSchema.parse(value);
+
+        const items: AwsScheduleNotification[] = [];
+        const invalidPublicIds: string[] = [];
+        let unidentifiableCount = 0;
+
+        for (const row of envelope.items) {
+            const parsed = scheduleNotificationSchema.safeParse(row);
+            if (parsed.success) {
+                items.push(parsed.data);
+                continue;
+            }
+            const identity = scheduleNotificationIdentitySchema.safeParse(row);
+            if (identity.success) invalidPublicIds.push(identity.data.publicId);
+            else unidentifiableCount += 1;
+        }
+
+        return { items, invalidPublicIds, unidentifiableCount };
     }
 
     async markScheduleNotificationDelivered(publicId: string): Promise<void> {
