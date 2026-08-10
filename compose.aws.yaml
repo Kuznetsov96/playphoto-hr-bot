@@ -1,0 +1,57 @@
+name: playphoto-bot
+
+services:
+  bot:
+    image: ${BOT_IMAGE:?Set BOT_IMAGE to an immutable ECR digest}
+    command: ["npm", "run", "start:standby"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s
+    env_file:
+      - /opt/playphoto-bot/.env
+    volumes:
+      - /opt/playphoto-bot/google-service-account.json:/app/google-service-account.json:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 8
+    mem_limit: 768m
+    cpus: 1.0
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-eu-north-1}
+        awslogs-group: /playphoto/staging/bot
+        awslogs-stream: production-bot
+        awslogs-create-group: "false"
+
+  redis:
+    # Must remain compatible with the production RDB restored from Hetzner.
+    image: redis:8.6.1-alpine
+    restart: unless-stopped
+    init: true
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    mem_limit: 192m
+    cpus: 0.25
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-eu-north-1}
+        awslogs-group: /playphoto/staging/redis
+        awslogs-stream: production-bot
+        awslogs-create-group: "false"
+
+volumes:
+  redis_data:

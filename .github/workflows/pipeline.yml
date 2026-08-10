@@ -40,18 +40,11 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v6
       with:
-        node-version: '20'
+        node-version: '22'
         cache: 'npm'
 
     - name: 📦 Install dependencies
       run: npm ci --prefer-offline --no-audit
-
-    - name: 🎭 Cache Playwright Browsers
-      uses: actions/cache@v5
-      with:
-        path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-        restore-keys: playwright-${{ runner.os }}-
 
     - name: 💎 Prisma Generate & Schema Check
       run: |
@@ -70,6 +63,7 @@ jobs:
       run: |
         npm run check-cycles
         npm run check-menu-ids
+        npm run check-production-deploy
 
     - name: 🧪 Run Unit/Integration Tests
       run: npm test
@@ -100,7 +94,12 @@ jobs:
   build-and-push:
     name: 🐳 Build & Push Docker
     needs: [test]
-    if: github.ref == 'refs/heads/main'
+    # Hetzner is retained only as an explicit rollback target after the AWS cutover.
+    # A normal merge to main must never rebuild or restart the legacy deployment.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      vars.ENABLE_LEGACY_HETZNER_DEPLOY == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -140,9 +139,12 @@ jobs:
         cache-to: type=gha,mode=max
 
   deploy:
-    name: 🚀 Deploy to Server
+    name: 🚀 Deploy to legacy Hetzner (manual rollback only)
     needs: build-and-push
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      vars.ENABLE_LEGACY_HETZNER_DEPLOY == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6

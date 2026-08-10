@@ -4,7 +4,6 @@ import { TEAM_CHATS } from "../config.js";
 import { type Api, InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
 import { extractFirstName } from "../utils/string-utils.js";
-import { workUABrowserService } from "./work-ua-browser-service.js";
 import { olxService } from "./olx-service.js";
 
 const PLATFORM_ICONS: Record<LeadPlatform, string> = {
