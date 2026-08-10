@@ -48,6 +48,39 @@ const shiftSchema = z.object({
     endsAt: z.string().datetime(),
 }).strict();
 
+const replacementCandidateSchema = z
+    .object({
+        employeePublicId: z.string().uuid(),
+        displayName: z.string().min(1),
+        availabilityKind: z.string().min(1),
+    })
+    .strict();
+
+const replacementWaveSchema = z
+    .object({
+        wave: z.string().min(1),
+        candidates: z.array(replacementCandidateSchema),
+    })
+    .strict();
+
+const replacementPreviewSchema = z
+    .object({
+        scheduledShiftPublicId: z.string().uuid(),
+        requesterEmployeePublicId: z.string().uuid(),
+        locationPublicId: z.string().uuid(),
+        shiftStartsAt: z.string().datetime(),
+        shiftEndsAt: z.string().datetime(),
+        waves: z.array(replacementWaveSchema),
+    })
+    .strict();
+
+const replacementRequestSchema = z
+    .object({
+        publicId: z.string().uuid(),
+        status: z.string().min(1),
+    })
+    .passthrough();
+
 const snapshotSchema = z.object({
     schemaVersion: z.literal(1),
     generatedAt: z.string().datetime(),
@@ -147,6 +180,8 @@ export type AwsScheduleChangeKind = AwsScheduleNotification["changeKind"];
 export type AwsScheduleNotificationUrgency = AwsScheduleNotification["urgency"];
 export type AwsScheduleNotificationPayload = z.infer<typeof scheduleNotificationPayloadSchema>;
 export type AwsScheduleNotificationShiftSnapshot = z.infer<typeof scheduleNotificationSnapshotSchema>;
+export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
+export type ReplacementRequestView = { publicId: string; status: string };
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -261,6 +296,71 @@ export class AwsBusinessClient {
             undefined,
             { expectsBody: false },
         );
+    }
+
+    async previewReplacement(input: {
+        scheduledShiftPublicId: string;
+        requesterEmployeePublicId: string;
+        requesterTelegramId: string;
+    }): Promise<ReplacementPreview> {
+        const body = await this.request("/replacements/preview", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+        return replacementPreviewSchema.parse(body);
+    }
+
+    async createReplacement(input: {
+        scheduledShiftPublicId: string;
+        requesterEmployeePublicId: string;
+        requesterTelegramId: string;
+    }): Promise<ReplacementRequestView> {
+        const body = await this.request("/replacements", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+        return replacementRequestSchema.parse(body);
+    }
+
+    async dispatchReplacementWave(publicId: string): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/${encodeURIComponent(publicId)}/dispatch-next-wave`,
+            { method: "POST", body: JSON.stringify({}) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    async acceptReplacementOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/offers/${encodeURIComponent(offerPublicId)}/accept`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    async declineReplacementOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/offers/${encodeURIComponent(offerPublicId)}/decline`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    async cancelReplacement(
+        publicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/${encodeURIComponent(publicId)}/cancel`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+        return replacementRequestSchema.parse(body);
     }
 
     private async request(
