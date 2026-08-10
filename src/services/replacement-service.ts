@@ -20,6 +20,7 @@ import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
 import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDay } from "./kyiv-date.js";
+import { replacementShadowService } from "./replacement-shadow.js";
 
 export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
@@ -847,9 +848,27 @@ export class ReplacementService {
         ]);
         const alreadyAsked = new Set(existingResponses.map(r => r.staffId));
 
-        return candidates
+        const result = candidates
             .filter(candidate => !busy.has(candidate.id) && !alreadyAsked.has(candidate.id))
             .map(candidate => ({ staff: candidate, availabilityKind: kindByStaff.get(candidate.id)! }));
+
+        const requesterTelegramId = request.requester?.user?.telegramId;
+        if (requesterTelegramId) {
+            replacementShadowService.compareInBackground({
+                requestId: request.id,
+                workShiftId: request.workShiftId,
+                requesterStaffId: request.requesterStaffId,
+                requesterTelegramId: String(requesterTelegramId),
+                locationId: request.locationId,
+                shiftDate: request.shiftDate,
+                legacyCandidates: result.map(candidate => ({
+                    awsEmployeePublicId: candidate.staff.awsEmployeePublicId,
+                    availabilityKind: candidate.availabilityKind,
+                })),
+            });
+        }
+
+        return result;
     }
 
     private getSameReplacementSearchFilter(request: RequestWithRelations) {
