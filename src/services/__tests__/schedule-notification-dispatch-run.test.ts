@@ -15,6 +15,16 @@ vi.mock("../../core/redis.js", () => ({ redis: redisMock, default: redisMock }))
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
 vi.mock("../aws-business-client.js", () => ({ awsBusinessClient: awsBusinessClientMock }));
 
+/** Mirrors the backend's ScheduleNotificationShiftSnapshot contract. */
+const shiftSnapshot = {
+    startsAtLocal: "2026-08-11T12:00:00",
+    endsAtLocal: "2026-08-11T20:00:00",
+    timezone: "Europe/Kyiv",
+    locationPublicId: "11111111-1111-4111-8111-111111111111",
+    locationName: "Гулівер",
+    locationCity: "Київ"
+};
+
 const urgentNotification = {
     publicId: "n-1",
     employeePublicId: "e-1",
@@ -22,7 +32,7 @@ const urgentNotification = {
     changeKind: "SHIFT_MOVED" as const,
     urgency: "URGENT" as const,
     batchId: null,
-    payload: { after: { date: "11.08", time: "12:00-20:00", location: "Гулівер" } }
+    payload: { after: shiftSnapshot }
 };
 
 describe("ScheduleNotificationDispatcher.runOnce", () => {

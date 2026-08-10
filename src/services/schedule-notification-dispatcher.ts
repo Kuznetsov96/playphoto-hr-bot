@@ -8,7 +8,8 @@ import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
     awsBusinessClient,
     type AwsScheduleChangeKind,
-    type AwsScheduleNotification
+    type AwsScheduleNotification,
+    type AwsScheduleNotificationShiftSnapshot
 } from "./aws-business-client.js";
 
 const LEASE_KEY = "worker:schedule-notification-dispatcher:lease";
@@ -104,7 +105,7 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
         if (before) lines.push(STAFF_TEXTS["schedule-notif-line-was"]({ details: escapeHtml(before) }));
         if (after) lines.push(STAFF_TEXTS["schedule-notif-line-now"]({ details: escapeHtml(after) }));
         if (!before && !after) lines.push(STAFF_TEXTS["schedule-notif-details-unknown"]);
-        const reason = typeof notification.payload.reason === "string" ? notification.payload.reason.trim() : "";
+        const reason = notification.payload.reason?.trim() ?? "";
         if (reason) lines.push(STAFF_TEXTS["schedule-notif-reason"]({ reason: escapeHtml(reason) }));
         lines.push("");
     }
@@ -117,13 +118,43 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     return lines.join("\n");
 }
 
-function describeSnapshot(value: unknown): string {
-    if (value === null || typeof value !== "object") return "";
-    const snapshot = value as Record<string, unknown>;
-    const parts = [snapshot.date, snapshot.time, snapshot.location]
-        .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
-        .map(part => part.trim());
+/**
+ * Renders one snapshot as `ДД.ММ, HH:MM-HH:MM, Локація (Місто)`.
+ *
+ * `startsAtLocal` / `endsAtLocal` are already local wall-clock strings for the
+ * location's timezone, so they are read as text and never passed through `Date`
+ * — constructing a Date here would re-interpret them in the bot's own timezone
+ * and shift the time the photographer sees.
+ *
+ * `locationPublicId` is deliberately never rendered; it is correlation data.
+ */
+function describeSnapshot(snapshot: AwsScheduleNotificationShiftSnapshot | undefined): string {
+    if (!snapshot) return "";
+
+    const day = formatLocalDay(snapshot.startsAtLocal);
+    const startTime = formatLocalTime(snapshot.startsAtLocal);
+    const endTime = formatLocalTime(snapshot.endsAtLocal);
+    const time = startTime && endTime ? `${startTime}-${endTime}` : startTime;
+
+    const place = snapshot.locationCity && snapshot.locationCity !== snapshot.locationName
+        ? `${snapshot.locationName} (${snapshot.locationCity})`
+        : snapshot.locationName;
+
+    const parts = [day, time, place].filter(part => part.length > 0);
     return parts.join(", ");
+}
+
+/** `2026-08-10T10:00:00` -> `10.08`. Pure string reading, no timezone maths. */
+function formatLocalDay(localDateTime: string): string {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(localDateTime);
+    if (!match) return "";
+    return `${match[3]}.${match[2]}`;
+}
+
+/** `2026-08-10T10:00:00` -> `10:00`. Pure string reading, no timezone maths. */
+function formatLocalTime(localDateTime: string): string {
+    const match = /[T ](\d{2}:\d{2})/u.exec(localDateTime);
+    return match?.[1] ?? "";
 }
 
 /**

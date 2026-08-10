@@ -73,6 +73,35 @@ const employeeScheduleSchema = z.object({
     }).strict()),
 }).strict();
 
+/**
+ * Mirrors the backend's exported `ScheduleNotificationShiftSnapshot`.
+ *
+ * `startsAtLocal` / `endsAtLocal` are already local wall-clock strings for the
+ * location's timezone — they must never be re-converted. `locationPublicId` is
+ * for correlation only and must never be shown to a photographer. The contract
+ * deliberately carries no employee name, phone, or Telegram id.
+ *
+ * Not `.strict()`: unknown extra keys must not throw, so the backend can add
+ * fields without breaking delivery.
+ */
+const scheduleNotificationSnapshotSchema = z.object({
+    startsAtLocal: z.string().min(1),
+    endsAtLocal: z.string().min(1),
+    timezone: z.string().min(1),
+    locationPublicId: z.string().min(1),
+    locationName: z.string().min(1),
+    locationCity: z.string().min(1),
+});
+
+/** Mirrors the backend's exported `ScheduleNotificationPayload`. */
+const scheduleNotificationPayloadSchema = z.object({
+    before: scheduleNotificationSnapshotSchema.optional(),
+    after: scheduleNotificationSnapshotSchema.optional(),
+    reason: z.string().optional(),
+    replacementPublicId: z.string().optional(),
+    role: z.enum(["accepted", "requester"]).optional(),
+});
+
 const scheduleNotificationSchema = z.object({
     publicId: z.string().min(1),
     employeePublicId: z.string().min(1),
@@ -80,7 +109,7 @@ const scheduleNotificationSchema = z.object({
     changeKind: z.enum(["SHIFT_ADDED", "SHIFT_REMOVED", "SHIFT_MOVED", "SHIFT_REASSIGNED"]),
     urgency: z.enum(["NORMAL", "URGENT"]),
     batchId: z.string().min(1).nullable(),
-    payload: z.record(z.string(), z.unknown()),
+    payload: scheduleNotificationPayloadSchema,
 });
 
 const pendingScheduleNotificationsSchema = z.object({
@@ -92,6 +121,8 @@ export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
 export type AwsScheduleNotification = z.infer<typeof scheduleNotificationSchema>;
 export type AwsScheduleChangeKind = AwsScheduleNotification["changeKind"];
 export type AwsScheduleNotificationUrgency = AwsScheduleNotification["urgency"];
+export type AwsScheduleNotificationPayload = z.infer<typeof scheduleNotificationPayloadSchema>;
+export type AwsScheduleNotificationShiftSnapshot = z.infer<typeof scheduleNotificationSnapshotSchema>;
 
 export interface AwsEmployeeUpsert {
     telegramId: string;

@@ -151,8 +151,23 @@ describe("groupForDelivery", () => {
     });
 });
 
+const FALLBACK_LINE = "деталі уточнюються";
+
+/** Mirrors the backend's ScheduleNotificationShiftSnapshot contract. */
+function snapshot(overrides: Record<string, string> = {}) {
+    return {
+        startsAtLocal: "2026-08-10T10:00:00",
+        endsAtLocal: "2026-08-10T18:00:00",
+        timezone: "Europe/Kyiv",
+        locationPublicId: "11111111-1111-4111-8111-111111111111",
+        locationName: "Гулівер",
+        locationCity: "Київ",
+        ...overrides,
+    };
+}
+
 describe("renderDeliveryGroup", () => {
-    it("renders the before/after snapshot and escapes untrusted payload text", () => {
+    it("renders a SHIFT_MOVED as before and after with real location names and local times", () => {
         const [group] = groupForDelivery([
             {
                 publicId: "a",
@@ -162,8 +177,14 @@ describe("renderDeliveryGroup", () => {
                 urgency: "URGENT",
                 batchId: null,
                 payload: {
-                    before: { date: "10.08", time: "10:00-18:00", location: "Гулівер" },
-                    after: { date: "11.08", time: "12:00-20:00", location: "<b>Ocean</b>" },
+                    before: snapshot(),
+                    after: snapshot({
+                        startsAtLocal: "2026-08-11T12:00:00",
+                        endsAtLocal: "2026-08-11T20:00:00",
+                        locationPublicId: "22222222-2222-4222-8222-222222222222",
+                        locationName: "Ocean Plaza",
+                        locationCity: "Київ",
+                    }),
                     reason: "хвороба колеги",
                 },
             },
@@ -171,10 +192,134 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("10.08, 10:00-18:00, Гулівер");
+        expect(text).toContain("Гулівер");
+        expect(text).toContain("Ocean Plaza");
+        expect(text).toContain("10.08");
+        expect(text).toContain("10:00");
+        expect(text).toContain("18:00");
+        expect(text).toContain("11.08");
+        expect(text).toContain("12:00");
+        expect(text).toContain("20:00");
+        expect(text).toContain("хвороба колеги");
+        expect(text).not.toContain(FALLBACK_LINE);
+    });
+
+    it("never shows a location UUID to a photographer", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { after: snapshot() },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).not.toContain("11111111-1111-4111-8111-111111111111");
+        expect(text).toContain("Гулівер");
+    });
+
+    it("renders SHIFT_ADDED with only an after snapshot and no empty 'was' line", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { after: snapshot() },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Гулівер");
+        expect(text).not.toContain("Було:");
+        expect(text).not.toContain(FALLBACK_LINE);
+    });
+
+    it("renders SHIFT_REMOVED with only a before snapshot and no empty 'now' line", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { before: snapshot() },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Гулівер");
+        expect(text).not.toContain("Стало:");
+        expect(text).not.toContain(FALLBACK_LINE);
+    });
+
+    it("renders a replacement row's snapshot alongside its role", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: {
+                    after: snapshot(),
+                    role: "accepted",
+                    replacementPublicId: "33333333-3333-4333-8333-333333333333",
+                },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Гулівер");
+        expect(text).not.toContain(FALLBACK_LINE);
+        expect(text).not.toContain("33333333-3333-4333-8333-333333333333");
+    });
+
+    it("escapes untrusted location text rather than emitting raw HTML", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { after: snapshot({ locationName: "<b>Ocean</b>" }) },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
         expect(text).toContain("&lt;b&gt;Ocean&lt;/b&gt;");
         expect(text).not.toContain("<b>Ocean</b>");
-        expect(text).toContain("хвороба колеги");
+    });
+
+    it("falls back only when the payload carries no usable snapshot", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: {},
+            },
+        ]);
+
+        expect(renderDeliveryGroup(group!)).toContain(FALLBACK_LINE);
     });
 
     it("summarises the count for a batched message", () => {
