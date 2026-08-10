@@ -15,6 +15,8 @@ import {
 } from "./aws-business-client.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// The backend rejects a `links` payload larger than 500 entries outright.
+const TELEGRAM_LINKS_CHUNK_SIZE = 500;
 
 const LEGACY_SHEET_BY_LOCATION_CODE: Record<string, string> = {
     "volkland-1-baburka": "Volkland",
@@ -168,6 +170,7 @@ export class AwsBusinessSyncService {
     private async performSync(): Promise<SyncResult> {
         const snapshot = await this.fetchSnapshot();
         const employeeResult = await this.syncEmployeesAndLocations(snapshot);
+        await this.reportTelegramLinks(snapshot);
         const shiftResult = await this.syncShifts(snapshot);
         const result: SyncResult = {
             generatedAt: snapshot.generatedAt,
@@ -325,6 +328,39 @@ export class AwsBusinessSyncService {
                 locations: snapshot.locations.length,
             };
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 });
+    }
+
+    /**
+     * Tells the backend which snapshot telegram ids the bot recognises, so the
+     * owner sees a verification badge when onboarding. A row in the bot's own
+     * `User` table is the evidence: it means that person has interacted with
+     * the bot. This is advisory only — a failure here must never fail the
+     * sync, since photographers losing their schedule is far worse than a
+     * stale badge.
+     */
+    private async reportTelegramLinks(snapshot: AwsBusinessSnapshot): Promise<void> {
+        try {
+            const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
+            const knownUsers = await prisma.user.findMany({
+                where: { telegramId: { in: snapshotTelegramIds } },
+                select: { telegramId: true, username: true },
+            });
+            const known = new Map(knownUsers.map((user) => [user.telegramId.toString(), user.username]));
+            const links = snapshot.employees.map((employee) => {
+                const username = known.get(employee.telegramId);
+                return {
+                    telegramId: employee.telegramId,
+                    found: known.has(employee.telegramId),
+                    ...(username ? { username } : {}),
+                };
+            });
+            for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
+                const chunk = links.slice(index, index + TELEGRAM_LINKS_CHUNK_SIZE);
+                await awsBusinessClient.reportTelegramLinks(chunk);
+            }
+        } catch (error) {
+            logger.warn({ err: error }, "could not report telegram links");
+        }
     }
 
     private async syncShifts(snapshot: AwsBusinessSnapshot) {

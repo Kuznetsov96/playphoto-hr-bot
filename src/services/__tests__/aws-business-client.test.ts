@@ -164,4 +164,24 @@ describe("AwsBusinessClient", () => {
             await expect(new AwsBusinessClient().pendingScheduleNotifications(100)).rejects.toThrow();
         });
     });
+
+    it("posts recognised telegram links to the backend", async () => {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ updated: 1 }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        const result = await new AwsBusinessClient().reportTelegramLinks([
+            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+        ]);
+
+        expect(fetch).toHaveBeenCalledWith(
+            "https://api.example.test/api/v1/internal/bot/telegram-links",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    authorization: `Bearer ${"a".repeat(32)}`,
+                }),
+            }),
+        );
+        expect(result).toEqual({ updated: 1 });
+    });
 });
