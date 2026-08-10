@@ -6,6 +6,8 @@ import { taskService } from "./task-service.js";
 import logger from "../core/logger.js";
 import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { AWS_REMINDERS_CANONICAL_READ_ENABLED } from "../config.js";
+import { awsScheduleCanonicalReadService } from "./aws-schedule-canonical-read.js";
 import { replacementService } from "./replacement-service.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { redis } from "../core/redis.js";
@@ -92,8 +94,74 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
     const { start: startOfDay, end: endOfDay } = getKyivCalendarDateRange(now);
 
     try {
+        const readLegacyShifts = () =>
+            workShiftRepository.findWithRelationsByDateRange(startOfDay, endOfDay);
+
+        const readShifts = async () => {
+            if (!AWS_REMINDERS_CANONICAL_READ_ENABLED) return readLegacyShifts();
+
+            const startedAt = Date.now();
+            try {
+                const staff = await prisma.staffProfile.findMany({
+                    where: { isActive: true, awsEmployeePublicId: { not: null } },
+                    include: { user: true }
+                });
+                const staffById = new Map(staff.map(profile => [profile.id, profile]));
+                const perStaff = await Promise.all(
+                    staff.map(profile =>
+                        awsScheduleCanonicalReadService.findForStaff(profile.id, startOfDay, 5)
+                    )
+                );
+
+                // The canonical projection carries no staff relation, but the
+                // delivery loop below reads shift.staff.user.telegramId and
+                // shift.staff.fullName. Attach the profile here so both paths
+                // hand the loop the identical shape.
+                const shifts = perStaff
+                    .flat()
+                    .filter(shift => shift.date >= startOfDay && shift.date < endOfDay)
+                    .flatMap(shift => {
+                        const profile = staffById.get(shift.staffId);
+                        return profile ? [{ ...shift, staff: profile }] : [];
+                    });
+
+                logBusinessEvent({
+                    event: "bot.reminders_canonical_read.succeeded",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "shift-reminder",
+                    operation: "read",
+                    durationMs: Date.now() - startedAt,
+                    safeContext: { staffCount: staff.length, shiftCount: shifts.length }
+                });
+
+                return shifts;
+            } catch (error: unknown) {
+                const shifts = await readLegacyShifts();
+
+                logBusinessEvent({
+                    event: "bot.reminders_canonical_read.fallback",
+                    level: "warn",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "fallback",
+                    reasonCode: "CANONICAL_SCHEDULE_UNAVAILABLE",
+                    module: "shift-reminder",
+                    operation: "read",
+                    durationMs: Date.now() - startedAt,
+                    safeContext: {
+                        errorType: error instanceof Error ? error.constructor.name : "UnknownError",
+                        legacyShiftCount: shifts.length
+                    }
+                });
+
+                return shifts;
+            }
+        };
+
         const [scheduledShifts, acceptedAssignments] = await Promise.all([
-            workShiftRepository.findWithRelationsByDateRange(startOfDay, endOfDay),
+            readShifts(),
             replacementService.listAcceptedAssignmentsByDateRange(startOfDay, endOfDay)
         ]);
 
