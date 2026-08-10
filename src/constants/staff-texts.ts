@@ -572,6 +572,6 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-btn-confirm": `✅ Підтверджую`,
   "schedule-notif-btn-decline": `🚫 Не зможу`,
   "schedule-notif-ans-confirmed": `Дякуємо! Ми записали твоє підтвердження ✨`,
-  "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Координатор зв'яжеться з тобою 🌸`,
+  "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Щоб змінити цю зміну, напиши в підтримку 🌸`,
   "schedule-notif-ans-expired": `Це сповіщення вже неактуальне 🌸`,
 };
