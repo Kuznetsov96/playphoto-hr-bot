@@ -166,7 +166,7 @@ describe("saveCanonicalPreference", () => {
         ).resolves.toEqual({ ok: false, reasonCode: "CANONICAL_BACKEND_UNAVAILABLE" });
     });
 
-    it("reports a backend failure when the version read itself fails", async () => {
+    it("reports a distinct reasonCode when the version read itself fails, instead of throwing", async () => {
         getSchedulePreference.mockRejectedValue(new Error("HTTP 404"));
 
         await expect(
@@ -178,7 +178,87 @@ describe("saveCanonicalPreference", () => {
                 telegramId: "12345",
                 declined: false,
             }),
-        ).resolves.toEqual({ ok: false, reasonCode: "CANONICAL_BACKEND_UNAVAILABLE" });
+        ).resolves.toEqual({ ok: false, reasonCode: "CANONICAL_PREFERENCE_READ_FAILED" });
         expect(upsertSchedulePreference).not.toHaveBeenCalled();
+    });
+
+    it("produces different reasonCodes for a read failure vs a write failure", async () => {
+        getSchedulePreference.mockRejectedValueOnce(new Error("HTTP 404"));
+        const readResult = await saveCanonicalPreference({
+            staffId: "staff-1",
+            month: "2026-09",
+            selectedDays: [1],
+            comment: null,
+            telegramId: "12345",
+            declined: false,
+        });
+
+        getSchedulePreference.mockResolvedValueOnce({ exists: false });
+        upsertSchedulePreference.mockRejectedValueOnce(new Error("HTTP 503"));
+        const writeResult = await saveCanonicalPreference({
+            staffId: "staff-1",
+            month: "2026-09",
+            selectedDays: [1],
+            comment: null,
+            telegramId: "12345",
+            declined: false,
+        });
+
+        expect(readResult).toEqual({ ok: false, reasonCode: "CANONICAL_PREFERENCE_READ_FAILED" });
+        expect(writeResult).toEqual({ ok: false, reasonCode: "CANONICAL_BACKEND_UNAVAILABLE" });
+        expect(readResult).not.toEqual(writeResult);
+    });
+
+    it("reports a dedicated reasonCode when the write conflicts with a concurrent edit (HTTP 409)", async () => {
+        getSchedulePreference.mockResolvedValue({ exists: true, version: 3 });
+        upsertSchedulePreference.mockRejectedValue(new Error("AWS business API request failed with HTTP 409"));
+
+        await expect(
+            saveCanonicalPreference({
+                staffId: "staff-1",
+                month: "2026-09",
+                selectedDays: [1],
+                comment: null,
+                telegramId: "12345",
+                declined: false,
+            }),
+        ).resolves.toEqual({ ok: false, reasonCode: "CANONICAL_PREFERENCE_STALE_VERSION" });
+    });
+
+    it("logs operation \"read\" for a read failure and operation \"upsert\" for a write failure", async () => {
+        const logger = (await import("../../core/logger.js")).default;
+        const errorSpy = vi.spyOn(logger, "error").mockImplementation(() => undefined as never);
+
+        getSchedulePreference.mockRejectedValueOnce(new Error("HTTP 404"));
+        await saveCanonicalPreference({
+            staffId: "staff-1",
+            month: "2026-09",
+            selectedDays: [1],
+            comment: null,
+            telegramId: "12345",
+            declined: false,
+        });
+
+        getSchedulePreference.mockResolvedValueOnce({ exists: false });
+        upsertSchedulePreference.mockRejectedValueOnce(new Error("HTTP 503"));
+        await saveCanonicalPreference({
+            staffId: "staff-1",
+            month: "2026-09",
+            selectedDays: [1],
+            comment: null,
+            telegramId: "12345",
+            declined: false,
+        });
+
+        expect(errorSpy).toHaveBeenCalledTimes(2);
+        const [readLogArgs, writeLogArgs] = errorSpy.mock.calls;
+        expect(readLogArgs![0]).toMatchObject({ operation: "read", reason_code: "CANONICAL_PREFERENCE_READ_FAILED" });
+        expect(writeLogArgs![0]).toMatchObject({ operation: "upsert", reason_code: "CANONICAL_BACKEND_UNAVAILABLE" });
+        // safeContext stays counters-only: no telegramId, employee id, or other identifier leaks into the log.
+        expect(readLogArgs![0]).toMatchObject({ safe_context: { dayCount: 1 } });
+        expect(JSON.stringify(readLogArgs![0])).not.toContain("12345");
+        expect(JSON.stringify(readLogArgs![0])).not.toContain("emp-uuid");
+
+        errorSpy.mockRestore();
     });
 });
