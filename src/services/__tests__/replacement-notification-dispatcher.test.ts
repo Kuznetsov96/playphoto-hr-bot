@@ -137,7 +137,7 @@ describe("ReplacementNotificationDispatcher", () => {
 
         await dispatcher.dispatchPending();
 
-        expect(sendMessage.mock.calls[0]![1]).toMatch(/потрібне ваше рішення/u);
+        expect(sendMessage.mock.calls[0]![1]).toMatch(/потрібне твоє рішення/u);
         expect(sendMessage.mock.calls[0]![1]).not.toMatch(/автоматично підтверджено/u);
     });
 

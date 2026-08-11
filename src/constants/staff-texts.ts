@@ -141,14 +141,14 @@ ${p.requesterName} → ${p.candidateName}
 🕐 ${p.time}
 
 Зміна вже переведена на нового фотографа. Якщо потрібно скасувати — натисни кнопку нижче.`,
-  "staff-replacement-owner-review-needs-review": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `⚠️ <b>Підміну прийнято, потрібне ваше рішення</b>
+  "staff-replacement-owner-review-needs-review": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `⚠️ <b>Підміну прийнято, потрібне твоє рішення</b>
 
 ${p.requesterName} → ${p.candidateName}
 📍 ${p.location}
 📅 ${p.date}
 🕐 ${p.time}
 
-Автоматичні перевірки не пройшли — підтвердіть чи скасуйте вручну в адмін-панелі. Кнопка нижче скасовує прийняту пропозицію.`,
+Автоматичні перевірки не пройшли — підтвердь або скасуй вручну в адмін-панелі. Кнопка нижче скасовує прийняту пропозицію.`,
   "staff-replacement-owner-review-btn-revert": `↩️ Скасувати підміну`,
   "staff-replacement-revert-ans-done": `Скасовано. Пошук підміни продовжується.`,
   "staff-replacement-revert-ans-failed": `Не вдалося скасувати. Спробуй ще раз із адмін-панелі.`,
