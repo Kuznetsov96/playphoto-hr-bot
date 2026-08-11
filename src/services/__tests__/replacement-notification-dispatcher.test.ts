@@ -141,6 +141,41 @@ describe("ReplacementNotificationDispatcher", () => {
         expect(sendMessage.mock.calls[0]![1]).not.toMatch(/автоматично підтверджено/u);
     });
 
+    it("escapes names and locations, since the message is sent as HTML", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([
+                    {
+                        publicId: "n-owner-3",
+                        kind: "ACCEPTED_OWNER_REVIEW" as const,
+                        telegramId: "999",
+                        payload: {
+                            ...pendingRow.payload,
+                            locationName: "Fly <b>Kids</b>",
+                            requesterDisplayName: "Петренко <i>Олена</i>",
+                            candidateDisplayName: "Іваненко Марія",
+                            outcome: "confirmed" as const,
+                        },
+                    },
+                ]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+            { adminIds: [555] },
+        );
+
+        await dispatcher.dispatchPending();
+
+        // Telegram rejects a message whose HTML does not parse, so an unescaped
+        // angle bracket in a name would silently lose the whole notification.
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).toContain("Fly &lt;b&gt;Kids&lt;/b&gt;");
+        expect(text).toContain("Петренко &lt;i&gt;Олена&lt;/i&gt;");
+        expect(text).not.toContain("<b>Kids</b>");
+    });
+
     it("does not send an owner-review row anywhere when no admin id is configured", async () => {
         const sendMessage = vi.fn();
         const markFailed = vi.fn().mockResolvedValue(undefined);

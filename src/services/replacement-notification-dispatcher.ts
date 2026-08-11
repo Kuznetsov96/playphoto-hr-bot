@@ -2,6 +2,7 @@ import { InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { ADMIN_IDS } from "../config.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
@@ -58,10 +59,14 @@ function formatLocalTime(localDateTime: string): string {
 }
 
 function formatLocationLine(payload: AwsReplacementNotificationPayload): { location: string; date: string } {
-    const location =
-        payload.locationCity && payload.locationCity !== payload.locationName
-            ? `${payload.locationName} (${payload.locationCity})`
-            : payload.locationName;
+    // Every message goes out with `parse_mode: "HTML"`, so backend-supplied
+    // names are escaped here rather than at each call site — a location named
+    // with an angle bracket would otherwise make Telegram reject the whole
+    // message and the notification would never arrive. Mirrors what
+    // `schedule-notification-dispatcher` already does with its payload text.
+    const name = escapeHtml(payload.locationName);
+    const city = payload.locationCity ? escapeHtml(payload.locationCity) : "";
+    const location = city && city !== name ? `${name} (${city})` : name;
     return { location, date: formatLocalDay(payload.startsAtLocal) };
 }
 
@@ -101,8 +106,11 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
 function renderOwnerReviewMessage(payload: AwsReplacementNotificationPayload): string {
     const { location, date } = formatLocationLine(payload);
     const time = `${formatLocalTime(payload.startsAtLocal)}-${formatLocalTime(payload.endsAtLocal)}`;
-    const requesterName = payload.requesterDisplayName ?? "?";
-    const candidateName = payload.candidateDisplayName ?? "?";
+    // Escaped for the same reason as the location: this message is sent with
+    // `parse_mode: "HTML"`, and a name carrying an angle bracket would make
+    // Telegram reject it outright.
+    const requesterName = escapeHtml(payload.requesterDisplayName ?? "?");
+    const candidateName = escapeHtml(payload.candidateDisplayName ?? "?");
     return payload.outcome === "confirmed"
         ? STAFF_TEXTS["staff-replacement-owner-review-confirmed"]({
               requesterName,
