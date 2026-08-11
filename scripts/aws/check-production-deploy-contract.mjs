@@ -60,6 +60,32 @@ for (const [description, value, expected] of requirements) {
     }
 }
 
+// A boolean flag reaches the running bot only if it is declared in every stage
+// of the chain. Miss one and the deploy still succeeds, the summary still
+// prints `true`, and the bot silently starts with the flag off — which is what
+// happened to AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED on its first production
+// deploy. The list is derived from the workflow itself, so a newly added flag
+// is covered here without touching this file.
+const flags = [...content.workflow.matchAll(/printf '(AWS_[A-Z0-9_]+_ENABLED)=%q\\n'/gu)].map(
+    match => match[1]
+);
+if (flags.length === 0) {
+    throw new Error("Production deploy contract failed: no AWS_*_ENABLED flags found in the workflow");
+}
+for (const flag of flags) {
+    const stages = [
+        ["exported by the start hook", content.start, flag],
+        ["defaulted in the deploy script", content.deploy, `${flag}="\${${flag}:-false}"`],
+        ["validated in the deploy script", content.deploy, `echo "${flag} must be true or false."`],
+        ["written to the container env", content.deploy, `set_env ${flag} "$${flag}"`]
+    ];
+    for (const [stage, value, expected] of stages) {
+        if (!value.includes(expected)) {
+            throw new Error(`Production deploy contract failed: ${flag} is not ${stage}`);
+        }
+    }
+}
+
 const syntax = spawnSync(
     "bash",
     ["-n", files.beforeInstall, files.afterInstall, files.start, files.validate, files.deploy, files.mode],
