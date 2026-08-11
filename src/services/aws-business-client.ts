@@ -407,6 +407,41 @@ export class AwsBusinessClient {
     }
 
     /**
+     * Undoes an acceptance made by mistake, within the backend's short undo
+     * window. The backend re-verifies the candidate against the offer itself,
+     * same as accept/decline — this call cannot undo someone else's offer.
+     */
+    async undoReplacementAcceptance(
+        offerPublicId: string,
+        employeePublicId: string,
+        telegramId: string,
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/offers/${encodeURIComponent(offerPublicId)}/undo`,
+            { method: "POST", body: JSON.stringify({ employeePublicId, telegramId }) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    /**
+     * Reverts an auto-confirmed replacement on the owner's behalf. No telegram
+     * id travels in the body: the backend has no telegram id on the owner
+     * model to verify against, so it records this action as SYSTEM rather than
+     * as a specific person. The caller (Task 12's handler) is responsible for
+     * checking the requester is in ADMIN_IDS before ever reaching this method.
+     */
+    async revertReplacementAsOwner(
+        requestPublicId: string,
+        acknowledgeLateRevert: boolean,
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/${encodeURIComponent(requestPublicId)}/revert`,
+            { method: "POST", body: JSON.stringify({ acknowledgeLateRevert }) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    /**
      * Reads the current monthly preference submission, if any, so the caller
      * can echo its `version` back on write. `telegramId` is required by the
      * backend and validated against the employee's stored id — a mismatch is

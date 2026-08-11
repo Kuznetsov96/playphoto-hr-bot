@@ -102,4 +102,56 @@ describe("awsBusinessClient replacements", () => {
             awsBusinessClient.dispatchReplacementWave("55555555-5555-4555-8555-555555555555"),
         ).rejects.toThrow(/409/u);
     });
+
+    it("undoes an acceptance through the canonical endpoint", async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                publicId: "55555555-5555-4555-8555-555555555555",
+                status: "ACTIVE",
+            }),
+        });
+
+        const result = await awsBusinessClient.undoReplacementAcceptance(
+            "66666666-6666-4666-8666-666666666666",
+            "44444444-4444-4444-8444-444444444444",
+            "12345",
+        );
+
+        expect(result.status).toBe("ACTIVE");
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(url).toBe(
+            "https://example.test/api/v1/internal/bot/replacements/offers/66666666-6666-4666-8666-666666666666/undo",
+        );
+        expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+            employeePublicId: "44444444-4444-4444-8444-444444444444",
+            telegramId: "12345",
+        });
+    });
+
+    it("reverts an auto-confirmed replacement without sending a telegram id", async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                publicId: "55555555-5555-4555-8555-555555555555",
+                status: "ACTIVE",
+            }),
+        });
+
+        const result = await awsBusinessClient.revertReplacementAsOwner(
+            "55555555-5555-4555-8555-555555555555",
+            true,
+        );
+
+        expect(result.status).toBe("ACTIVE");
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(url).toBe(
+            "https://example.test/api/v1/internal/bot/replacements/55555555-5555-4555-8555-555555555555/revert",
+        );
+        expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+            acknowledgeLateRevert: true,
+        });
+    });
 });

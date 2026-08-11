@@ -120,6 +120,19 @@ ${p.details}
 ${p.details}
 
 Орієнтуйся на розділ «Мій графік». Якщо це не відповідає домовленості, напиши в підтримку.`,
+  "staff-replacement-offer-unavailable-wave": (p: { location: string; date: string; time: string }) => `🌸 Знаємо, що ти позначала цей день як зайнятий — і це ок.
+Просто на випадок, якщо плани змінилися: зміна ще вільна.
+
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Якщо не можеш — просто пропусти це повідомлення, нічого пояснювати не треба 💛`,
+  "staff-replacement-offer-closed": (p: { location: string; date: string }) => `Зміну на ${p.location} ${p.date} вже закрито. Дякуємо, що відгукнулася 💛`,
+  "staff-replacement-offer-reopened": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — попередня домовленість скасувалася.
+Якщо готова, можеш взяти 🌸`,
+  "staff-replacement-undo-done": `Скасовано. Зміна знову у пошуку — дякуємо, що одразу дала знати 💛`,
+  "staff-replacement-reverted-by-owner": (p: { location: string; date: string }) => `Підміну на ${p.location} ${p.date} скасовано адміністратором. Пошук продовжується.`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,
