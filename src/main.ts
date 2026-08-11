@@ -11,7 +11,7 @@ import { logBusinessEvent } from "./core/log-events.js";
 import { bot } from "./core/bot.js";
 import { redis } from "./core/redis.js";
 import prisma from "./db/core.js";
-import { startWorker, startScheduleNotificationDispatcher } from "./services/worker.js";
+import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher } from "./services/worker.js";
 import { startBirthdayLoop } from "./services/birthday-service.js";
 import { startShiftReminderLoop } from "./services/shift-reminder-service.js";
 import { startDailyReportLoop } from "./services/finance-report.js";
@@ -36,6 +36,7 @@ let queueWorkers: ReturnType<typeof startWorkers> = [];
 let shuttingDown = false;
 let awsBusinessSyncTimer: NodeJS.Timeout | undefined;
 let scheduleNotificationTimer: NodeJS.Timeout | undefined;
+let replacementNotificationTimer: NodeJS.Timeout | undefined;
 
 async function bootstrap() {
     configureContainer();
@@ -150,6 +151,7 @@ async function bootstrap() {
         // Start background services
         startWorker(bot as any);
         scheduleNotificationTimer = startScheduleNotificationDispatcher(bot as any);
+        replacementNotificationTimer = startReplacementNotificationDispatcher(bot as any);
         startBirthdayLoop(bot);
         startShiftReminderLoop(bot);
         startDailyReportLoop(bot);
@@ -211,6 +213,7 @@ async function shutdown(signal: string) {
     try {
         if (awsBusinessSyncTimer) clearInterval(awsBusinessSyncTimer);
         if (scheduleNotificationTimer) clearInterval(scheduleNotificationTimer);
+        if (replacementNotificationTimer) clearInterval(replacementNotificationTimer);
         if (runner?.isRunning()) {
             await runner.stop();
         }

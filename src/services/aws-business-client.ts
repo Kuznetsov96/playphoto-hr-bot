@@ -5,6 +5,27 @@ import {
     AWS_BUSINESS_API_URL,
 } from "../config.js";
 
+/**
+ * Thrown for a non-2xx response whose body could be parsed as the backend's
+ * RFC 9457 problem-details shape, carrying the machine-readable `code` a
+ * caller needs to react to a *specific* failure — e.g.
+ * REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT, which must prompt the owner
+ * rather than read as a generic failure. Every other caller in this file
+ * that only needs "did it work" keeps working unchanged: this still extends
+ * Error and every existing `catch` that just logs `error.message` sees a
+ * sensible message.
+ */
+export class AwsBusinessApiError extends Error {
+    constructor(
+        public readonly status: number,
+        public readonly code: string | undefined,
+        message: string
+    ) {
+        super(message);
+        this.name = "AwsBusinessApiError";
+    }
+}
+
 const locationSchema = z.object({
     publicId: z.string().uuid(),
     canonicalCode: z.string().min(1),
@@ -159,6 +180,9 @@ const scheduleNotificationPayloadSchema = z.object({
     reason: z.string().optional(),
     replacementPublicId: z.string().optional(),
     role: z.enum(["accepted", "requester"]).optional(),
+    // Only present when role is "accepted": what the undo button on this
+    // message calls POST /offers/:offerPublicId/undo with.
+    offerPublicId: z.string().optional(),
 });
 
 const scheduleNotificationSchema = z.object({
@@ -199,6 +223,60 @@ export interface AwsPendingScheduleNotifications {
     unidentifiableCount: number;
 }
 
+/**
+ * Mirrors the backend's `buildReplacementNotificationPayload`
+ * (`apps/api/src/replacements/replacement-notifications.service.ts`) — derived
+ * from that function's actual output, not from a written description of it.
+ *
+ * Not `.strict()`: the backend may add fields (it already documents the shape
+ * as "flat and additive"), and unknown extra keys must not throw here.
+ */
+const replacementNotificationPayloadSchema = z.object({
+    startsAtLocal: z.string().min(1),
+    endsAtLocal: z.string().min(1),
+    timezone: z.string().min(1),
+    locationPublicId: z.string().min(1),
+    locationName: z.string().min(1),
+    locationCity: z.string().min(1),
+    replacementPublicId: z.string().min(1),
+    candidatePublicId: z.string().optional(),
+    requesterDisplayName: z.string().optional(),
+    candidateDisplayName: z.string().optional(),
+    outcome: z.enum(["confirmed", "needs_review"]).optional(),
+    // ACCEPTANCE_REVERTED only: who undid the acceptance. Same problem
+    // `outcome` solves for ACCEPTED_OWNER_REVIEW — without this the bot
+    // cannot tell a candidate's own mis-tap undo apart from an owner revert
+    // and would blame "an administrator" for something nobody but the
+    // candidate herself did.
+    revertedBy: z.enum(["candidate", "owner"]).optional(),
+});
+
+const replacementNotificationSchema = z.object({
+    publicId: z.string().min(1),
+    kind: z.enum(["OFFER", "OFFER_CLOSED", "OFFER_REOPENED", "ACCEPTED_OWNER_REVIEW", "ACCEPTANCE_REVERTED"]),
+    telegramId: z.string().regex(/^\d+$/u).nullable(),
+    payload: replacementNotificationPayloadSchema,
+});
+
+/**
+ * Same shape as `pendingScheduleNotificationsEnvelopeSchema`: rows are parsed
+ * one at a time so a single malformed row cannot abort the whole batch.
+ */
+const pendingReplacementNotificationsEnvelopeSchema = z.object({
+    items: z.array(z.unknown()),
+});
+
+const replacementNotificationIdentitySchema = z.object({
+    publicId: z.string().min(1),
+});
+
+/** Valid rows plus the ids of rows that failed validation and must be reported. */
+export interface AwsPendingReplacementNotifications {
+    items: AwsReplacementNotification[];
+    invalidPublicIds: string[];
+    unidentifiableCount: number;
+}
+
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
 export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
 export type AwsScheduleNotification = z.infer<typeof scheduleNotificationSchema>;
@@ -210,6 +288,9 @@ export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
 export type ReplacementRequestView = { publicId: string; status: string };
 export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
 export type MissingSchedulePreferences = z.infer<typeof missingPreferencesSchema>;
+export type AwsReplacementNotification = z.infer<typeof replacementNotificationSchema>;
+export type AwsReplacementNotificationKind = AwsReplacementNotification["kind"];
+export type AwsReplacementNotificationPayload = z.infer<typeof replacementNotificationPayloadSchema>;
 
 export interface AwsEmployeeUpsert {
     telegramId: string;
@@ -407,6 +488,90 @@ export class AwsBusinessClient {
     }
 
     /**
+     * Undoes an acceptance made by mistake, within the backend's short undo
+     * window. The backend re-verifies the candidate against the offer itself,
+     * same as accept/decline — this call cannot undo someone else's offer.
+     */
+    async undoReplacementAcceptance(
+        offerPublicId: string,
+        employeePublicId: string,
+        telegramId: string,
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/offers/${encodeURIComponent(offerPublicId)}/undo`,
+            { method: "POST", body: JSON.stringify({ employeePublicId, telegramId }) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    /**
+     * Reverts an auto-confirmed replacement on the owner's behalf. No telegram
+     * id travels in the body: the backend has no telegram id on the owner
+     * model to verify against, so it records this action as SYSTEM rather than
+     * as a specific person. The caller (Task 12's handler) is responsible for
+     * checking the requester is in ADMIN_IDS before ever reaching this method.
+     */
+    async revertReplacementAsOwner(
+        requestPublicId: string,
+        acknowledgeLateRevert: boolean,
+    ): Promise<ReplacementRequestView> {
+        const body = await this.request(
+            `/replacements/${encodeURIComponent(requestPublicId)}/revert`,
+            { method: "POST", body: JSON.stringify({ acknowledgeLateRevert }) },
+        );
+        return replacementRequestSchema.parse(body);
+    }
+
+    /**
+     * Fetches replacement notifications awaiting Telegram delivery, validating
+     * each row on its own — same shape as `pendingScheduleNotifications`, so a
+     * single malformed row cannot abort delivery for everyone else in the pass.
+     */
+    async pendingReplacementNotifications(limit: number): Promise<AwsPendingReplacementNotifications> {
+        const query = new URLSearchParams({ limit: String(limit) });
+        const value = await this.request(
+            `/replacement-notifications/pending?${query.toString()}`,
+            { method: "GET" },
+        );
+        const envelope = pendingReplacementNotificationsEnvelopeSchema.parse(value);
+
+        const items: AwsReplacementNotification[] = [];
+        const invalidPublicIds: string[] = [];
+        let unidentifiableCount = 0;
+
+        for (const row of envelope.items) {
+            const parsed = replacementNotificationSchema.safeParse(row);
+            if (parsed.success) {
+                items.push(parsed.data);
+                continue;
+            }
+            const identity = replacementNotificationIdentitySchema.safeParse(row);
+            if (identity.success) invalidPublicIds.push(identity.data.publicId);
+            else unidentifiableCount += 1;
+        }
+
+        return { items, invalidPublicIds, unidentifiableCount };
+    }
+
+    async markReplacementNotificationDelivered(publicId: string): Promise<void> {
+        await this.request(
+            `/replacement-notifications/${encodeURIComponent(publicId)}/delivered`,
+            { method: "POST", body: JSON.stringify({}) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async markReplacementNotificationFailed(publicId: string, reason: string): Promise<void> {
+        await this.request(
+            `/replacement-notifications/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    /**
      * Reads the current monthly preference submission, if any, so the caller
      * can echo its `version` back on write. `telegramId` is required by the
      * backend and validated against the employee's stored id — a mismatch is
@@ -476,7 +641,24 @@ export class AwsBusinessClient {
             signal: AbortSignal.timeout(timeoutMs),
         });
         if (!response.ok) {
-            throw new Error(`AWS business API request failed with HTTP ${response.status}`);
+            // Best-effort: a body that isn't the expected problem-details JSON
+            // (a proxy error page, an empty body) must still produce *some*
+            // error rather than throw a secondary parse failure that hides
+            // the original HTTP status. `.clone()` is unneeded — this is the
+            // only place on the non-ok branch that reads the body.
+            const code = await response
+                .json()
+                .then((body: unknown) =>
+                    typeof body === "object" && body !== null && "code" in body
+                        ? String((body as { code: unknown }).code)
+                        : undefined
+                )
+                .catch(() => undefined);
+            throw new AwsBusinessApiError(
+                response.status,
+                code,
+                `AWS business API request failed with HTTP ${response.status}`
+            );
         }
         if (options.expectsBody === false) {
             return undefined;

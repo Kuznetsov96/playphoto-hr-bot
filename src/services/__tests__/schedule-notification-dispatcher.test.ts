@@ -379,6 +379,115 @@ describe("buildDeliveryKeyboard", () => {
         const normalButtons = buildDeliveryKeyboard(normal!).inline_keyboard.flat();
         expect(normalButtons.map(button => button.text)).toEqual(["🗓 Мій графік"]);
     });
+
+    // Critical 2: the accepting photographer's own undo button. Attached only
+    // to the one message that is unambiguously "you just accepted this,
+    // moments ago" — a lone SHIFT_REASSIGNED notification addressed to her,
+    // carrying the offer id the undo endpoint needs.
+    it("adds an undo button to a lone SHIFT_REASSIGNED reassignment addressed to the accepting candidate", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { role: "accepted", offerPublicId: "offer-1" },
+            },
+        ]);
+
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+
+        expect(buttons.map(button => button.text)).toContain("↩️ Це помилка, скасувати");
+        const undoButton = buttons.find(button => button.text === "↩️ Це помилка, скасувати");
+        expect((undoButton as { callback_data: string }).callback_data).toMatch(/^cb:replun:offer-1:/u);
+    });
+
+    it("does not offer undo on the requester's own copy of the reassignment (role: requester)", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e2",
+                telegramId: "200",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { role: "requester" },
+            },
+        ]);
+
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+
+        expect(buttons.map(button => button.text)).not.toContain("↩️ Це помилка, скасувати");
+    });
+
+    it("does not offer undo once the reassignment is batched with other changes — a tap must never risk undoing the wrong shift", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { role: "accepted", offerPublicId: "offer-1" },
+            },
+            {
+                publicId: "b",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: {},
+            },
+        ]);
+
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+
+        expect(buttons.map(button => button.text)).not.toContain("↩️ Це помилка, скасувати");
+    });
+
+    it("does not offer undo when the payload is missing offerPublicId", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { role: "accepted" },
+            },
+        ]);
+
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+
+        expect(buttons.map(button => button.text)).not.toContain("↩️ Це помилка, скасувати");
+    });
+
+    it("still offers undo on an urgent reassignment, alongside the acknowledgement buttons", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: { role: "accepted", offerPublicId: "offer-1" },
+            },
+        ]);
+
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+
+        expect(buttons.map(button => button.text)).toEqual([
+            "✅ Підтверджую",
+            "🚫 Не зможу",
+            "↩️ Це помилка, скасувати",
+        ]);
+    });
 });
 
 describe("toSafeFailureReason", () => {
