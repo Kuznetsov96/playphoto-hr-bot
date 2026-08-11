@@ -154,4 +154,64 @@ describe("awsBusinessClient replacements", () => {
             acknowledgeLateRevert: true,
         });
     });
+
+    it("fetches pending replacement notifications and separates malformed rows", async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                items: [
+                    {
+                        publicId: "n-1",
+                        kind: "OFFER_CLOSED",
+                        telegramId: "222",
+                        payload: {
+                            startsAtLocal: "2026-08-15T10:00",
+                            endsAtLocal: "2026-08-15T19:00",
+                            timezone: "Europe/Kyiv",
+                            locationPublicId: "loc-1",
+                            locationName: "Аркадія",
+                            locationCity: "Одеса",
+                            replacementPublicId: "req-1",
+                        },
+                    },
+                    { publicId: "n-2", kind: "NOT_A_REAL_KIND" },
+                    { notPublicIdAtAll: true },
+                ],
+            }),
+        });
+
+        const result = await awsBusinessClient.pendingReplacementNotifications(50);
+
+        expect(result.items).toHaveLength(1);
+        expect(result.items[0]!.publicId).toBe("n-1");
+        expect(result.invalidPublicIds).toEqual(["n-2"]);
+        expect(result.unidentifiableCount).toBe(1);
+        expect(fetchMock.mock.calls[0]![0]).toBe(
+            "https://example.test/api/v1/internal/bot/replacement-notifications/pending?limit=50",
+        );
+    });
+
+    it("marks a replacement notification delivered", async () => {
+        fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+
+        await awsBusinessClient.markReplacementNotificationDelivered("n-1");
+
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(url).toBe(
+            "https://example.test/api/v1/internal/bot/replacement-notifications/n-1/delivered",
+        );
+        expect((init as RequestInit).method).toBe("POST");
+    });
+
+    it("marks a replacement notification failed with a truncated reason", async () => {
+        fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+
+        await awsBusinessClient.markReplacementNotificationFailed("n-1", "x".repeat(600));
+
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(url).toBe("https://example.test/api/v1/internal/bot/replacement-notifications/n-1/failed");
+        const body = JSON.parse((init as RequestInit).body as string) as { reason: string };
+        expect(body.reason).toHaveLength(500);
+    });
 });

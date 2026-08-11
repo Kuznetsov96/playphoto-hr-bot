@@ -133,6 +133,25 @@ ${p.details}
 Якщо готова, можеш взяти 🌸`,
   "staff-replacement-undo-done": `Скасовано. Зміна знову у пошуку — дякуємо, що одразу дала знати 💛`,
   "staff-replacement-reverted-by-owner": (p: { location: string; date: string }) => `Підміну на ${p.location} ${p.date} скасовано адміністратором. Пошук продовжується.`,
+  "staff-replacement-owner-review-confirmed": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `✅ <b>Підміну автоматично підтверджено</b>
+
+${p.requesterName} → ${p.candidateName}
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Зміна вже переведена на нового фотографа. Якщо потрібно скасувати — натисни кнопку нижче.`,
+  "staff-replacement-owner-review-needs-review": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `⚠️ <b>Підміну прийнято, потрібне ваше рішення</b>
+
+${p.requesterName} → ${p.candidateName}
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Автоматичні перевірки не пройшли — підтвердіть чи скасуйте вручну в адмін-панелі. Кнопка нижче скасовує прийняту пропозицію.`,
+  "staff-replacement-owner-review-btn-revert": `↩️ Скасувати підміну`,
+  "staff-replacement-revert-ans-done": `Скасовано. Пошук підміни продовжується.`,
+  "staff-replacement-revert-ans-failed": `Не вдалося скасувати. Спробуй ще раз із адмін-панелі.`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,

@@ -34,6 +34,10 @@ import { escapeHtml } from "./admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import prisma from "../db/core.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
+import {
+    REPLACEMENT_REVERT_CALLBACK_CODE,
+    revertReplacementIfOwner
+} from "../services/replacement-notification-dispatcher.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -261,6 +265,42 @@ handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
             ? STAFF_TEXTS["schedule-notif-ans-confirmed"]
             : STAFF_TEXTS["schedule-notif-ans-declined"]
     );
+});
+
+// Owner's revert button on an ACCEPTED_OWNER_REVIEW replacement message.
+//
+// The backend cannot verify who pressed this: its service token proves only
+// "this is the bot", and there is no telegramId on the owner (User) model to
+// check against. `revertReplacementIfOwner` is the ONLY gate — it must run,
+// and must run before any API call, every single time. See its doc comment
+// in `services/replacement-notification-dispatcher.js` for the full reasoning.
+handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CALLBACK_CODE}:`), async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const requestPublicId = readCallbackPayload(data, { code: REPLACEMENT_REVERT_CALLBACK_CODE });
+    if (!requestPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    const outcome = await revertReplacementIfOwner({
+        telegramId: ctx.from?.id,
+        requestPublicId,
+        // The bot never asks the owner to re-confirm a late revert inline; a
+        // shift starting within two hours is rare enough on this path that
+        // sending them to the admin panel for that specific confirmation is
+        // an acceptable trade for not building a second Telegram prompt.
+        acknowledgeLateRevert: false,
+        client: awsBusinessClient,
+    });
+
+    if (outcome === "denied") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["admin-err-access-denied"]);
+    }
+    if (outcome === "failed") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-failed"]);
+    }
+
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-done"]);
 });
 
 // Global Broadcast Receipt Confirmation
