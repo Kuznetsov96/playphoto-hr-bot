@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ReplacementNotificationDispatcher, revertReplacementIfOwner } from "../replacement-notification-dispatcher.js";
+import {
+    ReplacementNotificationDispatcher,
+    revertReplacementIfOwner,
+    undoReplacementAcceptanceAsCandidate,
+} from "../replacement-notification-dispatcher.js";
 
 const pendingRow = {
     publicId: "n-1",
@@ -176,6 +180,77 @@ describe("ReplacementNotificationDispatcher", () => {
         expect(text).not.toContain("<b>Kids</b>");
     });
 
+    // Important 1: the requester must never be told "an administrator"
+    // cancelled her replacement when the candidate undid her own mis-tap —
+    // `revertedBy` is the discriminator the backend now sends, mirroring how
+    // `outcome` disambiguates ACCEPTED_OWNER_REVIEW.
+    it("tells the requester the candidate undid her own acceptance, not that an administrator cancelled it", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([
+                    {
+                        publicId: "n-revert-1",
+                        kind: "ACCEPTANCE_REVERTED" as const,
+                        telegramId: "111",
+                        payload: { ...pendingRow.payload, revertedBy: "candidate" as const },
+                    },
+                ]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+
+        await dispatcher.dispatchPending();
+
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).not.toMatch(/адміністратором/u);
+    });
+
+    it("still tells the requester an administrator cancelled it when the owner reverted", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([
+                    {
+                        publicId: "n-revert-2",
+                        kind: "ACCEPTANCE_REVERTED" as const,
+                        telegramId: "111",
+                        payload: { ...pendingRow.payload, revertedBy: "owner" as const },
+                    },
+                ]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+
+        await dispatcher.dispatchPending();
+
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).toMatch(/адміністратором/u);
+    });
+
+    it("defaults ACCEPTANCE_REVERTED to the administrator wording when revertedBy is missing", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([
+                    { publicId: "n-revert-3", kind: "ACCEPTANCE_REVERTED" as const, telegramId: "111", payload: pendingRow.payload },
+                ]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+
+        await dispatcher.dispatchPending();
+
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).toMatch(/адміністратором/u);
+    });
+
     it("does not send an owner-review row anywhere when no admin id is configured", async () => {
         const sendMessage = vi.fn();
         const markFailed = vi.fn().mockResolvedValue(undefined);
@@ -292,6 +367,40 @@ describe("revertReplacementIfOwner", () => {
         expect(outcome).toBe("failed");
     });
 
+    // Important 2: a late revert (shift starts within 2h) must not read as a
+    // failure — the backend is asking the owner to knowingly confirm, not
+    // reporting that something broke.
+    it("reports needs_acknowledgement, not failed, when the backend's error carries that code", async () => {
+        const revertReplacementAsOwner = vi.fn().mockRejectedValue(
+            Object.assign(new Error("late revert"), { code: "REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT" }),
+        );
+
+        const outcome = await revertReplacementIfOwner({
+            telegramId: 111,
+            requestPublicId: "req-1",
+            acknowledgeLateRevert: false,
+            client: { revertReplacementAsOwner },
+            adminIds: [111],
+        });
+
+        expect(outcome).toBe("needs_acknowledgement");
+    });
+
+    it("the second tap, with acknowledgeLateRevert: true, reverts", async () => {
+        const revertReplacementAsOwner = vi.fn().mockResolvedValue({ publicId: "req-1", status: "ACTIVE" });
+
+        const outcome = await revertReplacementIfOwner({
+            telegramId: 111,
+            requestPublicId: "req-1",
+            acknowledgeLateRevert: true,
+            client: { revertReplacementAsOwner },
+            adminIds: [111],
+        });
+
+        expect(revertReplacementAsOwner).toHaveBeenCalledWith("req-1", true);
+        expect(outcome).toBe("reverted");
+    });
+
     it("defaults to the bot's real ADMIN_IDS when none are supplied", async () => {
         const revertReplacementAsOwner = vi.fn();
 
@@ -307,5 +416,55 @@ describe("revertReplacementIfOwner", () => {
 
         expect(revertReplacementAsOwner).not.toHaveBeenCalled();
         expect(outcome).toBe("denied");
+    });
+});
+
+// Critical 2: the candidate undo button was previously unreachable — no
+// handler called this at all. The window and ownership checks are the
+// backend's job (undoByCandidate re-verifies the offer belongs to this
+// employee/telegramId), so this only has to prove the client is called with
+// what the accepting photographer actually is, and that the result is
+// classified correctly.
+describe("undoReplacementAcceptanceAsCandidate", () => {
+    it("calls the client with the pressing photographer's own identity, not an admin gate", async () => {
+        const undoReplacementAcceptance = vi.fn().mockResolvedValue({ publicId: "req-1", status: "ACTIVE" });
+
+        const outcome = await undoReplacementAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoReplacementAcceptance },
+        });
+
+        expect(undoReplacementAcceptance).toHaveBeenCalledWith("offer-1", "emp-2", "222");
+        expect(outcome).toBe("undone");
+    });
+
+    it("reports window_closed, not a generic failure, when the backend's error carries that code", async () => {
+        const undoReplacementAcceptance = vi.fn().mockRejectedValue(
+            Object.assign(new Error("too late"), { code: "REPLACEMENT_UNDO_WINDOW_CLOSED" }),
+        );
+
+        const outcome = await undoReplacementAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoReplacementAcceptance },
+        });
+
+        expect(outcome).toBe("window_closed");
+    });
+
+    it("reports failed for any other error, including a plain network failure", async () => {
+        const undoReplacementAcceptance = vi.fn().mockRejectedValue(new Error("network down"));
+
+        const outcome = await undoReplacementAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoReplacementAcceptance },
+        });
+
+        expect(outcome).toBe("failed");
     });
 });

@@ -89,7 +89,15 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
         case "OFFER_REOPENED":
             return STAFF_TEXTS["staff-replacement-offer-reopened"]({ location, date });
         case "ACCEPTANCE_REVERTED":
-            return STAFF_TEXTS["staff-replacement-reverted-by-owner"]({ location, date });
+            // `revertedBy` discriminates the same way `outcome` does for
+            // ACCEPTED_OWNER_REVIEW: without it, a candidate who undid her
+            // own mis-tap within the 3-minute window would be told "an
+            // administrator" cancelled it, when nobody but her acted.
+            // Missing/unrecognised defaults to the owner text — the more
+            // cautious reading when the discriminator itself is absent.
+            return row.payload.revertedBy === "candidate"
+                ? STAFF_TEXTS["staff-replacement-reverted-by-candidate"]({ location, date })
+                : STAFF_TEXTS["staff-replacement-reverted-by-owner"]({ location, date });
         case "ACCEPTED_OWNER_REVIEW":
             return null;
     }
@@ -134,6 +142,14 @@ function renderOwnerReviewMessage(payload: AwsReplacementNotificationPayload): s
  * string this dispatcher signs with, rather than a second hardcoded copy.
  */
 export const REPLACEMENT_REVERT_CALLBACK_CODE = "replrv";
+
+/**
+ * Second tap of the revert flow, sent only after the backend has already
+ * answered REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT once. A distinct code
+ * (not the same one re-signed) so the handler that reads it can go straight
+ * to `acknowledgeLateRevert: true` without re-deriving which step it is on.
+ */
+export const REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE = "replrvc";
 
 function buildOwnerReviewKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard {
     return new InlineKeyboard().text(
@@ -392,6 +408,72 @@ export function createReplacementNotificationDispatcher(
     return new ReplacementNotificationDispatcher(awsReplacementNotificationClient, api);
 }
 
+/** Just the client surface the undo handler needs. */
+export interface ReplacementUndoClient {
+    undoReplacementAcceptance(
+        offerPublicId: string,
+        employeePublicId: string,
+        telegramId: string,
+    ): Promise<{ publicId: string; status: string }>;
+}
+
+export type ReplacementUndoOutcome = "undone" | "window_closed" | "failed";
+
+/**
+ * Calls the candidate's own undo endpoint and classifies the result.
+ *
+ * Unlike `revertReplacementIfOwner`, there is no ADMIN_IDS-style gate here:
+ * the backend re-verifies the offer belongs to (employeePublicId,
+ * telegramId) itself — see `undoByCandidate`'s own lookup — so duplicating
+ * an ownership check in the bot would only be able to get it wrong, not
+ * more right. Kept as a plain function (not folded into the grammy handler)
+ * for the same reason as `revertReplacementIfOwner`: it must be testable
+ * without constructing a grammy `Context`.
+ */
+export async function undoReplacementAcceptanceAsCandidate(input: {
+    offerPublicId: string;
+    employeePublicId: string;
+    telegramId: number;
+    client: ReplacementUndoClient;
+}): Promise<ReplacementUndoOutcome> {
+    try {
+        await input.client.undoReplacementAcceptance(
+            input.offerPublicId,
+            input.employeePublicId,
+            String(input.telegramId),
+        );
+    } catch (error) {
+        const code =
+            typeof error === "object" && error !== null && "code" in error
+                ? String((error as { code: unknown }).code)
+                : undefined;
+        logBusinessEvent({
+            event: "bot.replacement_notifications.undo_failed",
+            level: "warn",
+            telegramId: input.telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failed",
+            reasonCode: code ?? "UNDO_REQUEST_FAILED",
+            module: "replacement-notification-dispatcher",
+            operation: "undoReplacementAcceptanceAsCandidate",
+            safeContext: { offerPublicId: input.offerPublicId },
+        });
+        return code === "REPLACEMENT_UNDO_WINDOW_CLOSED" ? "window_closed" : "failed";
+    }
+
+    logBusinessEvent({
+        event: "bot.replacement_notifications.undone",
+        actorType: "staff",
+        actorRole: "staff",
+        telegramId: input.telegramId,
+        result: "success",
+        module: "replacement-notification-dispatcher",
+        operation: "undoReplacementAcceptanceAsCandidate",
+    });
+    return "undone";
+}
+
 /** Just the client surface the revert handler needs. */
 export interface ReplacementRevertClient {
     revertReplacementAsOwner(
@@ -400,7 +482,16 @@ export interface ReplacementRevertClient {
     ): Promise<{ publicId: string; status: string }>;
 }
 
-export type ReplacementRevertOutcome = "reverted" | "denied" | "failed";
+export type ReplacementRevertOutcome = "reverted" | "denied" | "failed" | "needs_acknowledgement";
+
+/**
+ * The backend's own code for "this would work, but the shift starts soon
+ * enough that a replacement may not be found — confirm to proceed." Matched
+ * by string against whatever the thrown error exposes as `.code`, duck-typed
+ * rather than an `instanceof AwsBusinessApiError` check, so a test can supply
+ * a plain `{ code }` object without importing the client's error class.
+ */
+const REVERT_NEEDS_ACKNOWLEDGEMENT_CODE = "REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT";
 
 /**
  * The only check standing between the revert button and
@@ -448,6 +539,25 @@ export async function revertReplacementIfOwner(input: {
     try {
         await input.client.revertReplacementAsOwner(input.requestPublicId, input.acknowledgeLateRevert);
     } catch (error) {
+        const code =
+            typeof error === "object" && error !== null && "code" in error
+                ? String((error as { code: unknown }).code)
+                : undefined;
+        if (code === REVERT_NEEDS_ACKNOWLEDGEMENT_CODE) {
+            // Not a failure: the backend is asking the owner to knowingly
+            // confirm a late revert, not reporting that anything went wrong.
+            logBusinessEvent({
+                event: "bot.replacement_notifications.revert_needs_acknowledgement",
+                actorType: "staff",
+                actorRole: "staff",
+                telegramId: input.telegramId,
+                result: "skipped",
+                reasonCode: REVERT_NEEDS_ACKNOWLEDGEMENT_CODE,
+                module: "replacement-notification-dispatcher",
+                operation: "revertReplacementIfOwner",
+            });
+            return "needs_acknowledgement";
+        }
         logBusinessEvent({
             event: "bot.replacement_notifications.revert_failed",
             level: "error",

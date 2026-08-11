@@ -36,8 +36,11 @@ import prisma from "../db/core.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
 import {
     REPLACEMENT_REVERT_CALLBACK_CODE,
-    revertReplacementIfOwner
+    REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE,
+    revertReplacementIfOwner,
+    undoReplacementAcceptanceAsCandidate
 } from "../services/replacement-notification-dispatcher.js";
+import { REPLACEMENT_UNDO_CALLBACK_CODE } from "../services/schedule-notification-dispatcher.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -274,6 +277,12 @@ handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
 // check against. `revertReplacementIfOwner` is the ONLY gate — it must run,
 // and must run before any API call, every single time. See its doc comment
 // in `services/replacement-notification-dispatcher.js` for the full reasoning.
+//
+// A shift starting within two hours makes the backend answer
+// REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT instead of reverting outright: the
+// owner is warned that a replacement may not be found in time and must tap a
+// second, distinct button (`replrvc`) to proceed. Both taps run through this
+// same gate — the second tap is not a shortcut around it.
 handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CALLBACK_CODE}:`), async (ctx) => {
     const data = ctx.callbackQuery.data ?? "";
     const requestPublicId = readCallbackPayload(data, { code: REPLACEMENT_REVERT_CALLBACK_CODE });
@@ -281,26 +290,111 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CALLBACK_CODE}:`), a
         return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
     }
 
+    await performOwnerRevert(ctx, requestPublicId, false);
+});
+
+// Second tap: the owner already saw the late-revert warning and confirmed.
+handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE}:`), async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const requestPublicId = readCallbackPayload(data, { code: REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE });
+    if (!requestPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    await performOwnerRevert(ctx, requestPublicId, true);
+});
+
+async function performOwnerRevert(
+    ctx: MyContext,
+    requestPublicId: string,
+    acknowledgeLateRevert: boolean
+): Promise<void> {
     const outcome = await revertReplacementIfOwner({
         telegramId: ctx.from?.id,
         requestPublicId,
-        // The bot never asks the owner to re-confirm a late revert inline; a
-        // shift starting within two hours is rare enough on this path that
-        // sending them to the admin panel for that specific confirmation is
-        // an acceptable trade for not building a second Telegram prompt.
-        acknowledgeLateRevert: false,
+        acknowledgeLateRevert,
         client: awsBusinessClient,
     });
 
     if (outcome === "denied") {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["admin-err-access-denied"]);
+        await ctx.answerCallbackQuery(STAFF_TEXTS["admin-err-access-denied"]);
+        return;
+    }
+    if (outcome === "needs_acknowledgement") {
+        // Replace the original revert button with a warning and an explicit
+        // second confirmation — the owner is told *why* it didn't just work,
+        // not left thinking the tap failed.
+        await ctx
+            .editMessageReplyMarkup({
+                reply_markup: new InlineKeyboard()
+                    .text(
+                        STAFF_TEXTS["staff-replacement-revert-late-btn-confirm"],
+                        buildSignedCallback(REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE, requestPublicId)
+                    )
+                    .row()
+                    .text(STAFF_TEXTS["staff-replacement-revert-late-btn-cancel"], "staff_hub_nav")
+            })
+            .catch(() => { });
+        await ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["staff-replacement-revert-late-warning"],
+            show_alert: true
+        });
+        return;
     }
     if (outcome === "failed") {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-failed"]);
+        await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-failed"]);
+        return;
     }
 
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-done"]);
+}
+
+// The accepting photographer's own undo button, attached to her
+// SHIFT_REASSIGNED confirmation message (see buildDeliveryKeyboard in
+// schedule-notification-dispatcher.js — the replacement dispatcher only ever
+// messages the owner, never the candidate, so this button has to live on the
+// pre-existing schedule-change message instead of a replacement-specific one).
+//
+// Unlike the owner revert button, the backend CAN verify who is pressing
+// this: the offer is looked up by (offerPublicId, employeePublicId,
+// telegramId) and undoByCandidate re-checks ownership itself, so the window
+// and ownership checks are deliberately not duplicated here — same division
+// of responsibility as accept/decline.
+handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_UNDO_CALLBACK_CODE}:`), async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const offerPublicId = readCallbackPayload(data, { code: REPLACEMENT_UNDO_CALLBACK_CODE });
+    if (!offerPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    const telegramId = ctx.from?.id;
+    const staff = telegramId
+        ? await prisma.staffProfile.findFirst({
+            where: { user: { telegramId: BigInt(telegramId) } },
+            select: { awsEmployeePublicId: true }
+        })
+        : null;
+    if (!staff?.awsEmployeePublicId || telegramId === undefined) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);
+    }
+
+    const outcome = await undoReplacementAcceptanceAsCandidate({
+        offerPublicId,
+        employeePublicId: staff.awsEmployeePublicId,
+        telegramId,
+        client: awsBusinessClient,
+    });
+
+    if (outcome === "window_closed") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-window-closed"]);
+    }
+    if (outcome === "failed") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);
+    }
+
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-done"]);
 });
 
 // Global Broadcast Receipt Confirmation

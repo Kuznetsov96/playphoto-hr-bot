@@ -5,6 +5,27 @@ import {
     AWS_BUSINESS_API_URL,
 } from "../config.js";
 
+/**
+ * Thrown for a non-2xx response whose body could be parsed as the backend's
+ * RFC 9457 problem-details shape, carrying the machine-readable `code` a
+ * caller needs to react to a *specific* failure — e.g.
+ * REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT, which must prompt the owner
+ * rather than read as a generic failure. Every other caller in this file
+ * that only needs "did it work" keeps working unchanged: this still extends
+ * Error and every existing `catch` that just logs `error.message` sees a
+ * sensible message.
+ */
+export class AwsBusinessApiError extends Error {
+    constructor(
+        public readonly status: number,
+        public readonly code: string | undefined,
+        message: string
+    ) {
+        super(message);
+        this.name = "AwsBusinessApiError";
+    }
+}
+
 const locationSchema = z.object({
     publicId: z.string().uuid(),
     canonicalCode: z.string().min(1),
@@ -159,6 +180,9 @@ const scheduleNotificationPayloadSchema = z.object({
     reason: z.string().optional(),
     replacementPublicId: z.string().optional(),
     role: z.enum(["accepted", "requester"]).optional(),
+    // Only present when role is "accepted": what the undo button on this
+    // message calls POST /offers/:offerPublicId/undo with.
+    offerPublicId: z.string().optional(),
 });
 
 const scheduleNotificationSchema = z.object({
@@ -219,6 +243,12 @@ const replacementNotificationPayloadSchema = z.object({
     requesterDisplayName: z.string().optional(),
     candidateDisplayName: z.string().optional(),
     outcome: z.enum(["confirmed", "needs_review"]).optional(),
+    // ACCEPTANCE_REVERTED only: who undid the acceptance. Same problem
+    // `outcome` solves for ACCEPTED_OWNER_REVIEW — without this the bot
+    // cannot tell a candidate's own mis-tap undo apart from an owner revert
+    // and would blame "an administrator" for something nobody but the
+    // candidate herself did.
+    revertedBy: z.enum(["candidate", "owner"]).optional(),
 });
 
 const replacementNotificationSchema = z.object({
@@ -611,7 +641,24 @@ export class AwsBusinessClient {
             signal: AbortSignal.timeout(timeoutMs),
         });
         if (!response.ok) {
-            throw new Error(`AWS business API request failed with HTTP ${response.status}`);
+            // Best-effort: a body that isn't the expected problem-details JSON
+            // (a proxy error page, an empty body) must still produce *some*
+            // error rather than throw a secondary parse failure that hides
+            // the original HTTP status. `.clone()` is unneeded — this is the
+            // only place on the non-ok branch that reads the body.
+            const code = await response
+                .json()
+                .then((body: unknown) =>
+                    typeof body === "object" && body !== null && "code" in body
+                        ? String((body as { code: unknown }).code)
+                        : undefined
+                )
+                .catch(() => undefined);
+            throw new AwsBusinessApiError(
+                response.status,
+                code,
+                `AWS business API request failed with HTTP ${response.status}`
+            );
         }
         if (options.expectsBody === false) {
             return undefined;
