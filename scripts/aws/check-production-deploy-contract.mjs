@@ -14,7 +14,6 @@ const files = {
 const content = Object.fromEntries(Object.entries(files).map(([name, path]) => [name, readFileSync(path, "utf8")]));
 
 const requirements = [
-    ["workflow defaults schedule shadow telemetry off", content.workflow, "default: false"],
     ["workflow deploys live mode", content.workflow, "printf 'BOT_RUNTIME_MODE=%q\\n' live"],
     ["workflow marks a live-safe revision", content.workflow, "LIVE_SAFE_ROLLBACK_VERSION"],
     ["workflow checks the previous immutable artifact", content.workflow, "previous-bot-revision.zip"],
@@ -57,6 +56,26 @@ const requirements = [
 for (const [description, value, expected] of requirements) {
     if (!value.includes(expected)) {
         throw new Error(`Production deploy contract failed: ${description}`);
+    }
+}
+
+// Every dispatch input is written straight into the running bot, so a deploy always sets
+// all of them rather than leaving the current values alone. Defaulting the form to `false`
+// therefore made "Run workflow" without touching the switches a silent rollback of every
+// enabled feature. The defaults must stay `true` to match what production runs; a flag is
+// disabled by deliberately unticking it, never by accepting the form as it opens.
+const workflowInputDefaults = [
+    ...content.workflow.matchAll(/^ {6}([a-z0-9_]+_enabled):\n(?: {8}.*\n)*? {8}default: (true|false)$/gmu)
+];
+if (workflowInputDefaults.length === 0) {
+    throw new Error("Production deploy contract failed: no *_enabled workflow inputs found");
+}
+for (const [, input, value] of workflowInputDefaults) {
+    if (value !== "true") {
+        throw new Error(
+            `Production deploy contract failed: workflow input ${input} defaults to ${value}; ` +
+            "it must default to true so a routine deploy cannot silently disable a live feature"
+        );
     }
 }
 
