@@ -13,7 +13,9 @@ const location = {
     id: "local-location",
     awsPublicId: canonicalShift.locationPublicId,
     name: "Canonical location mapping",
-    schedule: "10:00-20:00"
+    branch: "Shevchyk",
+    schedule: "10:00-20:00",
+    openingHours: [{ dayOfWeek: 1, opens: "14:00", closes: "21:00" }]
 };
 
 const projection = {
@@ -33,7 +35,9 @@ describe("projectCanonicalSchedule", () => {
             location: {
                 id: location.id,
                 name: location.name,
-                schedule: location.schedule
+                branch: location.branch,
+                schedule: location.schedule,
+                openingHours: location.openingHours
             }
         }]);
     });

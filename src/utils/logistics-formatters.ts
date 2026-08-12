@@ -12,6 +12,7 @@ type StaffWithUser = {
 type LocationLike = {
     name?: string | null;
     city?: string | null;
+    branch?: string | null;
 } | null | undefined;
 
 export function formatLogisticsPhotographerName(staff: StaffWithUser): string {
@@ -37,5 +38,5 @@ function shortenPhotographerName(fullName: string): string {
 export function formatLogisticsLocation(location: LocationLike): string {
     if (!location?.name) return "Unknown";
     if (!location.city) return location.name;
-    return formatLocationName(location.name, location.city);
+    return formatLocationName(location.name, location.city, location.branch);
 }

@@ -26,13 +26,38 @@ export class AwsBusinessApiError extends Error {
     }
 }
 
+/**
+ * One canonical opening-hours row. `dayOfWeek` is ISO-8601 (1 = Monday … 7 = Sunday) and the
+ * times are local wall-clock for the location's timezone, so they are never re-converted.
+ * `closes` < `opens` means the shift runs past midnight.
+ */
+const openingHoursSchema = z.object({
+    dayOfWeek: z.number().int().min(1).max(7),
+    opens: z.string().regex(/^\d{2}:\d{2}$/u),
+    closes: z.string().regex(/^\d{2}:\d{2}$/u),
+}).strict();
+
 const locationSchema = z.object({
     publicId: z.string().uuid(),
     canonicalCode: z.string().min(1),
     name: z.string().min(1),
+    /**
+     * Disambiguates same-named venues, e.g. the three Zaporizhzhia Volklands.
+     *
+     * Optional so the bot can be deployed before the backend that sends it: an older API
+     * omits the field, and requiring it would make the whole snapshot fail validation and
+     * stop schedule syncing. Absent simply means "no branch known yet".
+     */
+    branch: z.string().nullable().optional().default(null),
     city: z.string().min(1),
     address: z.string().nullable(),
     timezone: z.string().min(1),
+    /**
+     * Empty when the owner has not recorded hours; never defaulted to a guess.
+     * Optional for the same deploy-ordering reason as `branch` — an older API omits it,
+     * and the display layer already falls back to the legacy text schedule.
+     */
+    openingHours: z.array(openingHoursSchema).optional().default([]),
 }).strict();
 
 const assignmentSchema = z.object({

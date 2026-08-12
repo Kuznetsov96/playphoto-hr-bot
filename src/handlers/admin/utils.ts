@@ -404,10 +404,16 @@ export async function sendTaskNotification(
 
 /**
  * Cleans up raw location names from DDS/Technical prefixes
- * and formats them as "Name (City)"
- * @example "Выручка от продаж Leolend (Lviv)" -> "Leolend (Lviv)"
+ * and formats them as "Name (Branch) (City)"
+ *
+ * `branch` is the canonical discriminator for venues sharing a name — the three Zaporizhzhia
+ * Volklands are all named "Volkland" and differ only by branch. Pass it whenever it is
+ * known, or same-named locations collapse into one indistinguishable label.
+ *
+ * @example "Выручка от продаж Leolend" -> "Leolend (Lviv)"
+ * @example ("Volkland", "Запоріжжя", "Шевчик") -> "Volkland (Шевчик) (Zaporizhzhia)"
  */
-export function formatLocationName(rawName: string, city: string): string {
+export function formatLocationName(rawName: string, city: string, branch?: string | null): string {
     // 1. Remove common technical prefixes (DDS articles)
     // Supports RU/UA variants: "Выручка от продаж", "Виручка від продажу", "Дохід ", etc.
     let clean = rawName
@@ -470,8 +476,9 @@ export function formatLocationName(rawName: string, city: string): string {
         nfcClean = nfcClean.replace(brandRegex, en);
     }
 
-    // 2.6 Normalize "Volkland" (without number) to "Volkland 1"
-    nfcClean = nfcClean.replace(/\bVolkland\b(?!\s*\d)/gi, 'Volkland 1');
+    // 2.6 The canonical `branch` now distinguishes same-named venues. The old rule here
+    // rewrote a bare "Volkland" to "Volkland 1", which invented a fact: it turned an unknown
+    // branch into a confident and often wrong "1". An unbranded name stays as it is.
 
     // Final cleanup of extra spaces or empty parentheses
     const finalClean = nfcClean
@@ -479,7 +486,9 @@ export function formatLocationName(rawName: string, city: string): string {
         .replace(/\s{2,}/g, ' ')
         .trim();
 
-    // 3. Final format: "Location (City)" with English city name
+    // 3. Final format: "Location (Branch) (City)" with English city name
     const englishCity = normalizeCity(cityNoEmoji);
-    return `${finalClean} (${englishCity})`;
+    const trimmedBranch = branch?.trim();
+    const withBranch = trimmedBranch ? `${finalClean} (${trimmedBranch})` : finalClean;
+    return `${withBranch} (${englishCity})`;
 }

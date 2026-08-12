@@ -2,6 +2,15 @@ import { Prisma } from "@prisma/client";
 import type { WorkShift } from "@prisma/client";
 import prisma from "../db/core.js";
 
+/**
+ * `location: true` alone loads only scalars, so the canonical opening hours would come back
+ * undefined and every shift without explicit times would read "час не вказано". Anything that
+ * renders a shift time must include the relation.
+ */
+const locationWithOpeningHours = {
+    include: { openingHours: { orderBy: { dayOfWeek: "asc" } } },
+} satisfies Prisma.LocationDefaultArgs;
+
 export class WorkShiftRepository {
     async findShiftWithLocationOnDate(staffId: string, date: Date) {
         const startOfDay = new Date(date);
@@ -15,7 +24,7 @@ export class WorkShiftRepository {
                 staffId,
                 date: { gte: startOfDay, lte: endOfDay }
             },
-            include: { location: true },
+            include: { location: locationWithOpeningHours },
             orderBy: { date: 'asc' }
         });
     }
@@ -33,7 +42,7 @@ export class WorkShiftRepository {
             where: {
                 date: { gte: start, lt: end }
             },
-            include: { staff: { include: { user: true } }, location: true }
+            include: { staff: { include: { user: true } }, location: locationWithOpeningHours }
         });
     }
 
@@ -74,7 +83,7 @@ export class WorkShiftRepository {
                 staffId,
                 date: { gte: since }
             },
-            include: { location: true },
+            include: { location: locationWithOpeningHours },
             orderBy: { date: 'asc' },
             take: limit
         });
@@ -91,7 +100,7 @@ export class WorkShiftRepository {
         // Try nearest future shift next
         const futureShift = await prisma.workShift.findFirst({
             where: { staffId, date: { gte: aroundDate } },
-            include: { location: true },
+            include: { location: locationWithOpeningHours },
             orderBy: { date: 'asc' }
         });
         if (futureShift) return futureShift;
@@ -99,7 +108,7 @@ export class WorkShiftRepository {
         // Fallback to most recent past shift
         return prisma.workShift.findFirst({
             where: { staffId, date: { lt: aroundDate } },
-            include: { location: true },
+            include: { location: locationWithOpeningHours },
             orderBy: { date: 'desc' }
         });
     }

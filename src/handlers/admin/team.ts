@@ -24,6 +24,7 @@ import { candidateRepository } from "../../repositories/candidate-repository.js"
 import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
 import { startManualChannelAccessFlow, startManualChannelRevokeFlow } from "./manual-channel-access.js";
 import { getShiftTimeFromLocationSchedule } from "../../utils/shift-time.js";
+import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../utils/location-opening-hours.js";
 
 function formatShiftClock(date: Date) {
     return date.toLocaleTimeString("uk-UA", {
@@ -33,17 +34,20 @@ function formatShiftClock(date: Date) {
     });
 }
 
+/** Same source order as the staff view: shift times, then canonical hours, then legacy text. */
 function formatScheduleNotificationShiftTime(shift: {
     date: Date;
     startTime?: Date | null;
     endTime?: Date | null;
-    location?: { schedule?: string | null } | null;
+    location?: { schedule?: string | null; openingHours?: OpeningHoursDay[] | null } | null;
 }) {
     if (shift.startTime && shift.endTime) {
         return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
     }
 
-    return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
+    return getShiftTimeFromOpeningHours(shift.location?.openingHours, shift.date)
+        || getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date)
+        || "час не вказано";
 }
 
 function buildScheduleNotificationMessage(shifts: Array<{
@@ -652,7 +656,7 @@ async function showAdminReplacementLocationPicker(ctx: MyContext, cityIndex: num
 
     const kb = new InlineKeyboard();
     locations.slice(0, 20).forEach((location) => {
-        kb.text(formatLocationName(location.name, location.city), `admin_repl_loc_${location.id}`).row();
+        kb.text(formatLocationName(location.name, location.city, location.branch), `admin_repl_loc_${location.id}`).row();
     });
     kb.text("⬅️ Cities", "admin_repl_manual_start");
 
@@ -695,7 +699,7 @@ async function showAdminReplacementDatePicker(ctx: MyContext, locationId: string
 
     await ScreenManager.renderScreen(
         ctx,
-        `➕ <b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocationName(location.name, location.city))}</b>\n${body}`,
+        `➕ <b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocationName(location.name, location.city, location.branch))}</b>\n${body}`,
         kb,
         { forceNew: true, pushToStack: true }
     );
@@ -925,7 +929,7 @@ adminScheduleLocMenu.dynamic(async (ctx, range) => {
 
     const locations = await locationRepository.findByCity(city);
     locations.forEach((l: any) => {
-        range.text(formatLocationName(l.name, city), async (ctx) => {
+        range.text(formatLocationName(l.name, city, l.branch), async (ctx) => {
             ctx.session.selectedLocationId = l.id;
             await ScreenManager.renderScreen(ctx, "👥 <b>Select Staff:</b>", "admin-schedule-staff", { pushToStack: true });
         }).row();
@@ -1000,7 +1004,7 @@ adminTeamLocMenu.dynamic(async (ctx, range) => {
 
     const locations = await locationRepository.findByCity(city);
     locations.forEach((l: any) => {
-        range.text(formatLocationName(l.name, city), async (ctx) => {
+        range.text(formatLocationName(l.name, city, l.branch), async (ctx) => {
             ctx.session.selectedLocationId = l.id;
             await ScreenManager.renderScreen(ctx, "👥 <b>Select Staff:</b>", "admin-location-staff", { pushToStack: true });
         }).row();
