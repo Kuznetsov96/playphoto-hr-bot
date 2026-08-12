@@ -42,7 +42,14 @@ export class AwsScheduleCanonicalReadService {
                 ? Promise.resolve([])
                 : prisma.location.findMany({
                     where: { awsPublicId: { in: locationPublicIds } },
-                    select: { id: true, awsPublicId: true, name: true, schedule: true }
+                    select: {
+                        id: true,
+                        awsPublicId: true,
+                        name: true,
+                        branch: true,
+                        schedule: true,
+                        openingHours: { orderBy: { dayOfWeek: "asc" }, select: { dayOfWeek: true, opens: true, closes: true } }
+                    }
                 }),
             shiftPublicIds.length === 0
                 ? Promise.resolve([])

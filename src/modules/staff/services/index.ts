@@ -43,7 +43,7 @@ export class StaffService {
         // Add locations from shifts
         shifts.forEach(s => uniqueLocs.set(s.locationId, s.location));
 
-        const locItems = Array.from(uniqueLocs.values()).map((l) => escapeHtml(formatLocationName(l.name, l.city)));
+        const locItems = Array.from(uniqueLocs.values()).map((l) => escapeHtml(formatLocationName(l.name, l.city, l.branch)));
         const locStr = locItems.length > 0 ? locItems.join(', ') : (isEn ? 'not assigned' : 'не призначено');
 
         let displayName = this.formatStaffName(profile.fullName);

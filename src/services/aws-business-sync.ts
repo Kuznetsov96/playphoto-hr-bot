@@ -240,6 +240,7 @@ export class AwsBusinessSyncService {
                             awsPublicId: location.publicId,
                             canonicalCode: location.canonicalCode,
                             name: location.name,
+                            branch: location.branch,
                             city: location.city,
                             address: location.address,
                             isHidden: false,
@@ -251,12 +252,30 @@ export class AwsBusinessSyncService {
                             awsPublicId: location.publicId,
                             canonicalCode: location.canonicalCode,
                             name: location.name,
+                            branch: location.branch,
                             city: location.city,
                             address: location.address,
                             isHidden: false,
                         },
                         select: { id: true },
                     });
+
+                /**
+                 * The canonical snapshot is authoritative, so replace the whole week rather
+                 * than merging: a day the owner deleted upstream must disappear here too,
+                 * otherwise a stale row would keep answering for it.
+                 */
+                await transaction.locationOpeningHours.deleteMany({ where: { locationId: saved.id } });
+                if (location.openingHours.length > 0) {
+                    await transaction.locationOpeningHours.createMany({
+                        data: location.openingHours.map((day) => ({
+                            locationId: saved.id,
+                            dayOfWeek: day.dayOfWeek,
+                            opens: day.opens,
+                            closes: day.closes,
+                        })),
+                    });
+                }
                 locationIds.set(location.canonicalCode, saved.id);
             }
 
