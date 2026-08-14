@@ -547,6 +547,7 @@ model ReplacementRequest {
   completedAt        DateTime?
   closedReason       String?
   adminNotifiedAt    DateTime?
+  awsReplacementPublicId String?              @unique
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 

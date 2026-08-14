@@ -99,6 +99,7 @@ ${p.details}
   "staff-replacement-other-offer-closed": (p: { details: string }) => `Цю пропозицію закрито для вас, бо ви вже підтвердили іншу зміну на цю дату.
 
 ${p.details}`,
+  "staff-replacement-canonical-failed": `Не вдалося створити запит на підміну. Спробуй ще раз або напиши в підтримку.`,
   "staff-replacement-search-active-hub": `🔎 <i>Шукаємо підміну. Поки її не підтвердили, ця зміна залишається твоєю.</i>`,
   "staff-replacement-search-active-schedule": `🔎 <i>шукаємо підміну — зміна поки твоя</i>`,
   "staff-replacement-pending-sync-hub": `✅ <i>Підміна підтверджена, графік синхронізується</i>`,
@@ -128,6 +129,12 @@ ${p.details}
 🕐 ${p.time}
 
 Якщо не можеш — просто пропусти це повідомлення, нічого пояснювати не треба 💛`,
+  "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
+  "staff-replacement-offer-btn-decline": `🚫 Не можу`,
+  "staff-replacement-offer-accepted": `Дякуємо! Зміна закріплена за тобою 💛 Перевір «Мій графік».`,
+  "staff-replacement-offer-declined": `Зрозуміло, дякуємо за відповідь 💛`,
+  "staff-replacement-offer-gone": `Цю зміну вже закрито — хтось відгукнувся раніше. Дякуємо 💛`,
+  "staff-replacement-offer-error": `Не вдалося зберегти відповідь. Спробуй ще раз за хвилину або напиши в підтримку.`,
   "staff-replacement-offer-closed": (p: { location: string; date: string }) => `Зміну на ${p.location} ${p.date} вже закрито. Дякуємо, що відгукнулася 💛`,
   "staff-replacement-offer-reopened": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — попередня домовленість скасувалася.
 Якщо готова, можеш взяти 🌸`,
