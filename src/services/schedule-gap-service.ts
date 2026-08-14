@@ -1,7 +1,7 @@
 import { locationRepository } from "../repositories/location-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import logger from "../core/logger.js";
-import { formatLocationName } from "../handlers/admin/utils.js";
+import { formatLocation } from "../handlers/admin/utils.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 
 export class ScheduleGapService {
@@ -71,7 +71,7 @@ export class ScheduleGapService {
             report += `📅 <b>${dateStr}:</b>\n`;
             
             for (const locGap of dayGap.locationGaps) {
-                const locName = formatLocationName(locGap.location.name, locGap.location.city, locGap.location.branch);
+                const locName = formatLocation(locGap.location, "listing");
                 const missingText = locGap.missing > 1 ? ` (${locGap.missing} missing)` : "";
                 report += `• ${locName}${missingText}\n`;
             }

@@ -8,7 +8,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { staffService } from "../../modules/staff/services/index.js";
-import { buildAdminOutboundReplyKeyboard, escapeHtml, formatLocationName, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
+import { buildAdminOutboundReplyKeyboard, escapeHtml, formatLocation, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 import logger from "../../core/logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { supportConversationService } from "../../services/support-conversation-service.js";
@@ -307,7 +307,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
             const conversation = await supportConversationService.resolveOrCreateOutgoing(user.id, async () => {
                 const surname = displayName.split(' ')[0] || displayName;
                 const formattedLocation = location
-                    ? formatLocationName(location.name, location.city, location.branch)
+                    ? formatLocation(location, "sentence")
                     : '';
                 let locationPart = '';
                 if (formattedLocation) locationPart = ` | ${formattedLocation}`;

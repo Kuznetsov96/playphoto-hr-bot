@@ -5,7 +5,7 @@ import { supportRepository } from "../../../repositories/support-repository.js";
 import { taskService } from "../../../services/task-service.js";
 import logger from "../../../core/logger.js";
 import type { StaffProfile } from "@prisma/client";
-import { escapeHtml, formatLocationName } from "../../../handlers/admin/utils.js";
+import { escapeHtml, formatLocation } from "../../../handlers/admin/utils.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import type { AdminRole } from "@prisma/client";
 import { CandidateStatus, Role } from "@prisma/client";
@@ -43,7 +43,7 @@ export class StaffService {
         // Add locations from shifts
         shifts.forEach(s => uniqueLocs.set(s.locationId, s.location));
 
-        const locItems = Array.from(uniqueLocs.values()).map((l) => escapeHtml(formatLocationName(l.name, l.city, l.branch)));
+        const locItems = Array.from(uniqueLocs.values()).map((l) => escapeHtml(formatLocation(l, "listing")));
         const locStr = locItems.length > 0 ? locItems.join(', ') : (isEn ? 'not assigned' : 'не призначено');
 
         let displayName = this.formatStaffName(profile.fullName);

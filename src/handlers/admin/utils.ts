@@ -403,17 +403,64 @@ export async function sendTaskNotification(
 }
 
 /**
- * Cleans up raw location names from DDS/Technical prefixes
- * and formats them as "Name (Branch) (City)"
+ * Where a location label is being shown, which decides how the city appears.
+ *
+ * The venue part never varies — DDS cleanup, a city echoed inside the raw name, and the
+ * canonical `branch` are handled identically for all three. Only the city differs, so it is the
+ * only thing this switches on:
+ *
+ *   in-city    Fly Kids                  the screen already names the city (a picker scoped to
+ *                                        one city, a photographer's schedule)
+ *   listing    Fly Kids (Lviv)           a picker or report spanning cities
+ *   sentence   Fly Kids, Lviv            prose: notifications, support topics, detail headers
+ */
+export type LocationDisplayContext = "in-city" | "listing" | "sentence";
+
+export type LocationParts = {
+    name?: string | null | undefined;
+    city?: string | null | undefined;
+    branch?: string | null | undefined;
+} | null | undefined;
+
+/**
+ * The single location formatter. Renders a venue for a given display context.
  *
  * `branch` is the canonical discriminator for venues sharing a name — the three Zaporizhzhia
- * Volklands are all named "Volkland" and differ only by branch. Pass it whenever it is
- * known, or same-named locations collapse into one indistinguishable label.
+ * Volklands are all named "Volkland" and differ only by branch. It reaches the label in every
+ * context, so same-named venues never collapse into one indistinguishable row.
  *
- * @example "Выручка от продаж Leolend" -> "Leolend (Lviv)"
- * @example ("Volkland", "Запоріжжя", "Шевчик") -> "Volkland (Шевчик) (Zaporizhzhia)"
+ * The rule is "show what the catalogue says distinguishes this venue", not "show enough to be
+ * unique in the database". That keeps the label a pure function of one location: it never shifts
+ * because an unrelated venue opened elsewhere. When a genuine collision does appear, the
+ * catalogue is what should gain a branch — `findShiftLocationLabelCollisions` reports it rather than
+ * letting the bot invent a discriminator of its own.
+ *
+ * @example ({ name: "Выручка от продаж Leolend", city: "Львів" }, "listing") -> "Leolend (Lviv)"
+ * @example ({ name: "Volkland", city: "Запоріжжя", branch: "Шевчик" }, "in-city") -> "Volkland (Шевчик)"
  */
-export function formatLocationName(rawName: string, city: string, branch?: string | null): string {
+export function formatLocation(location: LocationParts, context: LocationDisplayContext): string {
+    const rawName = location?.name?.trim();
+    if (!rawName) return "Unknown";
+
+    const city = location?.city?.trim();
+    const branch = location?.branch?.trim();
+
+    // Without a city there is nothing to strip and nothing to append: every context collapses
+    // to the venue on its own.
+    if (!city) return branch ? `${rawName} (${branch})` : rawName;
+
+    const venue = formatVenuePart(rawName, city, branch);
+    if (context === "in-city") return venue;
+
+    const englishCity = normalizeCity(city.replace(/[^\p{L}\p{N}\s]/gu, '').trim().normalize('NFC'));
+    return context === "sentence" ? `${venue}, ${englishCity}` : `${venue} (${englishCity})`;
+}
+
+/**
+ * Cleans a raw location name and appends the canonical `branch`. The city is only ever removed
+ * here — never added — so the caller decides how to show it.
+ */
+function formatVenuePart(rawName: string, city: string, branch?: string | null): string {
     // 1. Remove common technical prefixes (DDS articles)
     // Supports RU/UA variants: "Выручка от продаж", "Виручка від продажу", "Дохід ", etc.
     let clean = rawName
@@ -486,9 +533,10 @@ export function formatLocationName(rawName: string, city: string, branch?: strin
         .replace(/\s{2,}/g, ' ')
         .trim();
 
-    // 3. Final format: "Location (Branch) (City)" with English city name
-    const englishCity = normalizeCity(cityNoEmoji);
+    // 3. Guard against the name collapsing to nothing (a raw name that was only the city).
+    const venue = finalClean || rawName.trim();
+
+    // 4. Append the canonical branch. The city is the caller's business.
     const trimmedBranch = branch?.trim();
-    const withBranch = trimmedBranch ? `${finalClean} (${trimmedBranch})` : finalClean;
-    return `${withBranch} (${englishCity})`;
+    return trimmedBranch ? `${venue} (${trimmedBranch})` : venue;
 }
