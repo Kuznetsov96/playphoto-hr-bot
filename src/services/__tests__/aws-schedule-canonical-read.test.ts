@@ -13,6 +13,7 @@ const location = {
     id: "local-location",
     awsPublicId: canonicalShift.locationPublicId,
     name: "Canonical location mapping",
+    city: "Запоріжжя",
     branch: "Shevchyk",
     schedule: "10:00-20:00",
     openingHours: [{ dayOfWeek: 1, opens: "14:00", closes: "21:00" }]
@@ -35,6 +36,7 @@ describe("projectCanonicalSchedule", () => {
             location: {
                 id: location.id,
                 name: location.name,
+                city: location.city,
                 branch: location.branch,
                 schedule: location.schedule,
                 openingHours: location.openingHours

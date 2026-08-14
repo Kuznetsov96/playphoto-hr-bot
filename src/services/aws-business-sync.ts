@@ -4,6 +4,7 @@ import { Prisma, Role } from "@prisma/client";
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
+import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import {
     AWS_BUSINESS_MIN_EMPLOYEES,
     AWS_BUSINESS_MIN_LOCATIONS,
@@ -277,6 +278,34 @@ export class AwsBusinessSyncService {
                     });
                 }
                 locationIds.set(location.canonicalCode, saved.id);
+            }
+
+            /**
+             * Shift labels omit the city, which is safe only while every venue sharing a name
+             * with another carries a distinguishing `branch`. That is maintained in the canonical
+             * catalogue, not here, so verify it on each snapshot instead of assuming it holds.
+             *
+             * A collision is reported, never repaired: inventing a discriminator is what produced
+             * the bogus "Volkland 1", and the fix belongs in the catalogue. The sync itself is
+             * unaffected — a duplicated label is a display defect, not a reason to reject data.
+             */
+            const labelCollisions = findShiftLocationLabelCollisions(snapshot.locations);
+            for (const collision of labelCollisions) {
+                logBusinessEvent({
+                    event: "bot.location_label.collision",
+                    level: "warn",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "degraded",
+                    reasonCode: "AMBIGUOUS_LOCATION_LABEL",
+                    module: "aws-business-sync",
+                    operation: "sync",
+                    safeContext: {
+                        label: collision.label,
+                        canonicalCodes: collision.canonicalCodes,
+                        hint: "add a canonical branch so photographers can tell these venues apart"
+                    }
+                });
             }
 
             const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
