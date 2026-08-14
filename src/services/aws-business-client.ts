@@ -274,6 +274,16 @@ const replacementNotificationPayloadSchema = z.object({
      * about the shift at all. Absent means the message goes out without buttons.
      */
     offerPublicId: z.string().optional(),
+    /**
+     * OFFER only: whether this candidate had marked the day unavailable when she
+     * was selected. Decides the wording — acknowledging a preference she never
+     * stated claims something untrue about her.
+     *
+     * Optional, and unknown values are tolerated rather than rejected: a new
+     * availability kind added upstream must not make the notification fail to
+     * parse and leave her unaware of the shift entirely.
+     */
+    availabilityKind: z.string().optional(),
     requesterDisplayName: z.string().optional(),
     candidateDisplayName: z.string().optional(),
     outcome: z.enum(["confirmed", "needs_review"]).optional(),

@@ -642,3 +642,76 @@ describe("answerReplacementOffer", () => {
         expect(outcome).toBe("failed");
     });
 });
+
+/**
+ * One wording served every wave: "we know you marked this day as busy — and
+ * that's ok". On an AVAILABLE wave that tells a photographer something untrue
+ * about herself, and it ends with "just ignore this if you can't", which
+ * contradicts the decline button now sitting under it.
+ */
+describe("OFFER wording follows the candidate's stated availability", () => {
+    const offerFor = (availabilityKind?: string) => ({
+        publicId: "n-offer-1",
+        kind: "OFFER" as const,
+        telegramId: "333",
+        payload: {
+            startsAtLocal: "2026-08-15T14:00",
+            endsAtLocal: "2026-08-15T21:00",
+            timezone: "Europe/Kyiv",
+            locationPublicId: "loc-1",
+            locationName: "Smile Park",
+            locationCity: "Kyiv",
+            replacementPublicId: "req-1",
+            offerPublicId: "offer-1",
+            ...(availabilityKind === undefined ? {} : { availabilityKind }),
+        },
+    });
+
+    const textFor = async (availabilityKind?: string) => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([offerFor(availabilityKind)]),
+                markReplacementNotificationDelivered: vi.fn(),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+        await dispatcher.dispatchPending();
+        return sendMessage.mock.calls[0]![1] as string;
+    };
+
+    it("does not claim an available candidate had marked the day busy", async () => {
+        const text = await textFor("AVAILABLE");
+
+        expect(text).not.toContain("зайнят");
+        expect(text).toContain("Smile Park");
+    });
+
+    it("acknowledges the declared preference when she did mark the day unavailable", async () => {
+        expect(await textFor("UNAVAILABLE")).toContain("зайнят");
+    });
+
+    /**
+     * The old wording told her to ignore the message; there is a decline button
+     * under it now, and an instruction that contradicts the visible controls is
+     * worse than no instruction.
+     */
+    it("stops telling her to ignore a message that has answer buttons", async () => {
+        for (const kind of ["AVAILABLE", "UNAVAILABLE"]) {
+            expect(await textFor(kind)).not.toContain("пропусти це повідомлення");
+        }
+    });
+
+    /**
+     * A backend that has not shipped `availabilityKind` yet must still produce a
+     * sendable message. The neutral wording is the safe default: it claims
+     * nothing about what she did or did not mark.
+     */
+    it("falls back to wording that assumes nothing when the kind is absent", async () => {
+        const text = await textFor(undefined);
+
+        expect(text).not.toContain("зайнят");
+        expect(text).toContain("Smile Park");
+    });
+});

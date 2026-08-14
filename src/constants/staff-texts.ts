@@ -121,6 +121,9 @@ ${p.details}
 ${p.details}
 
 Орієнтуйся на розділ «Мій графік». Якщо це не відповідає домовленості, напиши в підтримку.`,
+  // Sent when the candidate had marked this day unavailable. Naming that first
+  // is the point: she is being asked anyway, and pretending otherwise reads as
+  // if nobody looked at her preferences.
   "staff-replacement-offer-unavailable-wave": (p: { location: string; date: string; time: string }) => `🌸 Знаємо, що ти позначала цей день як зайнятий — і це ок.
 Просто на випадок, якщо плани змінилися: зміна ще вільна.
 
@@ -128,7 +131,16 @@ ${p.details}
 📅 ${p.date}
 🕐 ${p.time}
 
-Якщо не можеш — просто пропусти це повідомлення, нічого пояснювати не треба 💛`,
+Якщо не можеш — тисни «Не можу», нічого пояснювати не треба 💛`,
+  // The default, and what an older backend that sends no `availabilityKind`
+  // falls back to: it claims nothing about what she did or did not mark.
+  "staff-replacement-offer": (p: { location: string; date: string; time: string }) => `🔔 Потрібна підміна на зміну — можливо, тобі підійде.
+
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Якщо не можеш — тисни «Не можу», нічого пояснювати не треба 💛`,
   "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
   "staff-replacement-offer-btn-decline": `🚫 Не можу`,
   "staff-replacement-offer-accepted": `Дякуємо! Зміна закріплена за тобою 💛 Перевір «Мій графік».`,
