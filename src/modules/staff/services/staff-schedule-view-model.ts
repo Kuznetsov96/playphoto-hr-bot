@@ -5,9 +5,17 @@ import {
     type ScheduledShiftIdentity
 } from "../../../services/replacement-schedule-state.js";
 
+/**
+ * `city` and `branch` are what tell same-named venues apart — four locations are named
+ * "Smile Park" and three "Volkland", and the branchless ones (Fly Kids, Karamel) differ only
+ * by city. Dropping them here is what made every schedule row read a bare, useless "Smile Park".
+ * Both stay optional because legacy rows may predate the canonical sync.
+ */
 type ShiftLocation = {
     id: string;
     name: string;
+    city?: string | null;
+    branch?: string | null;
     schedule?: string | null;
 };
 
