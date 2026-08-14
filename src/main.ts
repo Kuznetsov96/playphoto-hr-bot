@@ -14,6 +14,7 @@ import prisma from "./db/core.js";
 import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher } from "./services/worker.js";
 import { startBirthdayLoop } from "./services/birthday-service.js";
 import { startShiftReminderLoop } from "./services/shift-reminder-service.js";
+import { startScheduleMirrorWatch } from "./services/stale-schedule-mirror.js";
 import { startDailyReportLoop } from "./services/finance-report.js";
 import { startPingerLoop } from "./services/pinger.js";
 import { startMonthlyPreferencesLoop } from "./services/monthly-preferences-trigger.js";
@@ -28,7 +29,7 @@ import { queues } from "./core/queue.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
-import { BUSINESS_DATA_SOURCE } from "./config.js";
+import { ADMIN_IDS, BUSINESS_DATA_SOURCE } from "./config.js";
 import { awsBusinessSyncService } from "./services/aws-business-sync.js";
 
 let runner: RunnerHandle | undefined;
@@ -37,6 +38,7 @@ let shuttingDown = false;
 let awsBusinessSyncTimer: NodeJS.Timeout | undefined;
 let scheduleNotificationTimer: NodeJS.Timeout | undefined;
 let replacementNotificationTimer: NodeJS.Timeout | undefined;
+let scheduleMirrorTimer: NodeJS.Timeout | undefined;
 
 async function bootstrap() {
     configureContainer();
@@ -154,6 +156,10 @@ async function bootstrap() {
         replacementNotificationTimer = startReplacementNotificationDispatcher(bot as any);
         startBirthdayLoop(bot);
         startShiftReminderLoop(bot);
+        // Nothing else notices when the schedule sync dies: the loop swallows its
+        // own failure into a log line, and a timer that stops firing produces no
+        // log at all. The bot would keep serving the last-written schedule.
+        scheduleMirrorTimer = startScheduleMirrorWatch(bot.api, ADMIN_IDS);
         startDailyReportLoop(bot);
         startPingerLoop(bot);
         startMonthlyPreferencesLoop(bot);
@@ -214,6 +220,7 @@ async function shutdown(signal: string) {
         if (awsBusinessSyncTimer) clearInterval(awsBusinessSyncTimer);
         if (scheduleNotificationTimer) clearInterval(scheduleNotificationTimer);
         if (replacementNotificationTimer) clearInterval(replacementNotificationTimer);
+        if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
         if (runner?.isRunning()) {
             await runner.stop();
         }
