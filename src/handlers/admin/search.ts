@@ -307,7 +307,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
             const conversation = await supportConversationService.resolveOrCreateOutgoing(user.id, async () => {
                 const surname = displayName.split(' ')[0] || displayName;
                 const formattedLocation = location
-                    ? formatLocationName(location.name, location.city)
+                    ? formatLocationName(location.name, location.city, location.branch)
                     : '';
                 let locationPart = '';
                 if (formattedLocation) locationPart = ` | ${formattedLocation}`;

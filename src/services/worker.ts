@@ -6,8 +6,9 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
+import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
@@ -724,6 +725,48 @@ export function startScheduleNotificationDispatcher(bot: Bot<MyContext>) {
             logger.error({ err: error }, "Schedule notification dispatcher iteration failed");
         });
     }, SCHEDULE_NOTIFICATION_POLL_MS);
+}
+
+const REPLACEMENT_NOTIFICATION_POLL_MS = 60 * 1000;
+
+/**
+ * Polls the backend for replacement notifications it has already decided to
+ * send (offers, closures, reopenings, owner review, reverts), and renders
+ * them in Telegram. Same shape as `startScheduleNotificationDispatcher`:
+ * recipients and payload content stay decided by the backend, and this loop
+ * only delivers. Disabled unless AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED is true,
+ * so nothing polls until the auto-confirm feature itself is turned on.
+ */
+export function startReplacementNotificationDispatcher(bot: Bot<MyContext>) {
+    if (!AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED) {
+        logBusinessEvent({
+            event: "bot.replacement_notifications.disabled",
+            actorType: "system",
+            actorRole: "system",
+            result: "skipped",
+            reasonCode: "FEATURE_FLAG_OFF",
+            module: "worker",
+            operation: "startReplacementNotificationDispatcher",
+        });
+        return undefined;
+    }
+
+    logBusinessEvent({
+        event: "bot.replacement_notifications.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "worker",
+        operation: "startReplacementNotificationDispatcher",
+        safeContext: { pollIntervalMs: REPLACEMENT_NOTIFICATION_POLL_MS },
+    });
+
+    const dispatcher = createReplacementNotificationDispatcher(bot.api);
+    return setInterval(() => {
+        dispatcher.dispatchPending().catch(error => {
+            logger.error({ err: error }, "Replacement notification dispatcher iteration failed");
+        });
+    }, REPLACEMENT_NOTIFICATION_POLL_MS);
 }
 
 type AlertState = {

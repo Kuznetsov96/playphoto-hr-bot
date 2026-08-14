@@ -71,7 +71,7 @@ export class ScheduleGapService {
             report += `📅 <b>${dateStr}:</b>\n`;
             
             for (const locGap of dayGap.locationGaps) {
-                const locName = formatLocationName(locGap.location.name, locGap.location.city);
+                const locName = formatLocationName(locGap.location.name, locGap.location.city, locGap.location.branch);
                 const missingText = locGap.missing > 1 ? ` (${locGap.missing} missing)` : "";
                 report += `• ${locName}${missingText}\n`;
             }

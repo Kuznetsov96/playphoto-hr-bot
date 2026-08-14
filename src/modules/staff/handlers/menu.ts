@@ -14,9 +14,11 @@ import { buildSignedCallback } from "../../../utils/signed-callback.js";
 import { TEAM_CHATS } from "../../../config.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
+import { formatShiftLocationLabel } from "../../../utils/logistics-formatters.js";
 import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
 import { replacementService } from "../../../services/replacement-service.js";
 import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
+import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../utils/location-opening-hours.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
@@ -55,17 +57,27 @@ function formatShiftClock(date: Date) {
     });
 }
 
+/**
+ * Shift times, most authoritative source first:
+ *   1. the shift's own start/end, as planned in the webapp;
+ *   2. the location's canonical opening hours for that weekday;
+ *   3. the legacy hand-seeded text schedule, for locations not yet migrated.
+ *
+ * Never fall back to an invented default — an unknown time must read as "not set".
+ */
 function formatStaffShiftTime(shift: {
     date: Date;
     startTime?: Date | null;
     endTime?: Date | null;
-    location?: { schedule?: string | null } | null;
+    location?: { schedule?: string | null; openingHours?: OpeningHoursDay[] | null } | null;
 }) {
     if (shift.startTime && shift.endTime) {
         return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
     }
 
-    return getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date) || "час не вказано";
+    return getShiftTimeFromOpeningHours(shift.location?.openingHours, shift.date)
+        || getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date)
+        || "час не вказано";
 }
 
 function buildTaskProofKeyboard(taskId: string) {
@@ -168,7 +180,7 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
         const shift = todayShifts[0]!;
         shiftLine =
             `📸 <b>Сьогодні зміна</b>\n` +
-            `${escapeHtml(shift.location.name)} · ${escapeHtml(formatStaffShiftTime(shift))}` +
+            `${escapeHtml(formatShiftLocationLabel(shift.location))} · ${escapeHtml(formatStaffShiftTime(shift))}` +
             (shift.isReplacementSearchActive
                 ? `\n${STAFF_TEXTS["staff-replacement-search-active-hub"]}`
                 : shift.isAcceptedReplacementPendingSync
@@ -226,7 +238,7 @@ export async function showStaffSchedule(ctx: MyContext) {
     for (const s of shifts) {
         const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-        text += `▫️ <code>${dateStr}</code> · ${escapeHtml(formatStaffShiftTime(s))} · ${escapeHtml(s.location.name)}`;
+        text += `▫️ <code>${dateStr}</code> · ${escapeHtml(formatStaffShiftTime(s))} · ${escapeHtml(formatShiftLocationLabel(s.location))}`;
         if (s.isReplacementSearchActive) {
             text += ` · ${STAFF_TEXTS["staff-replacement-search-active-schedule"]}`;
         } else if (s.isAcceptedReplacementPendingSync) {
@@ -403,11 +415,11 @@ export async function showStaffLogistics(ctx: MyContext) {
     });
 
     if (parcels.length === 0) {
-        const text = `📭 <b>На вашій локації (${shift.location.name}) зараз немає активних відправлень.</b>`;
+        const text = `📭 <b>На вашій локації (${escapeHtml(formatShiftLocationLabel(shift.location))}) зараз немає активних відправлень.</b>`;
         return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
     }
 
-    let text = `📦 <b>Посилки на локації ${shift.location.name}:</b>\n\n`;
+    let text = `📦 <b>Посилки на локації ${escapeHtml(formatShiftLocationLabel(shift.location))}:</b>\n\n`;
     const kb = new InlineKeyboard();
 
     parcels.forEach((parcel: any, index: number) => {

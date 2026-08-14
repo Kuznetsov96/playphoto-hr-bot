@@ -121,6 +121,51 @@ ${p.details}
 ${p.details}
 
 Орієнтуйся на розділ «Мій графік». Якщо це не відповідає домовленості, напиши в підтримку.`,
+  "staff-replacement-offer-unavailable-wave": (p: { location: string; date: string; time: string }) => `🌸 Знаємо, що ти позначала цей день як зайнятий — і це ок.
+Просто на випадок, якщо плани змінилися: зміна ще вільна.
+
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Якщо не можеш — просто пропусти це повідомлення, нічого пояснювати не треба 💛`,
+  "staff-replacement-offer-closed": (p: { location: string; date: string }) => `Зміну на ${p.location} ${p.date} вже закрито. Дякуємо, що відгукнулася 💛`,
+  "staff-replacement-offer-reopened": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — попередня домовленість скасувалася.
+Якщо готова, можеш взяти 🌸`,
+  "staff-replacement-undo-done": `Скасовано. Зміна знову у пошуку — дякуємо, що одразу дала знати 💛`,
+  "staff-replacement-accepted-btn-undo": `↩️ Це помилка, скасувати`,
+  "staff-replacement-undo-ans-window-closed": `Час на скасування вже минув. Якщо це помилка — напиши в підтримку.`,
+  "staff-replacement-undo-ans-failed": `Не вдалося скасувати. Спробуй ще раз або напиши в підтримку.`,
+  "staff-replacement-reverted-by-owner": (p: { location: string; date: string }) => `Підміну на ${p.location} ${p.date} скасовано адміністратором. Пошук продовжується.`,
+  "staff-replacement-reverted-by-candidate": (p: { location: string; date: string }) => `Домовленість на ${p.location} ${p.date} скасувалася — фотографиня, яка погодилась, відмінила це одразу. Пошук заміни триває.`,
+  "staff-replacement-owner-review-confirmed": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `✅ <b>Підміну автоматично підтверджено</b>
+
+${p.requesterName} → ${p.candidateName}
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Зміна вже переведена на нового фотографа. Якщо потрібно скасувати — натисни кнопку нижче.`,
+  "staff-replacement-owner-review-needs-review": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `⚠️ <b>Підміну прийнято, потрібне твоє рішення</b>
+
+${p.requesterName} → ${p.candidateName}
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Автоматичні перевірки не пройшли — підтвердь або скасуй вручну в адмін-панелі. Кнопка нижче скасовує прийняту пропозицію.`,
+  "staff-replacement-owner-review-btn-revert": `↩️ Скасувати підміну`,
+  "staff-replacement-revert-ans-done": `Скасовано. Пошук підміни продовжується.`,
+  "staff-replacement-revert-ans-failed": `Не вдалося скасувати. Спробуй ще раз із адмін-панелі.`,
+  // Second tap of the owner revert button, shown when the backend answers
+  // REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT: the shift starts soon enough
+  // that a replacement may not be found in time, and the owner must
+  // knowingly confirm rather than be told the action simply "failed".
+  "staff-replacement-revert-late-warning": `⚠️ Зміна починається менш ніж за 2 години — заміну можуть не встигнути знайти.
+
+Скасувати підміну попри це?`,
+  "staff-replacement-revert-late-btn-confirm": `✅ Так, скасувати`,
+  "staff-replacement-revert-late-btn-cancel": `Залишити як є`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,

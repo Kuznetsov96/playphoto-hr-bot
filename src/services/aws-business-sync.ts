@@ -4,6 +4,7 @@ import { Prisma, Role } from "@prisma/client";
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
+import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import {
     AWS_BUSINESS_MIN_EMPLOYEES,
     AWS_BUSINESS_MIN_LOCATIONS,
@@ -15,6 +16,8 @@ import {
 } from "./aws-business-client.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// The backend rejects a `links` payload larger than 500 entries outright.
+const TELEGRAM_LINKS_CHUNK_SIZE = 500;
 
 const LEGACY_SHEET_BY_LOCATION_CODE: Record<string, string> = {
     "volkland-1-baburka": "Volkland",
@@ -168,6 +171,7 @@ export class AwsBusinessSyncService {
     private async performSync(): Promise<SyncResult> {
         const snapshot = await this.fetchSnapshot();
         const employeeResult = await this.syncEmployeesAndLocations(snapshot);
+        await this.reportTelegramLinks(snapshot);
         const shiftResult = await this.syncShifts(snapshot);
         const result: SyncResult = {
             generatedAt: snapshot.generatedAt,
@@ -237,6 +241,7 @@ export class AwsBusinessSyncService {
                             awsPublicId: location.publicId,
                             canonicalCode: location.canonicalCode,
                             name: location.name,
+                            branch: location.branch,
                             city: location.city,
                             address: location.address,
                             isHidden: false,
@@ -248,13 +253,59 @@ export class AwsBusinessSyncService {
                             awsPublicId: location.publicId,
                             canonicalCode: location.canonicalCode,
                             name: location.name,
+                            branch: location.branch,
                             city: location.city,
                             address: location.address,
                             isHidden: false,
                         },
                         select: { id: true },
                     });
+
+                /**
+                 * The canonical snapshot is authoritative, so replace the whole week rather
+                 * than merging: a day the owner deleted upstream must disappear here too,
+                 * otherwise a stale row would keep answering for it.
+                 */
+                await transaction.locationOpeningHours.deleteMany({ where: { locationId: saved.id } });
+                if (location.openingHours.length > 0) {
+                    await transaction.locationOpeningHours.createMany({
+                        data: location.openingHours.map((day) => ({
+                            locationId: saved.id,
+                            dayOfWeek: day.dayOfWeek,
+                            opens: day.opens,
+                            closes: day.closes,
+                        })),
+                    });
+                }
                 locationIds.set(location.canonicalCode, saved.id);
+            }
+
+            /**
+             * Shift labels omit the city, which is safe only while every venue sharing a name
+             * with another carries a distinguishing `branch`. That is maintained in the canonical
+             * catalogue, not here, so verify it on each snapshot instead of assuming it holds.
+             *
+             * A collision is reported, never repaired: inventing a discriminator is what produced
+             * the bogus "Volkland 1", and the fix belongs in the catalogue. The sync itself is
+             * unaffected — a duplicated label is a display defect, not a reason to reject data.
+             */
+            const labelCollisions = findShiftLocationLabelCollisions(snapshot.locations);
+            for (const collision of labelCollisions) {
+                logBusinessEvent({
+                    event: "bot.location_label.collision",
+                    level: "warn",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "degraded",
+                    reasonCode: "AMBIGUOUS_LOCATION_LABEL",
+                    module: "aws-business-sync",
+                    operation: "sync",
+                    safeContext: {
+                        label: collision.label,
+                        canonicalCodes: collision.canonicalCodes,
+                        hint: "add a canonical branch so photographers can tell these venues apart"
+                    }
+                });
             }
 
             const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
@@ -325,6 +376,39 @@ export class AwsBusinessSyncService {
                 locations: snapshot.locations.length,
             };
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 });
+    }
+
+    /**
+     * Tells the backend which snapshot telegram ids the bot recognises, so the
+     * owner sees a verification badge when onboarding. A row in the bot's own
+     * `User` table is the evidence: it means that person has interacted with
+     * the bot. This is advisory only — a failure here must never fail the
+     * sync, since photographers losing their schedule is far worse than a
+     * stale badge.
+     */
+    private async reportTelegramLinks(snapshot: AwsBusinessSnapshot): Promise<void> {
+        try {
+            const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
+            const knownUsers = await prisma.user.findMany({
+                where: { telegramId: { in: snapshotTelegramIds } },
+                select: { telegramId: true, username: true },
+            });
+            const known = new Map(knownUsers.map((user) => [user.telegramId.toString(), user.username]));
+            const links = snapshot.employees.map((employee) => {
+                const username = known.get(employee.telegramId);
+                return {
+                    telegramId: employee.telegramId,
+                    found: known.has(employee.telegramId),
+                    ...(username ? { username } : {}),
+                };
+            });
+            for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
+                const chunk = links.slice(index, index + TELEGRAM_LINKS_CHUNK_SIZE);
+                await awsBusinessClient.reportTelegramLinks(chunk);
+            }
+        } catch (error) {
+            logger.warn({ err: error }, "could not report telegram links");
+        }
     }
 
     private async syncShifts(snapshot: AwsBusinessSnapshot) {

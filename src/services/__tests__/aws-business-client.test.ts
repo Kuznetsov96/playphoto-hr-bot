@@ -26,9 +26,11 @@ describe("AwsBusinessClient", () => {
                 publicId: "11111111-1111-4111-8111-111111111111",
                 canonicalCode: "location-code",
                 name: "Location",
+                branch: "Shevchyk",
                 city: "Kyiv",
                 address: null,
                 timezone: "Europe/Kyiv",
+                openingHours: [{ dayOfWeek: 1, opens: "14:00", closes: "21:00" }],
             }],
             employees: [],
             shifts: [],
@@ -47,6 +49,40 @@ describe("AwsBusinessClient", () => {
                 }),
             }),
         );
+    });
+
+    /**
+     * Deploy ordering: the bot may ship before the backend that sends the new fields. An older
+     * API omits `branch` and `openingHours`, and rejecting that snapshot would stop schedule
+     * syncing entirely. Missing must degrade to "nothing known yet", never to a hard failure.
+     */
+    it("accepts a snapshot from an API that predates branch and opening hours", async () => {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+            schemaVersion: 1,
+            generatedAt: "2026-08-08T12:00:00.000Z",
+            completeEmployeeSnapshot: true,
+            completeLocationSnapshot: true,
+            scheduleWindow: { from: "2026-08-01", to: "2026-08-31" },
+            locations: [{
+                publicId: "11111111-1111-4111-8111-111111111111",
+                canonicalCode: "location-code",
+                name: "Location",
+                city: "Kyiv",
+                address: null,
+                timezone: "Europe/Kyiv",
+            }],
+            employees: [],
+            shifts: [],
+        }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        const value = await new AwsBusinessClient().snapshot("2026-08-01", "2026-08-31");
+
+        expect(value.locations[0]).toEqual(expect.objectContaining({
+            canonicalCode: "location-code",
+            branch: null,
+            openingHours: [],
+        }));
     });
 
     it("rejects an incomplete or malformed response", async () => {
@@ -163,6 +199,31 @@ describe("AwsBusinessClient", () => {
             // Per-row tolerance must not become tolerance for a wholly wrong response.
             await expect(new AwsBusinessClient().pendingScheduleNotifications(100)).rejects.toThrow();
         });
+    });
+
+    it("posts recognised telegram links to the backend", async () => {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ updated: 1 }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        const result = await new AwsBusinessClient().reportTelegramLinks([
+            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+        ]);
+
+        expect(fetch).toHaveBeenCalledWith(
+            "https://api.example.test/api/v1/internal/bot/telegram-links",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    authorization: `Bearer ${"a".repeat(32)}`,
+                }),
+            }),
+        );
+        const call = vi.mocked(fetch).mock.calls.at(0);
+        const requestInit = call?.[1];
+        expect(JSON.parse(requestInit?.body as string)).toEqual({
+            links: [{ telegramId: "486213975", found: true, username: "ivan_petrov" }],
+        });
+        expect(result).toEqual({ updated: 1 });
     });
 
     describe("missingSchedulePreferences", () => {

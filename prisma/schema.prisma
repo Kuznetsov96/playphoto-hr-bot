@@ -255,6 +255,8 @@ model Location {
   awsPublicId            String?              @unique
   canonicalCode          String?              @unique
   name                   String
+  /** Canonical branch, e.g. "Бабурка". Disambiguates same-named venues. */
+  branch                 String?
   city                   String
   address                String?
   npRef                  String? // Nova Poshta Department/Postomat Ref
@@ -279,6 +281,25 @@ model Location {
   shifts                 WorkShift[]
   replacementRequests    ReplacementRequest[]
   parcels                Parcel[]
+  openingHours           LocationOpeningHours[]
+}
+
+/**
+ * Mirror of the canonical `location_opening_hours` table. Replaces the hand-seeded
+ * free-text `Location.schedule`, which nothing kept in sync with the real hours.
+ */
+model LocationOpeningHours {
+  id         String   @id @default(cuid())
+  locationId String
+  /** 1 = Monday … 7 = Sunday, ISO-8601. */
+  dayOfWeek  Int
+  /** Local wall-clock `HH:MM`; `closes` < `opens` means the shift runs past midnight. */
+  opens      String
+  closes     String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, dayOfWeek])
+  @@index([locationId])
 }
 
 model Application {

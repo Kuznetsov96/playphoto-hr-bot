@@ -164,18 +164,71 @@ function formatLocalTime(localDateTime: string): string {
 }
 
 /**
+ * Signed-callback code for the accepting photographer's own undo button.
+ * Exported so the Telegram callback handler in `handlers/index.ts` matches on
+ * the exact same string this dispatcher signs with, rather than a second
+ * hardcoded copy — mirrors `REPLACEMENT_REVERT_CALLBACK_CODE`.
+ */
+export const REPLACEMENT_UNDO_CALLBACK_CODE = "replun";
+
+/**
+ * The undo button belongs only on the one message that is unambiguously "you
+ * just accepted a replacement, moments ago": a group of exactly one
+ * SHIFT_REASSIGNED notification, addressed to the accepting candidate, whose
+ * payload carries the offer id the undo endpoint needs.
+ *
+ * Deliberately refuses a batched group (`notifications.length > 1`): a NORMAL
+ * SHIFT_REASSIGNED can be batched with unrelated schedule changes before
+ * delivery, and attaching an undo button there would let a tap on one bullet
+ * point undo a different, unrelated shift assignment. The bot never verifies
+ * the undo window itself either — that stays the backend's job — so this is
+ * purely about not offering the button where it cannot mean what it says.
+ */
+function findUndoableAcceptance(
+    group: ScheduleNotificationDeliveryGroup
+): { offerPublicId: string } | null {
+    if (group.notifications.length !== 1) return null;
+    const [notification] = group.notifications;
+    if (notification!.changeKind !== "SHIFT_REASSIGNED") return null;
+    if (notification!.payload.role !== "accepted") return null;
+    const offerPublicId = notification!.payload.offerPublicId;
+    if (!offerPublicId) return null;
+    return { offerPublicId };
+}
+
+/**
  * Urgent messages ask for an acknowledgement of the notification only. A reply
  * never cancels or changes a shift — the backend owns the schedule.
  */
 export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
+    const undoable = findUndoableAcceptance(group);
+
     if (group.urgency !== "URGENT") {
-        return new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
+        const keyboard = new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
+        if (undoable) {
+            keyboard
+                .row()
+                .text(
+                    STAFF_TEXTS["staff-replacement-accepted-btn-undo"],
+                    buildSignedCallback(REPLACEMENT_UNDO_CALLBACK_CODE, undoable.offerPublicId)
+                );
+        }
+        return keyboard;
     }
 
     const publicId = group.notificationPublicIds[0]!;
-    return new InlineKeyboard()
+    const keyboard = new InlineKeyboard()
         .text(STAFF_TEXTS["schedule-notif-btn-confirm"], buildSignedCallback("snack", publicId))
         .text(STAFF_TEXTS["schedule-notif-btn-decline"], buildSignedCallback("sndec", publicId));
+    if (undoable) {
+        keyboard
+            .row()
+            .text(
+                STAFF_TEXTS["staff-replacement-accepted-btn-undo"],
+                buildSignedCallback(REPLACEMENT_UNDO_CALLBACK_CODE, undoable.offerPublicId)
+            );
+    }
+    return keyboard;
 }
 
 /**
