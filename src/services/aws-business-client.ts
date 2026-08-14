@@ -16,6 +16,13 @@ import {
  * sensible message.
  */
 export class AwsBusinessApiError extends Error {
+    /**
+     * Set only on REPLACEMENT_WAVE_NOT_DUE: when the backend says the next wave
+     * actually becomes due. The bot paces its polling by this rather than by a
+     * guess of its own.
+     */
+    public nextWaveAt?: string;
+
     constructor(
         public readonly status: number,
         public readonly code: string | undefined,
@@ -124,6 +131,12 @@ const replacementRequestSchema = z
     .object({
         publicId: z.string().uuid(),
         status: z.string().min(1),
+        /**
+         * When the backend will run the next wave, or null once it has stopped
+         * pacing this request (found, cancelled, expired). The bot schedules
+         * its next poll from this instead of keeping a wave clock of its own.
+         */
+        nextWaveAt: z.string().nullable().optional(),
     })
     .passthrough();
 
@@ -329,7 +342,12 @@ export type AwsScheduleNotificationUrgency = AwsScheduleNotification["urgency"];
 export type AwsScheduleNotificationPayload = z.infer<typeof scheduleNotificationPayloadSchema>;
 export type AwsScheduleNotificationShiftSnapshot = z.infer<typeof scheduleNotificationSnapshotSchema>;
 export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
-export type ReplacementRequestView = { publicId: string; status: string };
+/**
+ * Derived from the schema rather than restated, so a field added to the parse
+ * (like `nextWaveAt`) is visible to callers instead of silently dropping out of
+ * the type while still arriving at runtime.
+ */
+export type ReplacementRequestView = z.infer<typeof replacementRequestSchema>;
 export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
 export type MissingSchedulePreferences = z.infer<typeof missingPreferencesSchema>;
 export type AwsReplacementNotification = z.infer<typeof replacementNotificationSchema>;
@@ -690,19 +708,24 @@ export class AwsBusinessClient {
             // error rather than throw a secondary parse failure that hides
             // the original HTTP status. `.clone()` is unneeded — this is the
             // only place on the non-ok branch that reads the body.
-            const code = await response
+            const problem = await response
                 .json()
                 .then((body: unknown) =>
-                    typeof body === "object" && body !== null && "code" in body
-                        ? String((body as { code: unknown }).code)
-                        : undefined
+                    typeof body === "object" && body !== null
+                        ? (body as { code?: unknown; nextWaveAt?: unknown })
+                        : {}
                 )
-                .catch(() => undefined);
-            throw new AwsBusinessApiError(
+                .catch(() => ({}) as { code?: unknown; nextWaveAt?: unknown });
+            const error = new AwsBusinessApiError(
                 response.status,
-                code,
+                problem.code === undefined ? undefined : String(problem.code),
                 `AWS business API request failed with HTTP ${response.status}`
             );
+            // REPLACEMENT_WAVE_NOT_DUE carries when the wave actually becomes
+            // due. Without it a caller polling too early has nothing to
+            // reschedule against and would either drop the request or spin.
+            if (typeof problem.nextWaveAt === "string") error.nextWaveAt = problem.nextWaveAt;
+            throw error;
         }
         if (options.expectsBody === false) {
             return undefined;
