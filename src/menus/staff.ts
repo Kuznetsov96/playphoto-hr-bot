@@ -1,6 +1,7 @@
 import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../types/context.js";
 import { menuRegistry } from "../utils/menu-registry.js";
+import { getStaffShiftToday } from "../modules/staff/services/staff-today-shift.js";
 
 async function shouldShowPreferencesButton() {
     const now = new Date();
@@ -33,7 +34,6 @@ export const staffHubMenu = new Menu<MyContext>("staff-main", {
         if (!telegramId) return `staff-main:${preferencesVisible}:no-user`;
 
         const { userRepository } = await import("../repositories/user-repository.js");
-        const { workShiftRepository } = await import("../repositories/work-shift-repository.js");
 
         const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
         if (!user?.staffProfile) return `staff-main:${preferencesVisible}:no-staff`;
@@ -41,8 +41,7 @@ export const staffHubMenu = new Menu<MyContext>("staff-main", {
         const kyivToday = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         kyivToday.setHours(0, 0, 0, 0);
 
-        const todayShifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivToday, 1);
-        const hasShiftToday = todayShifts.length > 0 && todayShifts[0]?.date.getTime() === kyivToday.getTime();
+        const hasShiftToday = (await getStaffShiftToday(user.staffProfile.id, kyivToday)) !== null;
 
         return `staff-main:${preferencesVisible}:${hasShiftToday ? "shift" : "no-shift"}`;
     }
@@ -95,7 +94,6 @@ staffHubMenu.dynamic(async (ctx, range) => {
     const telegramId = ctx.from?.id;
     if (telegramId) {
         const { userRepository } = await import("../repositories/user-repository.js");
-        const { workShiftRepository } = await import("../repositories/work-shift-repository.js");
         const prisma = (await import("../db/core.js")).default;
 
         const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
@@ -103,9 +101,9 @@ staffHubMenu.dynamic(async (ctx, range) => {
             const kyivToday = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
             kyivToday.setHours(0, 0, 0, 0);
 
-            const todayShifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivToday, 1);
-            if (todayShifts.length > 0 && todayShifts[0]?.date.getTime() === kyivToday.getTime()) {
-                const shift = todayShifts[0];
+            const todayShift = await getStaffShiftToday(user.staffProfile.id, kyivToday);
+            if (todayShift) {
+                const shift = todayShift;
                 const pendingParcelsCount = await prisma.parcel.count({
                     where: {
                         locationId: shift.locationId,
