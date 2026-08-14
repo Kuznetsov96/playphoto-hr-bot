@@ -22,7 +22,14 @@ import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
 import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDay } from "./kyiv-date.js";
 import { replacementShadowService } from "./replacement-shadow.js";
 import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
-import { startCanonicalReplacement } from "./replacement-canonical.js";
+import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
+
+/**
+ * How long to wait before retrying a canonical wave the backend could not
+ * answer. Matches the local dispatcher's own empty-wave retry, so an outage
+ * paces the same way a wave with no candidates already does.
+ */
+const CANONICAL_WAVE_RETRY_MS = 60_000;
 
 export const MAIN_ADMIN_ID = 107794048;
 const KYIV_TIMEZONE = "Europe/Kyiv";
@@ -627,6 +634,24 @@ export class ReplacementService {
             return;
         }
 
+        /**
+         * Candidate selection belongs to the canonical backend for any request it
+         * knows about. It owns the wave policy, picks who to ask, records an OFFER
+         * per candidate, and paces the next wave; the notification dispatcher then
+         * delivers those offers. Running the local selector as well would message
+         * photographers the backend never chose, leaving the two sides disagreeing
+         * about who was even asked.
+         *
+         * Requests created before the switchover carry no `awsReplacementPublicId`
+         * and stay on the local path to the end. Cancelling them mid-search would
+         * strand photographers who are already deciding, so the two paths coexist
+         * until the last legacy request closes.
+         */
+        if (request.awsReplacementPublicId) {
+            await this.dispatchCanonicalNextWave(request.id, request.awsReplacementPublicId);
+            return;
+        }
+
         const previousWave = request.currentWave;
         if (previousWave && request.nextWaveAt && request.nextWaveAt > now) return;
 
@@ -665,6 +690,43 @@ export class ReplacementService {
             { requestId: request.id },
             {
                 delay: Math.max(0, nextWaveAt.getTime() - now.getTime()),
+                attempts: 3,
+                backoff: { type: "fixed", delay: 60_000 },
+                removeOnComplete: true
+            }
+        );
+    }
+
+    /**
+     * Runs one canonical wave and schedules the next poll from the time the
+     * backend reported.
+     *
+     * No candidates are selected, no messages are sent and no wave state is
+     * written locally: the backend records the offers and an OFFER notification
+     * for each, which the notification dispatcher delivers on its own loop.
+     * Keeping a second wave clock here is what would let the two sides disagree
+     * about when a wave is due — so `nextWaveAt` is taken as given.
+     *
+     * A `null` due time means the backend has stopped pacing this request
+     * (found, cancelled, expired) and polling must stop with it. An outage
+     * reschedules the same canonical dispatch rather than falling back to local
+     * selection, which would offer the shift to people it has no record of.
+     */
+    private async dispatchCanonicalNextWave(requestId: string, replacementPublicId: string) {
+        const result = await dispatchCanonicalWave(replacementPublicId);
+
+        const delay = result.ok
+            ? result.nextWaveAt === null
+                ? null
+                : Math.max(0, result.nextWaveAt.getTime() - Date.now())
+            : CANONICAL_WAVE_RETRY_MS;
+        if (delay === null) return;
+
+        await defaultQueue.add(
+            "replacement-dispatch-wave",
+            { requestId },
+            {
+                delay,
                 attempts: 3,
                 backoff: { type: "fixed", delay: 60_000 },
                 removeOnComplete: true
