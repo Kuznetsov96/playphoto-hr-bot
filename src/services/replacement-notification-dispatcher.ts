@@ -151,6 +151,34 @@ export const REPLACEMENT_REVERT_CALLBACK_CODE = "replrv";
  */
 export const REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE = "replrvc";
 
+/**
+ * The candidate's answer to an OFFER. Both are addressed by `offerPublicId`
+ * rather than by request: the backend verifies the offer belongs to the
+ * employee pressing the button, so a request id would identify neither which
+ * candidate answered nor which of her offers she meant.
+ */
+export const REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE = "reploa";
+export const REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE = "replod";
+
+/**
+ * Answer buttons for an OFFER, or `null` when the payload predates
+ * `offerPublicId`. A button that cannot name its offer would fail on every tap,
+ * so the message goes out as plain text instead — the photographer still learns
+ * the shift is free and can answer from her schedule.
+ */
+function buildOfferKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard | null {
+    if (!payload.offerPublicId) return null;
+    return new InlineKeyboard()
+        .text(
+            STAFF_TEXTS["staff-replacement-offer-btn-accept"],
+            buildSignedCallback(REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE, payload.offerPublicId),
+        )
+        .text(
+            STAFF_TEXTS["staff-replacement-offer-btn-decline"],
+            buildSignedCallback(REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE, payload.offerPublicId),
+        );
+}
+
 function buildOwnerReviewKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard {
     return new InlineKeyboard().text(
         STAFF_TEXTS["staff-replacement-owner-review-btn-revert"],
@@ -249,10 +277,13 @@ export class ReplacementNotificationDispatcher {
 
         // `exactOptionalPropertyTypes` rejects an explicit `reply_markup:
         // undefined`, so the key is only added at all when there is a keyboard.
+        const offerKeyboard = row.kind === "OFFER" ? buildOfferKeyboard(row.payload) : null;
         const options: Parameters<Api["sendMessage"]>[2] =
             row.kind === "ACCEPTED_OWNER_REVIEW"
                 ? { parse_mode: "HTML", reply_markup: buildOwnerReviewKeyboard(row.payload) }
-                : { parse_mode: "HTML" };
+                : offerKeyboard
+                  ? { parse_mode: "HTML", reply_markup: offerKeyboard }
+                  : { parse_mode: "HTML" };
 
         try {
             await this.api.sendMessage(target, text, options);
@@ -472,6 +503,85 @@ export async function undoReplacementAcceptanceAsCandidate(input: {
         operation: "undoReplacementAcceptanceAsCandidate",
     });
     return "undone";
+}
+
+/** Just the client surface answering an offer needs. */
+export interface ReplacementOfferAnswerClient {
+    acceptReplacementOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<{ publicId: string; status: string }>;
+    declineReplacementOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<{ publicId: string; status: string }>;
+}
+
+export type ReplacementOfferAnswerOutcome = "accepted" | "declined" | "gone" | "failed";
+
+/**
+ * Records a candidate's answer to an offer in the canonical backend.
+ *
+ * The backend decides whether the shift actually moves — it re-checks that the
+ * offer belongs to this employee and is still open, so those checks are
+ * deliberately not duplicated here. The bot reports the tap and renders the
+ * answer; it never concludes locally that an acceptance succeeded.
+ *
+ * `gone` is separated from `failed` on purpose: losing the race to another
+ * photographer is ordinary, and telling her to retry something that can never
+ * succeed reads as a broken bot.
+ */
+export async function answerReplacementOffer(input: {
+    offerPublicId: string;
+    employeePublicId: string;
+    telegramId: number;
+    answer: "accept" | "decline";
+    client: ReplacementOfferAnswerClient;
+}): Promise<ReplacementOfferAnswerOutcome> {
+    const body = { employeePublicId: input.employeePublicId, telegramId: String(input.telegramId) };
+    try {
+        if (input.answer === "accept") {
+            await input.client.acceptReplacementOffer(input.offerPublicId, body);
+        } else {
+            await input.client.declineReplacementOffer(input.offerPublicId, body);
+        }
+    } catch (error) {
+        const code =
+            typeof error === "object" && error !== null && "code" in error
+                ? String((error as { code: unknown }).code)
+                : undefined;
+        logBusinessEvent({
+            event: "bot.replacement_notifications.answer_failed",
+            level: "warn",
+            telegramId: input.telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failed",
+            reasonCode: code ?? "OFFER_ANSWER_FAILED",
+            module: "replacement-notification-dispatcher",
+            operation: "answerReplacementOffer",
+            safeContext: { offerPublicId: input.offerPublicId, answer: input.answer },
+        });
+        // Every terminal reason the backend gives for an offer that can no
+        // longer be answered. A retry prompt would be wrong for all of them.
+        return code === "REPLACEMENT_OFFER_CLOSED" ||
+            code === "REPLACEMENT_OFFER_NOT_FOUND" ||
+            code === "REPLACEMENT_REQUEST_CLOSED"
+            ? "gone"
+            : "failed";
+    }
+
+    logBusinessEvent({
+        event: "bot.replacement_notifications.answered",
+        actorType: "staff",
+        actorRole: "staff",
+        telegramId: input.telegramId,
+        result: "success",
+        module: "replacement-notification-dispatcher",
+        operation: "answerReplacementOffer",
+        safeContext: { answer: input.answer },
+    });
+    return input.answer === "accept" ? "accepted" : "declined";
 }
 
 /** Just the client surface the revert handler needs. */

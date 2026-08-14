@@ -35,6 +35,9 @@ import { logBusinessEvent } from "../core/log-events.js";
 import prisma from "../db/core.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
 import {
+    answerReplacementOffer,
+    REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE,
+    REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE,
     REPLACEMENT_REVERT_CALLBACK_CODE,
     REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE,
     revertReplacementIfOwner,
@@ -396,6 +399,66 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_UNDO_CALLBACK_CODE}:`), asy
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-done"]);
 });
+
+// A candidate answering a canonical OFFER. Both buttons route here; the code
+// they were signed with is the only thing that distinguishes yes from no.
+//
+// The backend owns the outcome: it re-verifies that the offer belongs to this
+// employee and is still open, so neither check is repeated here — the same
+// division of responsibility as the undo button above. The keyboard is cleared
+// on every terminal answer, including "gone", so a message that can no longer
+// be acted on never keeps a live-looking button.
+async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
+    const data = ctx.callbackQuery?.data ?? "";
+    const code =
+        answer === "accept"
+            ? REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE
+            : REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE;
+    const offerPublicId = readCallbackPayload(data, { code });
+    if (!offerPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    const telegramId = ctx.from?.id;
+    const staff = telegramId
+        ? await prisma.staffProfile.findFirst({
+            where: { user: { telegramId: BigInt(telegramId) } },
+            select: { awsEmployeePublicId: true }
+        })
+        : null;
+    if (!staff?.awsEmployeePublicId || telegramId === undefined) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-offer-error"]);
+    }
+
+    const outcome = await answerReplacementOffer({
+        offerPublicId,
+        employeePublicId: staff.awsEmployeePublicId,
+        telegramId,
+        answer,
+        client: awsBusinessClient,
+    });
+
+    if (outcome === "failed") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-offer-error"]);
+    }
+
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    const answered =
+        outcome === "accepted"
+            ? STAFF_TEXTS["staff-replacement-offer-accepted"]
+            : outcome === "declined"
+              ? STAFF_TEXTS["staff-replacement-offer-declined"]
+              : STAFF_TEXTS["staff-replacement-offer-gone"];
+    await ctx.answerCallbackQuery(answered);
+}
+
+handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE}:`), (ctx) =>
+    handleOfferAnswer(ctx, "accept"),
+);
+
+handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE}:`), (ctx) =>
+    handleOfferAnswer(ctx, "decline"),
+);
 
 // Global Broadcast Receipt Confirmation
 handlers.callbackQuery(/^broadcast_confirm_ok_(.+)$/, async (ctx) => {

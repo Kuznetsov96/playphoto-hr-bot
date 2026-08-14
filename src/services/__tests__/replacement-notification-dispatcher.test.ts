@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     ReplacementNotificationDispatcher,
     revertReplacementIfOwner,
+    answerReplacementOffer,
     undoReplacementAcceptanceAsCandidate,
 } from "../replacement-notification-dispatcher.js";
 
@@ -463,6 +464,179 @@ describe("undoReplacementAcceptanceAsCandidate", () => {
             employeePublicId: "emp-2",
             telegramId: 222,
             client: { undoReplacementAcceptance },
+        });
+
+        expect(outcome).toBe("failed");
+    });
+});
+
+/**
+ * The gap this suite closes: an `OFFER` row rendered its text and went out with
+ * no keyboard at all, so a photographer was told a shift was free and had no way
+ * to say yes. Accept and decline are addressed by offer, so the buttons carry
+ * `offerPublicId` — the field the backend now puts in the payload.
+ */
+describe("OFFER notifications carry answer buttons", () => {
+    const offerRow = {
+        publicId: "n-offer-1",
+        kind: "OFFER" as const,
+        telegramId: "333",
+        payload: {
+            startsAtLocal: "2026-08-15T14:00",
+            endsAtLocal: "2026-08-15T21:00",
+            timezone: "Europe/Kyiv",
+            locationPublicId: "loc-1",
+            locationName: "Smile Park",
+            locationCity: "Kyiv",
+            replacementPublicId: "req-1",
+            offerPublicId: "offer-1",
+            candidatePublicId: "emp-1",
+        },
+    };
+
+    const dispatchOffer = async (payloadOverrides: Record<string, unknown> = {}) => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const markDelivered = vi.fn().mockResolvedValue(undefined);
+        const markFailed = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi
+                    .fn()
+                    .mockResolvedValue([
+                        { ...offerRow, payload: { ...offerRow.payload, ...payloadOverrides } },
+                    ]),
+                markReplacementNotificationDelivered: markDelivered,
+                markReplacementNotificationFailed: markFailed,
+            } as never,
+            { sendMessage } as never,
+        );
+        const result = await dispatcher.dispatchPending();
+        return { sendMessage, markDelivered, markFailed, result };
+    };
+
+    it("attaches an accept and a decline button to the offer", async () => {
+        const { sendMessage, result } = await dispatchOffer();
+
+        const options = sendMessage.mock.calls[0]![2] as { reply_markup?: { inline_keyboard: unknown[][] } };
+        const buttons = (options.reply_markup?.inline_keyboard ?? []).flat() as Array<{
+            text: string;
+            callback_data: string;
+        }>;
+
+        expect(buttons).toHaveLength(2);
+        expect(buttons.map((button) => button.callback_data)).toEqual([
+            expect.stringContaining("offer-1"),
+            expect.stringContaining("offer-1"),
+        ]);
+        expect(result).toEqual({ delivered: 1, failed: 0 });
+    });
+
+    /**
+     * The two buttons must be distinguishable by their callback code alone: the
+     * handler routes on it, and a shared code would make "no" do what "yes" does.
+     */
+    it("gives accept and decline distinct callback codes", async () => {
+        const { sendMessage } = await dispatchOffer();
+
+        const options = sendMessage.mock.calls[0]![2] as { reply_markup?: { inline_keyboard: unknown[][] } };
+        const codes = ((options.reply_markup?.inline_keyboard ?? []).flat() as Array<{
+            callback_data: string;
+        }>).map((button) => button.callback_data.split(":")[1]);
+
+        expect(new Set(codes).size).toBe(2);
+    });
+
+    it("still names the venue and the shift time in the message", async () => {
+        const { sendMessage } = await dispatchOffer();
+
+        expect(sendMessage.mock.calls[0]![1]).toContain("Smile Park");
+    });
+
+    /**
+     * An older backend that has not shipped `offerPublicId` yet would otherwise
+     * produce a button pointing at nothing. Sending the text without buttons is
+     * the honest degradation — the photographer still learns the shift is free
+     * and can answer through the schedule.
+     */
+    it("sends the message without buttons when the payload carries no offerPublicId", async () => {
+        const { sendMessage, result } = await dispatchOffer({ offerPublicId: undefined });
+
+        const options = sendMessage.mock.calls[0]![2] as { reply_markup?: unknown };
+        expect(options.reply_markup).toBeUndefined();
+        expect(result).toEqual({ delivered: 1, failed: 0 });
+    });
+});
+
+/**
+ * Answering an offer is a canonical write: the backend owns whether the shift
+ * actually moves, so the bot reports the tap and renders whatever answer comes
+ * back. It never decides locally that an acceptance succeeded.
+ */
+describe("answerReplacementOffer", () => {
+    const base = {
+        offerPublicId: "offer-1",
+        employeePublicId: "emp-1",
+        telegramId: 333,
+    };
+
+    it("accepts through the canonical backend", async () => {
+        const acceptReplacementOffer = vi.fn().mockResolvedValue({ publicId: "req-1", status: "CONFIRMED" });
+        const outcome = await answerReplacementOffer({
+            ...base,
+            answer: "accept",
+            client: { acceptReplacementOffer, declineReplacementOffer: vi.fn() } as never,
+        });
+
+        expect(acceptReplacementOffer).toHaveBeenCalledWith("offer-1", {
+            employeePublicId: "emp-1",
+            telegramId: "333",
+        });
+        expect(outcome).toBe("accepted");
+    });
+
+    it("declines through the canonical backend", async () => {
+        const declineReplacementOffer = vi.fn().mockResolvedValue({ publicId: "req-1", status: "ACTIVE" });
+        const outcome = await answerReplacementOffer({
+            ...base,
+            answer: "decline",
+            client: { acceptReplacementOffer: vi.fn(), declineReplacementOffer } as never,
+        });
+
+        expect(declineReplacementOffer).toHaveBeenCalledWith("offer-1", {
+            employeePublicId: "emp-1",
+            telegramId: "333",
+        });
+        expect(outcome).toBe("declined");
+    });
+
+    /**
+     * Someone else got there first. This is an ordinary race, not a fault: the
+     * photographer must be told the shift is gone rather than shown a retry
+     * prompt for something that cannot succeed.
+     */
+    it("reports a closed offer separately from a genuine failure", async () => {
+        const outcome = await answerReplacementOffer({
+            ...base,
+            answer: "accept",
+            client: {
+                acceptReplacementOffer: vi
+                    .fn()
+                    .mockRejectedValue(Object.assign(new Error("closed"), { code: "REPLACEMENT_OFFER_CLOSED" })),
+                declineReplacementOffer: vi.fn(),
+            } as never,
+        });
+
+        expect(outcome).toBe("gone");
+    });
+
+    it("reports a backend outage as a retryable failure, not as an acceptance", async () => {
+        const outcome = await answerReplacementOffer({
+            ...base,
+            answer: "accept",
+            client: {
+                acceptReplacementOffer: vi.fn().mockRejectedValue(new Error("boom")),
+                declineReplacementOffer: vi.fn(),
+            } as never,
         });
 
         expect(outcome).toBe("failed");

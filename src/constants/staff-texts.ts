@@ -129,6 +129,12 @@ ${p.details}
 🕐 ${p.time}
 
 Якщо не можеш — просто пропусти це повідомлення, нічого пояснювати не треба 💛`,
+  "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
+  "staff-replacement-offer-btn-decline": `🚫 Не можу`,
+  "staff-replacement-offer-accepted": `Дякуємо! Зміна закріплена за тобою 💛 Перевір «Мій графік».`,
+  "staff-replacement-offer-declined": `Зрозуміло, дякуємо за відповідь 💛`,
+  "staff-replacement-offer-gone": `Цю зміну вже закрито — хтось відгукнувся раніше. Дякуємо 💛`,
+  "staff-replacement-offer-error": `Не вдалося зберегти відповідь. Спробуй ще раз за хвилину або напиши в підтримку.`,
   "staff-replacement-offer-closed": (p: { location: string; date: string }) => `Зміну на ${p.location} ${p.date} вже закрито. Дякуємо, що відгукнулася 💛`,
   "staff-replacement-offer-reopened": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — попередня домовленість скасувалася.
 Якщо готова, можеш взяти 🌸`,

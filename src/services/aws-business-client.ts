@@ -265,6 +265,15 @@ const replacementNotificationPayloadSchema = z.object({
     locationCity: z.string().min(1),
     replacementPublicId: z.string().min(1),
     candidatePublicId: z.string().optional(),
+    /**
+     * OFFER only: what the accept and decline buttons on this message call
+     * `POST /offers/:offerPublicId/{accept,decline}` with.
+     *
+     * Optional so a backend that has not shipped it yet still validates — the
+     * whole notification would otherwise fail to parse and nobody would be told
+     * about the shift at all. Absent means the message goes out without buttons.
+     */
+    offerPublicId: z.string().optional(),
     requesterDisplayName: z.string().optional(),
     candidateDisplayName: z.string().optional(),
     outcome: z.enum(["confirmed", "needs_review"]).optional(),
