@@ -82,7 +82,13 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
             const time = formatLocalTime(row.payload.startsAtLocal)
                 ? `${formatLocalTime(row.payload.startsAtLocal)}-${formatLocalTime(row.payload.endsAtLocal)}`
                 : "";
-            return STAFF_TEXTS["staff-replacement-offer-unavailable-wave"]({ location, date, time });
+            // Only an explicit UNAVAILABLE earns the wording that names her stated
+            // preference. Anything else — AVAILABLE, LIMITED, a kind this bot has
+            // not heard of, or an older backend sending none — gets the neutral
+            // text, which asserts nothing about what she marked.
+            return row.payload.availabilityKind === "UNAVAILABLE"
+                ? STAFF_TEXTS["staff-replacement-offer-unavailable-wave"]({ location, date, time })
+                : STAFF_TEXTS["staff-replacement-offer"]({ location, date, time });
         }
         case "OFFER_CLOSED":
             return STAFF_TEXTS["staff-replacement-offer-closed"]({ location, date });
