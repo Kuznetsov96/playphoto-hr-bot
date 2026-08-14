@@ -22,6 +22,7 @@ import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../uti
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
+import { getStaffShiftToday } from "../services/staff-today-shift.js";
 
 export const staffHandlers = new Composer<MyContext>();
 const TASK_PROOF_BLOCKED_STEPS = new Set([
@@ -144,7 +145,11 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     kyivNow.setHours(0, 0, 0, 0);
 
     const staffProfileId = user.staffProfile?.id;
-    const upcomingShifts = staffProfileId ? await getVisibleStaffShifts(staffProfileId, kyivNow, 10) : [];
+    // Canonical, like the schedule screen: reading the local mirror here made the
+    // hub and "Мій графік" disagree for as long as a sync cycle.
+    const upcomingShifts = staffProfileId
+        ? await getVisibleStaffShifts(staffProfileId, kyivNow, 10, { canonicalRead: true })
+        : [];
     const todayShifts = upcomingShifts.filter((shift) => shift.date.getTime() === kyivNow.getTime());
     const hasShiftToday = todayShifts.length > 0;
 
@@ -395,13 +400,11 @@ export async function showStaffLogistics(ctx: MyContext) {
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
     kyivNow.setHours(0, 0, 0, 0);
 
-    const todayShifts = await workShiftRepository.findWithLocationForStaff(user.staffProfile.id, kyivNow, 1);
-    if (todayShifts.length === 0 || todayShifts[0]?.date.getTime() !== kyivNow.getTime()) {
+    const shift = await getStaffShiftToday(user.staffProfile.id, kyivNow);
+    if (!shift) {
         const text = "У тебе сьогодні немає зміни на жодній локації. 🏝";
         return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
     }
-
-    const shift = todayShifts[0]!;
     const prisma = (await import("../../../db/core.js")).default;
     const parcels = await prisma.parcel.findMany({
         where: {
