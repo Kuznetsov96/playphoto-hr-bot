@@ -46,6 +46,7 @@ export class AwsScheduleCanonicalReadService {
                         id: true,
                         awsPublicId: true,
                         name: true,
+                        city: true,
                         branch: true,
                         schedule: true,
                         openingHours: { orderBy: { dayOfWeek: "asc" }, select: { dayOfWeek: true, opens: true, closes: true } }

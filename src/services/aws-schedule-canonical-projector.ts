@@ -6,6 +6,7 @@ export type LocalScheduleLocation = {
     id: string;
     awsPublicId: string | null;
     name: string;
+    city?: string | null;
     branch?: string | null;
     schedule: string | null;
     openingHours?: { dayOfWeek: number; opens: string; closes: string }[];
@@ -23,7 +24,7 @@ export type CanonicalScheduledShift = {
     date: Date;
     startTime: Date;
     endTime: Date;
-    location: Pick<LocalScheduleLocation, "id" | "name" | "branch" | "schedule" | "openingHours">;
+    location: Pick<LocalScheduleLocation, "id" | "name" | "city" | "branch" | "schedule" | "openingHours">;
 };
 
 export type CanonicalScheduleReadReason =
@@ -69,6 +70,7 @@ export function projectCanonicalSchedule(
             location: {
                 id: location.id,
                 name: location.name,
+                city: location.city ?? null,
                 branch: location.branch ?? null,
                 schedule: location.schedule,
                 openingHours: location.openingHours ?? []

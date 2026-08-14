@@ -11,6 +11,7 @@ import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { systemStateRepository } from "../../repositories/system-state-repository.js";
 import { escapeHtml, formatLocationName, normalizeCity } from "./utils.js";
+import { formatShiftLocationLabel } from "../../utils/logistics-formatters.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
 import { chatLogRepository } from "../../repositories/chat-log-repository.js";
@@ -54,7 +55,7 @@ function buildScheduleNotificationMessage(shifts: Array<{
     date: Date;
     startTime?: Date | null;
     endTime?: Date | null;
-    location: { name: string; schedule?: string | null };
+    location: { name: string; city?: string | null; branch?: string | null; schedule?: string | null };
 }>) {
     let text = "📅 <b>Твій графік:</b>\n\n";
 
@@ -63,7 +64,7 @@ function buildScheduleNotificationMessage(shifts: Array<{
         const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
         const timeStr = formatScheduleNotificationShiftTime(s);
 
-        text += `▫️ ${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} · ${escapeHtml(s.location.name)}\n`;
+        text += `▫️ ${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} · ${escapeHtml(formatShiftLocationLabel(s.location))}\n`;
     }
 
     text += "\n✨ Ти можеш переглянути графік будь-коли в меню бота.";
