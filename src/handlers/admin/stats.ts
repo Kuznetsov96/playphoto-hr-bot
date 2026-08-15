@@ -3,16 +3,12 @@ import { Menu, MenuRange } from "@grammyjs/menu";
 import type { MyContext } from "../../types/context.js";
 import { statsService } from "../../services/stats-service.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
-import { formatLocationName, normalizeCity } from "./utils.js";
+import { formatLocation, normalizeCity } from "./utils.js";
 
 export const adminStatsMenu = new Menu<MyContext>("admin-stats");
 
 function formatStatsLocationButton(name: string, city: string): string {
-    const formatted = formatLocationName(name, city);
-    const citySuffix = ` (${normalizeCity(city)})`;
-    return formatted.endsWith(citySuffix)
-        ? formatted.slice(0, -citySuffix.length).trim()
-        : formatted;
+    return formatLocation({ name, city }, "in-city");
 }
 
 adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {

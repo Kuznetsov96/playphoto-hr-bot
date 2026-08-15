@@ -1,7 +1,7 @@
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 
 import prisma from "../db/core.js";
-import { formatLocationName, normalizeCity } from "../handlers/admin/utils.js";
+import { formatLocation, normalizeCity } from "../handlers/admin/utils.js";
 import { getAgeRejection } from "../utils/candidate-age.js";
 
 type PipelineHealthReport = {
@@ -283,14 +283,7 @@ function formatRateLine(label: string, count: number, base: number): string {
 }
 
 function formatStatsLocationName(rawName: string, city?: string | null): string {
-    const trimmedName = rawName.trim();
-    if (!city) return trimmedName;
-
-    const formatted = formatLocationName(trimmedName, city);
-    const citySuffix = ` (${normalizeCity(city)})`;
-    return formatted.endsWith(citySuffix)
-        ? formatted.slice(0, -citySuffix.length).trim()
-        : formatted;
+    return formatLocation({ name: rawName, city }, "in-city");
 }
 
 function formatStatsLocationLabel(city?: string, locationName?: string): string {

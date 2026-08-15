@@ -12,7 +12,7 @@ import { startAdminSearch } from "./search.js";
 import { formatCandidateProfile } from "../../utils/profile-formatter.js";
 import { formatCompactName, extractFirstName, shortenName } from "../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../utils/location-helpers.js";
-import { formatLocationName, normalizeCity } from "./utils.js";
+import { formatLocation, normalizeCity } from "./utils.js";
 import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 import { statsService } from "../../services/stats-service.js";
 import { hrService } from "../../services/hr-service.js";
@@ -202,7 +202,7 @@ adminHiringNeedLocationsMenu.dynamic(async (ctx, range) => {
     for (const location of locations.filter((location) => !location.isHidden)) {
         const visibilityIcon = location.isHiddenFromCandidates ? "👻" : "👁️";
         const status = location.neededCount > 0 ? `🟢 (${location.neededCount})` : "🔴 (0)";
-        const label = `${visibilityIcon} ${formatLocationName(location.name, city, location.branch)} ${status}`;
+        const label = `${visibilityIcon} ${formatLocation({ ...location, city }, "in-city")} ${status}`;
         range.text(label, async (ctx) => {
             ctx.session.selectedLocationId = location.id;
             const item = await hiringNeedsService.getLocationItem(location.id);

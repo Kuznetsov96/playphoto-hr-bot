@@ -7,7 +7,7 @@ import { hasPermission } from "../../config/roles.js";
 import logger from "../../core/logger.js";
 import { userRepository } from "../../repositories/user-repository.js";
 import { locationRepository } from "../../repositories/location-repository.js";
-import { formatLocationName, normalizeCity } from "./utils.js";
+import { formatLocation, normalizeCity } from "./utils.js";
 import { buildTasksDashboard } from "./tasks.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
@@ -101,7 +101,7 @@ locationAdminMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) =>
     locations.forEach((l: any) => {
         const visibilityIcon = l.isHiddenFromCandidates ? "👻" : "👁️";
         const status = l.neededCount > 0 ? `🟢 (${l.neededCount})` : "🔴 (0)";
-        const displayName = formatLocationName(l.name, city, l.branch);
+        const displayName = formatLocation({ ...l, city }, "in-city");
 
         range.text(`${visibilityIcon} ${displayName} ${status}`, async (ctx: MyContext) => {
             await renderLocationDetails(ctx, l, city);
@@ -122,7 +122,7 @@ async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
 
-    const displayName = formatLocationName(l.name, city, l.branch);
+    const displayName = formatLocation({ ...l, city }, "sentence");
     const kb = new InlineKeyboard()
         .text(l.isHiddenFromCandidates ? '🔓 Show to Candidates' : '🔒 Hide from Candidates', `toggle_visibility_${l.id}`).row()
         .text("🏙️ Change City", `edit_city_${l.id}`);

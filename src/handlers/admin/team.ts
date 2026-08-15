@@ -10,7 +10,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { systemStateRepository } from "../../repositories/system-state-repository.js";
-import { escapeHtml, formatLocationName, normalizeCity } from "./utils.js";
+import { escapeHtml, formatLocation, normalizeCity } from "./utils.js";
 import { formatShiftLocationLabel } from "../../utils/logistics-formatters.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
@@ -657,7 +657,7 @@ async function showAdminReplacementLocationPicker(ctx: MyContext, cityIndex: num
 
     const kb = new InlineKeyboard();
     locations.slice(0, 20).forEach((location) => {
-        kb.text(formatLocationName(location.name, location.city, location.branch), `admin_repl_loc_${location.id}`).row();
+        kb.text(formatLocation(location, "in-city"), `admin_repl_loc_${location.id}`).row();
     });
     kb.text("⬅️ Cities", "admin_repl_manual_start");
 
@@ -700,7 +700,7 @@ async function showAdminReplacementDatePicker(ctx: MyContext, locationId: string
 
     await ScreenManager.renderScreen(
         ctx,
-        `➕ <b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocationName(location.name, location.city, location.branch))}</b>\n${body}`,
+        `➕ <b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocation(location, "sentence"))}</b>\n${body}`,
         kb,
         { forceNew: true, pushToStack: true }
     );
@@ -734,7 +734,7 @@ async function showAdminReplacementManualConfirm(ctx: MyContext, dateKey: string
     await ScreenManager.renderScreen(
         ctx,
         `➕ <b>Start manual replacement search?</b>\n\n` +
-        `📍 <b>${escapeHtml(formatLocationName(draft.locationName, draft.city || ""))}</b>\n` +
+        `📍 <b>${escapeHtml(formatLocation({ name: draft.locationName, city: draft.city }, "sentence"))}</b>\n` +
         `📅 <b>${escapeHtml(option.label)}</b>\n\n` +
         `The bot will ask available photographers using the usual replacement waves.`,
         kb,
@@ -930,7 +930,7 @@ adminScheduleLocMenu.dynamic(async (ctx, range) => {
 
     const locations = await locationRepository.findByCity(city);
     locations.forEach((l: any) => {
-        range.text(formatLocationName(l.name, city, l.branch), async (ctx) => {
+        range.text(formatLocation({ ...l, city }, "in-city"), async (ctx) => {
             ctx.session.selectedLocationId = l.id;
             await ScreenManager.renderScreen(ctx, "👥 <b>Select Staff:</b>", "admin-schedule-staff", { pushToStack: true });
         }).row();
@@ -1005,7 +1005,7 @@ adminTeamLocMenu.dynamic(async (ctx, range) => {
 
     const locations = await locationRepository.findByCity(city);
     locations.forEach((l: any) => {
-        range.text(formatLocationName(l.name, city, l.branch), async (ctx) => {
+        range.text(formatLocation({ ...l, city }, "in-city"), async (ctx) => {
             ctx.session.selectedLocationId = l.id;
             await ScreenManager.renderScreen(ctx, "👥 <b>Select Staff:</b>", "admin-location-staff", { pushToStack: true });
         }).row();
