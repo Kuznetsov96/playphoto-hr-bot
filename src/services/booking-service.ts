@@ -8,6 +8,7 @@ import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { getBirthDateRejection, getCandidateAge } from "../utils/candidate-age.js";
 import { reactivateUnderageCandidateIfEligible } from "./underage-reactivation-service.js";
+import { formatLocation } from "../utils/location-label.js";
 
 function toIsoOrUndefined(value: unknown): string | undefined {
     if (value instanceof Date) return value.toISOString();
@@ -109,7 +110,7 @@ export class BookingService {
 
             const googleEvent = await googleCalendar.createInterviewEvent({
                 summary: `Співбесіда: ${candidateName}`,
-                description: `Кандидатка: ${candidateName}\nВік: ${candidate.birthDate ? getCandidateAge(candidate.birthDate) : 'Не вказано'}\nЛокація: ${candidate.location?.name || 'Не вказано'}\nTelegram: @${username || 'немає'}`,
+                description: `Кандидатка: ${candidateName}\nВік: ${candidate.birthDate ? getCandidateAge(candidate.birthDate) : 'Не вказано'}\nЛокація: ${candidate.location ? formatLocation(candidate.location, 'listing') : 'Не вказано'}\nTelegram: @${username || 'немає'}`,
                 startTime,
                 endTime
             });
@@ -335,7 +336,7 @@ export class BookingService {
 
                 const googleEvent = await googleCalendar.createEvent({
                     summary: `Знайомство: ${candidateName}`,
-                    description: `Кандидатка: ${candidateName}\nВік: ${candidate.birthDate ? (new Date().getFullYear() - new Date(candidate.birthDate).getFullYear()) : 'Не вказано'}\nЛокація: ${candidate.location?.name || 'Не вказано'}\nTelegram: @${candidate.user?.username || 'немає'}`,
+                    description: `Кандидатка: ${candidateName}\nВік: ${candidate.birthDate ? (new Date().getFullYear() - new Date(candidate.birthDate).getFullYear()) : 'Не вказано'}\nЛокація: ${candidate.location ? formatLocation(candidate.location, 'listing') : 'Не вказано'}\nTelegram: @${candidate.user?.username || 'немає'}`,
                     startTime,
                     endTime,
                     calendarType: 'training'

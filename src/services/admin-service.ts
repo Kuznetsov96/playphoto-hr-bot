@@ -3,6 +3,7 @@ import { timelineRepository } from "../repositories/timeline-repository.js";
 import { chatLogRepository } from "../repositories/chat-log-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { formatLocation } from "../utils/location-label.js";
 
 
 interface UnifiedEvent {
@@ -52,7 +53,7 @@ export const adminService = {
             lines.push(`--- STAFF PROFILE ---`);
             lines.push(`Full Name: ${user.staffProfile.fullName}`);
             lines.push(`Role: ${user.role}`);
-            lines.push(`Location: ${user.staffProfile.location?.name} (${user.staffProfile.location?.city})`);
+            lines.push(`Location: ${formatLocation(user.staffProfile.location, "listing")}`);
         }
 
         // Merge timeline events and chat logs into a single chronological list

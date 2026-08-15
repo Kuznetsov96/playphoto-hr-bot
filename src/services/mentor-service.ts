@@ -18,6 +18,7 @@ import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 import { googleCalendar } from "./google-calendar.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { formatLocation } from "../utils/location-label.js";
 
 export class MentorService {
     private hasBookedOverlap(overlap: {
@@ -330,7 +331,7 @@ export class MentorService {
     private async sendNdaRequest(api: Api, cand: any) {
         const firstName = escapeHtml(extractFirstName(cand.fullName || ""));
         const staticInfo = getLocationDetails(cand.location?.name);
-        const jobDetails = `\n\n📍 <b>${escapeHtml(cand.location?.name || cand.city || "—")}</b>\n` +
+        const jobDetails = `\n\n📍 <b>${escapeHtml(cand.location ? formatLocation(cand.location, "listing") : (cand.city || "—"))}</b>\n` +
             `🏠 ${escapeHtml(staticInfo?.address || cand.location?.address || "")}\n` +
             `📅 ${escapeHtml(staticInfo?.schedule || cand.location?.schedule || "Пн-Пт 15:00-21:00")}\n` +
             `💰 ${escapeHtml(staticInfo?.salary || cand.location?.salary || "25%")}`;
@@ -750,7 +751,7 @@ export class MentorService {
         const candidateAfterCancel = await candidateRepository.findById(candId);
         const googleEvent = await googleCalendar.createEvent({
             summary: `Знайомство: ${candidateAfterCancel?.fullName || "Кандидат"}`,
-            description: `Кандидатка: ${candidateAfterCancel?.fullName || "Кандидат"}\nЛокація: ${candidateAfterCancel?.location?.name || 'Не вказано'}\nTelegram: @${candidateAfterCancel?.user?.username || 'немає'}`,
+            description: `Кандидатка: ${candidateAfterCancel?.fullName || "Кандидат"}\nЛокація: ${candidateAfterCancel?.location ? formatLocation(candidateAfterCancel.location, 'listing') : 'Не вказано'}\nTelegram: @${candidateAfterCancel?.user?.username || 'немає'}`,
             startTime: start,
             endTime: end,
             calendarType: 'training'

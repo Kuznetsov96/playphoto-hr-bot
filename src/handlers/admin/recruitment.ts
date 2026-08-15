@@ -559,7 +559,7 @@ adminStagingSelectLocMenu.dynamic(async (ctx, range) => {
     if (!cand?.city) return;
     const locations = await locationRepository.findByCity(cand.city);
     for (const loc of locations) {
-        range.text(`${loc.name}`, async (ctx) => {
+        range.text(formatLocation(loc, "in-city"), async (ctx) => {
             ctx.session.stagingLocationId = loc.id;
             await ScreenManager.goBack(ctx, "👤 <b>Candidate Details</b>", "admin-candidate-details");
         }).row();

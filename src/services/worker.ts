@@ -26,6 +26,8 @@ import { buildSignedCallback } from "../utils/signed-callback.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { redis } from "../core/redis.js";
+import { formatLocation } from "../utils/location-label.js";
+import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
 
 
 /**
@@ -1279,7 +1281,7 @@ async function processAcceptedMaterialsHandoffAlerts(bot: Bot<MyContext>) {
 
         const preview = staleAccepted
             .slice(0, 8)
-            .map(c => `• ${escapeHtml(c.fullName || c.id)} — ${escapeHtml(c.city || "city n/a")} / ${escapeHtml(c.location?.name || "location n/a")}`)
+            .map(c => `• ${escapeHtml(c.fullName || c.id)} — ${escapeHtml(c.city || "city n/a")} / ${escapeHtml(c.location ? formatLocation(c.location, "in-city") : "location n/a")}`)
             .join("\n");
 
         const text = `⚠️ <b>Mentor handoff needs attention</b>\n\n` +
@@ -1333,7 +1335,7 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
 
                 if (shift) {
                     const dateStr = new Date(shift.date).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
-                    text += `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${escapeHtml(shift.location.name)}!</b> 📸\n\n`;
+                    text += `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${escapeHtml(formatShiftLocationLabel(shift.location))}!</b> 📸\n\n`;
                 }
 
                 if (totalTasks > 0) {

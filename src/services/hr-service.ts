@@ -17,6 +17,7 @@ import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { formatLocation } from "../utils/location-label.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -77,7 +78,7 @@ export async function notifyMentors(api: any, candidate: any) {
     const msg = `📥 <b>New candidate is waiting for materials!</b>\n\n` +
         `👤 Name: <b>${escapeHtml(candidate.fullName || "Candidate")}</b>\n` +
         `🏙️ City: <b>${escapeHtml(candidate.city || "—")}</b>\n` +
-        `📍 Location: <b>${escapeHtml(candidate.location?.name || '—')}</b>\n\n` +
+        `📍 Location: <b>${escapeHtml(candidate.location ? formatLocation(candidate.location, "listing") : '—')}</b>\n\n` +
         `Please go to <b>Mentor Hub</b> and send the knowledge base. ✨`;
 
     for (const id of MENTOR_IDS) {
@@ -91,7 +92,7 @@ function getPostInterviewSummaryText(candidate: any) {
     const loc = candidate.location;
     const staticInfo = getLocationDetails(loc?.name);
 
-    const locationName = loc?.name || "Smile Park";
+    const locationName = loc ? formatLocation(loc, "listing") : "Smile Park";
     const address = staticInfo?.address || loc?.address || "адреса вказана в Google Maps";
     const schedule = staticInfo?.schedule || loc?.schedule || "Пн-Пт 14:00-21:00, Сб-Нд 12:00-21:00";
     const salary = staticInfo?.salary || loc?.salary || "Комісія: 20% будні / 30% вихідні";
@@ -113,7 +114,7 @@ export const hrService = {
         const candidateName = cand.fullName || "Кандидатка";
         const dateStr = cand.firstShiftDate ? new Date(cand.firstShiftDate).toLocaleDateString("uk-UA") : null;
         const timeStr = cand.firstShiftTime || "15:00-17:00";
-        const locationName = cand.location?.name || "локація не вказана";
+        const locationName = cand.location ? formatLocation(cand.location, "listing") : "локація не вказана";
         const reasonText = reason === "candidate_withdrew"
             ? "Кандидатка повідомила, що не буде продовжувати відбір."
             : "Кандидатка скасувала погоджене стажування.";
@@ -755,12 +756,14 @@ export const hrService = {
     async getWaitlistLocationsByCity(city: string) {
         const candidates = await this.getWaitlistLocationFull();
         const cityCands = candidates.filter(c => c.city === city);
-        const locations: Record<string, { id: string | null, name: string, count: number }> = {};
+        // `label` rather than `name`: this is the rendered venue label, branch included, not the
+        // raw catalogue field. Two waitlist rows for same-named venues would otherwise merge.
+        const locations: Record<string, { id: string | null, label: string, count: number }> = {};
 
         cityCands.forEach(c => {
             const locId = c.locationId || "unassigned";
-            const locName = c.location?.name || "Unassigned";
-            if (!locations[locId]) locations[locId] = { id: c.locationId, name: locName, count: 0 };
+            const locLabel = c.location ? formatLocation(c.location, "in-city") : "Unassigned";
+            if (!locations[locId]) locations[locId] = { id: c.locationId, label: locLabel, count: 0 };
             locations[locId]!.count++;
         });
 

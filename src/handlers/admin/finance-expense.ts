@@ -4,6 +4,7 @@ import { ddsService } from "../../services/finance/dds.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import logger from "../../core/logger.js";
+import { formatLocation } from "../../utils/location-label.js";
 
 const EXPENSE_CATEGORIES = [
     "Логистические затраты",
@@ -213,7 +214,7 @@ expenseHandlers.callbackQuery(/^exp_cat_(\d+)$/, async (ctx) => {
 
     locations.forEach((loc, index) => {
         const shortCity = CITY_SHORT_MAP[loc.city] || loc.city;
-        const buttonLabel = `${loc.name} (${shortCity})`;
+        const buttonLabel = `${formatLocation(loc, "in-city")} (${shortCity})`;
         
         locKeyboard.text(buttonLabel, `exp_loc_${loc.id}`);
         if ((index + 1) % 2 === 0) locKeyboard.row();
@@ -234,7 +235,7 @@ expenseHandlers.callbackQuery(/^exp_loc_(.+)$/, async (ctx) => {
     if (locId !== "PlayPhoto") {
         const locations = await locationRepository.findAllActive();
         const selectedLoc = locations.find(l => l.id === locId);
-        if (selectedLoc) locationName = selectedLoc.name;
+        if (selectedLoc) locationName = formatLocation(selectedLoc, "sentence");
     }
 
     (ctx.session.candidateData as any).expenseLocation = locationName;

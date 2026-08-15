@@ -10,6 +10,7 @@ import fs from "fs/promises";
 import os from "os";
 import AdmZip from "adm-zip";
 import { InputFile } from "grammy";
+import { formatLocation } from "../../../utils/location-label.js";
 
 export class CandidateService {
     async processOnboardingFinish(api: any, candidate: any) {
@@ -123,7 +124,7 @@ Instagram: ${candidate.instagram || '—'}
 IBAN: ${candidate.iban || '—'}
 Bank: ${bankName}
 City: ${candidate.city || '—'}
-Location: ${candidate.location?.name || '—'}
+Location: ${candidate.location ? formatLocation(candidate.location, "listing") : '—'}
             `.trim();
 
             zip.addFile("Candidate_Info.txt", Buffer.from(infoContent, "utf8"));
@@ -147,7 +148,7 @@ Location: ${candidate.location?.name || '—'}
             if (ADMIN_IDS[0]) {
                 const locId = candidate.locationId;
                 const loc = locId ? await locationRepository.findById(locId) : null;
-                const locLabel = loc?.name ? `${candidate.city || '—'} • ${loc.name}` : (candidate.city || '—');
+                const locLabel = loc ? `${candidate.city || '—'} • ${formatLocation(loc, "in-city")}` : (candidate.city || '—');
                 const caption = `📁 <b>New documents & profile</b>\n\n` +
                     `👤 ${candidate.fullName}\n` +
                     `📍 ${locLabel}\n\n` +

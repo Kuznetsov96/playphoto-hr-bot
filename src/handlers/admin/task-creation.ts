@@ -191,7 +191,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
 
         await ScreenManager.renderScreen(
             ctx,
-            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${location.name} (${city})\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
+            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${formatLocation({ ...location, city }, "sentence")}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
             staffKeyboard,
             { pushToStack: true }
         );
@@ -200,7 +200,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
     }
 
     const keyboard = new InlineKeyboard();
-    for (const loc of locations) keyboard.text(`${loc.name} (${city})`, `tas_loc_${loc.id}`).row();
+    for (const loc of locations) keyboard.text(formatLocation({ ...loc, city }, "in-city"), `tas_loc_${loc.id}`).row();
     keyboard.text("⬅️ Back", `tas_d_${ctx.session.taskCreation.date}`);
 
     await ScreenManager.renderScreen(ctx, `📅 Date: ${ctx.session.taskCreation.date}\n📍 <b>Select location:</b>`, keyboard, { pushToStack: true });
