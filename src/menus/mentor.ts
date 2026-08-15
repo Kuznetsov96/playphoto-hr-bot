@@ -198,7 +198,7 @@ mentorInboxMenu.dynamic(async (ctx, range) => {
     } else {
         for (const cand of pageItems) {
             const contacted = Boolean(cand.mentorManualContactedAt);
-            const label = `${contacted ? "☑️" : "⬜"} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const label = `${contacted ? "☑️" : "⬜"} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city, cand.location?.branch)}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);
@@ -266,7 +266,7 @@ mentorManualMenu.dynamic(async (ctx, range) => {
     } else {
         for (const cand of pageItems) {
             const contacted = Boolean(cand.mentorManualContactedAt);
-            const label = `${contacted ? "☑️" : "⬜"} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const label = `${contacted ? "☑️" : "⬜"} ${formatCompactName(cand.fullName || "Cand")} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city, cand.location?.branch)}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 const text = await getMentorCandidateProfileText(ctx, cand.id);

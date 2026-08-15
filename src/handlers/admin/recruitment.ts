@@ -137,7 +137,7 @@ adminHiringNeedsMenu.dynamic(async (ctx, range) => {
     } else {
         for (const item of pageItems) {
             const icon = hiringNeedsService.getUrgencyIcon(item.urgency);
-            const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city)} • need ${item.needed} • open ${item.gap}`;
+            const label = `${icon} [${getCityCode(item.city)}] ${getShortLocationName(item.locationName, item.city, item.branch)} • need ${item.needed} • open ${item.gap}`;
             range.text(label, async (ctx) => {
                 ctx.session.selectedLocationId = item.locationId;
                 await renderHiringNeedDetails(ctx, item, { pushToStack: true });
@@ -361,7 +361,7 @@ adminOfflineStagingMenu.dynamic(async (ctx, range) => {
         range.text(ADMIN_TEXTS["admin-staging-none"], (ctx) => { }).row();
     } else {
         for (const cand of candidates) {
-            const label = `📸 ${formatCompactName(cand.fullName)} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const label = `📸 ${formatCompactName(cand.fullName)} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city, cand.location?.branch)}`;
             range.text(label, async (ctx) => {
                 if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
                 ctx.session.selectedCandidateId = cand.id;
@@ -690,7 +690,7 @@ adminRecruitmentHandlers.callbackQuery("admin_staging_active", async (ctx: MyCon
     if (candidates.length === 0) kb.text(ADMIN_TEXTS["admin-staging-active-none"], "none").row();
     else {
         for (const cand of candidates) {
-            const label = `👤 ${formatCompactName(cand.fullName)} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const label = `👤 ${formatCompactName(cand.fullName)} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city, cand.location?.branch)}`;
             kb.text(label, `admin_manage_active_${cand.id}`).row();
         }
     }
@@ -713,7 +713,7 @@ adminRecruitmentHandlers.callbackQuery("admin_staging_ready", async (ctx: MyCont
     if (candidates.length === 0) kb.text(ADMIN_TEXTS["admin-staging-ready-none"], "none").row();
     else {
         for (const cand of candidates) {
-            const label = `👤 ${formatCompactName(cand.fullName)} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city)}`;
+            const label = `👤 ${formatCompactName(cand.fullName)} • [${getCityCode(cand.city)}] ${getShortLocationName(cand.location?.name, cand.city, cand.location?.branch)}`;
             kb.text(label, `admin_manage_ready_${cand.id}`).row();
         }
     }

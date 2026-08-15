@@ -208,6 +208,8 @@ const scheduleNotificationSnapshotSchema = z.object({
     timezone: z.string().min(1),
     locationPublicId: z.string().min(1),
     locationName: z.string().min(1),
+    /** Present only when the catalogue records one; the sole thing telling same-named venues apart. */
+    locationBranch: z.string().min(1).optional(),
     locationCity: z.string().min(1),
 });
 
@@ -275,6 +277,8 @@ const replacementNotificationPayloadSchema = z.object({
     timezone: z.string().min(1),
     locationPublicId: z.string().min(1),
     locationName: z.string().min(1),
+    /** Present only when the catalogue records one; the sole thing telling same-named venues apart. */
+    locationBranch: z.string().min(1).optional(),
     locationCity: z.string().min(1),
     replacementPublicId: z.string().min(1),
     candidatePublicId: z.string().optional(),

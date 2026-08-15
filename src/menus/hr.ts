@@ -1,5 +1,6 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { Menu } from "@grammyjs/menu";
+import { formatLocation } from "../handlers/admin/utils.js";
 import type { MyContext } from "../types/context.js";
 import { HR_INTERVIEW_WAITLIST_REASONS, type HrInterviewWaitlistReason, hrService } from "../services/hr-service.js";
 import { locationRepository } from "../repositories/location-repository.js";
@@ -812,7 +813,7 @@ hrChangeLocationUnifiedMenu.dynamic(async (ctx, range) => {
     const locations = await locationRepository.findByCity(cand.city);
     locations.forEach(loc => {
         const isCurrent = loc.id === cand.locationId;
-        range.text(`${isCurrent ? '✅ ' : ''}${loc.name}`, async (ctx) => {
+        range.text(`${isCurrent ? '✅ ' : ''}${formatLocation(loc, "in-city")}`, async (ctx) => {
             if (isCurrent) return ctx.answerCallbackQuery("Already here.").catch(() => { });
             await candidateRepository.update(cand.id, { location: { connect: { id: loc.id } } } as any);
             await ctx.answerCallbackQuery(`Moved! ✅`).catch(() => { });

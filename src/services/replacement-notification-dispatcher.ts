@@ -2,7 +2,7 @@ import { InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { ADMIN_IDS } from "../config.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { escapeHtml } from "../handlers/admin/utils.js";
+import { escapeHtml, formatLocation } from "../handlers/admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
@@ -64,9 +64,12 @@ function formatLocationLine(payload: AwsReplacementNotificationPayload): { locat
     // with an angle bracket would otherwise make Telegram reject the whole
     // message and the notification would never arrive. Mirrors what
     // `schedule-notification-dispatcher` already does with its payload text.
-    const name = escapeHtml(payload.locationName);
-    const city = payload.locationCity ? escapeHtml(payload.locationCity) : "";
-    const location = city && city !== name ? `${name} (${city})` : name;
+    const location = escapeHtml(
+        formatLocation(
+            { name: payload.locationName, branch: payload.locationBranch, city: payload.locationCity },
+            "listing"
+        )
+    );
     return { location, date: formatLocalDay(payload.startsAtLocal) };
 }
 

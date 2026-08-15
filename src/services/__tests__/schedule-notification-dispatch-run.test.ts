@@ -105,6 +105,30 @@ describe("ScheduleNotificationDispatcher.runOnce", () => {
         expect(awsBusinessClientMock.markScheduleNotificationFailed).not.toHaveBeenCalled();
     });
 
+    /**
+     * Three Zaporizhzhia venues are all named "Volkland" and differ only by branch, so a schedule
+     * change that does not name it leaves the photographer unable to tell which shift moved.
+     */
+    it("names the branch that tells same-named venues apart", async () => {
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([{
+            ...urgentNotification,
+            payload: {
+                after: {
+                    ...shiftSnapshot,
+                    locationName: "Volkland",
+                    locationBranch: "Шевчик",
+                    locationCity: "Запоріжжя",
+                },
+            },
+        }]));
+        const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        await new ScheduleNotificationDispatcher().runOnce({ sendMessage });
+
+        expect(sendMessage.mock.calls[0]![1]).toContain("Volkland (Шевчик)");
+    });
+
     it("reports a safe non-PII reason when the Telegram send fails", async () => {
         awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([urgentNotification]));
         const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
