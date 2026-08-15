@@ -1,5 +1,6 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { Menu } from "@grammyjs/menu";
+import { formatLocation } from "../utils/location-label.js";
 import type { MyContext } from "../types/context.js";
 import { HR_INTERVIEW_WAITLIST_REASONS, type HrInterviewWaitlistReason, hrService } from "../services/hr-service.js";
 import { locationRepository } from "../repositories/location-repository.js";
@@ -327,7 +328,7 @@ hrFinalStepScheduleMenu.dynamic(async (ctx, range) => {
     const candidates = await hrService.getReadyForScheduleCandidates();
     for (const cand of candidates) {
         const waiting = getTimeWaiting(cand.statusChangedAt || cand.user.updatedAt);
-        const locName = cand.location?.name ? ` • ${cand.location.name}` : '';
+        const locName = cand.location ? ` • ${formatLocation(cand.location, "in-city")}` : '';
         range.text(`⏳ ${formatCompactName(cand.fullName)}${locName}${waiting}`, async (ctx) => {
             ctx.session.candidateData = { id: cand.id } as any;
             const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
@@ -450,7 +451,7 @@ hrWaitlistLocMenu.dynamic(async (ctx, range) => {
     if (!city) return;
     const locations = await hrService.getWaitlistLocationsByCity(city);
     for (const loc of locations) {
-        range.text(`📍 ${loc.name} (${loc.count})`, async (ctx) => {
+        range.text(`📍 ${loc.label} (${loc.count})`, async (ctx) => {
             ctx.session.broadcastLocationId = loc.id || "";
             ctx.session.candidatePage = 1;
             await ScreenManager.renderScreen(ctx, "👤 <b>Reserve Profiles</b>", "hr-waitlist-profiles", { pushToStack: true });
@@ -689,7 +690,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 await ctx.answerCallbackQuery().catch(() => { });
                 await ctx.reply("✍️ <b>Enter staging time:</b>\nExample: 10:00-12:00", { parse_mode: "HTML", reply_markup: { force_reply: true } });
             }).row();
-            range.text(hasLoc ? `📍 ${cand.location?.name || 'Loc'}` : "📍 Set Loc", async (ctx) => {
+            range.text(hasLoc ? `📍 ${formatLocation(cand.location, "in-city")}` : "📍 Set Loc", async (ctx) => {
                 ctx.session.selectedCandidateId = cand.id;
                 await ScreenManager.renderScreen(ctx, "📍 <b>Select new staging location:</b>", "hr-change-location-unified", { pushToStack: true });
             });
@@ -812,7 +813,7 @@ hrChangeLocationUnifiedMenu.dynamic(async (ctx, range) => {
     const locations = await locationRepository.findByCity(cand.city);
     locations.forEach(loc => {
         const isCurrent = loc.id === cand.locationId;
-        range.text(`${isCurrent ? '✅ ' : ''}${loc.name}`, async (ctx) => {
+        range.text(`${isCurrent ? '✅ ' : ''}${formatLocation(loc, "in-city")}`, async (ctx) => {
             if (isCurrent) return ctx.answerCallbackQuery("Already here.").catch(() => { });
             await candidateRepository.update(cand.id, { location: { connect: { id: loc.id } } } as any);
             await ctx.answerCallbackQuery(`Moved! ✅`).catch(() => { });

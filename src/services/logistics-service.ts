@@ -8,6 +8,8 @@ import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
+import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -421,7 +423,7 @@ export class LogisticsService {
 
         let text = '';
         const ttn = `<code>${parcel.ttn}</code>`;
-        const loc = `<b>${parcel.location?.name || 'Unknown'}</b>`;
+        const loc = `<b>${escapeHtml(formatLogisticsLocation(parcel.location))}</b>`;
 
         switch (type) {
             case 'NO_SHIFT':
@@ -541,7 +543,7 @@ export class LogisticsService {
         const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
         const text =
             `✅ <b>Доручення оформлено.</b>\n\n` +
-            `Посилку <code>${parcel.ttn}</code> для <b>${parcel.location?.name || 'локації'}</b> вже можна забирати у Новій Пошті.\n\n` +
+            `Посилку <code>${parcel.ttn}</code> для <b>${escapeHtml(formatLogisticsLocation(parcel.location))}</b> вже можна забирати у Новій Пошті.\n\n` +
             `Коли забереш посилку, натисни кнопку нижче й надішли фото вмісту.`;
 
         await bot.api.sendMessage(Number(user.telegramId), text, {
@@ -1144,7 +1146,7 @@ export class LogisticsService {
                 .text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcel.id));
 
             const sent = await bot.api.sendMessage(Number(tid),
-                `⏰ <b>Нагадування:</b> будь ласка, завантаж фото вмісту посилки <code>${parcel.ttn}</code> (${parcel.location?.name || ''}).\n\nНатисни кнопку нижче: 📸`,
+                `⏰ <b>Нагадування:</b> будь ласка, завантаж фото вмісту посилки <code>${parcel.ttn}</code> (${escapeHtml(formatLogisticsLocation(parcel.location))}).\n\nНатисни кнопку нижче: 📸`,
                 { parse_mode: 'HTML', reply_markup: kb }
             ).then(() => true).catch(err => { logger.error({ err, ttn: parcel.ttn, parcelId: parcel.id }, 'Logistics photo reminder delivery failed'); return false; });
 

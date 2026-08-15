@@ -2,6 +2,8 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 import prisma from "../db/core.js";
 import { systemStateRepository } from "../repositories/system-state-repository.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
+import { formatLocation } from "../utils/location-label.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 export type HiringUrgency = "NORMAL" | "CRITICAL";
 
@@ -17,6 +19,8 @@ type HiringNeedMetaState = Record<string, HiringNeedMeta>;
 export type HiringNeedItem = {
     locationId: string;
     locationName: string;
+    /** Canonical discriminator for venues sharing a name; null when the venue is the only one. */
+    branch: string | null;
     city: string;
     isHiddenFromCandidates: boolean;
     needed: number;
@@ -118,7 +122,7 @@ function normalizeUrgency(value?: string): HiringUrgency | null {
 }
 
 function createEmptyItem(
-    location: { id: string; name: string; city: string; neededCount: number | null; isHiddenFromCandidates: boolean },
+    location: { id: string; name: string; branch?: string | null; city: string; neededCount: number | null; isHiddenFromCandidates: boolean },
     meta: HiringNeedMeta
 ): HiringNeedItem {
     const needed = Math.max(0, location.neededCount || 0);
@@ -127,6 +131,7 @@ function createEmptyItem(
     return {
         locationId: location.id,
         locationName: location.name,
+        branch: location.branch ?? null,
         city: location.city,
         isHiddenFromCandidates: location.isHiddenFromCandidates,
         needed,
@@ -204,7 +209,7 @@ export const hiringNeedsService = {
         const [locations, candidates, metaState] = await Promise.all([
             prisma.location.findMany({
                 where: { isHidden: false },
-                select: { id: true, name: true, city: true, neededCount: true, isHiddenFromCandidates: true }
+                select: { id: true, name: true, branch: true, city: true, neededCount: true, isHiddenFromCandidates: true }
             }),
             prisma.candidate.findMany({
                 where: { locationId: { not: null } },
@@ -266,7 +271,7 @@ export const hiringNeedsService = {
         const [location, candidates, metaState] = await Promise.all([
             prisma.location.findFirst({
                 where: { id: locationId, isHidden: false },
-                select: { id: true, name: true, city: true, neededCount: true, isHiddenFromCandidates: true }
+                select: { id: true, name: true, branch: true, city: true, neededCount: true, isHiddenFromCandidates: true }
             }),
             prisma.candidate.findMany({
                 where: { locationId },
@@ -318,7 +323,7 @@ export const hiringNeedsService = {
 
         for (const item of visibleItems.slice(0, 8)) {
             const icon = urgencyIcon(item.urgency);
-            const shortLoc = getShortLocationName(item.locationName, item.city);
+            const shortLoc = getShortLocationName(item.locationName, item.city, item.branch);
             const city = getCityCode(item.city);
             const deadlineSuffix = item.deadline ? ` | ddl ${item.deadline}` : "";
             lines.push(
@@ -361,7 +366,7 @@ export const hiringNeedsService = {
         for (const item of pageItems) {
             const icon = urgencyIcon(item.urgency);
             const city = getCityCode(item.city);
-            const loc = getShortLocationName(item.locationName, item.city);
+            const loc = getShortLocationName(item.locationName, item.city, item.branch);
             const deadline = item.deadline ? ` | ${item.deadline}` : "";
             const note = item.note ? ` | ${item.note}` : "";
 
@@ -386,7 +391,7 @@ export const hiringNeedsService = {
         const lines = [
             `🎯 <b>Need Control</b>`,
             "",
-            `📍 <b>${item.locationName}</b> (${item.city})`,
+            `📍 <b>${escapeHtml(formatLocation({ name: item.locationName, branch: item.branch, city: item.city }, "listing"))}</b>`,
             `Need: <b>${item.needed}</b> | Open: <b>${item.gap}</b>`,
         ];
         if (item.overrideUrgency) {

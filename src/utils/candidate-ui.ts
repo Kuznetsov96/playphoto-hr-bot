@@ -8,6 +8,7 @@ import { getLocationDetails } from "./location-data-helper.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
 import { buildSignedCallback } from "./signed-callback.js";
+import { formatLocation } from "./location-label.js";
 
 function getCandidateAge(birthDate?: Date | string | null): number | null {
     if (!birthDate) return null;
@@ -42,7 +43,7 @@ function getJobDetailsText(candidate: any) {
     const loc = candidate.location;
     const staticInfo = getLocationDetails(loc?.name);
 
-    const locationName = loc?.name || "Smile Park";
+    const locationName = loc ? formatLocation(loc, "listing") : "Smile Park";
     const address = staticInfo?.address || loc?.address || "";
     const schedule = staticInfo?.schedule || loc?.schedule || "Гнучкий";
     const salary = staticInfo?.salary || loc?.salary || "20-30%";

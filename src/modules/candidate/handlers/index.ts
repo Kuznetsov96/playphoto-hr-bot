@@ -1,4 +1,6 @@
 import type { MyContext } from "../../../types/context.js";
+import { formatLocation } from "../../../utils/location-label.js";
+import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { CANDIDATE_TEXTS } from "../../../constants/candidate-texts.js";
 import { InlineKeyboard, Composer } from "grammy";
 import { z } from "zod";
@@ -147,7 +149,7 @@ export async function renderLocationSelectionContent(ctx: MyContext) {
     let text = CANDIDATE_TEXTS["candidate-ask-location-multiple"] + "\n\n";
     locations.forEach((l: any, i: number) => {
         const street = (l.address?.split(',')[1]?.trim() || l.address || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const nameEscaped = l.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const nameEscaped = escapeHtml(formatLocation(l, "in-city"));
         const maps = l.googleMapsLink ? ` (<a href="${l.googleMapsLink}">на мапі</a>)` : "";
         text += `${i + 1}. <b>${nameEscaped}</b>\n📍 <i>${street}</i>${maps}\n\n`;
     });

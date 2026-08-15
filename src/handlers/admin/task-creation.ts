@@ -1,4 +1,5 @@
 import { Composer, InlineKeyboard } from "grammy";
+import { formatLocation } from "./utils.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import type { MyContext } from "../../types/context.js";
 import { taskService, TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
@@ -171,7 +172,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
     if (locations.length === 1) {
         const location = locations[0]!;
         ctx.session.taskCreation.locationId = location.id;
-        ctx.session.taskCreation.locationName = `${location.name} (${city})`;
+        ctx.session.taskCreation.locationName = formatLocation({ ...location, city }, "sentence");
         ctx.session.taskCreation.step = "selecting_staff";
 
         const { staff, source } = await getTaskCreationStaff(location.id, ctx.session.taskCreation.date);
@@ -190,7 +191,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
 
         await ScreenManager.renderScreen(
             ctx,
-            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${location.name} (${city})\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
+            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${formatLocation({ ...location, city }, "sentence")}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
             staffKeyboard,
             { pushToStack: true }
         );
@@ -199,7 +200,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
     }
 
     const keyboard = new InlineKeyboard();
-    for (const loc of locations) keyboard.text(`${loc.name} (${city})`, `tas_loc_${loc.id}`).row();
+    for (const loc of locations) keyboard.text(formatLocation({ ...loc, city }, "in-city"), `tas_loc_${loc.id}`).row();
     keyboard.text("⬅️ Back", `tas_d_${ctx.session.taskCreation.date}`);
 
     await ScreenManager.renderScreen(ctx, `📅 Date: ${ctx.session.taskCreation.date}\n📍 <b>Select location:</b>`, keyboard, { pushToStack: true });
@@ -215,7 +216,7 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
     if (!location) return ctx.answerCallbackQuery("Location not found").catch(() => { });
 
     ctx.session.taskCreation.locationId = locationId;
-    ctx.session.taskCreation.locationName = `${location.name} (${location.city})`;
+    ctx.session.taskCreation.locationName = formatLocation(location, "sentence");
     ctx.session.taskCreation.step = "selecting_staff";
 
     const { staff, source } = await getTaskCreationStaff(locationId, ctx.session.taskCreation.date);

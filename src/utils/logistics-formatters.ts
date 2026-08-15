@@ -1,4 +1,5 @@
-import { escapeHtml, formatLocation, type LocationDisplayContext } from "../handlers/admin/utils.js";
+import { formatLocation, type LocationDisplayContext } from "./location-label.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 type StaffWithUser = {
     fullName?: string | null;

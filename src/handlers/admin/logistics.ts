@@ -8,6 +8,7 @@ import { menuRegistry } from "../../utils/menu-registry.js";
 import { TEAM_CHATS } from "../../config.js";
 import { audit } from "../../core/audit-logger.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../utils/logistics-formatters.js";
+import { escapeHtml } from "./utils.js";
 
 export const adminLogisticsHandlers = new Composer<MyContext>();
 
@@ -34,7 +35,7 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
     } else {
         activeParcels.forEach(p => {
             const statusIcon = p.status === 'VERIFYING' ? '📸' : (p.status === 'ARRIVED' ? '🔔' : '⏳');
-            const label = `${statusIcon} ${p.ttn} (${p.location?.name || 'Unassigned'})`;
+            const label = `${statusIcon} ${p.ttn} (${formatLogisticsLocation(p.location)})`;
             range.text(label, async (ctx) => {
                 await showParcelDetails(ctx, p.id);
             }).row();
@@ -77,7 +78,7 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
     const text = `📦 <b>Parcel Details</b>\n\n` +
         `<b>TTN:</b> <code>${parcel.ttn}</code>\n` +
         `<b>Status:</b> ${parcel.status}\n` +
-        `<b>Location:</b> ${parcel.location?.name || '⚠️ Not assigned'}\n` +
+        `<b>Location:</b> ${escapeHtml(formatLogisticsLocation(parcel.location))}\n` +
         `<b>NP City:</b> ${(parcel as any).npCity || 'N/A'}\n` +
         `<b>NP Address:</b> ${(parcel as any).npAddress || 'N/A'}\n` +
         `<b>Type:</b> ${parcel.deliveryType}\n` +

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { readCallbackPayload } from "../utils/signed-callback.js";
+import { formatLocation } from "../utils/location-label.js";
 
 const NDASchema = z.object({
     fullName: z.string().min(5, "ПІБ має бути не менше 5 символів").max(100),
@@ -95,7 +96,7 @@ testingHandlers.callbackQuery(/^test_2_(bad|good)_(.+)$/, async (ctx) => {
     const notifyMsg = `🎓 <b>Кандидатка склала тест і готова до офлайн-стажування!</b>\n\n` +
         `👤 Ім'я: <b>${cand.fullName}</b>\n` +
         `🏙️ Місто: ${cand.city}\n` +
-        `📍 Локація: ${cand.location?.name || 'Не вказано'}\n` +
+        `📍 Локація: ${cand.location ? formatLocation(cand.location, "listing") : 'Не вказано'}\n` +
         `📊 Результат тесту: <b>${finalScore} / 2</b>\n` +
         `📞 Telegram: @${cand.user.username || 'немає'}\n\n` +
         `⚠️ <b>Дія потрібна:</b> Будь ласка, домовся про час першого виходу на стажування.`;

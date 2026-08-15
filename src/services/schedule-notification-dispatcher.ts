@@ -3,6 +3,7 @@ import type { Api } from "grammy";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
+import { formatLocation } from "../utils/location-label.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
@@ -142,9 +143,10 @@ function describeSnapshot(snapshot: AwsScheduleNotificationShiftSnapshot | undef
     const endTime = formatLocalTime(snapshot.endsAtLocal);
     const time = startTime && endTime ? `${startTime}-${endTime}` : startTime;
 
-    const place = snapshot.locationCity && snapshot.locationCity !== snapshot.locationName
-        ? `${snapshot.locationName} (${snapshot.locationCity})`
-        : snapshot.locationName;
+    const place = formatLocation(
+        { name: snapshot.locationName, branch: snapshot.locationBranch, city: snapshot.locationCity },
+        "listing"
+    );
 
     const parts = [day, time, place].filter(part => part.length > 0);
     return parts.join(", ");

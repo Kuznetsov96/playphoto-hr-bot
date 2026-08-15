@@ -21,6 +21,7 @@ import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 import { broadcastService } from "../services/broadcast.js";
 
 import { accessService } from "../services/access-service.js";
+import { formatLocation } from "../utils/location-label.js";
 
 export const commandHandlers = new Composer<MyContext>();
 
@@ -534,14 +535,14 @@ commandHandlers.command("debug_user", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), 
             info += `👨‍💼 <b>Staff Profile:</b>\n`;
             info += `• Full Name: ${user.staffProfile.fullName}\n`;
             info += `• Active: ${user.staffProfile.isActive ? '✅' : '❌'}\n`;
-            info += `• Location: ${user.staffProfile.location?.name || 'None'}\n\n`;
+            info += `• Location: ${user.staffProfile.location ? formatLocation(user.staffProfile.location, "listing") : 'None'}\n\n`;
         }
 
         if (user.candidate) {
             info += `📝 <b>Candidate Profile:</b>\n`;
             info += `• Status: ${user.candidate.status}\n`;
             info += `• Waitlisted: ${user.candidate.isWaitlisted ? '✅' : '❌'}\n`;
-            info += `• Location: ${user.candidate.location?.name || 'None'}\n`;
+            info += `• Location: ${user.candidate.location ? formatLocation(user.candidate.location, "listing") : 'None'}\n`;
         }
 
         await ctx.reply(info, { parse_mode: "HTML" });

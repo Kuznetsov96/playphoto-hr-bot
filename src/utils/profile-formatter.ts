@@ -4,6 +4,7 @@ import { shortenName } from "./string-utils.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { formatLocation } from "./location-label.js";
 
 export interface ProfileFormatOptions {
     locale?: string;
@@ -72,7 +73,9 @@ export async function formatCandidateProfile(
 
     let locationInfo = city;
     if (candidate.location?.name && candidate.location.name !== rawCity && candidate.location.name !== city) {
-        locationInfo = city ? `${city} • ${candidate.location.name}` : candidate.location.name;
+        locationInfo = city
+            ? `${city} • ${formatLocation(candidate.location, "in-city")}`
+            : formatLocation(candidate.location, "listing");
     }
     if (locationInfo) text += `📍 ${escapeHtml(locationInfo)}\n`;
 

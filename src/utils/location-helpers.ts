@@ -24,29 +24,52 @@ export function getCityCode(city?: string | null): string {
     return city.substring(0, 2);
 }
 
-export function getShortLocationName(name?: string | null, city?: string | null): string {
+/**
+ * A compact venue label for rows that are already crowded — HR and mentor candidate lists, the
+ * hiring-needs board — where the full name would push out the candidate's own name.
+ *
+ * `branch` is what distinguishes same-named venues and must be passed whenever it is known.
+ * An earlier version derived the discriminator from the name, which worked only while the
+ * catalogue spelled them "Volkland 2 (Шевчик)". Once all three became a plain "Volkland" with
+ * the difference held in `branch`, the digit search found nothing and fell through to
+ * "Volkland 1" for all of them — two of which were simply wrong.
+ *
+ * @example ("Smile Park", "Київ", "Троєщина") -> "SP Троєщина"
+ * @example ("Kidlandia", "Київ", null) -> "Kidlandia"
+ */
+export function getShortLocationName(
+    name?: string | null,
+    _city?: string | null,
+    branch?: string | null
+): string {
     if (!name) return '—';
-    const n = name.toLowerCase();
-    const c = (city || '').toLowerCase();
 
-    if (n.includes('smile park')) {
-        if (n.includes('darynok') || n.includes('даринок')) return 'SP Даринок';
-        if (c.includes('київ')) return 'SP Троєщ';
-        return 'SP';
-    }
+    const abbreviated = abbreviateVenue(name);
+    const trimmedBranch = branch?.trim();
+
+    return trimmedBranch ? `${abbreviated} ${trimmedBranch}` : abbreviated;
+}
+
+/**
+ * Shortens the venue name alone. Only names that actually crowd a row are abbreviated; anything
+ * unrecognised keeps its first word, which is short enough already.
+ */
+function abbreviateVenue(name: string): string {
+    const n = name.toLowerCase();
+
+    // "Dragon Park" and "Dragon Park 2" are two Lviv venues told apart by the name itself, so the
+    // trailing number is part of the identity here rather than an invented discriminator.
+    if (n.includes('dragon park')) return n.includes('2') ? 'Dragon 2' : 'Dragon';
+
+    if (n.includes('smile park')) return 'SP';
     if (n.includes('fly kids')) return 'FK';
-    if (n.includes('dytyache horyshche') || n.includes('горище')) return 'DH';
+    if (n.includes('dytyache horyshche') || n.includes('dytiache horyshche') || n.includes('горище')) return 'DH';
     if (n.includes('drive city')) return 'Drive';
-    if (n.includes('dragon park')) return 'Dragon';
     if (n.includes('leoland') || n.includes('leolend')) return 'Leo';
     if (n.includes('fantasy town')) return 'FT';
-    if (n.includes('karamel')) return 'Карамель';
-    if (n.includes('volkland')) {
-        if (/\b3\b/.test(n)) return 'Volkland 3';
-        if (/\b2\b/.test(n)) return 'Volkland 2';
-        return 'Volkland 1';
-    }
-    
+    if (n.includes('karamel') || n.includes('карамель')) return 'Карамель';
+    if (n.includes('volkland')) return 'Volkland';
+
     return name.split(' ')[0] || name;
 }
 

@@ -63,6 +63,7 @@ jobs:
       run: |
         npm run check-cycles
         npm run check-menu-ids
+        npm run check-location-labels
         npm run check-production-deploy
 
     - name: 🧪 Run Unit/Integration Tests

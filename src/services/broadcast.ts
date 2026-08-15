@@ -17,6 +17,7 @@ import type { BroadcastMediaItem } from "../types/context.js";
 import { awsBusinessClient } from "./aws-business-client.js";
 import { toCanonicalMonth } from "./preference-month.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { formatLocation } from "../utils/location-label.js";
 
 export interface BroadcastStats {
     totalChats: number;
@@ -353,7 +354,7 @@ export const broadcastService = {
 
         if ((target.type === 'pm_location' || target.type === 'city_chat_location') && values.length === 1 && values[0]) {
             const loc = await locationRepository.findById(values[0]);
-            if (loc) targetSummary = (target.type === 'pm_location' ? "👤 " : "🏘️ ") + `${loc.city} | ${loc.name}`;
+            if (loc) targetSummary = (target.type === 'pm_location' ? "👤 " : "🏘️ ") + `${loc.city} | ${formatLocation(loc, "in-city")}`;
         } else if ((target.type === 'pm_location' || target.type === 'city_chat_location') && values.length > 1) {
             const locs = await locationRepository.findAll();
             const filteredLocs = locs.filter(l => values.includes(l.id));

@@ -42,6 +42,54 @@ describe("ReplacementNotificationDispatcher", () => {
         expect(result).toEqual({ delivered: 1, failed: 0 });
     });
 
+    /**
+     * Three Zaporizhzhia venues are all named "Volkland" and differ only by branch. A photographer
+     * offered a replacement has to see which one she is being called to; the city alone does not
+     * narrow it down, since all three share that too.
+     */
+    it("names the branch that tells same-named venues apart", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([{
+                    ...pendingRow,
+                    payload: {
+                        ...pendingRow.payload,
+                        locationName: "Volkland",
+                        locationBranch: "Шевчик",
+                        locationCity: "Запоріжжя",
+                    },
+                }]),
+                markReplacementNotificationDelivered: vi.fn(),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+
+        await dispatcher.dispatchPending();
+
+        expect(sendMessage.mock.calls[0]![1]).toContain("Volkland (Шевчик)");
+    });
+
+    /** A venue that is the only one of its name carries no branch, and gains no empty brackets. */
+    it("leaves a venue without a branch bare", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([pendingRow]),
+                markReplacementNotificationDelivered: vi.fn(),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+
+        await dispatcher.dispatchPending();
+
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).toContain("Аркадія");
+        expect(text).not.toContain("()");
+    });
+
     it("records a failure without throwing when Telegram rejects the message", async () => {
         const markFailed = vi.fn().mockResolvedValue(undefined);
         const dispatcher = new ReplacementNotificationDispatcher(

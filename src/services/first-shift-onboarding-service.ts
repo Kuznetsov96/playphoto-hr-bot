@@ -13,6 +13,7 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { getShiftTimeFromLocationSchedule } from "../utils/shift-time.js";
 import { createKyivDate } from "../utils/bot-utils.js";
+import { formatLocation } from "../utils/location-label.js";
 
 const ACTIVE_STATUSES = ["OPEN", "IN_PROGRESS", "CLOSING", "PENDING_FINAL"] as const;
 const CLOSING_BLOCK = "Закриття зміни";
@@ -805,7 +806,7 @@ export class FirstShiftOnboardingService {
         return `${FIRST_SHIFT_ONBOARDING_TEXTS.topicOpened}\n\n` +
             `👤 <b>Фотограф:</b> ${escapeHtml(candidate.fullName || candidate.user.firstName || "Candidate")}\n` +
             `🔗 <b>Telegram:</b> ${candidate.user.username ? `@${escapeHtml(candidate.user.username)}` : "—"}\n` +
-            `📍 <b>Локація:</b> ${escapeHtml(candidate.location?.name || candidate.city || "—")}\n` +
+            `📍 <b>Локація:</b> ${escapeHtml(candidate.location ? formatLocation(candidate.location, "listing") : (candidate.city || "—"))}\n` +
             `🗓 <b>Зміна:</b> ${escapeHtml(this.formatDate(candidate.firstShiftDate))} ${escapeHtml(candidate.firstShiftTime || "")}`;
     }
 

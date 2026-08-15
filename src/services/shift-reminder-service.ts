@@ -13,6 +13,7 @@ import { replacementService } from "./replacement-service.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { redis } from "../core/redis.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
 import {
     classifyAcceptedReplacement,
     getScheduleSlotKey
@@ -271,7 +272,7 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 const pendingSyncText = "isAcceptedReplacementPendingSync" in shift && shift.isAcceptedReplacementPendingSync
                     ? `\n${STAFF_TEXTS["staff-replacement-pending-sync-reminder"]}`
                     : "";
-                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${escapeHtml(shift.location.name)}!</b> 📸${pendingSyncText}\nВдалого дня та гарних знімків! ✨`;
+                const shiftText = `🏃 <b>Сьогодні (${dateStr}) у тебе зміна в ${escapeHtml(formatShiftLocationLabel(shift.location))}!</b> 📸${pendingSyncText}\nВдалого дня та гарних знімків! ✨`;
 
                 const tasks = await taskService.getStaffActiveTasks(staff.id);
                 const activeTasksCount = tasks.filter(t => !t.isCompleted).length;

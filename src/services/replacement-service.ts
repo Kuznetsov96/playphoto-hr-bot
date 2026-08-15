@@ -23,6 +23,7 @@ import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDa
 import { replacementShadowService } from "./replacement-shadow.js";
 import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
 import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
+import { formatLocation } from "../utils/location-label.js";
 
 /**
  * How long to wait before retrying a canonical wave the backend could not
@@ -1451,7 +1452,7 @@ export class ReplacementService {
     }
 
     private formatShiftDetails(request: RequestWithRelations) {
-        return `${this.formatDate(request.shiftDate)}\n${escapeHtml(request.location.name)}\n${escapeHtml(this.formatShiftTime(request))}`;
+        return `${this.formatDate(request.shiftDate)}\n${escapeHtml(formatLocation(request.location, "in-city"))}\n${escapeHtml(this.formatShiftTime(request))}`;
     }
 
     private formatShiftTime(request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: Location }) {
@@ -1462,7 +1463,7 @@ export class ReplacementService {
     }
 
     formatShiftButtonLabel(shift: { date: Date; location: Location }) {
-        return `${this.formatDate(shift.date)}, ${shift.location.name}`;
+        return `${this.formatDate(shift.date)}, ${formatLocation(shift.location, "in-city")}`;
     }
 
     formatConfirmationText(shift: { date: Date; startTime?: Date | null; endTime?: Date | null; location: Location }) {
@@ -1473,7 +1474,7 @@ export class ReplacementService {
             location: shift.location
         });
 
-        return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(shift.location.name)}\n${escapeHtml(time)}\n\nПочати пошук?`;
+        return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(formatLocation(shift.location, "in-city"))}\n${escapeHtml(time)}\n\nПочати пошук?`;
     }
 
     formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listManageableRequestsForAdmin"]>>) {
@@ -1508,7 +1509,7 @@ export class ReplacementService {
                 : "";
 
             text +=
-                `\n<b>${index + 1}. ${escapeHtml(request.location.name)}</b> · ${escapeHtml(request.city)} · ${status}\n` +
+                `\n<b>${index + 1}. ${escapeHtml(formatLocation(request.location, "in-city"))}</b> · ${escapeHtml(request.city)} · ${status}\n` +
                 `📅 ${this.formatDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request))}\n` +
                 `👤 ${escapeHtml(photographer)}${replacement} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
                 `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
@@ -1543,7 +1544,7 @@ export class ReplacementService {
             `<b>Shift</b>\n` +
             `📅 Date: <b>${this.formatDate(request.shiftDate)}</b>\n` +
             `🕒 Time: <b>${escapeHtml(this.formatShiftTime(request))}</b>\n` +
-            `📍 Location: <b>${escapeHtml(request.location.name)}</b>\n` +
+            `📍 Location: <b>${escapeHtml(formatLocation(request.location, "in-city"))}</b>\n` +
             `🏙 City: ${escapeHtml(request.city)}\n\n` +
             `<b>People</b>\n` +
             `${requesterLine}\n\n` +
@@ -1557,7 +1558,7 @@ export class ReplacementService {
             `Поки що підміну не знайдено.\n\n` +
             `📅 <b>${this.formatDate(request.shiftDate)}</b>\n` +
             `🕒 <b>${escapeHtml(this.formatShiftTime(request))}</b>\n` +
-            `📍 <b>${escapeHtml(request.location.name)}</b>\n\n` +
+            `📍 <b>${escapeHtml(formatLocation(request.location, "in-city"))}</b>\n\n` +
             `Будь ласка, напиши в підтримку, щоб адміністратор допоміг вирішити ситуацію вручну.`
         );
     }

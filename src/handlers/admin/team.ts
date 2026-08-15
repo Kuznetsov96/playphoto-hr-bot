@@ -203,7 +203,7 @@ async function executeFullSync(ctx: MyContext, msg: any) {
                         `📅 <b>New Staff First Shift Scheduled</b>\n\n` +
                         `👤 Name: <b>${staff.fullName}</b>\n` +
                         `📅 First Shift: <b>${dateStr}</b>\n` +
-                        `📍 Location: <b>${firstShift.location.name}</b>\n\n` +
+                        `📍 Location: <b>${escapeHtml(formatLocation(firstShift.location, "listing"))}</b>\n\n` +
                         `Schedule is ready; no separate mentor onboarding is required.`;
                     const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${staff.id}`);
                     await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });

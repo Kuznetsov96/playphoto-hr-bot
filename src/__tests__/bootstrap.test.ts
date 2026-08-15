@@ -31,13 +31,18 @@ vi.mock("../core/redis.js", () => ({
 }));
 
 describe("Bot Bootstrap & Menu Integrity", () => {
+    // Importing the whole admin menu hierarchy is the heaviest thing the suite does — it pulls in
+    // every handler transitively. It measured ~3.3s of vitest's 5s default, so any growth
+    // elsewhere in the suite tipped it over and failed a test that was not about the change.
+    // The timeout is generous on purpose: this test exists to catch duplicate menu ids, not to
+    // police load time.
     it("should register Admin menus without duplicate errors", async () => {
         const { bot } = await import("../core/bot.js");
         const { registerAdminMenusHierarchy } = await import("../handlers/admin/bootstrap.js");
 
         // The test passes if this call doesn't throw "Menu 'id' already registered"
         await expect(registerAdminMenusHierarchy(bot)).resolves.not.toThrow();
-    });
+    }, 30_000);
 
     it("should load HR menus without errors", async () => {
         const { hrHubMenu } = await import("../menus/hr.js");

@@ -26,6 +26,7 @@ import { truncateText } from "../../../utils/task-helpers.js";
 import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../../../services/first-shift-onboarding-service.js";
 import { getRichMessagePlainText } from "../../../utils/rich-message.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
+import { formatLocation } from "../../../utils/location-label.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -413,7 +414,7 @@ staffSupportHandlers.callbackQuery(/^close_topic_(\d+)$/, async (ctx) => {
                 const staffName = user.staffProfile?.fullName || outgoingTopic.staffName || "Unknown";
                 const surname = staffName.split(' ')[0] || staffName;
                 const loc = user.staffProfile?.location || (await candidateRepository.findByUserId(user.id))?.location;
-                const locPart = loc ? ` | ${loc.name}` : "";
+                const locPart = loc ? ` | ${formatLocation(loc, "listing")}` : "";
                 newTitle = `✖️ ${surname}${locPart}`;
             }
         }
@@ -653,7 +654,7 @@ staffSupportHandlers.callbackQuery(/^ticket_transfer_(\d+)_(\d+)$/, async (ctx) 
 
         const locationText = creator.staffProfile?.location
             ? (creator.staffProfile.location.city
-                ? `${creator.staffProfile.location.name} (${creator.staffProfile.location.city})`
+                ? formatLocation(creator.staffProfile.location, "listing")
                 : creator.staffProfile.location.name)
             : "Unknown";
 
@@ -1519,7 +1520,7 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
                 const taskPreview = truncateText(htmlToPlainText(task.taskText), 180);
                 const hintText =
                     `💬 <b>Уточнення від support по завданню</b>\n` +
-                    `📍 ${escapeHtml(task.locationName || proofSubmission.staff.location?.name || "Локація не вказана")}\n` +
+                    `📍 ${escapeHtml(task.locationName || (proofSubmission.staff.location ? formatLocation(proofSubmission.staff.location, "listing") : "Локація не вказана"))}\n` +
                     `<i>${escapeHtml(taskPreview)}</i>\n\n` +
                     `Натисни кнопку нижче і надішли відповідь сюди. Я передам її в правильний topic.`;
                 await sendSupportStatus(ctx, hintText, { parse_mode: "HTML", reply_markup: keyboard }, targetTelegramId);

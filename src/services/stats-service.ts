@@ -702,7 +702,7 @@ export const statsService = {
             actions.push("Підсилити handoff у mentor track: accepted/discovery/training зависають довше SLA.");
         }
         if (topDeficitLocations.length > 0) {
-            actions.push(`Закрити дефіцит по локаціях: ${topDeficitLocations.map((location) => `${normalizeCity(location.city)} / ${location.name}`).join(", ")}.`);
+            actions.push(`Закрити дефіцит по локаціях: ${topDeficitLocations.map((location) => `${normalizeCity(location.city)} / ${formatLocation(location, "in-city")}`).join(", ")}.`);
         }
         if (reserveValidPool > activeValidPool && reserveValidPool >= 10) {
             actions.push("Переглянути логіку waitlist: резерв уже більший за активний робочий пул.");

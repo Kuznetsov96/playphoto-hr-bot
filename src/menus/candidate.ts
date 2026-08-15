@@ -1,4 +1,5 @@
 import { Menu } from "@grammyjs/menu";
+import { formatLocation } from "../utils/location-label.js";
 import type { MyContext } from "../types/context.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { locationRepository } from "../repositories/location-repository.js";
@@ -79,7 +80,7 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
 
     locations.forEach((l, i) => {
         const isSelected = selectedIds.has(l.id);
-        const label = `${isSelected ? '✅ ' : ''}${l.name}`;
+        const label = `${isSelected ? '✅ ' : ''}${formatLocation(l, "in-city")}`;
         
         range.text(label, async (ctx) => {
             if (selectedIds.has(l.id)) selectedIds.delete(l.id);
