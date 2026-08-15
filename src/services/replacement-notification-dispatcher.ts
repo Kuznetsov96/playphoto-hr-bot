@@ -2,7 +2,8 @@ import { InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { ADMIN_IDS } from "../config.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { escapeHtml, formatLocation } from "../handlers/admin/utils.js";
+import { formatLocation } from "../utils/location-label.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {

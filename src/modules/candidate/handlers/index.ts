@@ -1,5 +1,6 @@
 import type { MyContext } from "../../../types/context.js";
-import { escapeHtml, formatLocation } from "../../../handlers/admin/utils.js";
+import { formatLocation } from "../../../utils/location-label.js";
+import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { CANDIDATE_TEXTS } from "../../../constants/candidate-texts.js";
 import { InlineKeyboard, Composer } from "grammy";
 import { z } from "zod";

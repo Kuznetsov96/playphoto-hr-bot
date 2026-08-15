@@ -37,6 +37,8 @@ describe("mentor manual track", () => {
         mocks.sendMessage.mockResolvedValue(undefined);
     });
 
+    // First test in the file, so it absorbs the module-loading cost of the whole service chain;
+    // it sat close enough to vitest's 5s default that unrelated suite growth failed it.
     it("lists MENTOR_MANUAL candidates", async () => {
         const { mentorService } = await import("../mentor-service.js");
         mocks.findByStatusWithUser.mockResolvedValue([{ id: "c1", mentorManualContactedAt: null }]);
@@ -45,7 +47,7 @@ describe("mentor manual track", () => {
 
         expect(mocks.findByStatusWithUser).toHaveBeenCalledWith(CandidateStatus.MENTOR_MANUAL);
         expect(result).toEqual([{ id: "c1", mentorManualContactedAt: null }]);
-    });
+    }, 30_000);
 
     it("puts not-contacted manual candidates first", async () => {
         const { mentorService } = await import("../mentor-service.js");

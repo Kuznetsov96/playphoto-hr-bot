@@ -2,7 +2,8 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 import prisma from "../db/core.js";
 import { systemStateRepository } from "../repositories/system-state-repository.js";
 import { getCityCode, getShortLocationName } from "../utils/location-helpers.js";
-import { escapeHtml, formatLocation } from "../handlers/admin/utils.js";
+import { formatLocation } from "../utils/location-label.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 export type HiringUrgency = "NORMAL" | "CRITICAL";
 

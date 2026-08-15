@@ -1,5 +1,5 @@
 import { Menu } from "@grammyjs/menu";
-import { formatLocation } from "../handlers/admin/utils.js";
+import { formatLocation } from "../utils/location-label.js";
 import type { MyContext } from "../types/context.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { locationRepository } from "../repositories/location-repository.js";
