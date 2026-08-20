@@ -434,7 +434,25 @@ async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
         })
         : null;
     if (!staff?.awsEmployeePublicId || telegramId === undefined) {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-offer-error"]);
+        // Тот же случай, что и у подтверждения графика выше: без канонического id
+        // ответ отправить некуда. Молчать нельзя — снаружи это выглядит как
+        // сломанная кнопка, а причина видна только в данных.
+        logBusinessEvent({
+            event: "bot.replacement_notifications.answer_failed",
+            level: "warn",
+            telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failure",
+            reasonCode: "EMPLOYEE_NOT_MAPPED",
+            module: "replacement-notification-dispatcher",
+            operation: "answerReplacementOffer",
+            safeContext: { offerPublicId, answer },
+        });
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["staff-replacement-offer-error-alert"],
+            show_alert: true,
+        });
     }
 
     const outcome = await answerReplacementOffer({
@@ -473,6 +491,23 @@ async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
         // Telegram отказывает по своим причинам — сообщение старше 48 часов, гонка
         // двух нажатий. Тогда хотя бы снимаем кнопки, чтобы мёртвая не выглядела
         // живой; бэкенд всё равно поглотит повторное нажатие.
+        //
+        // Ответ фотографе при этом уже сохранён, так что это не сбой операции, а
+        // расхождение того, что она видит, с тем, что записано. Пишется warn, а не
+        // error: если такие строки пойдут потоком, значит правка перестала
+        // проходить и карточки остаются с живыми на вид кнопками.
+        logBusinessEvent({
+            event: "bot.replacement_notifications.answer_message_not_rewritten",
+            level: "warn",
+            telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failure",
+            reasonCode: "MESSAGE_EDIT_REJECTED",
+            module: "replacement-notification-dispatcher",
+            operation: "answerReplacementOffer",
+            safeContext: { offerPublicId, answer, outcome },
+        });
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     }
 
