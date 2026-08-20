@@ -1,4 +1,5 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { buildAnsweredOfferText } from "../services/replacement-offer-answered-text.js";
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { hrHandlers } from "./hr.js";
@@ -456,7 +457,25 @@ async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
         });
     }
 
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    // Сообщение переписывается на месте: исход должен читаться там же, где
+    // названа смена. Отдельное сообщение оторвало бы «Зміна твоя» от того, о чём
+    // оно, а при девятнадцяти оферах на один пошук ще й засмітило б стрічку.
+    //
+    // Детали берутся из текста самого сообщения, а не из ответа бэкенда: тот
+    // отдаёт время в UTC, и зміна на 14:00 за Києвом показалась б як 11:00.
+    const originalText = ctx.callbackQuery?.message?.text ?? "";
+    const rewritten = buildAnsweredOfferText(originalText, outcome);
+    const edited = await ctx
+        .editMessageText(rewritten, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } })
+        .then(() => true)
+        .catch(() => false);
+    if (!edited) {
+        // Telegram отказывает по своим причинам — сообщение старше 48 часов, гонка
+        // двух нажатий. Тогда хотя бы снимаем кнопки, чтобы мёртвая не выглядела
+        // живой; бэкенд всё равно поглотит повторное нажатие.
+        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    }
+
     const answered =
         outcome === "accepted"
             ? STAFF_TEXTS["staff-replacement-offer-accepted"]

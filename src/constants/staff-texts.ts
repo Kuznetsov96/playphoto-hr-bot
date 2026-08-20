@@ -141,6 +141,28 @@ ${p.details}
 🕐 ${p.time}
 
 Якщо не можеш — тисни «Не можу», нічого пояснювати не треба 💛`,
+  // Чем заменяется карточка оффера после ответа. Переписывание на месте, а не
+  // новое сообщение: исход читается там же, где названа смена, и лента не растёт
+  // на девятнадцать сообщений с одного пошуку.
+  "staff-replacement-offer-answered-accepted": (p: { location: string; date: string; time: string }) => `✅ <b>Ти виходиш на цю зміну</b>
+
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Перевір «Мій графік» 💛`,
+  // Отказ — одной строкой: рішення прийнято, повертатися до цієї зміни немає
+  // потреби, але слід має лишитися читабельним.
+  "staff-replacement-offer-answered-declined": (p: { location: string; date: string }) => `🚫 Ти відмовилась — ${p.location}, ${p.date}`,
+  "staff-replacement-offer-answered-gone": (p: { location: string; date: string }) => `⌛️ Зміну вже закрито — хтось відгукнувся раніше.
+
+📍 ${p.location}
+📅 ${p.date}`,
+  // Когда разбор карточки не удался: деталей нет, но сообщение обязано
+  // перестать выглядеть действующим.
+  "staff-replacement-offer-answered-accepted-bare": `✅ Ти виходиш на цю зміну. Перевір «Мій графік» 💛`,
+  "staff-replacement-offer-answered-declined-bare": `🚫 Ти відмовилась від цієї зміни`,
+  "staff-replacement-offer-answered-gone-bare": `⌛️ Зміну вже закрито — хтось відгукнувся раніше`,
   "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
   "staff-replacement-offer-btn-decline": `🚫 Не можу`,
   "staff-replacement-offer-accepted": `Зміна твоя 💛 Перевір «Мій графік».`,
