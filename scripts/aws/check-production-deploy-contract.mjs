@@ -47,6 +47,11 @@ const requirements = [
         content.deploy,
         "set_env AWS_PREFERENCES_CANONICAL_WRITE_ENABLED"
     ],
+    [
+        "deploy sets the reviewed parcels canonical read flag",
+        content.deploy,
+        "set_env AWS_PARCELS_CANONICAL_READ_ENABLED"
+    ],
     ["validate checks live command", content.validate, 'expected_command="start:live"'],
     ["validate checks the shadow flag", content.validate, "actual_shadow_flag"],
     ["validate checks the canonical flag", content.validate, "actual_canonical_flag"],

@@ -99,6 +99,7 @@ const run = (failDeploy) => {
             AWS_REPLACEMENTS_CANONICAL_ENABLED: "false",
             AWS_REMINDERS_CANONICAL_READ_ENABLED: "false",
             AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: "false",
+            AWS_PARCELS_CANONICAL_READ_ENABLED: "false",
             DEPLOY_DIRECTORY: deployDirectory,
             DEPLOY_TEST_STATE: root,
             FAIL_DEPLOY: failDeploy ? "true" : "false"
@@ -130,6 +131,9 @@ try {
     }
     if (!deployedEnv.includes("AWS_PREFERENCES_CANONICAL_WRITE_ENABLED=false")) {
         throw new Error("Live deploy did not force the reviewed preferences canonical write flag");
+    }
+    if (!deployedEnv.includes("AWS_PARCELS_CANONICAL_READ_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed parcels canonical read flag");
     }
 
     const failure = run(true);

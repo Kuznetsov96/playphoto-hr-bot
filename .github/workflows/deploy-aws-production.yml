@@ -54,6 +54,11 @@ on:
         required: true
         type: boolean
         default: true
+      parcels_canonical_read_enabled:
+        description: Read Nova Poshta parcels from the canonical backend instead of the bot's own table
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -276,6 +281,7 @@ jobs:
             printf 'AWS_REMINDERS_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.reminders_canonical_read_enabled }}"
             printf 'AWS_PREFERENCES_CANONICAL_WRITE_ENABLED=%q\n' "${{ inputs.preferences_canonical_write_enabled }}"
             printf 'AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED=%q\n' "${{ inputs.replacement_auto_confirm_enabled }}"
+            printf 'AWS_PARCELS_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.parcels_canonical_read_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
