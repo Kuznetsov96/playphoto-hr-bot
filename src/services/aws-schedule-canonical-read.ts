@@ -1,4 +1,5 @@
 import prisma from "../db/core.js";
+import { logBusinessEvent } from "../core/log-events.js";
 import { awsBusinessClient } from "./aws-business-client.js";
 import {
     CanonicalScheduleReadError,
@@ -60,7 +61,32 @@ export class AwsScheduleCanonicalReadService {
                 })
         ]);
 
-        return projectCanonicalSchedule(staffId, canonicalShifts, locations, projections);
+        const projected = projectCanonicalSchedule(staffId, canonicalShifts, locations, projections);
+
+        // Пропуск незмаплених змін мовчазний за задумом — фотографині показується
+        // решта канону, а не старе дзеркало цілком. Але мовчазний для неї, не для
+        // нас: якщо синк дзеркала стане, зміни зникали б з екранів без жодного
+        // сигналу. Один рядок на читання означає звичайне відставання; потік —
+        // що дзеркало перестало наздоганяти.
+        if (projected.length !== canonicalShifts.length) {
+            logBusinessEvent({
+                event: "bot.aws_schedule_canonical_read.shift_not_mirrored",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                result: "partial",
+                reasonCode: "SHIFT_PROJECTION_NOT_MAPPED",
+                module: "aws-schedule-canonical-read",
+                operation: "read",
+                safeContext: {
+                    canonicalCount: canonicalShifts.length,
+                    projectedCount: projected.length,
+                    skipped: canonicalShifts.length - projected.length
+                }
+            });
+        }
+
+        return projected;
     }
 }
 
