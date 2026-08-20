@@ -521,10 +521,16 @@ export interface ReplacementOfferAnswerClient {
         offerPublicId: string,
         input: { employeePublicId: string; telegramId: string },
     ): Promise<{ publicId: string; status: string }>;
+    /**
+     * Отказ не меняет запрос, поэтому бэкенд возвращает только подтверждение
+     * `{ status: "DECLINED" }` — без `publicId`. Требовать здесь запрос целиком
+     * значит описывать контракт, которого нет, и это уже роняло каждое нажатие
+     * «Не можу» на разборе ответа.
+     */
     declineReplacementOffer(
         offerPublicId: string,
         input: { employeePublicId: string; telegramId: string },
-    ): Promise<{ publicId: string; status: string }>;
+    ): Promise<{ status: string }>;
 }
 
 export type ReplacementOfferAnswerOutcome = "accepted" | "declined" | "gone" | "failed";

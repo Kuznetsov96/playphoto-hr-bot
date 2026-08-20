@@ -215,3 +215,63 @@ describe("awsBusinessClient replacements", () => {
         expect(body.reason).toHaveLength(500);
     });
 });
+
+/**
+ * Прод, 17–20.08: каждое нажатие «Не можу» падало с OFFER_ANSWER_FAILED, фотографы
+ * жали повторно и получали то же самое. Причина не в бэкенде — он на отказ отвечает
+ * `{ status: "DECLINED" }` и идемпотентен, — а в том, что клиент разбирал этот ответ
+ * схемой полного запроса, требующей `publicId`. Разбор падал уже после успешного
+ * HTTP 200, ошибка выходила без `code`, и бот показывал «Спробуй ще раз».
+ */
+describe("awsBusinessClient declineReplacementOffer", () => {
+    const offerPublicId = "55555555-5555-4555-8555-555555555555";
+    const input = {
+        employeePublicId: "44444444-4444-4444-8444-444444444444",
+        telegramId: "1368744350",
+    };
+
+    it("accepts the backend's decline acknowledgement as-is", async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ status: "DECLINED" }),
+        });
+
+        await expect(
+            awsBusinessClient.declineReplacementOffer(offerPublicId, input),
+        ).resolves.toMatchObject({ status: "DECLINED" });
+    });
+
+    it("posts to the decline endpoint with the employee and telegram id", async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ status: "DECLINED" }),
+        });
+
+        await awsBusinessClient.declineReplacementOffer(offerPublicId, input);
+
+        const [url, init] = fetchMock.mock.calls[0]!;
+        expect(String(url)).toContain(`/replacements/offers/${offerPublicId}/decline`);
+        expect(JSON.parse(String(init.body))).toEqual(input);
+    });
+
+    /**
+     * Повторное нажатие: бэкенд на уже отклонённом оффере возвращает тот же
+     * `{ status: "DECLINED" }`, а не ошибку. Клиент обязан пройти так же, иначе
+     * идемпотентность бэкенда не доходит до фотографа.
+     */
+    it("stays successful when the same offer is declined twice", async () => {
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: async () => ({ status: "DECLINED" }),
+        });
+
+        await awsBusinessClient.declineReplacementOffer(offerPublicId, input);
+
+        await expect(
+            awsBusinessClient.declineReplacementOffer(offerPublicId, input),
+        ).resolves.toMatchObject({ status: "DECLINED" });
+    });
+});

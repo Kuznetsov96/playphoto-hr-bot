@@ -140,6 +140,17 @@ const replacementRequestSchema = z
     })
     .passthrough();
 
+/**
+ * Отказ — единственный ответ кандидатки, на который бэкенд не возвращает запрос
+ * целиком: отказ ничего в нём не меняет, поэтому приходит только подтверждение
+ * `{ status: "DECLINED" }`. Разбор этого ответа схемой полного запроса валил
+ * каждое нажатие «Не можу» уже после успешного HTTP 200 — ошибка выходила без
+ * `code`, и фотографе показывалось «Спробуй ще раз за хвилину».
+ */
+const replacementDeclineSchema = z
+    .object({ status: z.literal("DECLINED") })
+    .passthrough();
+
 const schedulePreferenceReadSchema = z.union([
     z.object({ exists: z.literal(false) }).strict(),
     z
@@ -352,6 +363,7 @@ export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
  * the type while still arriving at runtime.
  */
 export type ReplacementRequestView = z.infer<typeof replacementRequestSchema>;
+export type ReplacementDeclineAck = z.infer<typeof replacementDeclineSchema>;
 export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
 export type MissingSchedulePreferences = z.infer<typeof missingPreferencesSchema>;
 export type AwsReplacementNotification = z.infer<typeof replacementNotificationSchema>;
@@ -534,12 +546,12 @@ export class AwsBusinessClient {
     async declineReplacementOffer(
         offerPublicId: string,
         input: { employeePublicId: string; telegramId: string },
-    ): Promise<ReplacementRequestView> {
+    ): Promise<ReplacementDeclineAck> {
         const body = await this.request(
             `/replacements/offers/${encodeURIComponent(offerPublicId)}/decline`,
             { method: "POST", body: JSON.stringify(input) },
         );
-        return replacementRequestSchema.parse(body);
+        return replacementDeclineSchema.parse(body);
     }
 
     async cancelReplacement(
