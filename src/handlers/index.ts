@@ -224,7 +224,10 @@ handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
             operation: "acknowledge",
             safeContext: { notificationPublicId },
         });
-        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-unavailable"]);
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["schedule-notif-ans-unavailable-alert"],
+            show_alert: true,
+        });
     }
 
     try {
@@ -250,7 +253,10 @@ handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
             },
         });
         // The buttons stay in place so the photographer can try again.
-        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-unavailable"]);
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["schedule-notif-ans-unavailable-alert"],
+            show_alert: true,
+        });
     }
 
     logBusinessEvent({
@@ -438,8 +444,16 @@ async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
         client: awsBusinessClient,
     });
 
+    // show_alert: узкая всплывашка обрезает текст примерно на 45 символах, и
+    // фотограф видела «...Спробуй ще раз за хви...» — то есть ровно ту часть, где
+    // сказано, что делать, до неё и не доходило. Ошибка — единственный случай,
+    // когда ей нужно что-то предпринять, поэтому она показывается плашкой с
+    // кнопкой «ОК», а успешные ответы остаются ненавязчивым тостом.
     if (outcome === "failed") {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-offer-error"]);
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["staff-replacement-offer-error-alert"],
+            show_alert: true,
+        });
     }
 
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });

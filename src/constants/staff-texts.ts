@@ -143,17 +143,22 @@ ${p.details}
 Якщо не можеш — тисни «Не можу», нічого пояснювати не треба 💛`,
   "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
   "staff-replacement-offer-btn-decline": `🚫 Не можу`,
-  "staff-replacement-offer-accepted": `Дякуємо! Зміна закріплена за тобою 💛 Перевір «Мій графік».`,
+  "staff-replacement-offer-accepted": `Зміна твоя 💛 Перевір «Мій графік».`,
   "staff-replacement-offer-declined": `Зрозуміло, дякуємо за відповідь 💛`,
-  "staff-replacement-offer-gone": `Цю зміну вже закрито — хтось відгукнувся раніше. Дякуємо 💛`,
-  "staff-replacement-offer-error": `Не вдалося зберегти відповідь. Спробуй ще раз за хвилину або напиши в підтримку.`,
+  "staff-replacement-offer-gone": `Зміну вже закрито — хтось був раніше 💛`,
+  /** Узкая всплывашка: обрезается после ~45 символов, поэтому только действие. */
+  "staff-replacement-offer-error": `Спробуй ще раз за хвилину 🌸`,
+  /** Плашка з кнопкою «ОК» — місця більше, тому тут і куди звертатися. */
+  "staff-replacement-offer-error-alert": `Не вдалося зберегти відповідь.
+
+Спробуй ще раз за хвилину. Якщо не вийде — напиши в підтримку 💛`,
   "staff-replacement-offer-closed": (p: { location: string; date: string }) => `Зміну на ${p.location} ${p.date} вже закрито. Дякуємо, що відгукнулася 💛`,
   "staff-replacement-offer-reopened": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — попередня домовленість скасувалася.
 Якщо готова, можеш взяти 🌸`,
-  "staff-replacement-undo-done": `Скасовано. Зміна знову у пошуку — дякуємо, що одразу дала знати 💛`,
+  "staff-replacement-undo-done": `Скасовано, зміна знову у пошуку 💛`,
   "staff-replacement-accepted-btn-undo": `↩️ Це помилка, скасувати`,
-  "staff-replacement-undo-ans-window-closed": `Час на скасування вже минув. Якщо це помилка — напиши в підтримку.`,
-  "staff-replacement-undo-ans-failed": `Не вдалося скасувати. Спробуй ще раз або напиши в підтримку.`,
+  "staff-replacement-undo-ans-window-closed": `Час на скасування минув — напиши в підтримку.`,
+  "staff-replacement-undo-ans-failed": `Спробуй ще раз 🌸`,
   "staff-replacement-reverted-by-owner": (p: { location: string; date: string }) => `Підміну на ${p.location} ${p.date} скасовано адміністратором. Пошук продовжується.`,
   "staff-replacement-reverted-by-candidate": (p: { location: string; date: string }) => `Домовленість на ${p.location} ${p.date} скасувалася — фотографиня, яка погодилась, відмінила це одразу. Пошук заміни триває.`,
   "staff-replacement-owner-review-confirmed": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `✅ <b>Підміну автоматично підтверджено</b>
@@ -174,7 +179,7 @@ ${p.requesterName} → ${p.candidateName}
 Автоматичні перевірки не пройшли — підтвердь або скасуй вручну в адмін-панелі. Кнопка нижче скасовує прийняту пропозицію.`,
   "staff-replacement-owner-review-btn-revert": `↩️ Скасувати підміну`,
   "staff-replacement-revert-ans-done": `Скасовано. Пошук підміни продовжується.`,
-  "staff-replacement-revert-ans-failed": `Не вдалося скасувати. Спробуй ще раз із адмін-панелі.`,
+  "staff-replacement-revert-ans-failed": `Не вийшло — спробуй з адмін-панелі.`,
   // Second tap of the owner revert button, shown when the backend answers
   // REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT: the shift starts soon enough
   // that a replacement may not be found in time, and the owner must
@@ -638,5 +643,9 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-ans-confirmed": `Дякуємо! Ми записали твоє підтвердження ✨`,
   "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Щоб змінити цю зміну, напиши в підтримку 🌸`,
   "schedule-notif-ans-expired": `Це сповіщення вже неактуальне 🌸`,
-  "schedule-notif-ans-unavailable": `Не вдалося зберегти відповідь. Спробуй ще раз, а якщо не вийде — напиши в підтримку 🌸`,
+  "schedule-notif-ans-unavailable": `Спробуй ще раз за хвилину 🌸`,
+  /** Плашка з кнопкою «ОК» — місця більше, тому тут і куди звертатися. */
+  "schedule-notif-ans-unavailable-alert": `Не вдалося зберегти відповідь.
+
+Спробуй ще раз за хвилину. Якщо не вийде — напиши в підтримку 🌸`,
 };
