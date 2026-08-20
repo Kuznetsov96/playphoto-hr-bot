@@ -246,3 +246,132 @@ describe("shift reminder service", () => {
         expect(sendMessage.mock.calls[0]?.[1]).not.toContain("<Admin>");
     });
 });
+
+/**
+ * Планувальник жив у памʼяті процесу: одноразовий `setTimeout` на 08:00, а після
+ * спрацювання — на 08:00 наступного дня. Будь-який рестарт бота між 08:00 і
+ * північчю означав, що нагадування за ЦЕЙ день не піде вже ніколи — не одне, а
+ * всі. Це не гіпотеза: 20.08.2026 було три деплої, і кожен переставляв запуск на
+ * завтра (`nextRunAt` у логах).
+ *
+ * AWS цього й не обіцяє: при in-place деплої застосунок зупиняється, а на одному
+ * інстансі гарантії доступності немає взагалі.
+ *
+ * Лікується не окремим catch-up, а заміною одноразового таймера на періодичну
+ * перевірку: «чи настало вікно і чи вже зроблено». Дедуплікація вже є —
+ * `SET NX` на ключі `shift-reminder:<дата>:<staff>:<shift>` з TTL 3 доби, — тож
+ * зайвий прогін нікого не продублює. Саме такої ідемпотентності вимагає й AWS
+ * від цілей планувальника: EventBridge Scheduler дає at-least-once.
+ */
+describe("shift reminder catch-up after a restart", () => {
+    it("reports the window as due when the bot starts after 08:00 on the same day", async () => {
+        const { isShiftReminderDue } = await import("../shift-reminder-service.js");
+
+        // 10:30 Київ — вікно сьогодні вже настало.
+        expect(isShiftReminderDue(new Date("2026-07-19T07:30:00.000Z"))).toBe(true);
+    });
+
+    it("reports the window as not due before 08:00", async () => {
+        const { isShiftReminderDue } = await import("../shift-reminder-service.js");
+
+        // 07:59 Київ — ще рано.
+        expect(isShiftReminderDue(new Date("2026-07-19T04:59:00.000Z"))).toBe(false);
+    });
+
+    it("treats exactly 08:00 as due", async () => {
+        const { isShiftReminderDue } = await import("../shift-reminder-service.js");
+
+        expect(isShiftReminderDue(new Date("2026-07-19T05:00:00.000Z"))).toBe(true);
+    });
+
+    /**
+     * Взимку Київ — UTC+2, влітку UTC+3. Вікно прибите до місцевих 08:00, а не до
+     * фіксованого UTC, інакше пів року нагадування ходили б на годину не туди.
+     */
+    it("keeps the window at 08:00 Kyiv across daylight saving", async () => {
+        const { isShiftReminderDue } = await import("../shift-reminder-service.js");
+
+        expect(isShiftReminderDue(new Date("2026-01-19T05:59:00.000Z"))).toBe(false);
+        expect(isShiftReminderDue(new Date("2026-01-19T06:00:00.000Z"))).toBe(true);
+    });
+
+    /**
+     * Головна перевірка: другий прогін у той самий день нікого не турбує. Redis
+     * повертає не-OK на вже зайнятий ключ, і повідомлення не йде.
+     */
+    it("sends nothing on a second run for a day already handled", async () => {
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        // Зміна на сьогодні є — інакше перевірка проходила б і без дедуплікації,
+        // просто тому що розсилати нічого.
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([
+            {
+                id: "shift-1",
+                staffId: "staff-1",
+                locationId: "location-1",
+                date: new Date("2026-07-19T00:00:00.000Z"),
+                staff: {
+                    id: "staff-1",
+                    fullName: "Виниченко Вікторія",
+                    user: { telegramId: 1311338839n }
+                },
+                location: { id: "location-1", name: "Volkland 3 (Перемоги)" }
+            }
+        ]);
+        // Ключ уже зайнятий першим прогоном — Redis відповідає не-OK.
+        redisMock.set.mockResolvedValue(null);
+
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Дзеркальна перевірка до попередньої: з тією самою зміною, але вільним
+     * ключем нагадування таки йде. Без неї попередній тест не відрізняв би
+     * «дедуплікація спрацювала» від «розсилка зламана назовсім».
+     */
+    it("still sends when the day has not been handled yet", async () => {
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([
+            {
+                id: "shift-1",
+                staffId: "staff-1",
+                locationId: "location-1",
+                date: new Date("2026-07-19T00:00:00.000Z"),
+                staff: {
+                    id: "staff-1",
+                    fullName: "Виниченко Вікторія",
+                    user: { telegramId: 1311338839n }
+                },
+                location: { id: "location-1", name: "Volkland 3 (Перемоги)" }
+            }
+        ]);
+        redisMock.set.mockResolvedValue("OK");
+
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalled();
+    });
+});
+
+/**
+ * Наздоганяння обмежене в часі. Текст каже «Сьогодні у тебе зміна», а зміни
+ * закінчуються о 21:00: розсилка о 20:00 повідомляла б про те, що вже минуло.
+ * Опівдні ще корисно, ввечері — гірше за мовчання.
+ */
+describe("shift reminder catch-up window has an end", () => {
+    it("still catches up at noon", async () => {
+        const { isShiftReminderDue } = await import("../shift-reminder-service.js");
+
+        expect(isShiftReminderDue(new Date("2026-07-19T09:00:00.000Z"))).toBe(true);
+    });
+
+    it("stops catching up once the shift day is mostly gone", async () => {
+        const { isShiftReminderDue } = await import("../shift-reminder-service.js");
+
+        // 17:00 Київ — зміни ще тривають, але нагадувати про початок дня пізно.
+        expect(isShiftReminderDue(new Date("2026-07-19T14:00:00.000Z"))).toBe(false);
+    });
+});
