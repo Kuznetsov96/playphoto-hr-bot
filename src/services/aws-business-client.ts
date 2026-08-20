@@ -202,6 +202,23 @@ const employeeScheduleSchema = z.object({
     }).strict()),
 }).strict();
 
+const parcelsSchema = z.object({
+    schemaVersion: z.literal(1),
+    generatedAt: z.string(),
+    parcels: z.array(
+        z.object({
+            ttn: z.string(),
+            status: z.string(),
+            locationPublicId: z.string().nullable(),
+            npAddress: z.string().nullable(),
+            npCity: z.string().nullable(),
+            scheduledDate: z.string().nullable(),
+            arrivedAt: z.string().nullable(),
+        }),
+    ),
+});
+export type AwsParcels = z.infer<typeof parcelsSchema>;
+
 /**
  * Mirrors the backend's exported `ScheduleNotificationShiftSnapshot`.
  *
@@ -413,6 +430,11 @@ export class AwsBusinessClient {
             throw new Error("AWS business API returned a schedule for another employee");
         }
         return schedule;
+    }
+
+    async parcels(options: { timeoutMs?: number } = {}): Promise<AwsParcels> {
+        const value = await this.request("/parcels", { method: "GET" }, options.timeoutMs);
+        return parcelsSchema.parse(value);
     }
 
     /**
