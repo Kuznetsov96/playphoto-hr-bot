@@ -3,7 +3,7 @@ import { novaPoshtaService } from './nova-poshta-service.js';
 import logger from '../core/logger.js';
 import { ParcelStatus } from '@prisma/client';
 import { Bot, InlineKeyboard } from 'grammy';
-import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE, PARCELS_CANONICAL_READ_ENABLED } from '../config.js';
+import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE, AWS_PARCELS_CANONICAL_READ_ENABLED } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
@@ -67,7 +67,7 @@ export class LogisticsService {
      * back to the local row by `ttn` before writing anything.
      */
     private async readParcels(): Promise<CanonicalParcel[]> {
-        if (!PARCELS_CANONICAL_READ_ENABLED) {
+        if (!AWS_PARCELS_CANONICAL_READ_ENABLED) {
             const rows = await prisma.parcel.findMany({
                 where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } }
             });
