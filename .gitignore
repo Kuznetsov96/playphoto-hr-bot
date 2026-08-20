@@ -92,3 +92,10 @@ canvas-test.png
 # ─── Temporary SQL files ───
 prisma/migrations/*.sql
 !prisma/migrations/*/migration.sql
+
+# Этот репозиторий ставится через npm (package-lock.json, `npm ci` в Dockerfile
+# и в деплой-воркфлоу). Локальный запуск pnpm оставляет свой lock и
+# pnpm-workspace.yaml с заглушками вместо значений — в коммит они попадать не
+# должны, иначе рядом лежат два конкурирующих lock-файла.
+pnpm-lock.yaml
+pnpm-workspace.yaml
