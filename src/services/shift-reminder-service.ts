@@ -83,6 +83,30 @@ function getKyivCalendarDateRange(now: Date) {
     return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 }
 
+/**
+ * Чи настало сьогодні вікно розсилки нагадувань (08:00 за Києвом).
+ *
+ * Питання саме таке — «чи настало», а не «коли настане». Одноразовий таймер на
+ * 08:00 жив у памʼяті процесу: рестарт після 08:00 переставляв запуск на завтра,
+ * і нагадування за цей день не йшли вже ніколи. Періодична перевірка цього
+ * питання разом із дедуплікацією в Redis робить і розсилку, і наздоганяння
+ * одним механізмом.
+ */
+/**
+ * Доки має сенс наздоганяти пропущену розсилку. Текст нагадування каже «Сьогодні
+ * у тебе зміна», а зміни закінчуються о 21:00 — надіслати його ввечері означало б
+ * повідомити про те, що вже минуло. Опівдні ще корисно, о 20:00 — ні.
+ */
+const REMINDER_CATCH_UP_UNTIL_HOUR = 14;
+
+export function isShiftReminderDue(now: Date): boolean {
+    const parts = getKyivDateParts(now);
+    return (
+        now >= createKyivDateTime(parts.year, parts.month, parts.day, 8) &&
+        now < createKyivDateTime(parts.year, parts.month, parts.day, REMINDER_CATCH_UP_UNTIL_HOUR)
+    );
+}
+
 export function getNextShiftReminderAt(now: Date) {
     const parts = getKyivDateParts(now);
     let nextRun = createKyivDateTime(parts.year, parts.month, parts.day, 8);
@@ -344,34 +368,46 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
     }
 }
 
-export function startShiftReminderLoop(bot: Bot<MyContext>) {
-    const scheduleNextRun = () => {
-        const now = new Date();
-        const nextRun = getNextShiftReminderAt(now);
-        const delay = nextRun.getTime() - now.getTime();
-        logBusinessEvent({
-            event: "staff.shift_reminder_loop.started",
-            actorType: "system",
-            actorRole: "system",
-            result: "success",
-            module: "shift-reminder-service",
-            operation: "startShiftReminderLoop",
-            safeContext: {
-                nextRunAt: nextRun.toISOString(),
-                delayHours: Number((delay / 1000 / 60 / 60).toFixed(2)),
-            },
-        });
+/**
+ * Як часто перевіряти, чи настало вікно. Прогін дешевий і в переважній більшості
+ * випадків ні до чого не призводить: `sendDailyShiftReminders` виходить одразу,
+ * якщо змін на сьогодні немає, а вже розіслані нагадування відсікає Redis.
+ *
+ * Пʼятнадцять хвилин також визначають найгірше запізнення нагадування після
+ * рестарту — і водночас дають дзеркалу час наздогнати канон (синк ходить раз на
+ * пʼять хвилин), тож зміна, додана перед самим вікном, потрапить у наступний
+ * прогін.
+ */
+const REMINDER_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-        setTimeout(async () => {
-            try {
-                await sendDailyShiftReminders(bot);
-            } catch (error) {
-                logger.error({ err: error }, "Shift reminder run failed");
-            } finally {
-                scheduleNextRun();
-            }
-        }, delay);
+export function startShiftReminderLoop(bot: Bot<MyContext>) {
+    logBusinessEvent({
+        event: "staff.shift_reminder_loop.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "shift-reminder-service",
+        operation: "startShiftReminderLoop",
+        safeContext: {
+            checkIntervalMinutes: REMINDER_CHECK_INTERVAL_MS / 60_000,
+            nextRunAt: getNextShiftReminderAt(new Date()).toISOString(),
+        },
+    });
+
+    // Одне й те саме питання щочверть години: чи настало вікно. Якщо бот стартував
+    // о 10:00 — перша ж перевірка це побачить і розішле те, що мало піти о 08:00,
+    // замість чекати до завтра. Повторний прогін нікого не турбує: заявка на
+    // нагадування береться через `SET NX` з добовим запасом, тож другий раз ключ
+    // уже зайнятий.
+    const check = async () => {
+        if (!isShiftReminderDue(new Date())) return;
+        try {
+            await sendDailyShiftReminders(bot);
+        } catch (error) {
+            logger.error({ err: error }, "Shift reminder run failed");
+        }
     };
 
-    scheduleNextRun();
+    void check();
+    return setInterval(() => void check(), REMINDER_CHECK_INTERVAL_MS);
 }

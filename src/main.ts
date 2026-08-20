@@ -36,6 +36,7 @@ let runner: RunnerHandle | undefined;
 let queueWorkers: ReturnType<typeof startWorkers> = [];
 let shuttingDown = false;
 let awsBusinessSyncTimer: NodeJS.Timeout | undefined;
+let shiftReminderTimer: NodeJS.Timeout | undefined;
 let scheduleNotificationTimer: NodeJS.Timeout | undefined;
 let replacementNotificationTimer: NodeJS.Timeout | undefined;
 let scheduleMirrorTimer: NodeJS.Timeout | undefined;
@@ -155,7 +156,7 @@ async function bootstrap() {
         scheduleNotificationTimer = startScheduleNotificationDispatcher(bot as any);
         replacementNotificationTimer = startReplacementNotificationDispatcher(bot as any);
         startBirthdayLoop(bot);
-        startShiftReminderLoop(bot);
+        shiftReminderTimer = startShiftReminderLoop(bot);
         // Nothing else notices when the schedule sync dies: the loop swallows its
         // own failure into a log line, and a timer that stops firing produces no
         // log at all. The bot would keep serving the last-written schedule.
@@ -221,6 +222,7 @@ async function shutdown(signal: string) {
         if (scheduleNotificationTimer) clearInterval(scheduleNotificationTimer);
         if (replacementNotificationTimer) clearInterval(replacementNotificationTimer);
         if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
+        if (shiftReminderTimer) clearInterval(shiftReminderTimer);
         if (runner?.isRunning()) {
             await runner.stop();
         }
