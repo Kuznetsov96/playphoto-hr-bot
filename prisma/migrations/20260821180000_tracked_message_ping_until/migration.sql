@@ -5,6 +5,7 @@
 -- отвечает «збір закрито» — каждые четыре часа.
 ALTER TABLE "TrackedMessage" ADD COLUMN "pingUntil" TIMESTAMP(3);
 
--- Частичный индекс: строк с дедлайном мало, а условие проверяется на каждом
--- тике пингера вместе с nextPingAt.
-CREATE INDEX "TrackedMessage_pingUntil_idx" ON "TrackedMessage"("pingUntil") WHERE "pingUntil" IS NOT NULL;
+-- Обычный индекс, а не частичный: схема объявляет @@index([pingUntil]) без
+-- условия, и `WHERE pingUntil IS NOT NULL` в SQL давал бы дрейф — Prisma
+-- считает такой индекс другим. CI это поймал.
+CREATE INDEX "TrackedMessage_pingUntil_idx" ON "TrackedMessage"("pingUntil");
