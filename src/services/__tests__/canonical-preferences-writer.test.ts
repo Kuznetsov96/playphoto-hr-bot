@@ -9,6 +9,17 @@ vi.mock("../aws-business-client.js", () => ({
         upsertSchedulePreference: (...a: unknown[]) => upsertSchedulePreference(...a),
         getSchedulePreference: (...a: unknown[]) => getSchedulePreference(...a),
     },
+    // Настоящий класс, а не заглушка: писатель различает виды отказа через
+    // `instanceof`, и подделка молча увела бы закрытое окно в «бэкенд лежит».
+    AwsBusinessApiError: class AwsBusinessApiError extends Error {
+        constructor(
+            public readonly status: number,
+            public readonly code: string | undefined,
+            message: string
+        ) {
+            super(message);
+        }
+    },
 }));
 vi.mock("../../db/core.js", () => ({
     default: { staffProfile: { findUnique: (...a: unknown[]) => findUniqueStaff(...a) } },
@@ -260,5 +271,34 @@ describe("saveCanonicalPreference", () => {
         expect(JSON.stringify(readLogArgs![0])).not.toContain("emp-uuid");
 
         errorSpy.mockRestore();
+    });
+
+    it("отличает закрытое окно от устаревшей версии — оба приходят как 409", () => {
+        // Устаревшая версия значит «перечитай и попробуй снова», закрытое окно —
+        // «поздно, дальше через підміну». Спутать их значит посоветовать
+        // опоздавшему «спробуй ще раз за хвилину»: совет, который никогда не
+        // сработает.
+        return expect(
+            (async () => {
+                findUniqueStaff.mockResolvedValue({ awsEmployeePublicId: "emp-1" });
+                getSchedulePreference.mockResolvedValue({ exists: false });
+                const { AwsBusinessApiError } = await import("../aws-business-client.js");
+                upsertSchedulePreference.mockRejectedValue(
+                    new AwsBusinessApiError(
+                        409,
+                        "SCHEDULE_PREFERENCES_CLOSED",
+                        "AWS business API request failed with HTTP 409"
+                    )
+                );
+                return saveCanonicalPreference({
+                    staffId: "staff-1",
+                    month: "2026-09",
+                    selectedDays: [5],
+                    comment: null,
+                    telegramId: "5",
+                    declined: false,
+                });
+            })()
+        ).resolves.toEqual({ ok: false, reasonCode: "SCHEDULE_PREFERENCES_CLOSED" });
     });
 });

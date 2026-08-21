@@ -10,7 +10,11 @@ import { redis } from "../core/redis.js";
 import { formatSurnameNameDot } from "../utils/string-utils.js";
 import { escapeHtml } from "./admin/utils.js";
 import { AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
-import { saveCanonicalPreference } from "../services/canonical-preferences-writer.js";
+import {
+    saveCanonicalPreference,
+    type CanonicalPreferenceReasonCode,
+} from "../services/canonical-preferences-writer.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 
@@ -130,7 +134,7 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
             });
             if (!saved.ok) {
                 await ctx.answerCallbackQuery();
-                await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                await ctx.reply(preferenceSaveFailureText(saved.reasonCode, month));
                 return;
             }
         } else {
@@ -407,7 +411,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                 });
                 if (!saved.ok) {
                     await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
-                    await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                    await ctx.reply(preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"));
                     return;
                 }
             } else {
@@ -541,4 +545,20 @@ export async function handlePreferenceComment(ctx: MyContext) {
     await ctx.deleteMessage().catch(() => { });
     await renderConfirmation(ctx);
     return true;
+}
+
+/**
+ * Что сказать человеку, когда пожелания не сохранились.
+ *
+ * Закрытое окно — не сбой: «Спробуй ще раз за хвилину» отправило бы
+ * опоздавшего повторять то, что не сработает никогда. Ему нужно знать, что
+ * дальше — через підміну.
+ */
+function preferenceSaveFailureText(
+    reasonCode: CanonicalPreferenceReasonCode,
+    monthName: string
+): string {
+    return reasonCode === "SCHEDULE_PREFERENCES_CLOSED"
+        ? STAFF_TEXTS["staff-preferences-window-closed"]({ monthName })
+        : CANDIDATE_TEXTS["preferences-save-failed"];
 }

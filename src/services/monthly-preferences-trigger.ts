@@ -4,10 +4,15 @@ import { broadcastService } from "./broadcast.js";
 import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
 import { logBusinessEvent } from "../core/log-events.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { formatDeadline } from "../utils/format-deadline.js";
 
 /**
  * Service to handle monthly schedule preference collection.
  */
+/** До какого числа принимаются пожелания. Рассылка уходит 23-го. */
+const DEADLINE_DAY_OF_MONTH = 26;
+
 export class MonthlyPreferencesTrigger {
     /**
      * Triggers the monthly broadcast to all active staff.
@@ -41,7 +46,14 @@ export class MonthlyPreferencesTrigger {
             return;
         }
 
-        const messageText = `📢 <b>Побажання на ${monthName}</b>\n\nПривіт! Час планувати графік на наступний місяць. 😊\n\nБудь ласка, познач дні, коли ти <b>НЕ ЗМОЖЕШ</b> вийти на зміну. \n\nДедлайн: <b>2 дні</b>. Після цього бот почне нагадувати тобі кожні 4 години! ⏳\n\nНатисни кнопку нижче, щоб заповнити:`;
+        // Дедлайн — 26-е число текущего месяца, через три дня после рассылки.
+        // Дата, а не «2 дні»: относительный срок каждый считает по-своему,
+        // а день недели выводится из самой даты и потому не разойдётся с ней.
+        const deadlineDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth(), DEADLINE_DAY_OF_MONTH, 23, 59);
+        const messageText = STAFF_TEXTS["staff-preferences-invite"]({
+            monthName,
+            deadline: formatDeadline(deadlineDate),
+        });
 
         try {
             // Queue the broadcast after acquiring the distributed monthly lock.
