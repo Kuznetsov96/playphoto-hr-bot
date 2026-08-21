@@ -53,12 +53,27 @@ export function formatDeadline(deadline: Date, timeZone = "Europe/Kyiv"): string
  */
 export function kyivDeadline(now: Date, dayOfMonth: number, timeZone = "Europe/Kyiv"): Date {
     const local = new Date(now.toLocaleString("en-US", { timeZone }));
-    const midnightUtc = Date.UTC(local.getFullYear(), local.getMonth(), dayOfMonth);
-    // Насколько зона опережает UTC в этот день: разница между тем, как один и
-    // тот же момент читается в зоне и в UTC.
-    const probe = new Date(midnightUtc);
-    const offsetMs =
-        new Date(probe.toLocaleString("en-US", { timeZone })).getTime() -
-        new Date(probe.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
-    return new Date(midnightUtc + 23 * 60 * 60 * 1000 + 59 * 60 * 1000 - offsetMs);
+    const wallClockMs = Date.UTC(local.getFullYear(), local.getMonth(), dayOfMonth, 23, 59);
+
+    // Смещение измеряется в САМ искомый час, а не в полночь: в день перевода
+    // часов они разные, и замер в полночь сдвигал бы результат на час. Для
+    // 29 марта 2026 это давало «30 березня» — та же ошибка «сообщение
+    // противоречит себе», ради которой функция и написана.
+    //
+    // Две итерации: первая берёт смещение по догадке, вторая — уже по
+    // найденному моменту. Этого достаточно, потому что перевод часов сдвигает
+    // время на час, а не на сутки.
+    let utcMs = wallClockMs;
+    for (let pass = 0; pass < 2; pass += 1) {
+        utcMs = wallClockMs - offsetAt(new Date(utcMs), timeZone);
+    }
+    return new Date(utcMs);
+}
+
+/** Насколько зона опережает UTC в этот момент. */
+function offsetAt(instant: Date, timeZone: string): number {
+    return (
+        new Date(instant.toLocaleString("en-US", { timeZone })).getTime() -
+        new Date(instant.toLocaleString("en-US", { timeZone: "UTC" })).getTime()
+    );
 }
