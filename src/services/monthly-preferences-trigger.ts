@@ -5,7 +5,7 @@ import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { formatDeadline } from "../utils/format-deadline.js";
+import { formatDeadline, kyivDeadline } from "../utils/format-deadline.js";
 
 /**
  * Service to handle monthly schedule preference collection.
@@ -49,7 +49,7 @@ export class MonthlyPreferencesTrigger {
         // Дедлайн — 26-е число текущего месяца, через три дня после рассылки.
         // Дата, а не «2 дні»: относительный срок каждый считает по-своему,
         // а день недели выводится из самой даты и потому не разойдётся с ней.
-        const deadlineDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth(), DEADLINE_DAY_OF_MONTH, 23, 59);
+        const deadlineDate = kyivDeadline(now, DEADLINE_DAY_OF_MONTH);
         const messageText = STAFF_TEXTS["staff-preferences-invite"]({
             monthName,
             deadline: formatDeadline(deadlineDate),

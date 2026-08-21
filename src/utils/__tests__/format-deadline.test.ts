@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDeadline } from "../format-deadline.js";
+import { formatDeadline, kyivDeadline } from "../format-deadline.js";
 
 describe("formatDeadline", () => {
     it("выводит день недели из самой даты, а не из шаблона", () => {
@@ -25,5 +25,36 @@ describe("formatDeadline", () => {
         // 2026-08-30 — воскресенье. В JS getDay() для него 0, и наивная
         // индексация массива, начинающегося с понедельника, дала бы пятницу.
         expect(formatDeadline(new Date("2026-08-30T12:00:00.000Z"))).toBe("30 серпня, неділя");
+    });
+});
+
+describe("kyivDeadline", () => {
+    it("строит 23:59 киевского времени, а не серверного", () => {
+        // `new Date(y, m, d, h, min)` читает компоненты в таймзоне СЕРВЕРА.
+        // В контейнере TZ не задан, то есть UTC, и наивная сборка дала бы
+        // 26-е 23:59 UTC — это уже 27-е в Киеве. Сообщение назвало бы
+        // «27 серпня, четвер» вместо «26 серпня, середа» и противоречило
+        // бы само себе.
+        const deadline = kyivDeadline(new Date("2026-08-23T09:00:00.000Z"), 26);
+
+        expect(formatDeadline(deadline)).toBe("26 серпня, середа");
+        // Летом Киев UTC+3: 23:59 местного — это 20:59 UTC.
+        expect(deadline.toISOString()).toBe("2026-08-26T20:59:00.000Z");
+    });
+
+    it("учитывает зимнее смещение", () => {
+        // Зимой Киев UTC+2: 23:59 местного — это 21:59 UTC.
+        const deadline = kyivDeadline(new Date("2026-12-23T09:00:00.000Z"), 26);
+
+        expect(deadline.toISOString()).toBe("2026-12-26T21:59:00.000Z");
+        expect(formatDeadline(deadline)).toBe("26 грудня, субота");
+    });
+
+    it("остаётся в своём месяце независимо от часа запуска", () => {
+        // Рассылка идёт 23-го в 10:00 по Киеву, но проверяется каждую минуту.
+        for (const hour of ["00", "07", "12", "21", "23"]) {
+            const deadline = kyivDeadline(new Date(`2026-08-23T${hour}:30:00.000Z`), 26);
+            expect(formatDeadline(deadline)).toBe("26 серпня, середа");
+        }
     });
 });
