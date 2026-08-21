@@ -92,3 +92,6 @@ canvas-test.png
 # ─── Temporary SQL files ───
 prisma/migrations/*.sql
 !prisma/migrations/*/migration.sql
+
+# Рабочие деревья сессий: содержимое репозитория, а не его часть.
+.worktrees/
