@@ -140,6 +140,17 @@ const replacementRequestSchema = z
     })
     .passthrough();
 
+/**
+ * Отказ — единственный ответ кандидатки, на который бэкенд не возвращает запрос
+ * целиком: отказ ничего в нём не меняет, поэтому приходит только подтверждение
+ * `{ status: "DECLINED" }`. Разбор этого ответа схемой полного запроса валил
+ * каждое нажатие «Не можу» уже после успешного HTTP 200 — ошибка выходила без
+ * `code`, и фотографе показывалось «Спробуй ще раз за хвилину».
+ */
+const replacementDeclineSchema = z
+    .object({ status: z.literal("DECLINED") })
+    .passthrough();
+
 const schedulePreferenceReadSchema = z.union([
     z.object({ exists: z.literal(false) }).strict(),
     z
@@ -190,6 +201,23 @@ const employeeScheduleSchema = z.object({
         endsAt: z.string().datetime(),
     }).strict()),
 }).strict();
+
+const parcelsSchema = z.object({
+    schemaVersion: z.literal(1),
+    generatedAt: z.string(),
+    parcels: z.array(
+        z.object({
+            ttn: z.string(),
+            status: z.string(),
+            locationPublicId: z.string().nullable(),
+            npAddress: z.string().nullable(),
+            npCity: z.string().nullable(),
+            scheduledDate: z.string().nullable(),
+            arrivedAt: z.string().nullable(),
+        }),
+    ),
+});
+export type AwsParcels = z.infer<typeof parcelsSchema>;
 
 /**
  * Mirrors the backend's exported `ScheduleNotificationShiftSnapshot`.
@@ -352,6 +380,7 @@ export type ReplacementPreview = z.infer<typeof replacementPreviewSchema>;
  * the type while still arriving at runtime.
  */
 export type ReplacementRequestView = z.infer<typeof replacementRequestSchema>;
+export type ReplacementDeclineAck = z.infer<typeof replacementDeclineSchema>;
 export type SchedulePreferenceRead = z.infer<typeof schedulePreferenceReadSchema>;
 export type MissingSchedulePreferences = z.infer<typeof missingPreferencesSchema>;
 export type AwsReplacementNotification = z.infer<typeof replacementNotificationSchema>;
@@ -401,6 +430,11 @@ export class AwsBusinessClient {
             throw new Error("AWS business API returned a schedule for another employee");
         }
         return schedule;
+    }
+
+    async parcels(options: { timeoutMs?: number } = {}): Promise<AwsParcels> {
+        const value = await this.request("/parcels", { method: "GET" }, options.timeoutMs);
+        return parcelsSchema.parse(value);
     }
 
     /**
@@ -534,12 +568,12 @@ export class AwsBusinessClient {
     async declineReplacementOffer(
         offerPublicId: string,
         input: { employeePublicId: string; telegramId: string },
-    ): Promise<ReplacementRequestView> {
+    ): Promise<ReplacementDeclineAck> {
         const body = await this.request(
             `/replacements/offers/${encodeURIComponent(offerPublicId)}/decline`,
             { method: "POST", body: JSON.stringify(input) },
         );
-        return replacementRequestSchema.parse(body);
+        return replacementDeclineSchema.parse(body);
     }
 
     async cancelReplacement(

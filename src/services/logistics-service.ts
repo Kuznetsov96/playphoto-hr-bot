@@ -3,13 +3,14 @@ import { novaPoshtaService } from './nova-poshta-service.js';
 import logger from '../core/logger.js';
 import { ParcelStatus } from '@prisma/client';
 import { Bot, InlineKeyboard } from 'grammy';
-import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE } from '../config.js';
+import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE, AWS_PARCELS_CANONICAL_READ_ENABLED } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
 import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canonical-read.js';
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -57,14 +58,37 @@ export class LogisticsService {
     }
 
     /**
+     * Reads the active-parcel set that drives `syncActiveParcelsStatus`.
+     *
+     * Behind the flag, this is unchanged legacy behavior. Ahead of it, the set of
+     * active TTNs comes from the canonical web API instead of the bot's own
+     * mirror — but the bot's `Parcel` row is still the sole store of conversation
+     * state (responsibleStaffId, reminders, acceptedAt), so callers must resolve
+     * back to the local row by `ttn` before writing anything.
+     */
+    private async readParcels(): Promise<CanonicalParcel[]> {
+        if (!AWS_PARCELS_CANONICAL_READ_ENABLED) {
+            const rows = await prisma.parcel.findMany({
+                where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } }
+            });
+            return rows.map(row => ({
+                ttn: row.ttn,
+                status: row.status,
+                locationId: row.locationId,
+                npAddress: row.npAddress,
+                npCity: row.npCity,
+                scheduledDate: row.scheduledDate,
+                arrivedAt: row.arrivedAt
+            }));
+        }
+        return parcelCanonicalReadService.findActive();
+    }
+
+    /**
      * Tracks statuses of all active parcels in DB
      */
     async syncActiveParcelsStatus() {
-        const activeParcels = await prisma.parcel.findMany({
-            where: {
-                status: { notIn: ['COMPLETED', 'CANCELLED'] }
-            }
-        });
+        const activeParcels = await this.readParcels();
 
         if (activeParcels.length === 0) return;
 
@@ -76,11 +100,16 @@ export class LogisticsService {
                 const parcel = activeParcels.find(p => p.ttn === statusDoc.Number);
                 if (!parcel) continue;
 
+                // Conversation state (id, deliveryType) lives only in the bot's own
+                // table — resolved by ttn regardless of where the active-set came from.
+                const localParcel = await prisma.parcel.findUnique({ where: { ttn: parcel.ttn } });
+                if (!localParcel) continue;
+
                 const npStatus = this.mapNPStatusToParcelStatus(statusDoc.StatusCode);
-                const newStatus = this.resolveStatusTransition(parcel.status, npStatus, parcel.deliveryType);
-                if (parcel.status !== newStatus) {
+                const newStatus = this.resolveStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
+                if (localParcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
-                        where: { id: parcel.id },
+                        where: { id: localParcel.id },
                         data: { status: newStatus, staleAlertSentAt: null },
                         include: { location: true }
                     });
@@ -94,7 +123,7 @@ export class LogisticsService {
                         operation: "syncActiveParcelsStatus",
                         safeContext: {
                             parcelId: updated.id,
-                            oldStatus: parcel.status,
+                            oldStatus: localParcel.status,
                             newStatus,
                             statusSource: "nova_poshta_tracking",
                         },
