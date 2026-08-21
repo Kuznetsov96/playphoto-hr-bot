@@ -331,7 +331,7 @@ export const broadcastService = {
         };
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none' }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -417,6 +417,10 @@ export const broadcastService = {
         ]);
 
         const initialDelay = pingOptions?.initialDelayMs || (20 * 60 * 60 * 1000);
+        // Докуда напоминать. Без этого пингер звал бы заполнить форму и после
+        // закрытия окна — она отвечает «збір закрито», а он повторяет каждые
+        // четыре часа, пока человек не заблокирует бота.
+        const pingUntil = pingOptions?.pingUntil ?? null;
         const repeatInterval = pingOptions?.repeatIntervalMs || null;
         const buttonType = pingOptions?.buttonType || 'default';
 
@@ -444,7 +448,8 @@ export const broadcastService = {
                         chatId: BigInt(chatId),
                         messageId: sentMsg.message_id,
                         nextPingAt: new Date(Date.now() + initialDelay),
-                        pingIntervalMs: repeatInterval
+                        pingIntervalMs: repeatInterval,
+                        pingUntil
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
@@ -491,7 +496,8 @@ export const broadcastService = {
                         chatId: BigInt(userId),
                         messageId: sentMsg.message_id,
                         nextPingAt: new Date(Date.now() + initialDelay),
-                        pingIntervalMs: repeatInterval
+                        pingIntervalMs: repeatInterval,
+                        pingUntil
                     });
                     await pendingReplyRepository.create({
                         trackedMessage: { connect: { id: tracked.id } },

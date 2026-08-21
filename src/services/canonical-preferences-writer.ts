@@ -1,6 +1,6 @@
 import prisma from "../db/core.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { awsBusinessClient } from "./aws-business-client.js";
+import { awsBusinessClient, AwsBusinessApiError } from "./aws-business-client.js";
 
 export interface PreferenceDay {
     localDate: string;
@@ -25,6 +25,7 @@ export type CanonicalPreferenceReasonCode =
     | "EMPLOYEE_NOT_MAPPED"
     | "CANONICAL_PREFERENCE_READ_FAILED"
     | "CANONICAL_PREFERENCE_STALE_VERSION"
+    | "SCHEDULE_PREFERENCES_CLOSED"
     | "CANONICAL_BACKEND_UNAVAILABLE";
 
 export type CanonicalPreferenceResult =
@@ -42,6 +43,19 @@ export type CanonicalPreferenceResult =
  */
 function isStaleVersionConflict(error: unknown): boolean {
     return error instanceof Error && /HTTP 409\b/.test(error.message);
+}
+
+/**
+ * Окно сбора закрыто — это тоже 409, но совсем другой разговор.
+ *
+ * Устаревшая версия значит «перечитай и попробуй снова»; закрытое окно значит
+ * «поздно, дальше через підміну». Различаются по коду в теле ответа, а не по
+ * статусу: `AwsBusinessApiError` его несёт, и полагаться на 409 как таковой
+ * значило бы сказать опоздавшему «спробуй ще раз за хвилину» — совет,
+ * который никогда не сработает.
+ */
+function isCollectionClosed(error: unknown): boolean {
+    return error instanceof AwsBusinessApiError && error.code === "SCHEDULE_PREFERENCES_CLOSED";
 }
 
 export async function saveCanonicalPreference(input: {
@@ -86,9 +100,11 @@ export async function saveCanonicalPreference(input: {
         });
         return { ok: true };
     } catch (error: unknown) {
-        const reasonCode = isStaleVersionConflict(error)
-            ? "CANONICAL_PREFERENCE_STALE_VERSION"
-            : "CANONICAL_BACKEND_UNAVAILABLE";
+        const reasonCode = isCollectionClosed(error)
+            ? "SCHEDULE_PREFERENCES_CLOSED"
+            : isStaleVersionConflict(error)
+              ? "CANONICAL_PREFERENCE_STALE_VERSION"
+              : "CANONICAL_BACKEND_UNAVAILABLE";
         return logAndFail(error, "upsert", reasonCode, input.selectedDays.length);
     }
 }

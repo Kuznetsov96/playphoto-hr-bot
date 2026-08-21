@@ -28,7 +28,13 @@ export class TrackedMessageRepository {
     async findToPing(now: Date) {
         return prisma.trackedMessage.findMany({
             where: {
-                nextPingAt: { lte: now }
+                nextPingAt: { lte: now },
+                // Окно напоминаний. У обычных рассылок его нет (`pingUntil`
+                // пустой) — они пингуют, пока человек не ответит, как раньше.
+                // У сбора пожеланий оно есть: после закрытия окна бот звал бы
+                // заполнить форму, которая отвечает «збір закрито», — каждые
+                // четыре часа, пока человек не сдастся.
+                OR: [{ pingUntil: null }, { pingUntil: { gt: now } }]
             },
             include: {
                 broadcast: true,
