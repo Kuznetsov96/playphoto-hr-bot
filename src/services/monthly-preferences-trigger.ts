@@ -67,6 +67,9 @@ export class MonthlyPreferencesTrigger {
                 {
                     initialDelayMs: 2 * 24 * 60 * 60 * 1000, // 2 days
                     repeatIntervalMs: 4 * 60 * 60 * 1000,    // 4 hours
+                    // Напоминания смолкают вместе с окном: после дедлайна
+                    // форма отвечает «збір закрито», и звать в неё — издевка.
+                    pingUntil: deadlineDate,
                     buttonType: 'preferences'
                 }
             );

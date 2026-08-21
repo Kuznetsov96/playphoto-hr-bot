@@ -71,12 +71,15 @@ model TrackedMessage {
   chatId         BigInt
   messageId      Int
   nextPingAt     DateTime?
+  /// Докуда пинговать. NULL — до ответа, как у обычных рассылок.
+  pingUntil      DateTime?
   lastPingMsgId  Int?
   pingIntervalMs Int?
   pendingReplies PendingReply[]
   broadcast      Broadcast      @relation(fields: [broadcastId], references: [id])
 
   @@index([nextPingAt])
+  @@index([pingUntil])
   @@index([broadcastId])
 }
 

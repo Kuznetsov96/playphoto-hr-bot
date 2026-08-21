@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { STAFF_TEXTS } from "../../constants/staff-texts.js";
 import { formatDeadline } from "../../utils/format-deadline.js";
@@ -59,5 +60,20 @@ describe("приглашение заполнить пожелания", () => {
         ].join("\n");
 
         expect(all).not.toMatch(/заміну|заміна/u);
+    });
+});
+
+describe("окно напоминаний", () => {
+    it("дедлайн рассылки совпадает с тем, до которого пингуют", () => {
+        // Один и тот же `deadlineDate` идёт и в текст сообщения, и в
+        // `pingUntil`. Разойдись они — бот назвал бы одну дату, а замолчал
+        // в другую, и человек не понял бы, верить ли написанному.
+        const source = readFileSync(
+            new URL("../monthly-preferences-trigger.ts", import.meta.url),
+            "utf8",
+        );
+
+        expect(source).toContain("pingUntil: deadlineDate");
+        expect(source).toContain("deadline: formatDeadline(deadlineDate)");
     });
 });
