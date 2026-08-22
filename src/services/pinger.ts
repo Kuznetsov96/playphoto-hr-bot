@@ -194,6 +194,13 @@ export function startPingerLoop(bot: Bot<MyContext>) {
     setInterval(() => runPinger(bot), PING_CONFIG.CHECK_INTERVAL_MS);
 }
 
+/**
+ * Экспортируется только для тестов: цикл напоминаний иначе достижим лишь через
+ * `setInterval` в `startPingerLoop`, а потолок — как раз то, что нужно проверять
+ * прогоном, а не таймером. Продакшен-код вызывает `startPingerLoop`.
+ */
+export const runPingerForTest = (bot: Bot<MyContext>) => runPinger(bot);
+
 async function runPinger(bot: Bot<MyContext>) {
     try {
         const now = new Date();
@@ -201,6 +208,45 @@ async function runPinger(bot: Bot<MyContext>) {
 
         for (const msg of messagesToPing) {
             const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
+
+            // 0. Потолок: рассылка старше окна — перестаём напоминать, даже если
+            // человек так и не ответил. Раньше цикл был бесконечным, и молчащий
+            // получал пинг каждые 4 часа до конца сбора; у молчания же всегда
+            // причина, которую бот не исправит (увольнение без отметки, больница,
+            // потерянный телефон). Дальше это забота владельца — имя видно в
+            // «Still waiting» на экране месяца.
+            //
+            // Проверяется ДО отправки, но ПОСЛЕ pruneNonMembers, чтобы вышедшие из
+            // чата всё так же вычищались из pending, а не застревали навсегда.
+            const broadcastAt = msg.broadcast?.createdAt;
+            if (broadcastAt && now.getTime() - broadcastAt.getTime() > PING_CONFIG.MAX_PING_AGE_MS) {
+                await trackedMessageRepository.stopTracking(msg.id);
+                logBusinessEvent({
+                    event: "broadcast.ping_tracking.exhausted",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    reasonCode: "MAX_PING_AGE_REACHED",
+                    module: "pinger",
+                    operation: "runPinger",
+                    safeContext: {
+                        trackedMessageId: msg.id,
+                        chatId: msg.chatId,
+                        messageId: msg.messageId,
+                        // Сколько человек так и не ответило: это число владелец
+                        // видит на экране месяца и обзванивает руками.
+                        unanswered: activePendingReplies.length,
+                        ageHours: Math.round((now.getTime() - broadcastAt.getTime()) / 3600000),
+                    },
+                });
+
+                if (msg.lastPingMsgId) {
+                    try {
+                        await bot.api.deleteMessage(Number(msg.chatId), msg.lastPingMsgId);
+                    } catch (e) { /* ignore */ }
+                }
+                continue;
+            }
 
             // 1. If no pending replies, stop pinging
             if (activePendingReplies.length === 0) {

@@ -100,6 +100,17 @@ preferencesHandlers.callbackQuery("pref_force_edit", async (ctx) => {
     await startPreferencesFlow(ctx);
 });
 
+/**
+ * Кнопки, которая сюда ведёт, больше нет — `buildBroadcastKeyboard` её не рисует
+ * (см. комментарий там о том, почему). Обработчик остаётся НАМЕРЕННО: рассылки,
+ * ушедшие до этого изменения, лежат в чатах у людей вместе со своей клавиатурой,
+ * и Telegram отдаст этот callback, когда по ней нажмут. Удалить обработчик —
+ * значит превратить старую кнопку в тихий отказ у человека, который просто хотел
+ * выключить напоминания.
+ *
+ * Удалять можно, когда пройдёт месяц сбора и старые сообщения перестанут быть
+ * актуальными.
+ */
 preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return ctx.answerCallbackQuery();
