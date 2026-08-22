@@ -37,6 +37,8 @@ import prisma from "../db/core.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
 import {
     answerReplacementOffer,
+    OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE,
+    OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE,
     REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE,
     REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE,
     REPLACEMENT_REVERT_CALLBACK_CODE,
@@ -519,6 +521,99 @@ async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
               : STAFF_TEXTS["staff-replacement-offer-gone"];
     await ctx.answerCallbackQuery(answered);
 }
+
+
+/**
+ * Відповідь на вільну зміну. Кнопки підписані окремими кодами, тож «беру» і
+ * «не можу» розрізняються самим callback-ом, як і в замінах.
+ *
+ * Бекенд володіє результатом: він перевіряє, що предложення належить саме цій
+ * людині, що зміну ще не взяли і що людина досі може її відкрити. Повторювати
+ * ці перевірки тут нічого — вони мають виконуватись у транзакції, а не в боті.
+ */
+async function handleOpenShiftAnswer(ctx: MyContext, answer: "accept" | "decline") {
+    const data = ctx.callbackQuery?.data ?? "";
+    const code =
+        answer === "accept"
+            ? OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE
+            : OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE;
+    const offerPublicId = readCallbackPayload(data, { code });
+    if (!offerPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    const telegramId = ctx.from?.id;
+    const staff = telegramId
+        ? await prisma.staffProfile.findFirst({
+            where: { user: { telegramId: BigInt(telegramId) } },
+            select: { awsEmployeePublicId: true }
+        })
+        : null;
+    if (!staff?.awsEmployeePublicId || telegramId === undefined) {
+        logBusinessEvent({
+            event: "bot.open_shift.answer_failed",
+            level: "warn",
+            telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failure",
+            reasonCode: "EMPLOYEE_NOT_MAPPED",
+            module: "open-shifts",
+            operation: "answerOpenShiftOffer",
+            safeContext: { offerPublicId, answer },
+        });
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["staff-replacement-offer-error-alert"],
+            show_alert: true,
+        });
+    }
+
+    try {
+        const input = { employeePublicId: staff.awsEmployeePublicId, telegramId: String(telegramId) };
+        if (answer === "accept") {
+            await awsBusinessClient.acceptOpenShiftOffer(offerPublicId, input);
+        } else {
+            await awsBusinessClient.declineOpenShiftOffer(offerPublicId, input);
+        }
+    } catch (error: unknown) {
+        logBusinessEvent({
+            event: "bot.open_shift.answer_failed",
+            level: "error",
+            telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failure",
+            reasonCode: "CANONICAL_BACKEND_UNAVAILABLE",
+            module: "open-shifts",
+            operation: "answerOpenShiftOffer",
+            safeContext: {
+                offerPublicId,
+                answer,
+                errorType: error instanceof Error ? error.constructor.name : "UnknownError",
+            },
+        });
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["staff-replacement-offer-error-alert"],
+            show_alert: true,
+        });
+    }
+
+    // Кнопки прибираються завжди: повідомлення, на яке вже відповіли, не має
+    // виглядати живим.
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    return ctx.answerCallbackQuery(
+        answer === "accept"
+            ? STAFF_TEXTS["staff-open-shift-btn-accept"]
+            : STAFF_TEXTS["staff-open-shift-btn-decline"],
+    );
+}
+
+handlers.callbackQuery(new RegExp(`^cb:${OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE}:`), (ctx) =>
+    handleOpenShiftAnswer(ctx, "accept"),
+);
+handlers.callbackQuery(new RegExp(`^cb:${OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE}:`), (ctx) =>
+    handleOpenShiftAnswer(ctx, "decline"),
+);
 
 handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE}:`), (ctx) =>
     handleOfferAnswer(ctx, "accept"),
