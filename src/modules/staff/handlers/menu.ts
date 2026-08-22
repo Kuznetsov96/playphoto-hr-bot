@@ -754,6 +754,8 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
             message = "Ти вже запускала пошук для цієї зміни, але заміну не знайшли. Напиши в підтримку, щоб команда допомогла вручну.";
         } else if (error?.message === "SHIFT_ALREADY_STARTED") {
             message = "Ця зміна вже почалась.";
+        } else if (error?.message === "CANONICAL_REPLACEMENT_FAILED:REPLACEMENT_REQUEST_ALREADY_OPEN") {
+            message = STAFF_TEXTS["staff-replacement-already-open"];
         } else if (typeof error?.message === "string" && error.message.startsWith("CANONICAL_REPLACEMENT_FAILED:")) {
             message = STAFF_TEXTS["staff-replacement-canonical-failed"];
         }

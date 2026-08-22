@@ -3,9 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const createReplacement = vi.fn();
 const resolveCanonicalShift = vi.fn();
 
-vi.mock("../aws-business-client.js", () => ({
-    awsBusinessClient: { createReplacement: (...a: unknown[]) => createReplacement(...a) },
-}));
+vi.mock("../aws-business-client.js", async () => {
+    // `AwsBusinessApiError` теж імпортується модулем, що тестується: без
+    // нього мок ламає `instanceof` ще до перевірки поведінки.
+    const actual = await vi.importActual<typeof import("../aws-business-client.js")>(
+        "../aws-business-client.js"
+    );
+    return {
+        ...actual,
+        awsBusinessClient: { createReplacement: (...a: unknown[]) => createReplacement(...a) },
+    };
+});
 vi.mock("../canonical-shift-resolver.js", () => ({
     resolveCanonicalShift: (...a: unknown[]) => resolveCanonicalShift(...a),
 }));

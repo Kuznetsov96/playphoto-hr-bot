@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lastSelectableDay } from "../last-working-day.js";
+import { formatWorksUntil, lastSelectableDay } from "../last-working-day.js";
 
 describe("lastSelectableDay", () => {
     it("stops the calendar on the last working day itself", () => {
@@ -31,5 +31,28 @@ describe("lastSelectableDay", () => {
     it("compares years, not just month numbers", () => {
         // Той самий номер місяця, але торік — календар має бути порожній.
         expect(lastSelectableDay("2025-09-30", 2026, 8, 30)).toBe(0);
+    });
+});
+
+describe("formatWorksUntil", () => {
+    it("reads as a date a person would say out loud", () => {
+        expect(formatWorksUntil("2026-08-31")).toBe("31 серпня");
+    });
+
+    it("drops the leading zero on single-digit days", () => {
+        expect(formatWorksUntil("2026-09-05")).toBe("5 вересня");
+    });
+
+    it("returns an unparseable value as-is rather than blank", () => {
+        // Порожнє місце там, де людина чекає дату, гірше за технічний вигляд.
+        expect(formatWorksUntil("later")).toBe("later");
+    });
+
+    it("gives nothing back for no date", () => {
+        expect(formatWorksUntil(null)).toBe("");
+    });
+
+    it("rejects an out-of-range month instead of printing undefined", () => {
+        expect(formatWorksUntil("2026-13-01")).toBe("2026-13-01");
     });
 });
