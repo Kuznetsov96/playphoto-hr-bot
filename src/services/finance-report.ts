@@ -194,7 +194,13 @@ const DDS_ARTICLE_MAPPING: Record<string, string> = {
     "cmlqcgvwo000ala3d60mtpkg4": "Выручка от продаж Volkland 3",
     "cmlqcgvvn0007la3dpmt4dgh6": "Выручка от продаж Smile Park Lviv",
     "cmlqcgvys000gla3d92ruth2t": "Выручка от продаж Karamel Sambir",
-    "cmlqcgvyx000hla3d1cncpb0u": "Выручка от продаж Dytyache Horyshche"
+    "cmlqcgvyx000hla3d1cncpb0u": "Выручка от продаж Dytyache Horyshche",
+    // Без явной записи имя статьи собирается как `Выручка от продаж ${name} ${city}`,
+    // а город у этой локации записан латиницей — выходит «Kidlandia Kyiv», статьи
+    // с таким названием в ДДС нет. В листе это терпимо: там колонка свободная. При
+    // проводке через API (FINANCE_DDS_TARGET=api) выручка Kidlandia просто не
+    // прошла бы с TREASURY_ARTICLE_NOT_FOUND, и потеря была бы тихой.
+    "kidlandia_kyiv": "Выручка от продаж Kidlandia Київ"
 };
 
 export function calculateCashSalaryDeduction(income: { totalSalary?: number; photographers?: string[] }): number {
