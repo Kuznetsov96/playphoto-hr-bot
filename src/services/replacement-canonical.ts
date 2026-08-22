@@ -1,11 +1,12 @@
 import { logBusinessEvent } from "../core/log-events.js";
-import { awsBusinessClient } from "./aws-business-client.js";
+import { AwsBusinessApiError, awsBusinessClient } from "./aws-business-client.js";
 import {
     resolveCanonicalShift,
     type CanonicalShiftResolveReason,
 } from "./canonical-shift-resolver.js";
 
 export type CanonicalReplacementFailure =
+    | "REPLACEMENT_REQUEST_ALREADY_OPEN"
     | CanonicalShiftResolveReason
     | "CANONICAL_BACKEND_UNAVAILABLE";
 
@@ -42,20 +43,32 @@ export async function startCanonicalReplacement(input: {
         });
         return { ok: true, replacementPublicId: created.publicId };
     } catch (error: unknown) {
+        /**
+         * 409 ALREADY_OPEN — це осмислена відповідь доступного бекенда, а не
+         * збій. Зливати її в «бекенд недоступний» подвійно шкідливо: людина
+         * бачить неправдиву причину і пораду «спробуй ще раз», яка впреться
+         * в той самий конфлікт.
+         */
+        const code =
+            error instanceof AwsBusinessApiError && error.code === "REPLACEMENT_REQUEST_ALREADY_OPEN"
+                ? "REPLACEMENT_REQUEST_ALREADY_OPEN"
+                : "CANONICAL_BACKEND_UNAVAILABLE";
+
         logBusinessEvent({
             event: "bot.replacement_canonical.failed",
-            level: "error",
+            // Вже відкрита заявка — нормальний перебіг, не помилка рівня error.
+            level: code === "REPLACEMENT_REQUEST_ALREADY_OPEN" ? "warn" : "error",
             actorType: "system",
             actorRole: "system",
             result: "failed",
-            reasonCode: "CANONICAL_BACKEND_UNAVAILABLE",
+            reasonCode: code,
             module: "replacement-canonical",
             operation: "create",
             safeContext: {
                 errorType: error instanceof Error ? error.constructor.name : "UnknownError",
             },
         });
-        return { ok: false, reasonCode: "CANONICAL_BACKEND_UNAVAILABLE" };
+        return { ok: false, reasonCode: code };
     }
 }
 

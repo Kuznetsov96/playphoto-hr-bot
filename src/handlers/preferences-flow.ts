@@ -15,7 +15,7 @@ import {
     saveCanonicalPreference,
     type CanonicalPreferenceReasonCode,
 } from "../services/canonical-preferences-writer.js";
-import { lastSelectableDay } from "../utils/last-working-day.js";
+import { formatWorksUntil, lastSelectableDay } from "../utils/last-working-day.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -257,6 +257,23 @@ async function renderCalendar(ctx: MyContext) {
         targetMonthIndex ?? 0,
         daysInMonth,
     );
+
+    // Місяць цілком після останнього робочого дня: показувати 30 глухих
+    // кнопок — це вигляд зламаного бота. Людина отримала запрошення
+    // «познач свої вихідні» разом з усіма, тож мовчати теж не можна.
+    if (lastDay === 0) {
+        const kb = new InlineKeyboard().text("⬅️ Назад", "staff_hub_nav");
+        const until = formatWorksUntil(ctx.session.preferencesData.worksUntil);
+        await ScreenManager.renderScreen(
+            ctx,
+            `🗓 <b>Побажання (${month})</b>\n\n` +
+                `Ти працюєш до <b>${until}</b>, тож побажання на ${month} не потрібні. ` +
+                `Дякуємо за роботу! 💛`,
+            kb,
+            { pushToStack: true, manualMenuId: "staff-preferences" },
+        );
+        return;
+    }
 
     const kb = new InlineKeyboard();
     const selected = new Set(selectedDays || []);

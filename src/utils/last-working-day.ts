@@ -31,3 +31,25 @@ export function lastSelectableDay(
     // Межа включна: останній робочий день — ще робочий.
     return Math.min(untilDay, daysInMonth);
 }
+
+/** Родовий відмінок: «31 серпня», а не «31 серпень». */
+const MONTHS_GENITIVE = [
+    "січня", "лютого", "березня", "квітня", "травня", "червня",
+    "липня", "серпня", "вересня", "жовтня", "листопада", "грудня",
+] as const;
+
+/**
+ * Дата останнього робочого дня у вигляді, придатному для повідомлення.
+ * Нерозпізнаний рядок повертається як є: краще технічний вигляд, ніж
+ * порожнє місце там, де людина чекає дату.
+ */
+export function formatWorksUntil(worksUntil: string | null | undefined): string {
+    if (!worksUntil) return "";
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(worksUntil);
+    if (!match) return worksUntil;
+
+    const monthName = MONTHS_GENITIVE[Number(match[2]) - 1];
+    if (monthName === undefined) return worksUntil;
+
+    return `${Number(match[3])} ${monthName}`;
+}
