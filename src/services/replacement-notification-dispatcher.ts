@@ -94,6 +94,13 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
                 ? STAFF_TEXTS["staff-replacement-offer-unavailable-wave"]({ location, date, time })
                 : STAFF_TEXTS["staff-replacement-offer"]({ location, date, time });
         }
+        case "OPEN_SHIFT_OFFER": {
+            const time = formatLocalTime(row.payload.startsAtLocal)
+                ? `${formatLocalTime(row.payload.startsAtLocal)}-${formatLocalTime(row.payload.endsAtLocal)}`
+                : "";
+            // Вакансія — не підміна: ніхто не зникав, зміна просто вільна.
+            return STAFF_TEXTS["staff-open-shift-offer"]({ location, date, time });
+        }
         case "OFFER_CLOSED":
             return STAFF_TEXTS["staff-replacement-offer-closed"]({ location, date });
         case "OFFER_REOPENED":
@@ -167,6 +174,8 @@ export const REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE = "replrvc";
  * employee pressing the button, so a request id would identify neither which
  * candidate answered nor which of her offers she meant.
  */
+export const OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE = "osoa";
+export const OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE = "osod";
 export const REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE = "reploa";
 export const REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE = "replod";
 
@@ -186,6 +195,19 @@ function buildOfferKeyboard(payload: AwsReplacementNotificationPayload): InlineK
         .text(
             STAFF_TEXTS["staff-replacement-offer-btn-decline"],
             buildSignedCallback(REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE, payload.offerPublicId),
+        );
+}
+
+function buildOpenShiftKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard | null {
+    if (!payload.offerPublicId) return null;
+    return new InlineKeyboard()
+        .text(
+            STAFF_TEXTS["staff-open-shift-btn-accept"],
+            buildSignedCallback(OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE, payload.offerPublicId),
+        )
+        .text(
+            STAFF_TEXTS["staff-open-shift-btn-decline"],
+            buildSignedCallback(OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE, payload.offerPublicId),
         );
 }
 
@@ -287,7 +309,12 @@ export class ReplacementNotificationDispatcher {
 
         // `exactOptionalPropertyTypes` rejects an explicit `reply_markup:
         // undefined`, so the key is only added at all when there is a keyboard.
-        const offerKeyboard = row.kind === "OFFER" ? buildOfferKeyboard(row.payload) : null;
+        const offerKeyboard =
+            row.kind === "OFFER"
+                ? buildOfferKeyboard(row.payload)
+                : row.kind === "OPEN_SHIFT_OFFER"
+                  ? buildOpenShiftKeyboard(row.payload)
+                  : null;
         const options: Parameters<Api["sendMessage"]>[2] =
             row.kind === "ACCEPTED_OWNER_REVIEW"
                 ? { parse_mode: "HTML", reply_markup: buildOwnerReviewKeyboard(row.payload) }

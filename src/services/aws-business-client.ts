@@ -347,7 +347,14 @@ const replacementNotificationPayloadSchema = z.object({
 
 const replacementNotificationSchema = z.object({
     publicId: z.string().min(1),
-    kind: z.enum(["OFFER", "OFFER_CLOSED", "OFFER_REOPENED", "ACCEPTED_OWNER_REVIEW", "ACCEPTANCE_REVERTED"]),
+    kind: z.enum([
+        "OFFER",
+        "OFFER_CLOSED",
+        "OFFER_REOPENED",
+        "ACCEPTED_OWNER_REVIEW",
+        "ACCEPTANCE_REVERTED",
+        "OPEN_SHIFT_OFFER",
+    ]),
     telegramId: z.string().regex(/^\d+$/u).nullable(),
     payload: replacementNotificationPayloadSchema,
 });
@@ -568,6 +575,33 @@ export class AwsBusinessClient {
             { method: "POST", body: JSON.stringify(input) },
         );
         return replacementRequestSchema.parse(body);
+    }
+
+    /**
+     * Вакансія: на зміні ще нікого немає. Бекенд перевіряє, що предложення
+     * належить саме цій людині і що зміну ще не взяли, тож повторної
+     * перевірки тут немає — той самий поділ, що й у замін.
+     */
+    async acceptOpenShiftOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<void> {
+        await this.request(
+            `/open-shifts/offers/${encodeURIComponent(offerPublicId)}/accept`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+    }
+
+    async declineOpenShiftOffer(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<void> {
+        await this.request(
+            `/open-shifts/offers/${encodeURIComponent(offerPublicId)}/decline`,
+            { method: "POST", body: JSON.stringify(input) },
+            undefined,
+            { expectsBody: false },
+        );
     }
 
     async declineReplacementOffer(

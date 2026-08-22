@@ -163,6 +163,18 @@ ${p.details}
   "staff-replacement-offer-answered-accepted-bare": `✅ Ти виходиш на цю зміну. Перевір «Мій графік» 💛`,
   "staff-replacement-offer-answered-declined-bare": `🚫 Ти відмовилась від цієї зміни`,
   "staff-replacement-offer-answered-gone-bare": `⌛️ Зміну вже закрито — хтось відгукнувся раніше`,
+  // Вакансія: на зміні ще нікого немає, і ніхто не зникав. Слово «підміна»
+  // тут збрехало б — саме тому словник з замінами не перетинається.
+  "staff-open-shift-offer": (p: { location: string; date: string; time: string }) => `🆕 Вільна зміна — можеш взяти.
+
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Хто перший погодиться — за тим і зміна 💛`,
+  "staff-open-shift-btn-accept": `✅ Беру`,
+  "staff-open-shift-btn-decline": `🚫 Не можу`,
+  "staff-open-shift-taken": (p: { location: string; date: string }) => `Цю зміну вже взяли: ${p.location}, ${p.date}.`,
   "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
   "staff-replacement-offer-btn-decline": `🚫 Не можу`,
   "staff-replacement-offer-accepted": `Зміна твоя 💛 Перевір «Мій графік».`,
