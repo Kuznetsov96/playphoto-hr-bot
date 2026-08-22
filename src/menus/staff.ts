@@ -53,9 +53,11 @@ staffHubMenu.dynamic(async (ctx, range) => {
     range.text("🗓 Мій графік", async (ctx) => {
         const { showStaffSchedule } = await import("../modules/staff/handlers/menu.js");
         await showStaffSchedule(ctx);
-    });
+    }).row();
 
-    range.text("🔁 Потрібна заміна", async (ctx) => {
+    // Власний рядок: Telegram ділить ширину порівну і не переносить текст,
+    // тож у парі з графіком ця назва обрізалась до «🔁 Пот...заміна».
+    range.text("🔁 Шукати підміну", async (ctx) => {
         const { showReplacementShiftPicker } = await import("../modules/staff/handlers/menu.js");
         await showReplacementShiftPicker(ctx);
     }).row();
