@@ -49,6 +49,12 @@ const envSchema = z.object({
     // Spreadsheets (Required for full functionality)
     SPREADSHEET_ID_TECH_CASH: z.string().min(1, "TECH_CASH spreadsheet ID is missing"),
     SPREADSHEET_ID_DDS: z.string().min(1, "DDS spreadsheet ID is missing"),
+    // Куда бот проводит выручку: в лист Google Sheets или в ДДС вебаппа.
+    //
+    // Флаг, а не мгновенное переключение, потому что расхождение между двумя
+    // путями обнаружится только на реальных данных. Откат должен быть
+    // переменной окружения, а не деплоем.
+    FINANCE_DDS_TARGET: z.enum(["sheets", "api", "both"]).default("sheets"),
     SPREADSHEET_ID_SCHEDULE: z.string().min(1, "SCHEDULE spreadsheet ID is missing"),
     SPREADSHEET_ID_TEAM: z.string().min(1, "TEAM spreadsheet ID is missing"),
 
@@ -169,6 +175,7 @@ export const FIRST_SHIFT_ONBOARDING_CHAT_ID = env.FIRST_SHIFT_ONBOARDING_CHAT_ID
 // Spreadsheets
 export const SPREADSHEET_ID_TECH_CASH = env.SPREADSHEET_ID_TECH_CASH;
 export const SPREADSHEET_ID_DDS = env.SPREADSHEET_ID_DDS;
+export const FINANCE_DDS_TARGET = env.FINANCE_DDS_TARGET;
 export const SPREADSHEET_ID_SCHEDULE = env.SPREADSHEET_ID_SCHEDULE;
 export const SPREADSHEET_ID_TEAM = env.SPREADSHEET_ID_TEAM;
 
@@ -205,6 +212,19 @@ export const FOP_DISPLAY_NAMES: Record<string, string> = {
     "POSREDNIKOVA": "Счёт ФОП Посредникова",
     "GUPALOVA": "Счёт ФОП Гупалова",
     "KARPUK": "Счёт ФОП Карпук"
+};
+
+/**
+ * ФОП бота → `canonicalCode` кошелька в вебаппе.
+ *
+ * Отдельно от FOP_DISPLAY_NAMES: там имя для человека и для листа, здесь адрес
+ * для API. Совпадение по строке названия ломалось бы от лишнего пробела.
+ */
+export const FOP_WALLET_CODES: Record<string, string> = {
+    KUZNETSOV: "fop-kuznetsov",
+    POSREDNIKOVA: "fop-posrednikova",
+    GUPALOVA: "fop-hupalova",
+    KARPUK: "fop-karpuk",
 };
 
 export const MONO_FOP_IBANS: Record<string, string[]> = {
