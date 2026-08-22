@@ -101,6 +101,14 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
             // Вакансія — не підміна: ніхто не зникав, зміна просто вільна.
             return STAFF_TEXTS["staff-open-shift-offer"]({ location, date, time });
         }
+        case "SEARCH_STARTED": {
+            const time = formatLocalTime(row.payload.startsAtLocal)
+                ? `${formatLocalTime(row.payload.startsAtLocal)}-${formatLocalTime(row.payload.endsAtLocal)}`
+                : "";
+            // Адресоване тій, кого підміняють, а не кандидату: власник
+            // запустив пошук за неї, і мовчати про це не можна.
+            return STAFF_TEXTS["staff-search-started"]({ location, date, time });
+        }
         case "OFFER_CLOSED":
             return STAFF_TEXTS["staff-replacement-offer-closed"]({ location, date });
         case "OFFER_REOPENED":

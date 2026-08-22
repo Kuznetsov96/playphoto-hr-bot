@@ -354,6 +354,7 @@ const replacementNotificationSchema = z.object({
         "ACCEPTED_OWNER_REVIEW",
         "ACCEPTANCE_REVERTED",
         "OPEN_SHIFT_OFFER",
+        "SEARCH_STARTED",
     ]),
     telegramId: z.string().regex(/^\d+$/u).nullable(),
     payload: replacementNotificationPayloadSchema,
