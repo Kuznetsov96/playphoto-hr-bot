@@ -411,11 +411,58 @@ export interface AwsEmployeeUpsert {
     locationCode: string;
 }
 
+const locationCutoverSchema = z.object({
+    items: z.array(
+        z.object({
+            canonicalCode: z.string(),
+            inAppSince: z.string().nullable(),
+        })
+    ),
+});
+
 export class AwsBusinessClient {
     async snapshot(from: string, to: string): Promise<AwsBusinessSnapshot> {
         const query = new URLSearchParams({ from, to });
         const value = await this.request(`/business-snapshot?${query.toString()}`, { method: "GET" });
         return snapshotSchema.parse(value);
+    }
+
+    /**
+     * Проводит выручку локации в ДДС вебаппа.
+     *
+     * Идемпотентно на стороне API: повторный вызов за тот же день, локацию и
+     * канал возвращает исходную проводку, а не создаёт вторую.
+     *
+     * Отказ `LOCATION_ALREADY_IN_APP` означает, что локация успела переехать и
+     * её выручка приходит из касс приложения — это ожидаемый ответ, а не сбой.
+     */
+    async recordDdsRevenue(payment: {
+        paidOn: string;
+        locationCode: string;
+        walletCode: string;
+        articleCode: string;
+        amount: string;
+        paymentMethod: "CASH" | "TERMINAL" | "UNKNOWN";
+        purpose?: string;
+    }) {
+        return this.request("/treasury/payments", {
+            method: "POST",
+            body: JSON.stringify(payment),
+        });
+    }
+
+    /**
+     * С какого дня каждая локация записывает продажи в приложении.
+     *
+     * `inAppSince = null` — локация ещё вне контура, её кассу по-прежнему ведёт
+     * бот. Список читается перед синхронизацией, чтобы не писать в ДДС то, что
+     * уже пришло из `Sale`.
+     */
+    async locationCutover(): Promise<{
+        items: Array<{ canonicalCode: string; inAppSince: string | null }>;
+    }> {
+        const value = await this.request("/locations/cutover", { method: "GET" });
+        return locationCutoverSchema.parse(value);
     }
 
     async upsertEmployee(employee: AwsEmployeeUpsert) {

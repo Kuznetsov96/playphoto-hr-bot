@@ -2,7 +2,8 @@ import { techCashService } from "./finance/tech-cash.js";
 import { ddsService } from "./finance/dds.js";
 import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
-import { FINANCE_IDS, FOP_DISPLAY_NAMES } from "../config.js";
+import { FINANCE_IDS, FOP_DISPLAY_NAMES, FOP_WALLET_CODES } from "../config.js";
+import { ddsArticleCode, writeDdsEntry } from "./finance/dds-writer.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
@@ -271,13 +272,17 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                         log += `[DRY] Add Cash: ${netCash} | FOP: ${fopCashName} | ${locationLabel} | Cat: ${articleName}\n`;
                     } else {
                         logger.debug({ location: fullName, amount: netCash, flow: "cash" }, "Finance DDS sync inserting transaction");
-                        await ddsService.addTransaction({
+                        await writeDdsEntry({
                             date: dateStr,
                             amount: netCash,
                             fop: fopCashName,
                             category: articleName,
                             comment: articleName,
-                            location: locationLabel
+                            location: locationLabel,
+                            locationCode: loc?.canonicalCode ?? null,
+                            walletCode: FOP_WALLET_CODES[fopCashId] ?? null,
+                            articleCode: ddsArticleCode(articleName),
+                            paymentMethod: "CASH",
                         });
                         addedCount++;
                         wroteThisIteration = true;
@@ -305,13 +310,17 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
                             log += `[DRY] Add Terminal: ${netTerminal} (Origin: ${inc.totalTerminal}) | FOP: ${fopTerminalName} | ${locationLabel} | Cat: ${articleName}\n`;
                         } else {
                             logger.debug({ location: fullName, amount: netTerminal, flow: "terminal" }, "Finance DDS sync inserting transaction");
-                            await ddsService.addTransaction({
+                            await writeDdsEntry({
                                 date: dateStr,
                                 amount: netTerminal,
                                 fop: fopTerminalName,
                                 category: articleName,
                                 comment: articleName,
-                                location: locationLabel
+                                location: locationLabel,
+                                locationCode: loc?.canonicalCode ?? null,
+                                walletCode: FOP_WALLET_CODES[fopTerminalId] ?? null,
+                                articleCode: ddsArticleCode(articleName),
+                                paymentMethod: "TERMINAL",
                             });
                             addedCount++;
                             wroteThisIteration = true;
