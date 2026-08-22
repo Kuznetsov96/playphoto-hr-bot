@@ -67,6 +67,8 @@ export interface SessionData {
         comment?: string;
         forceNextMonth?: boolean;
         forceEdit?: boolean;
+        // Останній робочий день (`YYYY-MM-DD`) для тих, хто доопрацьовує.
+        worksUntil?: string | null;
     };
 
     slotBuilder?: {

@@ -6,6 +6,7 @@ import type { PreferenceData } from "../services/preferences-service.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
+import { awsBusinessClient } from "../services/aws-business-client.js";
 import { redis } from "../core/redis.js";
 import { formatSurnameNameDot } from "../utils/string-utils.js";
 import { escapeHtml } from "./admin/utils.js";
@@ -14,6 +15,7 @@ import {
     saveCanonicalPreference,
     type CanonicalPreferenceReasonCode,
 } from "../services/canonical-preferences-writer.js";
+import { lastSelectableDay } from "../utils/last-working-day.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -157,6 +159,21 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
 });
 
+async function readWorksUntil(
+    employeePublicId: string | null,
+    month: string | null,
+    telegramId: string,
+): Promise<string | null> {
+    if (!employeePublicId || !month) return null;
+    try {
+        const read = await awsBusinessClient.getSchedulePreference(employeePublicId, month, telegramId);
+        return read.worksUntil ?? null;
+    } catch (error) {
+        logger.warn({ err: error, employeePublicId, month }, "Failed to read worksUntil for the preferences calendar");
+        return null;
+    }
+}
+
 export async function startPreferencesFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -198,8 +215,18 @@ export async function startPreferencesFlow(ctx: MyContext) {
     }
     delete ctx.session.preferencesData?.forceEdit;
 
+    // Останній робочий день тих, хто доопрацьовує, щоб клавіатура не
+    // пропонувала дні, коли людини вже не буде. Збій читання не має ламати
+    // весь флоу: без дати календар просто лишається повним, як раніше.
+    const worksUntil = await readWorksUntil(
+        user?.staffProfile?.awsEmployeePublicId ?? null,
+        toCanonicalMonth(getMonthName(targetMonthDate), targetMonthDate.getFullYear()),
+        String(telegramId),
+    );
+
     ctx.session.preferencesData = {
         month: getMonthName(targetMonthDate),
+        worksUntil,
         year: targetMonthDate.getFullYear(),
         selectedDays: [],
         comment: "",
@@ -222,6 +249,15 @@ async function renderCalendar(ctx: MyContext) {
 
     const daysInMonth = new Date(year || kyivNow.getFullYear(), (targetMonthIndex ?? 0) + 1, 0).getDate();
 
+    // Той, хто доопрацьовує, не має бачити дні після свого останнього робочого:
+    // позначати їх нема сенсу — на ці зміни його вже не поставлять.
+    const lastDay = lastSelectableDay(
+        ctx.session.preferencesData.worksUntil,
+        year || kyivNow.getFullYear(),
+        targetMonthIndex ?? 0,
+        daysInMonth,
+    );
+
     const kb = new InlineKeyboard();
     const selected = new Set(selectedDays || []);
 
@@ -229,9 +265,10 @@ async function renderCalendar(ctx: MyContext) {
     for (let d = 1; d <= daysInMonth; d++) {
         const isSelected = selected.has(d);
         const isTodayOrPast = isCurrentMonth && d <= kyivNow.getDate();
+        const isAfterLastDay = d > lastDay;
 
-        if (isTodayOrPast) {
-            // Block today and past days
+        if (isTodayOrPast || isAfterLastDay) {
+            // Block today, past days, and days after the last working one
             kb.text(`·`, `none`);
         } else {
             // Future days are selectable
@@ -255,8 +292,14 @@ async function renderCalendar(ctx: MyContext) {
         ? `<i>(Вибір вихідних доступний з завтрашнього дня)</i>`
         : `<i>(Натисни на дати нижче)</i>`;
 
+    // Скорочений календар без пояснення виглядає як помилка бота.
+    const worksUntilHint = lastDay < daysInMonth
+        ? `Твій останній робочий день — <b>${lastDay} ${month}</b>, тож познач дні лише до нього.\n\n`
+        : "";
+
     const text = `🗓 <b>Побажання (${month})</b>\n\n` +
         `Познач дні, коли ти <b>НЕ МОЖЕШ</b> вийти на зміну (твої вихідні). 🚫\n\n` +
+        worksUntilHint +
         selectionHint;
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
@@ -265,6 +308,17 @@ async function renderCalendar(ctx: MyContext) {
 preferencesHandlers.callbackQuery(/^pref_toggle_(\d+)$/, async (ctx) => {
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
     const day = parseInt(ctx.match![1]!);
+
+    // Кнопка на екрані вже заглушена, але старе повідомлення в чаті могло
+    // зберегти день після останнього робочого — не приймаємо його.
+    const { month: pMonth, year: pYear, worksUntil } = ctx.session.preferencesData;
+    const pMonthIndex = UKRAINIAN_MONTH_INDEX[pMonth?.toLowerCase() || ''] ?? 0;
+    const pYearValue = pYear || getKyivNow().getFullYear();
+    const pDaysInMonth = new Date(pYearValue, pMonthIndex + 1, 0).getDate();
+    if (day > lastSelectableDay(worksUntil, pYearValue, pMonthIndex, pDaysInMonth)) {
+        return ctx.answerCallbackQuery("Цей день уже після твого останнього робочого.");
+    }
+
     const selected = new Set(ctx.session.preferencesData.selectedDays);
     if (selected.has(day)) selected.delete(day);
     else selected.add(day);

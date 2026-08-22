@@ -151,11 +151,16 @@ const replacementDeclineSchema = z
     .object({ status: z.literal("DECLINED") })
     .passthrough();
 
+// `worksUntil` — останній робочий день (`YYYY-MM-DD`) або `null`. Необовʼязкове
+// в схемі, бо старіший бекенд його не віддає, а бот має працювати з обома.
 const schedulePreferenceReadSchema = z.union([
-    z.object({ exists: z.literal(false) }).strict(),
+    z
+        .object({ exists: z.literal(false), worksUntil: z.string().nullish() })
+        .strict(),
     z
         .object({
             exists: z.literal(true),
+            worksUntil: z.string().nullish(),
             version: z.number().int(),
             status: z.enum(["SUBMITTED", "DECLINED"]),
             days: z.array(z.object({ localDate: z.string(), kind: z.string() }).strict()),
