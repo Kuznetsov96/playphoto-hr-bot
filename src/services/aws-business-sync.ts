@@ -380,27 +380,42 @@ export class AwsBusinessSyncService {
 
     /**
      * Tells the backend which snapshot telegram ids the bot recognises, so the
-     * owner sees a verification badge when onboarding. A row in the bot's own
-     * `User` table is the evidence: it means that person has interacted with
-     * the bot. This is advisory only — a failure here must never fail the
-     * sync, since photographers losing their schedule is far worse than a
-     * stale badge.
+     * owner sees a verification badge when onboarding, and which ones it knows
+     * it cannot reach (blocked the bot), so the owner sees them flagged for
+     * review. A row in the bot's own `User` table is the evidence a person has
+     * interacted with the bot at all; `botBlockedAt` on that row is the
+     * evidence delivery to them now fails.
+     *
+     * An id with no `User` row is neither of those — it is "not checked yet"
+     * (e.g. a brand-new hire who has not opened the chat), and the API treats
+     * every id in this payload as a binary verified/unreachable outcome with
+     * no third state. So an unknown id is left out of `links` entirely rather
+     * than guessed at either way: reporting it as unreachable would get a
+     * newcomer offered up for deactivation, and reporting it as found would
+     * falsely mark the link VERIFIED.
+     *
+     * This is advisory only — a failure here must never fail the sync, since
+     * photographers losing their schedule is far worse than a stale badge.
      */
     private async reportTelegramLinks(snapshot: AwsBusinessSnapshot): Promise<void> {
         try {
             const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
             const knownUsers = await prisma.user.findMany({
                 where: { telegramId: { in: snapshotTelegramIds } },
-                select: { telegramId: true, username: true },
+                select: { telegramId: true, username: true, botBlockedAt: true },
             });
-            const known = new Map(knownUsers.map((user) => [user.telegramId.toString(), user.username]));
-            const links = snapshot.employees.map((employee) => {
-                const username = known.get(employee.telegramId);
-                return {
+            const known = new Map(knownUsers.map((user) => [
+                user.telegramId.toString(),
+                { username: user.username, reachable: user.botBlockedAt === null },
+            ]));
+            const links = snapshot.employees.flatMap((employee) => {
+                const user = known.get(employee.telegramId);
+                if (!user) return [];
+                return [{
                     telegramId: employee.telegramId,
-                    found: known.has(employee.telegramId),
-                    ...(username ? { username } : {}),
-                };
+                    found: user.reachable,
+                    ...(user.username ? { username: user.username } : {}),
+                }];
             });
             for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
                 const chunk = links.slice(index, index + TELEGRAM_LINKS_CHUNK_SIZE);

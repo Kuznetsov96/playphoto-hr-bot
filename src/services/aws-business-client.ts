@@ -421,6 +421,29 @@ export type AwsReplacementNotification = z.infer<typeof replacementNotificationS
 export type AwsReplacementNotificationKind = AwsReplacementNotification["kind"];
 export type AwsReplacementNotificationPayload = z.infer<typeof replacementNotificationPayloadSchema>;
 
+/**
+ * One queued row from Task 5's access-revocation queue. `.strict()` like its
+ * neighbours: every field the API sends must be listed here, or `parse` throws
+ * on the whole response and the feature breaks silently.
+ */
+const accessRevocationsSchema = z
+    .object({
+        items: z.array(
+            z
+                .object({
+                    publicId: z.string().uuid(),
+                    telegramId: z.string().regex(/^\d+$/u),
+                    kind: z.enum(["REVOKE", "RESTORE"]),
+                    reason: z.string(),
+                })
+                .strict(),
+        ),
+    })
+    .strict();
+
+export type AwsAccessRevocationRow = z.infer<typeof accessRevocationsSchema>["items"][number];
+export type AwsAccessRevocationKind = AwsAccessRevocationRow["kind"];
+
 export interface AwsEmployeeUpsert {
     telegramId: string;
     firstName: string;
@@ -844,6 +867,41 @@ export class AwsBusinessClient {
             { method: "GET" }
         );
         return missingPreferencesSchema.parse(body);
+    }
+
+    /**
+     * Fetches queued access-revocation rows Task 5's API has decided on: who
+     * loses access (REVOKE) and who gets it back (RESTORE). Unlike the
+     * schedule/replacement notification feeds this is parsed as a single
+     * strict batch rather than row-by-row — a contract drift here must fail
+     * loudly rather than silently drop rows, since a dropped REVOKE row means
+     * someone keeps channel access they should have lost.
+     */
+    async pendingAccessRevocations(limit: number): Promise<{ items: AwsAccessRevocationRow[] }> {
+        const query = new URLSearchParams({ limit: String(limit) });
+        const value = await this.request(
+            `/access-revocations/pending?${query.toString()}`,
+            { method: "GET" },
+        );
+        return accessRevocationsSchema.parse(value);
+    }
+
+    async markAccessRevocationProcessed(publicId: string): Promise<void> {
+        await this.request(
+            `/access-revocations/${encodeURIComponent(publicId)}/processed`,
+            { method: "POST", body: JSON.stringify({}) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async markAccessRevocationFailed(publicId: string, reason: string): Promise<void> {
+        await this.request(
+            `/access-revocations/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
+            undefined,
+            { expectsBody: false },
+        );
     }
 
     private async request(
