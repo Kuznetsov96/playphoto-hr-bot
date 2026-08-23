@@ -39,3 +39,31 @@ describe("preferences button gate", () => {
         expect(source).toMatch(/getDate\(\) < 23\) return false/u);
     });
 });
+
+/**
+ * Placement and label. A few days a month this is the most urgent thing a photographer has —
+ * it has a deadline and the bot chases it every six hours — while everything else in the hub is
+ * available all the time. It used to sit third, below "Потрібна заміна".
+ */
+describe("preferences button presentation", () => {
+    it("leads the hub while collection is open", () => {
+        const preferences = source.indexOf("Побажання (${monthName})");
+        const schedule = source.indexOf('range.text("🗓 Мій графік"');
+        const replacement = source.indexOf('range.text("🔁 Шукати підміну"');
+
+        expect(preferences).toBeGreaterThan(-1);
+        expect(preferences).toBeLessThan(schedule);
+        expect(preferences).toBeLessThan(replacement);
+    });
+
+    /** Two calendars in a row forced reading the labels to tell them apart. */
+    it("does not reuse the calendar icon that already marks Мій графік", () => {
+        expect(source).toContain("📝 Побажання");
+        expect(source).not.toContain("🗓 Побажання");
+    });
+
+    /** 20–23 characters depending on the month — it would be clipped beside a neighbour. */
+    it("takes a full-width row of its own", () => {
+        expect(source).toMatch(/📝 Побажання[\s\S]{0,500}\}\)\.row\(\);/u);
+    });
+});

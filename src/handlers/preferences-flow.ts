@@ -20,6 +20,7 @@ import { formatWorksUntil, lastSelectableDay } from "../utils/last-working-day.j
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 
 
 export const preferencesHandlers = new Composer<MyContext>();
@@ -487,6 +488,47 @@ preferencesHandlers.callbackQuery("open_support_dialog", async (ctx) => {
     await startSupportFlow(ctx);
 });
 
+/**
+ * Одно нажатие «Зберегти» — одна попытка записи.
+ *
+ * Запись версионирована на бэкенде, поэтому второе нажатие данные не испортит —
+ * оно получит 409. Но человек увидит непонятную ошибку сразу после успешного
+ * сохранения, что читается как «не сохранилось». Окно в 10 секунд закрывает
+ * дребезг пальца и повторную доставку callback'а, но не мешает осознанному
+ * повтору после неудачи.
+ */
+const saveDedupe = new ActionDedupeWindow(10_000);
+
+/**
+ * Неудача сохранения возвращает человека на экран подтверждения с кнопками.
+ *
+ * Раньше здесь был `ctx.reply(...)` и `return`: экран подтверждения к этому
+ * моменту уже заменён сообщением «⏳ Зберігаю...», и человек оставался с текстом
+ * «спробуй ще раз» — но нажимать было не на что. Данные в сессии при этом целы,
+ * то есть повторить было МОЖНО, просто нечем.
+ */
+async function failSave(
+    ctx: MyContext,
+    waitMessageId: number | undefined,
+    text: string = CANDIDATE_TEXTS["preferences-save-failed"],
+    canRetry: boolean = true,
+): Promise<void> {
+    // Снимаем защиту от дребезга: она существует, чтобы гасить второе нажатие
+    // ПОКА идёт запись, а не чтобы блокировать осознанный повтор после отказа.
+    const telegramId = ctx.from?.id;
+    if (telegramId !== undefined) saveDedupe.release(`pref-save:${telegramId}`);
+
+    if (waitMessageId !== undefined) {
+        await ctx.api.deleteMessage(ctx.chat!.id, waitMessageId).catch(() => { });
+    }
+    await ctx.reply(text);
+
+    // Сессия не тронута — тот же выбор, та же клавиатура, кнопка «Зберегти»
+    // снова доступна. Кроме случая, когда повторять нечего: закрытое окно
+    // сбора не откроется от повторного нажатия, и кнопка обещала бы неправду.
+    if (canRetry) await renderConfirmation(ctx);
+}
+
 preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Помилка.");
     if (await ensureActiveStaffTargetsNextMonth(ctx)) {
@@ -495,9 +537,18 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     }
     const { selectedDays, comment, month } = ctx.session.preferencesData;
     const telegramId = ctx.from?.id;
+
+    if (telegramId !== undefined && !saveDedupe.tryAcquire(`pref-save:${telegramId}`)) {
+        // Тихо: человек уже нажал, запись идёт. Сообщение об ошибке здесь
+        // выглядело бы как отказ, хотя первое нажатие сохраняется.
+        return ctx.answerCallbackQuery("⏳ Зберігаю…");
+    }
+
     await ctx.answerCallbackQuery();
 
+    let waitMessageId: number | undefined;
     const waitMsg = await ctx.reply("⏳ Зберігаю...");
+    waitMessageId = waitMsg.message_id;
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId!));
         const staffNameForTable = getPreferenceTableName(user);
@@ -534,8 +585,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                 const canonicalMonth = toCanonicalMonth(month, ctx.session.preferencesData.year);
                 if (!canonicalMonth || !staffProfileId) {
                     logger.error({ telegramId, month, year: ctx.session.preferencesData.year }, "Preference month could not be converted to YYYY-MM");
-                    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
-                    await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                    await failSave(ctx, waitMessageId);
                     return;
                 }
                 const saved = await saveCanonicalPreference({
@@ -547,8 +597,15 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     declined: false
                 });
                 if (!saved.ok) {
-                    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
-                    await ctx.reply(preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"));
+                    logger.error({ telegramId, month: canonicalMonth, reasonCode: saved.reasonCode }, "Canonical preference save failed");
+                    // Закрытое окно — не сбой, а конец сбора: повторять нечего,
+                    // поэтому экран подтверждения не возвращается.
+                    await failSave(
+                        ctx,
+                        waitMessageId,
+                        preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"),
+                        saved.reasonCode !== "SCHEDULE_PREFERENCES_CLOSED",
+                    );
                     return;
                 }
             } else {
@@ -581,6 +638,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         await redis.set(prefFilledKey, "1", "EX", 40 * 24 * 60 * 60); // 40 days TTL
 
         await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
+        waitMessageId = undefined;
 
         if (shouldMoveToNext) {
             const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
@@ -669,7 +727,9 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         }
     } catch (e: any) {
         logger.error({ err: e }, "Preferences save failed");
-        await ScreenManager.renderError(ctx, "❌ Помилка при збереженні. Будь ласка, повідомте адміністратора.");
+        // «⏳ Зберігаю...» удаляется и здесь: без этого экран продолжал уверять,
+        // что запись идёт, рядом с сообщением о том, что она провалилась.
+        await failSave(ctx, waitMessageId);
     }
 });
 
