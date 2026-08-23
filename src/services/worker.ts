@@ -6,7 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, ACCESS_REVOCATIONS_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { runAccessRevocations } from "./access-revocation-dispatcher.js";
@@ -779,11 +779,11 @@ const ACCESS_REVOCATION_POLL_MS = 60 * 1000;
  * access via `accessService.revokeAccess`, RESTORE rows get a fresh one-time
  * invite link via `accessService.createInviteLink`. Same shape as
  * `startScheduleNotificationDispatcher` — a plain `setInterval`, disabled
- * unless `ACCESS_REVOCATIONS_ENABLED` is true, so a new background loop can
+ * unless `AWS_ACCESS_REVOCATIONS_ENABLED` is true, so a new background loop can
  * be switched off with an env var rather than a rollback.
  */
 export function startAccessRevocationDispatcher(bot: Bot<MyContext>) {
-    if (!ACCESS_REVOCATIONS_ENABLED) {
+    if (!AWS_ACCESS_REVOCATIONS_ENABLED) {
         logBusinessEvent({
             event: "bot.access_revocations.disabled",
             actorType: "system",
