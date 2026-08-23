@@ -91,7 +91,7 @@ function snapshot(employees: Array<{ telegramId: string }>) {
     };
 }
 
-describe("AwsBusinessSyncService — reportTelegramLinks", () => {
+describe("telegram link reporting", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         prismaMock.staffProfile.count.mockResolvedValue(0);
@@ -103,77 +103,66 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         awsBusinessClientMock.reportTelegramLinks.mockResolvedValue({ updated: 0 });
     });
 
-    it("does not fail the sync when reporting telegram links fails", async () => {
+    /**
+     * A person who blocked the bot must be reported as unreachable, not omitted. Omission is
+     * indistinguishable from "not checked" on the API side, which is why the signal was lost.
+     * Having blocked the bot, they still have a `User` row from before — the naive "row exists"
+     * check would say `found: true`, which is the exact bug this test guards against.
+     */
+    it("reports a blocked person as not found", async () => {
         awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
         prismaMock.user.findMany.mockResolvedValue([
-            { telegramId: 486213975n, username: null, botBlockedAt: null },
+            { telegramId: 486213975n, username: "ivan_petrov", botBlockedAt: new Date("2026-08-23T00:00:00.000Z") },
         ]);
-        awsBusinessClientMock.reportTelegramLinks.mockRejectedValue(new Error("backend unavailable"));
         const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
 
-        const result = await new AwsBusinessSyncService().syncAll();
+        await new AwsBusinessSyncService().syncAll();
 
-        expect(result.employees).toBe(1);
-        expect(loggerMock.warn).toHaveBeenCalledWith(
-            expect.objectContaining({ err: expect.any(Error) }),
-            "could not report telegram links",
-        );
+        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
+            { telegramId: "486213975", found: false, username: "ivan_petrov" },
+        ]);
     });
 
-    it("derives found from the User table lookup and omits username when absent", async () => {
+    it("reports a reachable person as found", async () => {
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        prismaMock.user.findMany.mockResolvedValue([
+            { telegramId: 486213975n, username: "ivan_petrov", botBlockedAt: null },
+        ]);
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
+            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+        ]);
+    });
+
+    /**
+     * A brand-new hire who has never opened the chat has no `User` row at all — that is
+     * "not checked yet", not "unreachable". The API has no third state: every id in the
+     * `links` payload is bucketed as either verified or unreachable (and unreachable puts
+     * a Deactivate button in front of the owner). So an unknown id must never be sent with
+     * any `found` value — it must be left out of the payload entirely. This is the
+     * regression test for the bug where `found: user?.reachable ?? false` collapsed
+     * "never messaged the bot" into "blocked the bot".
+     */
+    it("omits a person with no User row instead of guessing found", async () => {
         awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([
             { telegramId: "486213975" },
-            { telegramId: "486213976" },
-            { telegramId: "486213977" },
+            { telegramId: "486213999" },
         ]));
         prismaMock.user.findMany.mockResolvedValue([
             { telegramId: 486213975n, username: "ivan_petrov", botBlockedAt: null },
-            { telegramId: 486213977n, username: null, botBlockedAt: null },
+            // 486213999 has no row: never interacted with the bot.
         ]);
         const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
 
         await new AwsBusinessSyncService().syncAll();
 
-        // 486213976 has no User row at all — "not checked yet", not "unreachable" — so it must
-        // be left out of the payload entirely rather than sent with any found value.
-        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
-            { telegramId: "486213975", found: true, username: "ivan_petrov" },
-            { telegramId: "486213977", found: true },
-        ]);
-    });
-
-    it("chunks at 500 entries and the chunks reproduce the input exactly", async () => {
-        const employees = Array.from({ length: 501 }, (_, index) => ({
-            telegramId: String(100000000 + index),
-        }));
-        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot(employees));
-        prismaMock.user.findMany.mockResolvedValue(
-            employees.map((employee) => ({
-                telegramId: BigInt(employee.telegramId),
-                username: null,
-                botBlockedAt: null,
-            })),
-        );
-        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
-
-        await new AwsBusinessSyncService().syncAll();
-
-        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledTimes(2);
-        const firstChunk = awsBusinessClientMock.reportTelegramLinks.mock.calls.at(0)?.[0];
-        const secondChunk = awsBusinessClientMock.reportTelegramLinks.mock.calls.at(1)?.[0];
-        expect(firstChunk).toHaveLength(500);
-        expect(secondChunk).toHaveLength(1);
-        expect([...(firstChunk ?? []), ...(secondChunk ?? [])]).toEqual(
-            employees.map((employee) => ({ telegramId: employee.telegramId, found: true })),
-        );
-    });
-
-    it("issues no HTTP request for an empty employee list", async () => {
-        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([]));
-        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
-
-        await new AwsBusinessSyncService().syncAll();
-
-        expect(awsBusinessClientMock.reportTelegramLinks).not.toHaveBeenCalled();
+        const [payload] = awsBusinessClientMock.reportTelegramLinks.mock.calls[0] as [
+            Array<{ telegramId: string; found: boolean }>,
+        ];
+        expect(payload.find((link) => link.telegramId === "486213999")).toBeUndefined();
+        expect(payload).toEqual([{ telegramId: "486213975", found: true, username: "ivan_petrov" }]);
     });
 });

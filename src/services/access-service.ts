@@ -8,7 +8,10 @@ export class AccessService {
     public chatId: number;
     public staticJoinLink = "https://t.me/+FuFRMGsvMktkNGFi";
     private api: any; // Raw grammY API instance
-    private revokeInFlight = new Map<string, Promise<void>>();
+    private revokeInFlight = new Map<
+        string,
+        Promise<{ attemptedChats: number; failures: Array<{ chatId: number; error: string }> }>
+    >();
 
     constructor() {
         this.chatId = TEAM_CHATS.CHANNEL;
@@ -108,16 +111,27 @@ export class AccessService {
 
     /**
      * Removes user from the channel and keeps the ban in place.
+     *
+     * Returns the chats that were attempted and the subset that refused to
+     * ban the user (`failures` is empty when every chat succeeded, including
+     * the "already not a member" cases treated as success below). This never
+     * throws for a partial failure — `securityAudit` already records
+     * `result: "failed"` for that case, and callers that only care whether
+     * it ran at all can keep ignoring the return value exactly as before.
+     * Callers that must not treat a partial removal as a real revocation
+     * (the access-revocation dispatcher) read the returned counts instead.
      */
-    async revokeAccess(telegramId: bigint, reason: string = "Unauthorized") {
+    async revokeAccess(
+        telegramId: bigint,
+        reason: string = "Unauthorized"
+    ): Promise<{ attemptedChats: number; failures: Array<{ chatId: number; error: string }> }> {
         const key = telegramId.toString();
         const inFlight = this.revokeInFlight.get(key);
         if (inFlight) {
-            await inFlight;
-            return;
+            return inFlight;
         }
 
-        const revokePromise = (async () => {
+        const revokePromise = (async (): Promise<{ attemptedChats: number; failures: Array<{ chatId: number; error: string }> }> => {
             const chatIds = this.getRevocationChatIds();
             try {
                 securityAudit({
@@ -152,8 +166,9 @@ export class AccessService {
                     entityType: "channel_access",
                     context: { reason, chatIds, failedChats: failures.length }
                 });
+                return { attemptedChats: chatIds.length, failures };
             } catch (e: any) {
-                if (e.description?.includes("user is not a member")) return;
+                if (e.description?.includes("user is not a member")) return { attemptedChats: chatIds.length, failures: [] };
                 securityAudit({
                     event: "security.channel_access.revoked",
                     result: "failed",
@@ -164,13 +179,17 @@ export class AccessService {
                     context: { reason, chatId: this.chatId }
                 });
                 logger.error({ err: e, telegramId }, "Failed to revoke channel access");
+                return {
+                    attemptedChats: chatIds.length,
+                    failures: [{ chatId: this.chatId, error: e?.description || e?.message || "Unknown Telegram API error" }]
+                };
             }
         })();
 
         this.revokeInFlight.set(key, revokePromise);
 
         try {
-            await revokePromise;
+            return await revokePromise;
         } finally {
             if (this.revokeInFlight.get(key) === revokePromise) {
                 this.revokeInFlight.delete(key);

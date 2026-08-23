@@ -6,9 +6,10 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, ACCESS_REVOCATIONS_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
+import { runAccessRevocations } from "./access-revocation-dispatcher.js";
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
@@ -769,6 +770,47 @@ export function startReplacementNotificationDispatcher(bot: Bot<MyContext>) {
             logger.error({ err: error }, "Replacement notification dispatcher iteration failed");
         });
     }, REPLACEMENT_NOTIFICATION_POLL_MS);
+}
+
+const ACCESS_REVOCATION_POLL_MS = 60 * 1000;
+
+/**
+ * Polls Task 5's access-revocation queue: REVOKE rows lose channel/hub/support
+ * access via `accessService.revokeAccess`, RESTORE rows get a fresh one-time
+ * invite link via `accessService.createInviteLink`. Same shape as
+ * `startScheduleNotificationDispatcher` — a plain `setInterval`, disabled
+ * unless `ACCESS_REVOCATIONS_ENABLED` is true, so a new background loop can
+ * be switched off with an env var rather than a rollback.
+ */
+export function startAccessRevocationDispatcher(bot: Bot<MyContext>) {
+    if (!ACCESS_REVOCATIONS_ENABLED) {
+        logBusinessEvent({
+            event: "bot.access_revocations.disabled",
+            actorType: "system",
+            actorRole: "system",
+            result: "skipped",
+            reasonCode: "FEATURE_FLAG_OFF",
+            module: "worker",
+            operation: "startAccessRevocationDispatcher",
+        });
+        return undefined;
+    }
+
+    logBusinessEvent({
+        event: "bot.access_revocations.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "worker",
+        operation: "startAccessRevocationDispatcher",
+        safeContext: { pollIntervalMs: ACCESS_REVOCATION_POLL_MS },
+    });
+
+    return setInterval(() => {
+        runAccessRevocations(bot).catch(error => {
+            logger.error({ err: error }, "Access revocation dispatcher iteration failed");
+        });
+    }, ACCESS_REVOCATION_POLL_MS);
 }
 
 type AlertState = {

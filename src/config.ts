@@ -24,6 +24,10 @@ const envSchema = z.object({
     AWS_REMINDERS_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Диспетчер очереди отзыва/восстановления доступа (Task 6). Флаг, а не
+    // мгновенное подключение: новый фоновый цикл должен выключаться переменной
+    // окружения, а не откатом деплоя.
+    ACCESS_REVOCATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
 
     // Staff Ids (Comma-separated integers)
     ADMIN_IDS: z.string().default(""),
@@ -133,6 +137,7 @@ export const AWS_REPLACEMENTS_CANONICAL_ENABLED = env.AWS_REPLACEMENTS_CANONICAL
 export const AWS_REMINDERS_CANONICAL_READ_ENABLED = env.AWS_REMINDERS_CANONICAL_READ_ENABLED === "true";
 export const AWS_PREFERENCES_CANONICAL_WRITE_ENABLED = env.AWS_PREFERENCES_CANONICAL_WRITE_ENABLED === "true";
 export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED === "true";
+export const ACCESS_REVOCATIONS_ENABLED = env.ACCESS_REVOCATIONS_ENABLED === "true";
 
 // Helper to parse number arrays
 const parseNumArray = (str: string) => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
