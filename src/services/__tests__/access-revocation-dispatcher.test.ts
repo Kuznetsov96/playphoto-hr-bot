@@ -40,7 +40,7 @@ describe('access revocation dispatcher', () => {
         { publicId: 'req-1', telegramId: '905284110', kind: 'REVOKE', reason: 'Звільнилась' },
       ],
     });
-    revokeAccess.mockResolvedValue(undefined);
+    revokeAccess.mockResolvedValue({ attemptedChats: 3, failures: [] });
 
     await runAccessRevocationsForTest(fakeBot());
 
@@ -80,6 +80,95 @@ describe('access revocation dispatcher', () => {
     expect(markProcessed).not.toHaveBeenCalled();
   });
 
+  /**
+   * `revokeAccess` never throws for a chat that refuses to remove the
+   * user — it logs the failure, writes its own security audit with
+   * `result: "failed"`, and resolves normally. Left unchecked, that turns a
+   * genuine security failure (the person is still in every protected chat)
+   * into a row the dispatcher marks PROCESSED. The failure list on the
+   * resolved value is the only signal that survives, so the dispatcher must
+   * read it and fail the row itself.
+   */
+  it('fails the row when every attempted chat refuses removal', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-6', telegramId: '905284110', kind: 'REVOKE', reason: 'Звільнилась' },
+      ],
+    });
+    revokeAccess.mockResolvedValue({
+      attemptedChats: 3,
+      failures: [
+        { chatId: -100, error: 'CHAT_ADMIN_REQUIRED' },
+        { chatId: -200, error: 'CHAT_ADMIN_REQUIRED' },
+        { chatId: -300, error: 'CHAT_ADMIN_REQUIRED' },
+      ],
+    });
+
+    await runAccessRevocationsForTest(fakeBot());
+
+    expect(markFailed).toHaveBeenCalledWith('req-6', expect.stringContaining('3 of 3'));
+    expect(markProcessed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A partial removal is not a removal: the person still has access to
+   * whichever chat refused. Marking the row processed would tell the owner
+   * revocation succeeded when it did not.
+   */
+  it('fails the row when only some attempted chats refuse removal', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-7', telegramId: '905284110', kind: 'REVOKE', reason: 'Звільнилась' },
+      ],
+    });
+    revokeAccess.mockResolvedValue({
+      attemptedChats: 3,
+      failures: [{ chatId: -200, error: 'CHAT_ADMIN_REQUIRED' }],
+    });
+
+    await runAccessRevocationsForTest(fakeBot());
+
+    expect(markFailed).toHaveBeenCalledWith('req-7', expect.stringContaining('1 of 3'));
+    expect(markProcessed).not.toHaveBeenCalled();
+  });
+
+  it('marks the row processed when every attempted chat succeeds', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-8', telegramId: '905284110', kind: 'REVOKE', reason: 'Звільнилась' },
+      ],
+    });
+    revokeAccess.mockResolvedValue({ attemptedChats: 3, failures: [] });
+
+    await runAccessRevocationsForTest(fakeBot());
+
+    expect(markProcessed).toHaveBeenCalledWith('req-8');
+    expect(markFailed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `revokeAccess` treats "user not found" / "participant_id_invalid" as
+   * already-removed, not as a failure — those chats are simply skipped and
+   * never added to `failures`. A person who was never in a chat is
+   * correctly considered removed from it, so this must still resolve as a
+   * processed row, not a failed one.
+   */
+  it('marks the row processed when a chat is skipped because the user was never a member', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-9', telegramId: '905284110', kind: 'REVOKE', reason: 'Звільнилась' },
+      ],
+    });
+    // Two of three chats banned successfully; the third never had the user as a
+    // member, so `revokeAccess` skips it internally and it never reaches `failures`.
+    revokeAccess.mockResolvedValue({ attemptedChats: 3, failures: [] });
+
+    await runAccessRevocationsForTest(fakeBot());
+
+    expect(markProcessed).toHaveBeenCalledWith('req-9');
+    expect(markFailed).not.toHaveBeenCalled();
+  });
+
   it('keeps going when one row fails', async () => {
     pending.mockResolvedValue({
       items: [
@@ -87,7 +176,9 @@ describe('access revocation dispatcher', () => {
         { publicId: 'b', telegramId: '2', kind: 'REVOKE', reason: 'r' },
       ],
     });
-    revokeAccess.mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce(undefined);
+    revokeAccess
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({ attemptedChats: 3, failures: [] });
 
     await runAccessRevocationsForTest(fakeBot());
 

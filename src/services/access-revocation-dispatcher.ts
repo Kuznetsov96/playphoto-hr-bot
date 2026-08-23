@@ -96,7 +96,22 @@ async function processRow(
 
     try {
         if (row.kind === "REVOKE") {
-            await accessService.revokeAccess(telegramId, row.reason);
+            // `revokeAccess` never throws for a partial failure — it logs the
+            // failing chats and its own security audit, then returns
+            // normally, so a bare `await` here would mark the row PROCESSED
+            // even when the person is still sitting in one or more of the
+            // protected chats. The failure list is the only place that
+            // signal survives, so it has to be read and turned into a thrown
+            // error here for the shared catch below to treat it as a failed
+            // row — a security failure recorded as a success is exactly the
+            // outcome this queue exists to prevent.
+            const { attemptedChats, failures } = await accessService.revokeAccess(telegramId, row.reason);
+            if (failures.length > 0) {
+                throw new Error(
+                    `${failures.length} of ${attemptedChats} chats refused to remove the user: ` +
+                        failures.map(f => `${f.chatId}: ${f.error}`).join("; "),
+                );
+            }
         } else {
             await processRestore(bot, telegramId, row);
         }
