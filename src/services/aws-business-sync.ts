@@ -391,15 +391,18 @@ export class AwsBusinessSyncService {
             const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
             const knownUsers = await prisma.user.findMany({
                 where: { telegramId: { in: snapshotTelegramIds } },
-                select: { telegramId: true, username: true },
+                select: { telegramId: true, username: true, botBlockedAt: true },
             });
-            const known = new Map(knownUsers.map((user) => [user.telegramId.toString(), user.username]));
+            const known = new Map(knownUsers.map((user) => [
+                user.telegramId.toString(),
+                { username: user.username, reachable: user.botBlockedAt === null },
+            ]));
             const links = snapshot.employees.map((employee) => {
-                const username = known.get(employee.telegramId);
+                const user = known.get(employee.telegramId);
                 return {
                     telegramId: employee.telegramId,
-                    found: known.has(employee.telegramId),
-                    ...(username ? { username } : {}),
+                    found: user?.reachable ?? false,
+                    ...(user?.username ? { username: user.username } : {}),
                 };
             });
             for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
