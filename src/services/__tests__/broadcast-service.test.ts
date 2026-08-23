@@ -83,3 +83,39 @@ describe("broadcastService media delivery", () => {
         );
     });
 });
+
+/**
+ * Кнопка «🚫 Не буду заповнювати» задумывалась для увольняющихся. Эту задачу
+ * теперь решает `worksUntil` на бэкенде — такой человек не попадает в `/missing`
+ * и напоминаний не получает. У кнопки осталось лишь одно свойство: она была
+ * коротким путём к результату, который форма даёт и так («Заповнити» → ничего
+ * не выбирать → «✨ Немає побажань»), но писала DECLINED вместо SUBMITTED, из-за
+ * чего счётчики владельца расходились.
+ */
+describe("preferences broadcast keyboard", () => {
+    async function preferencesKeyboard() {
+        const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
+        await broadcastService.sendTestBroadcast(api, 123, "Побажання", undefined, "preferences");
+        const extra = api.sendMessage.mock.calls[0]?.[2];
+        return extra?.reply_markup?.inline_keyboard ?? [];
+    }
+
+    it("offers filling in the schedule", async () => {
+        const rows = await preferencesKeyboard();
+
+        expect(JSON.stringify(rows)).toContain("pref_fill");
+    });
+
+    it("no longer offers opting out of filling it in", async () => {
+        const rows = await preferencesKeyboard();
+
+        expect(JSON.stringify(rows)).not.toContain("pref_opt_out");
+    });
+
+    /** Один путь к результату, а не два: второй существовал только как ярлык. */
+    it("is a single button", async () => {
+        const rows = await preferencesKeyboard();
+
+        expect(rows.flat()).toHaveLength(1);
+    });
+});

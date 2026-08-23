@@ -2,6 +2,34 @@ import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../types/context.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 import { getStaffShiftToday } from "../modules/staff/services/staff-today-shift.js";
+import { BUSINESS_DATA_SOURCE } from "../config.js";
+import logger from "../core/logger.js";
+
+/**
+ * Показывать ли кнопку «Побажання»: сбор идёт с 23-го и до тех пор, пока
+ * владелец не закроет окно.
+ *
+ * Признак закрытия берётся из бэкенда — того же `preferencesClosedAt`, который
+ * проверяет `assertWindowOpen` на записи, так что предложение и сохранение не
+ * могут разойтись. Раньше он брался из ключа в Redis, который писала ТОЛЬКО
+ * ветка синхронизации с Google Sheets; в проде `BUSINESS_DATA_SOURCE=aws`, где
+ * `syncSchedule` выходит раньше записи ключа, — поэтому кнопка не исчезала
+ * даже после публикации графика.
+ *
+ * При недоступном бэкенде кнопка ОСТАЁТСЯ: не показать её человеку, который
+ * пришёл заполнить пожелания в срок, хуже, чем показать лишнюю после закрытия —
+ * во втором случае он получит понятный отказ на сохранении, в первом просто не
+ * найдёт, куда нажать.
+ */
+/**
+ * Ответ на месяц один для всех и меняется раз в месяц, а меню рисуется на каждое
+ * нажатие — и `shouldShowPreferencesButton` вызывается дважды за рендер (сам
+ * пункт и fingerprint). Без кэша это два HTTP-запроса на каждое касание любой
+ * кнопки в хабе. Минута выбрана так, чтобы закрытие сбора доходило до людей
+ * практически сразу, но всплеск нажатий не превращался во всплеск запросов.
+ */
+const WINDOW_CACHE_TTL_MS = 60 * 1000;
+let windowCache: { month: string; open: boolean; at: number } | undefined;
 
 async function shouldShowPreferencesButton() {
     const now = new Date();
@@ -9,13 +37,30 @@ async function shouldShowPreferencesButton() {
     if (kyivNow.getDate() < 23) return false;
 
     const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
-    const { systemStateRepository } = await import("../repositories/system-state-repository.js");
-    const isPublished = await systemStateRepository.isSchedulePublishedForMonth(
-        nextMonth.getFullYear(),
-        nextMonth.getMonth() + 1
-    );
 
-    return !isPublished;
+    if (BUSINESS_DATA_SOURCE !== "aws") {
+        const { systemStateRepository } = await import("../repositories/system-state-repository.js");
+        const isPublished = await systemStateRepository.isSchedulePublishedForMonth(
+            nextMonth.getFullYear(),
+            nextMonth.getMonth() + 1
+        );
+        return !isPublished;
+    }
+
+    const month = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+    if (windowCache && windowCache.month === month && Date.now() - windowCache.at < WINDOW_CACHE_TTL_MS) {
+        return windowCache.open;
+    }
+
+    try {
+        const { awsBusinessClient } = await import("../services/aws-business-client.js");
+        const window = await awsBusinessClient.schedulePreferenceWindow(month);
+        windowCache = { month, open: window.open, at: Date.now() };
+        return window.open;
+    } catch (error) {
+        logger.warn({ err: error, month }, "Preference collection window unavailable; keeping the button");
+        return true;
+    }
 }
 
 // --- ROOT MENU ---
@@ -49,7 +94,35 @@ export const staffHubMenu = new Menu<MyContext>("staff-main", {
 menuRegistry.register(staffHubMenu);
 
 staffHubMenu.dynamic(async (ctx, range) => {
-    // 1. My Schedule
+    const now = new Date();
+    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
+
+    // 1. Побажання — ПЕРВЫМ, пока идёт сбор.
+    //
+    // Несколько дней в месяц это самое срочное, что есть у фотографа: у действия
+    // дедлайн, и бот напоминает о нём каждые шесть часов. Всё остальное в хабе
+    // доступно всегда. Раньше кнопка стояла третьей, ниже подмены, то есть
+    // срочное пряталось за постоянным.
+    //
+    // Значок 📝, а не 🗓: «Мій графік» уже календарь, и два одинаковых значка
+    // подряд заставляли читать подписи, чтобы понять разницу. Значок должен
+    // различать, а не повторять.
+    //
+    // Собственная строка на всю ширину — подпись занимает 20–23 символа в
+    // зависимости от месяца, и рядом с соседом обрезалась бы.
+    if (await shouldShowPreferencesButton()) {
+        const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
+        const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
+        range.text(`📝 Побажання (${monthName})`, async (ctx) => {
+            // Trigger the callback handler by data or call the function directly
+            // Since we want to break circular dependency, we can use ctx.menu.nav if it was a submenu,
+            // but this is a separate flow. We can use a dynamic import here inside the handler.
+            const { startPreferencesFlow } = await import("../handlers/preferences-flow.js");
+            await startPreferencesFlow(ctx);
+        }).row();
+    }
+
+    // 2. My Schedule
     range.text("🗓 Мій графік", async (ctx) => {
         const { showStaffSchedule } = await import("../modules/staff/handlers/menu.js");
         await showStaffSchedule(ctx);
@@ -61,21 +134,6 @@ staffHubMenu.dynamic(async (ctx, range) => {
         const { showReplacementShiftPicker } = await import("../modules/staff/handlers/menu.js");
         await showReplacementShiftPicker(ctx);
     }).row();
-
-    // 2. Preferences (Schedule requests) - only visible 23rd to end of month
-    const now = new Date();
-    const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-    if (await shouldShowPreferencesButton()) {
-        const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
-        const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
-        range.text(`🗓 Побажання (${monthName})`, async (ctx) => {
-            // Trigger the callback handler by data or call the function directly
-            // Since we want to break circular dependency, we can use ctx.menu.nav if it was a submenu,
-            // but this is a separate flow. We can use a dynamic import here inside the handler.
-            const { startPreferencesFlow } = await import("../handlers/preferences-flow.js");
-            await startPreferencesFlow(ctx);
-        }).row();
-    }
 
     // 3. Support / Care Service
     range.text("🤍 Служба турботи", async (ctx) => {
