@@ -2,14 +2,19 @@ name: Deploy AWS production bot
 
 on:
   # Every input below is a live feature flag: the value chosen here is written straight
-  # into the running bot's environment, so a deploy always *sets* all eight rather than
-  # leaving the current ones alone.
+  # into the running bot's environment, so a deploy always *sets* every one of them
+  # rather than leaving the current ones alone. A value set by hand on the box does not
+  # survive the next release.
   #
-  # They default to `true` because that is what production actually runs. While they
+  # A flag defaults to `true` once that is what production actually runs. While they all
   # defaulted to `false`, opening this form and pressing "Run workflow" without touching
   # the switches would silently turn off canonical schedules, replacements, reminders and
   # preference writes — a routine code deploy would have rolled back half the behaviour.
   # The defaults must therefore track the deployed state, not a first-rollout posture.
+  #
+  # A flag that is not yet rolled out defaults to `false` for the mirror-image reason: an
+  # untouched form must not switch on behaviour nobody asked for. It moves to `true` once
+  # the contour is proven on production — see `access_revocations_enabled` below.
   #
   # To disable a flag, untick it deliberately.
   workflow_dispatch:
@@ -59,6 +64,22 @@ on:
         required: true
         type: boolean
         default: true
+      # Единственный флаг со значением по умолчанию `false`, и намеренно.
+      #
+      # Остальные восемь стоят на `true`, потому что это то, что прод уже
+      # выполняет: открыть форму и нажать «Run workflow», не трогая переключатели,
+      # не должно ничего выключить. Этот же включает НОВОЕ поведение, которое
+      # действует на живые чаты — выгоняет человека из канала, хаба и поддержки
+      # при деактивации. Случайный запуск формы не должен его включить.
+      #
+      # Когда контур проверен на проде, значение по умолчанию меняется на `true`
+      # по тому же правилу, что и у соседей: умолчание отслеживает развёрнутое
+      # состояние, а не первоначальную осторожность.
+      access_revocations_enabled:
+        description: Revoke Telegram access (channel, hub, support) when an employee is deactivated
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -282,6 +303,7 @@ jobs:
             printf 'AWS_PREFERENCES_CANONICAL_WRITE_ENABLED=%q\n' "${{ inputs.preferences_canonical_write_enabled }}"
             printf 'AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED=%q\n' "${{ inputs.replacement_auto_confirm_enabled }}"
             printf 'AWS_PARCELS_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.parcels_canonical_read_enabled }}"
+            printf 'ACCESS_REVOCATIONS_ENABLED=%q\n' "${{ inputs.access_revocations_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
