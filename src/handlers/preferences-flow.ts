@@ -12,6 +12,7 @@ import { formatSurnameNameDot } from "../utils/string-utils.js";
 import { escapeHtml } from "./admin/utils.js";
 import { AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
 import {
+    readCanonicalPreferenceDays,
     saveCanonicalPreference,
     type CanonicalPreferenceReasonCode,
 } from "../services/canonical-preferences-writer.js";
@@ -19,6 +20,7 @@ import { formatWorksUntil, lastSelectableDay } from "../utils/last-working-day.j
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 
 
 export const preferencesHandlers = new Composer<MyContext>();
@@ -100,6 +102,17 @@ preferencesHandlers.callbackQuery("pref_force_edit", async (ctx) => {
     await startPreferencesFlow(ctx);
 });
 
+/**
+ * Кнопки, которая сюда ведёт, больше нет — `buildBroadcastKeyboard` её не рисует
+ * (см. комментарий там о том, почему). Обработчик остаётся НАМЕРЕННО: рассылки,
+ * ушедшие до этого изменения, лежат в чатах у людей вместе со своей клавиатурой,
+ * и Telegram отдаст этот callback, когда по ней нажмут. Удалить обработчик —
+ * значит превратить старую кнопку в тихий отказ у человека, который просто хотел
+ * выключить напоминания.
+ *
+ * Удалять можно, когда пройдёт месяц сбора и старые сообщения перестанут быть
+ * актуальными.
+ */
 preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
     const userId = ctx.from?.id;
     if (!userId) return ctx.answerCallbackQuery();
@@ -215,23 +228,50 @@ export async function startPreferencesFlow(ctx: MyContext) {
     }
     delete ctx.session.preferencesData?.forceEdit;
 
+    const monthName = getMonthName(targetMonthDate);
+    const targetYear = targetMonthDate.getFullYear();
+    const canonicalMonth = toCanonicalMonth(monthName, targetYear);
+
     // Останній робочий день тих, хто доопрацьовує, щоб клавіатура не
     // пропонувала дні, коли людини вже не буде. Збій читання не має ламати
     // весь флоу: без дати календар просто лишається повним, як раніше.
     const worksUntil = await readWorksUntil(
         user?.staffProfile?.awsEmployeePublicId ?? null,
-        toCanonicalMonth(getMonthName(targetMonthDate), targetMonthDate.getFullYear()),
+        canonicalMonth,
         String(telegramId),
     );
 
+    // Уже отмеченные дни подставляются в календарь при повторном заходе.
+    //
+    // Раньше человек, зашедший второй раз, попадал в ПУСТОЙ календарь и не
+    // видел, что именно подал: приходилось либо заполнять заново по памяти,
+    // либо не трогать вовсе, не зная текущего состояния. Проверка «ты уже
+    // заполнила» существовала только в legacy-ветке, а с каноническим
+    // флагом — который включён — не работала вовсе.
+    //
+    // `undefined` (не замаплен, бэкенд недоступен, отказ) оставляет пустой
+    // календарь: показать «ты ничего не отмечала» при сбое сети значило бы
+    // соврать, а промолчать — всего лишь вернуть прежнее поведение.
+    let prefilledDays: number[] = [];
+    const staffId = user?.staffProfile?.id;
+    if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && staffId && !isNewCandidate && canonicalMonth) {
+        const existing = await readCanonicalPreferenceDays({
+            staffId,
+            month: canonicalMonth,
+            telegramId: String(telegramId),
+        });
+        if (existing) prefilledDays = existing;
+    }
+
     ctx.session.preferencesData = {
-        month: getMonthName(targetMonthDate),
+        month: monthName,
         worksUntil,
-        year: targetMonthDate.getFullYear(),
-        selectedDays: [],
+        year: targetYear,
+        selectedDays: prefilledDays,
         comment: "",
         step: 'CALENDAR',
-        forceNextMonth: isNewCandidate && isLateInMonth
+        forceNextMonth: isNewCandidate && isLateInMonth,
+        prefilled: prefilledDays.length > 0
     };
 
     await renderCalendar(ctx);
@@ -314,7 +354,17 @@ async function renderCalendar(ctx: MyContext) {
         ? `Твій останній робочий день — <b>${lastDay} ${month}</b>, тож познач дні лише до нього.\n\n`
         : "";
 
+    // Отмеченные дни при повторном заходе нужно объяснить: без строки они
+    // выглядят как чужой выбор или сбой, и человек не понимает, менять их
+    // или начинать сначала.
+    const alreadySubmitted = ctx.session.preferencesData.step === 'CALENDAR'
+        && (selectedDays?.length ?? 0) > 0
+        && ctx.session.preferencesData.prefilled === true;
+
     const text = `🗓 <b>Побажання (${month})</b>\n\n` +
+        (alreadySubmitted
+            ? `Ти вже надсилала побажання на цей місяць — вони позначені нижче. Зміни, якщо треба, і натисни «Готово». ✅\n\n`
+            : "") +
         `Познач дні, коли ти <b>НЕ МОЖЕШ</b> вийти на зміну (твої вихідні). 🚫\n\n` +
         worksUntilHint +
         selectionHint;
@@ -401,11 +451,28 @@ async function renderConfirmation(ctx: MyContext) {
     const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає";
 
     const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${escapeHtml(name)}</b>\n📅 Місяць: <b>${escapeHtml(month || "—")} ${year}</b>\n🚫 Вихідні: <b>${escapeHtml(daysStr)}</b>\n💬 Коментар: ${escapeHtml(comment || 'відсутній')}`;
-    const kb = new InlineKeyboard().text("✅ Зберегти", "pref_save_final").text("🔄 Спочатку", "pref_restart_flow").row().text("✖️ Скасувати", "pref_cancel_flow").danger();
+    // «🔄 Спочатку» и «✖️ Скасувати» стояли рядом, и разница между ними была
+    // неочевидна: обе выглядели как «отменить». Теперь каждая называет, что
+    // именно произойдёт, — HIG требует называть последствие, а не намерение.
+    // «Вийти без збереження» вдобавок предупреждает, что работа пропадёт.
+    const kb = new InlineKeyboard()
+        .text("✅ Зберегти", "pref_save_final")
+        .row()
+        .text("✏️ Змінити дні", "pref_back_calendar")
+        .row()
+        .text("✖️ Вийти без збереження", "pref_cancel_flow").danger();
 
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
 }
 
+/**
+ * Кнопка «🔄 Спочатку» убрана с экрана подтверждения: рядом со «Скасувати» она
+ * читалась как второй способ отменить, хотя сбрасывала выбор и возвращала в
+ * календарь. Её место занял «✏️ Змінити дні», который НЕ теряет отмеченное.
+ *
+ * Обработчик остаётся: экраны подтверждения, отрисованные до деплоя, всё ещё
+ * висят у людей в чатах со старой клавиатурой.
+ */
 preferencesHandlers.callbackQuery("pref_restart_flow", async (ctx) => {
     if (!ctx.session.preferencesData) return;
     ctx.session.preferencesData.selectedDays = [];
@@ -421,6 +488,47 @@ preferencesHandlers.callbackQuery("open_support_dialog", async (ctx) => {
     await startSupportFlow(ctx);
 });
 
+/**
+ * Одно нажатие «Зберегти» — одна попытка записи.
+ *
+ * Запись версионирована на бэкенде, поэтому второе нажатие данные не испортит —
+ * оно получит 409. Но человек увидит непонятную ошибку сразу после успешного
+ * сохранения, что читается как «не сохранилось». Окно в 10 секунд закрывает
+ * дребезг пальца и повторную доставку callback'а, но не мешает осознанному
+ * повтору после неудачи.
+ */
+const saveDedupe = new ActionDedupeWindow(10_000);
+
+/**
+ * Неудача сохранения возвращает человека на экран подтверждения с кнопками.
+ *
+ * Раньше здесь был `ctx.reply(...)` и `return`: экран подтверждения к этому
+ * моменту уже заменён сообщением «⏳ Зберігаю...», и человек оставался с текстом
+ * «спробуй ще раз» — но нажимать было не на что. Данные в сессии при этом целы,
+ * то есть повторить было МОЖНО, просто нечем.
+ */
+async function failSave(
+    ctx: MyContext,
+    waitMessageId: number | undefined,
+    text: string = CANDIDATE_TEXTS["preferences-save-failed"],
+    canRetry: boolean = true,
+): Promise<void> {
+    // Снимаем защиту от дребезга: она существует, чтобы гасить второе нажатие
+    // ПОКА идёт запись, а не чтобы блокировать осознанный повтор после отказа.
+    const telegramId = ctx.from?.id;
+    if (telegramId !== undefined) saveDedupe.release(`pref-save:${telegramId}`);
+
+    if (waitMessageId !== undefined) {
+        await ctx.api.deleteMessage(ctx.chat!.id, waitMessageId).catch(() => { });
+    }
+    await ctx.reply(text);
+
+    // Сессия не тронута — тот же выбор, та же клавиатура, кнопка «Зберегти»
+    // снова доступна. Кроме случая, когда повторять нечего: закрытое окно
+    // сбора не откроется от повторного нажатия, и кнопка обещала бы неправду.
+    if (canRetry) await renderConfirmation(ctx);
+}
+
 preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Помилка.");
     if (await ensureActiveStaffTargetsNextMonth(ctx)) {
@@ -429,9 +537,18 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     }
     const { selectedDays, comment, month } = ctx.session.preferencesData;
     const telegramId = ctx.from?.id;
+
+    if (telegramId !== undefined && !saveDedupe.tryAcquire(`pref-save:${telegramId}`)) {
+        // Тихо: человек уже нажал, запись идёт. Сообщение об ошибке здесь
+        // выглядело бы как отказ, хотя первое нажатие сохраняется.
+        return ctx.answerCallbackQuery("⏳ Зберігаю…");
+    }
+
     await ctx.answerCallbackQuery();
 
+    let waitMessageId: number | undefined;
     const waitMsg = await ctx.reply("⏳ Зберігаю...");
+    waitMessageId = waitMsg.message_id;
     try {
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId!));
         const staffNameForTable = getPreferenceTableName(user);
@@ -468,8 +585,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                 const canonicalMonth = toCanonicalMonth(month, ctx.session.preferencesData.year);
                 if (!canonicalMonth || !staffProfileId) {
                     logger.error({ telegramId, month, year: ctx.session.preferencesData.year }, "Preference month could not be converted to YYYY-MM");
-                    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
-                    await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                    await failSave(ctx, waitMessageId);
                     return;
                 }
                 const saved = await saveCanonicalPreference({
@@ -481,8 +597,15 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                     declined: false
                 });
                 if (!saved.ok) {
-                    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
-                    await ctx.reply(preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"));
+                    logger.error({ telegramId, month: canonicalMonth, reasonCode: saved.reasonCode }, "Canonical preference save failed");
+                    // Закрытое окно — не сбой, а конец сбора: повторять нечего,
+                    // поэтому экран подтверждения не возвращается.
+                    await failSave(
+                        ctx,
+                        waitMessageId,
+                        preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"),
+                        saved.reasonCode !== "SCHEDULE_PREFERENCES_CLOSED",
+                    );
                     return;
                 }
             } else {
@@ -515,6 +638,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         await redis.set(prefFilledKey, "1", "EX", 40 * 24 * 60 * 60); // 40 days TTL
 
         await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
+        waitMessageId = undefined;
 
         if (shouldMoveToNext) {
             const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
@@ -603,7 +727,9 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         }
     } catch (e: any) {
         logger.error({ err: e }, "Preferences save failed");
-        await ScreenManager.renderError(ctx, "❌ Помилка при збереженні. Будь ласка, повідомте адміністратора.");
+        // «⏳ Зберігаю...» удаляется и здесь: без этого экран продолжал уверять,
+        // что запись идёт, рядом с сообщением о том, что она провалилась.
+        await failSave(ctx, waitMessageId);
     }
 });
 

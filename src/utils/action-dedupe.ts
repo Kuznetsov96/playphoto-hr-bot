@@ -15,6 +15,18 @@ export class ActionDedupeWindow {
         return true;
     }
 
+    /**
+     * Снять отметку до истечения окна.
+     *
+     * Нужно там, где действие ПРОВАЛИЛОСЬ и человеку предлагают повторить: без
+     * этого окно проглотило бы осознанный повтор, и кнопка «Зберегти» молча не
+     * срабатывала бы несколько секунд после ошибки — ровно тогда, когда её и
+     * нажимают.
+     */
+    release(key: string) {
+        this.seen.delete(key);
+    }
+
     private clearExpired(nowMs: number) {
         for (const [key, ts] of this.seen.entries()) {
             if (nowMs - ts >= this.windowMs) {

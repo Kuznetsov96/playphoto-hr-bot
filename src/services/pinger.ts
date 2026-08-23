@@ -11,6 +11,7 @@ import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { handleBlockedCandidate } from "../utils/bot-blocked.js";
+import { isQuietHour, nextAllowedPingTime } from "../utils/quiet-hours.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
@@ -194,6 +195,13 @@ export function startPingerLoop(bot: Bot<MyContext>) {
     setInterval(() => runPinger(bot), PING_CONFIG.CHECK_INTERVAL_MS);
 }
 
+/**
+ * Экспортируется только для тестов: цикл напоминаний иначе достижим лишь через
+ * `setInterval` в `startPingerLoop`, а потолок — как раз то, что нужно проверять
+ * прогоном, а не таймером. Продакшен-код вызывает `startPingerLoop`.
+ */
+export const runPingerForTest = (bot: Bot<MyContext>) => runPinger(bot);
+
 async function runPinger(bot: Bot<MyContext>) {
     try {
         const now = new Date();
@@ -201,6 +209,19 @@ async function runPinger(bot: Bot<MyContext>) {
 
         for (const msg of messagesToPing) {
             const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
+
+            // 0. Тихие часы: ночью не отправляем, а переносим на утро.
+            //
+            // Интервал в 4 часа ровно укладывался в сутки, поэтому сдвига не
+            // было — человек получал пинг в 02:00 каждую ночь, пока не ответит.
+            // Переносится именно `nextPingAt`, а не пропускается тик: пропуск
+            // вернул бы нас сюда через минуту и снова, всю ночь, каждую минуту.
+            if (isQuietHour(now)) {
+                await trackedMessageRepository.update(msg.id, {
+                    nextPingAt: nextAllowedPingTime(now)
+                });
+                continue;
+            }
 
             // 1. If no pending replies, stop pinging
             if (activePendingReplies.length === 0) {
@@ -276,9 +297,12 @@ async function runPinger(bot: Bot<MyContext>) {
 
                 // 6. Update tracking info
                 const nextPingInterval = msg.pingIntervalMs || PING_CONFIG.REPEAT_DELAY_MS;
+                // Следующий пинг тоже сдвигается за пределы ночи: 18:00 плюс
+                // шесть часов — это полночь, и без переноса напоминание всё
+                // равно ушло бы ночью, просто на один тик позже.
                 await trackedMessageRepository.update(msg.id, {
                     lastPingMsgId: sentPing.message_id,
-                    nextPingAt: new Date(Date.now() + nextPingInterval)
+                    nextPingAt: nextAllowedPingTime(new Date(Date.now() + nextPingInterval))
                 });
 
                 logBusinessEvent({

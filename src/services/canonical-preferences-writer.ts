@@ -132,3 +132,44 @@ function logAndFail(
     });
     return { ok: false, reasonCode };
 }
+
+/**
+ * Дни, которые человек уже отметил на этот месяц, — чтобы при повторном заходе
+ * показать ему его же выбор, а не пустой календарь.
+ *
+ * Возвращает номера дней (1..31), потому что календарь бота работает номерами,
+ * а канонический ответ отдаёт даты `YYYY-MM-DD`.
+ *
+ * `undefined` означает «не знаем»: не замапленный сотрудник, недоступный
+ * бэкенд, отказ вместо подачи. Это НЕ то же самое, что пустой массив (человек
+ * подал и не отметил ни дня) — вызывающий код должен различать эти случаи, иначе
+ * при сбое сети покажет «ты ничего не отмечала» вместо честного молчания.
+ */
+export async function readCanonicalPreferenceDays(input: {
+    staffId: string;
+    month: string;
+    telegramId: string;
+}): Promise<number[] | undefined> {
+    const staff = await prisma.staffProfile.findUnique({
+        where: { id: input.staffId },
+        select: { awsEmployeePublicId: true },
+    });
+    if (!staff?.awsEmployeePublicId) return undefined;
+
+    try {
+        const existing = await awsBusinessClient.getSchedulePreference(
+            staff.awsEmployeePublicId,
+            input.month,
+            input.telegramId,
+        );
+        if (!existing.exists || existing.status !== "SUBMITTED") return undefined;
+        return existing.days
+            .map((day) => Number(day.localDate.slice(-2)))
+            .filter((day) => Number.isInteger(day) && day >= 1 && day <= 31);
+    } catch {
+        // Молча: это подсказка, а не суть шага. Недоступный бэкенд не должен
+        // мешать человеку заполнить график заново — он просто увидит пустой
+        // календарь, как и раньше.
+        return undefined;
+    }
+}

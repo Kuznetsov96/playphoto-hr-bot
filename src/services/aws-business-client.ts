@@ -151,11 +151,27 @@ const replacementDeclineSchema = z
     .object({ status: z.literal("DECLINED") })
     .passthrough();
 
-// `worksUntil` — останній робочий день (`YYYY-MM-DD`) або `null`. Необовʼязкове
-// в схемі, бо старіший бекенд його не віддає, а бот має працювати з обома.
+/**
+ * Поля бэкенда, которые бот пока не использует, объявляются ЗДЕСЬ и
+ * необязательными.
+ *
+ * Схема `.strict()`, поэтому новое поле в ответе роняет `parse`, а этот запрос
+ * сидит внутри `saveCanonicalPreference` (читает версию перед записью) — то
+ * есть падение означает «фотограф не может сохранить побажання». `worksUntil`
+ * добавлялся именно так и по этой причине объявлен, хотя нужен только
+ * календарю.
+ *
+ * `.strict()` тем не менее оставлен намеренно: он ловит опечатки в именах.
+ * Цена — объявлять новые поля здесь, и это дешевле, чем молча принимать что
+ * угодно. `collectionOpen` говорит, открыт ли ещё сбор на месяц.
+ */
 const schedulePreferenceReadSchema = z.union([
     z
-        .object({ exists: z.literal(false), worksUntil: z.string().nullish() })
+        .object({
+            exists: z.literal(false),
+            worksUntil: z.string().nullish(),
+            collectionOpen: z.boolean().optional(),
+        })
         .strict(),
     z
         .object({
@@ -164,9 +180,14 @@ const schedulePreferenceReadSchema = z.union([
             version: z.number().int(),
             status: z.enum(["SUBMITTED", "DECLINED"]),
             days: z.array(z.object({ localDate: z.string(), kind: z.string() }).strict()),
+            collectionOpen: z.boolean().optional(),
         })
         .strict(),
 ]);
+
+const schedulePreferenceWindowSchema = z
+    .object({ month: z.string().min(1), open: z.boolean() })
+    .strict();
 
 const missingPreferencesSchema = z
     .object({
@@ -765,6 +786,21 @@ export class AwsBusinessClient {
      * a 404, deliberately, so the bot cannot read a version it would then
      * fail to write with.
      */
+    /**
+     * Открыт ли сбор пожеланий на месяц. Меню спрашивает это, чтобы решить,
+     * показывать ли кнопку «Побажання»: раньше признак брался из ключа в Redis,
+     * который писала только ветка синхронизации с Google Sheets, а прод её не
+     * выполняет — из-за чего кнопка висела в меню и после публикации графика.
+     */
+    async schedulePreferenceWindow(month: string): Promise<{ month: string; open: boolean }> {
+        const query = new URLSearchParams({ month });
+        const body = await this.request(
+            `/schedule-preferences/collection-window?${query.toString()}`,
+            { method: "GET" },
+        );
+        return schedulePreferenceWindowSchema.parse(body);
+    }
+
     async getSchedulePreference(
         employeePublicId: string,
         month: string,

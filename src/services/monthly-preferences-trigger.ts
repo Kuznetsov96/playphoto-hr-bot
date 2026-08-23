@@ -66,7 +66,11 @@ export class MonthlyPreferencesTrigger {
                 undefined, // Skip bot username here if not used
                 {
                     initialDelayMs: 2 * 24 * 60 * 60 * 1000, // 2 days
-                    repeatIntervalMs: 4 * 60 * 60 * 1000,    // 4 hours
+                    // 6 часов, а не 4: ночью пингер молчит (тихое окно
+                    // PING_CONFIG.QUIET_FROM_HOUR), и в дневном окне 10:00–22:00
+                    // шестичасовой шаг даёт два напоминания в день вместо трёх —
+                    // достаточно, чтобы достучаться до забывчивого.
+                    repeatIntervalMs: 6 * 60 * 60 * 1000,    // 6 hours
                     // Напоминания смолкают вместе с окном: после дедлайна
                     // форма отвечает «збір закрито», и звать в неё — издевка.
                     pingUntil: deadlineDate,
