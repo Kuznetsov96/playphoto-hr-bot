@@ -136,4 +136,33 @@ describe("telegram link reporting", () => {
             { telegramId: "486213975", found: true, username: "ivan_petrov" },
         ]);
     });
+
+    /**
+     * A brand-new hire who has never opened the chat has no `User` row at all — that is
+     * "not checked yet", not "unreachable". The API has no third state: every id in the
+     * `links` payload is bucketed as either verified or unreachable (and unreachable puts
+     * a Deactivate button in front of the owner). So an unknown id must never be sent with
+     * any `found` value — it must be left out of the payload entirely. This is the
+     * regression test for the bug where `found: user?.reachable ?? false` collapsed
+     * "never messaged the bot" into "blocked the bot".
+     */
+    it("omits a person with no User row instead of guessing found", async () => {
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([
+            { telegramId: "486213975" },
+            { telegramId: "486213999" },
+        ]));
+        prismaMock.user.findMany.mockResolvedValue([
+            { telegramId: 486213975n, username: "ivan_petrov", botBlockedAt: null },
+            // 486213999 has no row: never interacted with the bot.
+        ]);
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        const [payload] = awsBusinessClientMock.reportTelegramLinks.mock.calls[0] as [
+            Array<{ telegramId: string; found: boolean }>,
+        ];
+        expect(payload.find((link) => link.telegramId === "486213999")).toBeUndefined();
+        expect(payload).toEqual([{ telegramId: "486213975", found: true, username: "ivan_petrov" }]);
+    });
 });

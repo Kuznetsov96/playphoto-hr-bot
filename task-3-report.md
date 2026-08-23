@@ -109,3 +109,93 @@ npx vitest run    (== npm test, package.json: "test": "vitest run")
 - Did not touch `aws-business-client.ts` per the constraint — the response schema is unaffected,
   only the outgoing `found` value changed, which the constraint anticipated.
 - Did not push, per instructions — committed to the current branch only.
+
+## Addendum: critical fix from whole-branch review
+
+The reviewer found a real critical defect in `found: user?.reachable ?? false`
+(`aws-business-sync.ts:404` at the time): it collapsed two different populations into the same
+`found: false` — a person who blocked the bot (`User` row exists, `botBlockedAt` set), and a
+person who has **never messaged the bot at all** (no `User` row — e.g. a brand-new hire whose
+telegram id was just entered but who hasn't opened the chat). Before this task, that collapse
+was harmless because the webapp discarded every `found: false`. This task's sibling change (in
+the webapp worktree) made the webapp **write** `unreachableSince` from `found: false`, which
+turned the collapse into a live bug: a new hire could be sync'd straight onto the "they blocked
+the bot" panel with a Deactivate button next to her name.
+
+### Checked before choosing a fix
+
+Per the reviewer's instruction, read `recordTelegramLinks` in
+`apps/api/src/bot-integration/bot-business-snapshot.service.ts` (webapp worktree,
+`/Users/vitaliikuznetsov/PlayPhoto/Webapp PlayPhoto/.worktrees/employee-deactivation`) before
+picking a shape. Its own doc comment (lines 241-249) states the API has no third state: every id
+in `dto.links` is partitioned into exactly two buckets — `found: true` → `telegramLinkState:
+'VERIFIED'` (line 273), `found: false` → `unreachableSince` stamped (line 304). There is no
+"not checked" outcome available on the DTO (`BotTelegramLinksDto`, confirmed by reading
+`dto/bot-telegram-links.dto.ts` — only `telegramId`/`found`/`username`).
+
+So neither literal branch of the reviewer's suggested `found: user === undefined ? true : ...`
+is safe: `true` for an unknown id would falsely mark the link VERIFIED (a lie the API would act
+on, just a different lie than deactivation). **A two-value payload cannot express three states
+without a schema change, which is out of scope (the task's own constraint says not to touch the
+`.strict()` schemas unless the API response changed — it didn't, and this is the request side
+anyway).** The only shape that expresses "not checked" correctly on a binary payload is
+omission — leave the id out of `links` entirely. This is also literally what the API's own
+comment already assumes ("the bot cannot tell 'this id is a typo' from 'this person has not
+written to me yet'") — the pre-existing code already treated unknown ids as a degenerate case;
+this task's earlier draft broke that only by accident when reusing the same map lookup.
+
+### Fix
+
+`reportTelegramLinks` now builds `links` with `flatMap` instead of `map`: an employee with no
+matching `User` row contributes nothing to the array. Only employees with a `User` row appear,
+with `found: user.reachable` (`botBlockedAt === null`). Updated the method's doc comment to
+state the three-state reality explicitly and why omission is the only safe encoding.
+
+### Tests
+
+Added to `telegram-links-unreachable.test.ts`:
+- "omits a person with no User row instead of guessing found" — two employees in the snapshot,
+  only one has a `User` row; asserts the unknown id is absent from the emitted payload
+  (`payload.find(...) toBeUndefined()`) and the payload holds exactly the known, reachable
+  person. This is the regression test for the exact defect reported — verified it would have
+  failed against the pre-fix `?? false` line (an id with no row got `found: false` under the old
+  code, which this test would catch via the `toBeUndefined()` assertion failing).
+- Kept "reports a blocked person as not found" and "reports a reachable person as found"
+  passing unchanged (requirements 2 and 3 from the reviewer).
+
+Updated pre-existing tests in `aws-business-sync.test.ts` that encoded the old, unsafe
+behaviour:
+- "derives found from the User table lookup and omits username when absent": previously
+  asserted the unknown id `486213976` gets `found: false`; now asserts it is omitted from the
+  payload (only the two known ids remain).
+- "chunks at 500 entries...": previously exercised 501 *unknown* ids, which under the fix would
+  all be omitted and defeat the point of the test (nothing to chunk). Changed the mock so every
+  synthetic id has a matching, reachable `User` row, so the payload still has 501 entries across
+  two chunks and the chunking behaviour is still genuinely exercised.
+- "does not fail the sync when reporting telegram links fails": previously used an id with no
+  `User` row; under the fix that id is now omitted, `links` becomes empty, and the loop around
+  `awsBusinessClient.reportTelegramLinks` never runs — so the rejection this test exists to
+  cover was never triggered and the assertion on `loggerMock.warn` silently failed. Added a
+  matching `User` row so the network call (and its rejection) is actually exercised.
+
+### Verification
+
+```
+npx vitest run src/services/__tests__/telegram-links-unreachable.test.ts src/services/__tests__/aws-business-sync.test.ts
+```
+→ 2 files, 7 tests, all passed (was 6; +1 new regression test).
+
+```
+npm run build            → tsc clean
+npm run check-cycles     → ✅ No circular dependencies found!
+npm run check-menu-ids   → ✅ No duplicate Menu IDs found.
+npx vitest run           → 119 files passed, 764 tests passed, 0 failed
+```
+
+### Chosen shape and why
+
+Omission, not a two-flag payload and not `found: true` for unknown ids. The API's
+`recordTelegramLinks` has no third state to receive a two-flag payload without a schema/DTO
+change, which is out of this task's scope; omission is the only encoding of "not checked" that
+a strictly-binary `found` field can carry safely, and it matches what the API's own existing
+comment already assumed was happening.

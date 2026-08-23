@@ -105,6 +105,9 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
 
     it("does not fail the sync when reporting telegram links fails", async () => {
         awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        prismaMock.user.findMany.mockResolvedValue([
+            { telegramId: 486213975n, username: null, botBlockedAt: null },
+        ]);
         awsBusinessClientMock.reportTelegramLinks.mockRejectedValue(new Error("backend unavailable"));
         const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
 
@@ -131,9 +134,10 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
 
         await new AwsBusinessSyncService().syncAll();
 
+        // 486213976 has no User row at all — "not checked yet", not "unreachable" — so it must
+        // be left out of the payload entirely rather than sent with any found value.
         expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
             { telegramId: "486213975", found: true, username: "ivan_petrov" },
-            { telegramId: "486213976", found: false },
             { telegramId: "486213977", found: true },
         ]);
     });
@@ -143,6 +147,13 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
             telegramId: String(100000000 + index),
         }));
         awsBusinessClientMock.snapshot.mockResolvedValue(snapshot(employees));
+        prismaMock.user.findMany.mockResolvedValue(
+            employees.map((employee) => ({
+                telegramId: BigInt(employee.telegramId),
+                username: null,
+                botBlockedAt: null,
+            })),
+        );
         const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
 
         await new AwsBusinessSyncService().syncAll();
@@ -153,7 +164,7 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         expect(firstChunk).toHaveLength(500);
         expect(secondChunk).toHaveLength(1);
         expect([...(firstChunk ?? []), ...(secondChunk ?? [])]).toEqual(
-            employees.map((employee) => ({ telegramId: employee.telegramId, found: false })),
+            employees.map((employee) => ({ telegramId: employee.telegramId, found: true })),
         );
     });
 
