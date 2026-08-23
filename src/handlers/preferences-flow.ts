@@ -12,6 +12,7 @@ import { formatSurnameNameDot } from "../utils/string-utils.js";
 import { escapeHtml } from "./admin/utils.js";
 import { AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
 import {
+    readCanonicalPreferenceDays,
     saveCanonicalPreference,
     type CanonicalPreferenceReasonCode,
 } from "../services/canonical-preferences-writer.js";
@@ -226,23 +227,50 @@ export async function startPreferencesFlow(ctx: MyContext) {
     }
     delete ctx.session.preferencesData?.forceEdit;
 
+    const monthName = getMonthName(targetMonthDate);
+    const targetYear = targetMonthDate.getFullYear();
+    const canonicalMonth = toCanonicalMonth(monthName, targetYear);
+
     // Останній робочий день тих, хто доопрацьовує, щоб клавіатура не
     // пропонувала дні, коли людини вже не буде. Збій читання не має ламати
     // весь флоу: без дати календар просто лишається повним, як раніше.
     const worksUntil = await readWorksUntil(
         user?.staffProfile?.awsEmployeePublicId ?? null,
-        toCanonicalMonth(getMonthName(targetMonthDate), targetMonthDate.getFullYear()),
+        canonicalMonth,
         String(telegramId),
     );
 
+    // Уже отмеченные дни подставляются в календарь при повторном заходе.
+    //
+    // Раньше человек, зашедший второй раз, попадал в ПУСТОЙ календарь и не
+    // видел, что именно подал: приходилось либо заполнять заново по памяти,
+    // либо не трогать вовсе, не зная текущего состояния. Проверка «ты уже
+    // заполнила» существовала только в legacy-ветке, а с каноническим
+    // флагом — который включён — не работала вовсе.
+    //
+    // `undefined` (не замаплен, бэкенд недоступен, отказ) оставляет пустой
+    // календарь: показать «ты ничего не отмечала» при сбое сети значило бы
+    // соврать, а промолчать — всего лишь вернуть прежнее поведение.
+    let prefilledDays: number[] = [];
+    const staffId = user?.staffProfile?.id;
+    if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && staffId && !isNewCandidate && canonicalMonth) {
+        const existing = await readCanonicalPreferenceDays({
+            staffId,
+            month: canonicalMonth,
+            telegramId: String(telegramId),
+        });
+        if (existing) prefilledDays = existing;
+    }
+
     ctx.session.preferencesData = {
-        month: getMonthName(targetMonthDate),
+        month: monthName,
         worksUntil,
-        year: targetMonthDate.getFullYear(),
-        selectedDays: [],
+        year: targetYear,
+        selectedDays: prefilledDays,
         comment: "",
         step: 'CALENDAR',
-        forceNextMonth: isNewCandidate && isLateInMonth
+        forceNextMonth: isNewCandidate && isLateInMonth,
+        prefilled: prefilledDays.length > 0
     };
 
     await renderCalendar(ctx);
@@ -325,7 +353,17 @@ async function renderCalendar(ctx: MyContext) {
         ? `Твій останній робочий день — <b>${lastDay} ${month}</b>, тож познач дні лише до нього.\n\n`
         : "";
 
+    // Отмеченные дни при повторном заходе нужно объяснить: без строки они
+    // выглядят как чужой выбор или сбой, и человек не понимает, менять их
+    // или начинать сначала.
+    const alreadySubmitted = ctx.session.preferencesData.step === 'CALENDAR'
+        && (selectedDays?.length ?? 0) > 0
+        && ctx.session.preferencesData.prefilled === true;
+
     const text = `🗓 <b>Побажання (${month})</b>\n\n` +
+        (alreadySubmitted
+            ? `Ти вже надсилала побажання на цей місяць — вони позначені нижче. Зміни, якщо треба, і натисни «Готово». ✅\n\n`
+            : "") +
         `Познач дні, коли ти <b>НЕ МОЖЕШ</b> вийти на зміну (твої вихідні). 🚫\n\n` +
         worksUntilHint +
         selectionHint;
@@ -412,11 +450,28 @@ async function renderConfirmation(ctx: MyContext) {
     const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає";
 
     const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${escapeHtml(name)}</b>\n📅 Місяць: <b>${escapeHtml(month || "—")} ${year}</b>\n🚫 Вихідні: <b>${escapeHtml(daysStr)}</b>\n💬 Коментар: ${escapeHtml(comment || 'відсутній')}`;
-    const kb = new InlineKeyboard().text("✅ Зберегти", "pref_save_final").text("🔄 Спочатку", "pref_restart_flow").row().text("✖️ Скасувати", "pref_cancel_flow").danger();
+    // «🔄 Спочатку» и «✖️ Скасувати» стояли рядом, и разница между ними была
+    // неочевидна: обе выглядели как «отменить». Теперь каждая называет, что
+    // именно произойдёт, — HIG требует называть последствие, а не намерение.
+    // «Вийти без збереження» вдобавок предупреждает, что работа пропадёт.
+    const kb = new InlineKeyboard()
+        .text("✅ Зберегти", "pref_save_final")
+        .row()
+        .text("✏️ Змінити дні", "pref_back_calendar")
+        .row()
+        .text("✖️ Вийти без збереження", "pref_cancel_flow").danger();
 
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
 }
 
+/**
+ * Кнопка «🔄 Спочатку» убрана с экрана подтверждения: рядом со «Скасувати» она
+ * читалась как второй способ отменить, хотя сбрасывала выбор и возвращала в
+ * календарь. Её место занял «✏️ Змінити дні», который НЕ теряет отмеченное.
+ *
+ * Обработчик остаётся: экраны подтверждения, отрисованные до деплоя, всё ещё
+ * висят у людей в чатах со старой клавиатурой.
+ */
 preferencesHandlers.callbackQuery("pref_restart_flow", async (ctx) => {
     if (!ctx.session.preferencesData) return;
     ctx.session.preferencesData.selectedDays = [];

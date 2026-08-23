@@ -11,6 +11,7 @@ import { scheduleSyncService } from "./schedule-sync.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { handleBlockedCandidate } from "../utils/bot-blocked.js";
+import { isQuietHour, nextAllowedPingTime } from "../utils/quiet-hours.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
@@ -209,42 +210,16 @@ async function runPinger(bot: Bot<MyContext>) {
         for (const msg of messagesToPing) {
             const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
 
-            // 0. Потолок: рассылка старше окна — перестаём напоминать, даже если
-            // человек так и не ответил. Раньше цикл был бесконечным, и молчащий
-            // получал пинг каждые 4 часа до конца сбора; у молчания же всегда
-            // причина, которую бот не исправит (увольнение без отметки, больница,
-            // потерянный телефон). Дальше это забота владельца — имя видно в
-            // «Still waiting» на экране месяца.
+            // 0. Тихие часы: ночью не отправляем, а переносим на утро.
             //
-            // Проверяется ДО отправки, но ПОСЛЕ pruneNonMembers, чтобы вышедшие из
-            // чата всё так же вычищались из pending, а не застревали навсегда.
-            const broadcastAt = msg.broadcast?.createdAt;
-            if (broadcastAt && now.getTime() - broadcastAt.getTime() > PING_CONFIG.MAX_PING_AGE_MS) {
-                await trackedMessageRepository.stopTracking(msg.id);
-                logBusinessEvent({
-                    event: "broadcast.ping_tracking.exhausted",
-                    actorType: "system",
-                    actorRole: "system",
-                    result: "success",
-                    reasonCode: "MAX_PING_AGE_REACHED",
-                    module: "pinger",
-                    operation: "runPinger",
-                    safeContext: {
-                        trackedMessageId: msg.id,
-                        chatId: msg.chatId,
-                        messageId: msg.messageId,
-                        // Сколько человек так и не ответило: это число владелец
-                        // видит на экране месяца и обзванивает руками.
-                        unanswered: activePendingReplies.length,
-                        ageHours: Math.round((now.getTime() - broadcastAt.getTime()) / 3600000),
-                    },
+            // Интервал в 4 часа ровно укладывался в сутки, поэтому сдвига не
+            // было — человек получал пинг в 02:00 каждую ночь, пока не ответит.
+            // Переносится именно `nextPingAt`, а не пропускается тик: пропуск
+            // вернул бы нас сюда через минуту и снова, всю ночь, каждую минуту.
+            if (isQuietHour(now)) {
+                await trackedMessageRepository.update(msg.id, {
+                    nextPingAt: nextAllowedPingTime(now)
                 });
-
-                if (msg.lastPingMsgId) {
-                    try {
-                        await bot.api.deleteMessage(Number(msg.chatId), msg.lastPingMsgId);
-                    } catch (e) { /* ignore */ }
-                }
                 continue;
             }
 
@@ -322,9 +297,12 @@ async function runPinger(bot: Bot<MyContext>) {
 
                 // 6. Update tracking info
                 const nextPingInterval = msg.pingIntervalMs || PING_CONFIG.REPEAT_DELAY_MS;
+                // Следующий пинг тоже сдвигается за пределы ночи: 18:00 плюс
+                // шесть часов — это полночь, и без переноса напоминание всё
+                // равно ушло бы ночью, просто на один тик позже.
                 await trackedMessageRepository.update(msg.id, {
                     lastPingMsgId: sentPing.message_id,
-                    nextPingAt: new Date(Date.now() + nextPingInterval)
+                    nextPingAt: nextAllowedPingTime(new Date(Date.now() + nextPingInterval))
                 });
 
                 logBusinessEvent({
