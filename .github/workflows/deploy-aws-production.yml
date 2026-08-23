@@ -2,14 +2,24 @@ name: Deploy AWS production bot
 
 on:
   # Every input below is a live feature flag: the value chosen here is written straight
-  # into the running bot's environment, so a deploy always *sets* all eight rather than
-  # leaving the current ones alone.
+  # into the running bot's environment, so a deploy always *sets* every one of them
+  # rather than leaving the current ones alone. A value set by hand on the box does not
+  # survive the next release.
   #
-  # They default to `true` because that is what production actually runs. While they
+  # A flag defaults to `true` once that is what production actually runs. While they all
   # defaulted to `false`, opening this form and pressing "Run workflow" without touching
   # the switches would silently turn off canonical schedules, replacements, reminders and
   # preference writes — a routine code deploy would have rolled back half the behaviour.
   # The defaults must therefore track the deployed state, not a first-rollout posture.
+  #
+  # `scripts/aws/check-production-deploy-contract.mjs` enforces this: every input must
+  # default to `true`, and every flag must reach the container through all four links
+  # (form → release.env → start-hook export → set_env). Missing one link deploys green,
+  # prints `true` in the summary, and starts the bot with the flag off — which is exactly
+  # what happened to AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED on its first production deploy.
+  #
+  # A not-yet-rolled-out flag is therefore held back by UNTICKING it on its first deploy,
+  # not by defaulting it to `false`.
   #
   # To disable a flag, untick it deliberately.
   workflow_dispatch:
@@ -56,6 +66,18 @@ on:
         default: true
       parcels_canonical_read_enabled:
         description: Read Nova Poshta parcels from the canonical backend instead of the bot's own table
+        required: true
+        type: boolean
+        default: true
+      # Умолчание `true`, как и у соседей, и это требование контракта
+      # (`scripts/aws/check-production-deploy-contract.mjs`): форма переписывает
+      # окружение целиком, поэтому флаг с умолчанием `false` превращал бы обычный
+      # деплой в тихий откат этой функции.
+      #
+      # Первый выкат поэтому делается с СНЯТОЙ галочкой — осторожность выражается
+      # действием при запуске формы, а не умолчанием в файле.
+      access_revocations_enabled:
+        description: Revoke Telegram access (channel, hub, support) when an employee is deactivated
         required: true
         type: boolean
         default: true
@@ -282,6 +304,7 @@ jobs:
             printf 'AWS_PREFERENCES_CANONICAL_WRITE_ENABLED=%q\n' "${{ inputs.preferences_canonical_write_enabled }}"
             printf 'AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED=%q\n' "${{ inputs.replacement_auto_confirm_enabled }}"
             printf 'AWS_PARCELS_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.parcels_canonical_read_enabled }}"
+            printf 'AWS_ACCESS_REVOCATIONS_ENABLED=%q\n' "${{ inputs.access_revocations_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
