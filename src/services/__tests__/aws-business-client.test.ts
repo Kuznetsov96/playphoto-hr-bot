@@ -278,3 +278,62 @@ describe("AwsBusinessClient", () => {
         });
     });
 });
+
+/**
+ * `schedulePreferenceReadSchema` is `.strict()` and this request sits inside
+ * `saveCanonicalPreference` (it reads the version before writing), so a field the schema does
+ * not declare does not degrade — it breaks saving preferences outright.
+ *
+ * That is exactly what happened when the backend started sending `worksUntil`: the bot rejected
+ * every response and photographers got "не вдалося зберегти" on every submission.
+ */
+describe("AwsBusinessClient.getSchedulePreference", () => {
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    async function read(body: unknown) {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+        return new AwsBusinessClient().getSchedulePreference(
+            "11111111-1111-4111-8111-111111111111",
+            "2026-09",
+            "123456789",
+        );
+    }
+
+    it("accepts an absent submission carrying the backend's last-working-day field", async () => {
+        await expect(read({ exists: false, worksUntil: null })).resolves.toEqual({
+            exists: false,
+            worksUntil: null,
+        });
+    });
+
+    it("accepts an existing submission carrying the same field", async () => {
+        await expect(
+            read({
+                exists: true,
+                worksUntil: "2026-09-15",
+                version: 3,
+                status: "SUBMITTED",
+                days: [{ localDate: "2026-09-05", kind: "UNAVAILABLE" }],
+            }),
+        ).resolves.toMatchObject({ exists: true, version: 3 });
+    });
+
+    it("accepts the collection-window field the menu gate reads", async () => {
+        await expect(read({ exists: false, worksUntil: null, collectionOpen: false })).resolves.toMatchObject({
+            collectionOpen: false,
+        });
+    });
+
+    /** `.strict()` is kept on purpose: it still catches a misspelled field name. */
+    it("still rejects a field nobody declared", async () => {
+        await expect(read({ exists: false, worksUntill: null })).rejects.toThrow();
+    });
+});
