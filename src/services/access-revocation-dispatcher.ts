@@ -9,6 +9,23 @@ const PENDING_LIMIT = 100;
 const MAX_FAILURE_REASON_LENGTH = 500;
 
 /**
+ * Guards against a pass overlapping itself inside the same process — mirrors
+ * `ScheduleNotificationDispatcher.iterationInProgress`
+ * (`schedule-notification-dispatcher.ts:258`). No Redis lease here (the
+ * sibling's cross-instance protection): only `main.ts` starts this loop, so
+ * cross-instance overlap isn't a concern this task needs to solve. But the
+ * local, same-process overlap the flag prevents is not optional here the way
+ * it might look for REVOKE: `accessService.revokeAccess` already dedups
+ * concurrent calls per telegramId via its own `revokeInFlight` map, but
+ * `accessService.createInviteLink` has no such guard — it unconditionally
+ * mints a fresh single-use `createChatInviteLink` on every call. Without this
+ * flag, a slow pass still mid-flight when the next poll fires would process
+ * the same still-pending RESTORE row twice and hand out two valid untracked
+ * invites to the protected channel for one row.
+ */
+let iterationInProgress = false;
+
+/**
  * Drains Task 5's access-revocation queue: REVOKE rows lose channel/hub/support
  * access, RESTORE rows get a fresh one-time invite link. Modeled on
  * `schedule-notification-dispatcher.ts` — a polling loop behind an env flag,
@@ -17,39 +34,58 @@ const MAX_FAILURE_REASON_LENGTH = 500;
  * idempotent on them.
  */
 export async function runAccessRevocations(bot: Pick<Bot<MyContext>, "api">): Promise<void> {
-    let pending: { items: AwsAccessRevocationRow[] };
-    try {
-        pending = await awsBusinessClient.pendingAccessRevocations(PENDING_LIMIT);
-    } catch (error) {
+    if (iterationInProgress) {
         logBusinessEvent({
-            event: "bot.access_revocations.iteration_failed",
-            level: "error",
+            event: "bot.access_revocations.iteration_skipped",
+            level: "warn",
             actorType: "system",
             actorRole: "system",
-            result: "failed",
-            reasonCode: "PENDING_FETCH_FAILED",
+            result: "skipped",
+            reasonCode: "LOCAL_ITERATION_IN_PROGRESS",
             module: "access-revocation-dispatcher",
             operation: "runAccessRevocations",
-            error,
         });
         return;
     }
 
-    if (pending.items.length === 0) return;
+    iterationInProgress = true;
+    try {
+        let pending: { items: AwsAccessRevocationRow[] };
+        try {
+            pending = await awsBusinessClient.pendingAccessRevocations(PENDING_LIMIT);
+        } catch (error) {
+            logBusinessEvent({
+                event: "bot.access_revocations.iteration_failed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                reasonCode: "PENDING_FETCH_FAILED",
+                module: "access-revocation-dispatcher",
+                operation: "runAccessRevocations",
+                error,
+            });
+            return;
+        }
 
-    for (const row of pending.items) {
-        await processRow(bot, row);
+        if (pending.items.length === 0) return;
+
+        for (const row of pending.items) {
+            await processRow(bot, row);
+        }
+
+        logBusinessEvent({
+            event: "bot.access_revocations.iteration_completed",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "access-revocation-dispatcher",
+            operation: "runAccessRevocations",
+            safeContext: { pendingCount: pending.items.length },
+        });
+    } finally {
+        iterationInProgress = false;
     }
-
-    logBusinessEvent({
-        event: "bot.access_revocations.iteration_completed",
-        actorType: "system",
-        actorRole: "system",
-        result: "success",
-        module: "access-revocation-dispatcher",
-        operation: "runAccessRevocations",
-        safeContext: { pendingCount: pending.items.length },
-    });
 }
 
 async function processRow(

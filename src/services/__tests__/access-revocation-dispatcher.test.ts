@@ -103,4 +103,69 @@ describe('access revocation dispatcher', () => {
     expect(revokeAccess).not.toHaveBeenCalled();
     expect(markProcessed).not.toHaveBeenCalled();
   });
+
+  /**
+   * `createInviteLink` has no dedup of its own (unlike `revokeAccess`, which
+   * keys concurrent calls off `revokeInFlight`): every call mints a fresh
+   * single-use invite. If a slow pass were still in flight when the next
+   * poll fired, the same still-pending RESTORE row would be processed twice,
+   * handing out two live, untracked invites to the protected channel for one
+   * row. The local `iterationInProgress` guard exists to make that
+   * impossible within one process.
+   */
+  it('does not let a second pass overlap a slow first pass', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-4', telegramId: '905284110', kind: 'RESTORE', reason: 'Повернулась' },
+      ],
+    });
+
+    let resolveInviteLink: (link: string) => void;
+    createInviteLink.mockReturnValue(
+      new Promise<string>(resolve => {
+        resolveInviteLink = resolve;
+      }),
+    );
+
+    const firstPass = runAccessRevocationsForTest(fakeBot());
+    // Let the first pass reach and start awaiting `createInviteLink` before
+    // the second pass is started.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const secondPass = runAccessRevocationsForTest(fakeBot());
+    await secondPass;
+
+    expect(pending).toHaveBeenCalledTimes(1);
+    expect(createInviteLink).toHaveBeenCalledTimes(1);
+
+    resolveInviteLink!('https://t.me/+abc');
+    await firstPass;
+
+    expect(pending).toHaveBeenCalledTimes(1);
+    expect(createInviteLink).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Pins the RESTORE-not-authorised decision: `createInviteLink` returning
+   * `null` means the bot's own authorisation check disagrees with the row
+   * ever having been queued, and retrying will not change that outcome.
+   * The row is still marked processed rather than failed — a `failed` row
+   * would make the API re-offer it forever against someone it is never
+   * going to succeed for. The reason lives in the security audit
+   * (`logSecurityEvent`), not in a call to `markAccessRevocationFailed`.
+   */
+  it('marks a RESTORE row processed, not failed, when createInviteLink returns null', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-5', telegramId: '905284110', kind: 'RESTORE', reason: 'Повернулась' },
+      ],
+    });
+    createInviteLink.mockResolvedValue(null);
+
+    await runAccessRevocationsForTest(fakeBot());
+
+    expect(markProcessed).toHaveBeenCalledWith('req-5');
+    expect(markFailed).not.toHaveBeenCalled();
+  });
 });
