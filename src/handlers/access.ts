@@ -1,9 +1,11 @@
 import { Composer } from "grammy";
+import type { ChatMemberUpdated } from "grammy/types";
 import { accessService } from "../services/access-service.js";
 import { TEAM_CHATS } from "../config.js";
 import type { MyContext } from "../types/context.js";
 import logger from "../core/logger.js";
 import { securityAudit } from "../core/audit-logger.js";
+import { knownChatRepository } from "../repositories/known-chat-repository.js";
 
 export const accessHandlers = new Composer<MyContext>();
 
@@ -64,4 +66,40 @@ accessHandlers.on("chat_member", async (ctx) => {
         // Double check if they are authorized, if not - kick
         await accessService.syncUserAccess(telegramId);
     }
+});
+
+/**
+ * Бот узнаёт о своих чатах от Telegram, а не из списка, который кто-то ведёт.
+ *
+ * Подписка на `my_chat_member` была здесь и раньше (`main.ts`), но обработчика
+ * не существовало — событие приходило и терялось. Ровно поэтому чаты локаций
+ * никогда не попадали в отзыв доступов.
+ *
+ * Приватные чаты не записываются: это переписка с одним человеком, а не
+ * командный чат, и выгонять оттуда некого.
+ */
+export async function handleMyChatMember(update: ChatMemberUpdated): Promise<void> {
+    const { chat, new_chat_member: newMember } = update;
+
+    if (chat.type === "private") return;
+
+    const isPresent = newMember.status !== "left" && newMember.status !== "kicked";
+
+    try {
+        if (isPresent) {
+            await knownChatRepository.recordPresent({
+                id: BigInt(chat.id),
+                title: chat.title ?? null,
+                type: chat.type
+            });
+        } else {
+            await knownChatRepository.recordLost(BigInt(chat.id));
+        }
+    } catch (e) {
+        logger.error({ err: e, chatId: chat.id }, "Failed to update known chat registry");
+    }
+}
+
+accessHandlers.on("my_chat_member", async (ctx) => {
+    await handleMyChatMember(ctx.myChatMember);
 });
