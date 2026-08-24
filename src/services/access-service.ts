@@ -1,5 +1,6 @@
 import { TEAM_CHATS } from "../config.js";
 import { userRepository } from "../repositories/user-repository.js";
+import { knownChatRepository } from "../repositories/known-chat-repository.js";
 import { Role, CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import { securityAudit } from "../core/audit-logger.js";
@@ -31,17 +32,33 @@ export class AccessService {
         return this.api;
     }
 
-    private getRevocationChatIds(): number[] {
-        return Array.from(new Set([
-            TEAM_CHATS.CHANNEL,
-            TEAM_CHATS.HUB,
-            TEAM_CHATS.SUPPORT,
-        ].filter((chatId): chatId is number => Boolean(chatId) && !Number.isNaN(chatId))));
+    /**
+     * The scope of a revocation is every chat the bot is currently in, not a
+     * hardcoded list: the team channel arrives through the registry like any
+     * location chat, and a fired photographer must lose the chat they actually
+     * worked in. Ids are `bigint` in the registry and `number` at the Telegram
+     * API boundary, so they are narrowed here once.
+     */
+    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null }>> {
+        const chats = await knownChatRepository.listActive();
+        const seen = new Set<number>();
+        const result: Array<{ id: number; title: string | null }> = [];
+        for (const chat of chats) {
+            const id = Number(chat.id);
+            if (!id || Number.isNaN(id) || seen.has(id)) continue;
+            seen.add(id);
+            result.push({ id, title: chat.title });
+        }
+        return result;
     }
 
     private async clearProtectedChatBan(telegramId: bigint) {
         const api = this.getSafeApi();
-        for (const chatId of this.getRevocationChatIds()) {
+        // Un-banning follows the same scope as banning: otherwise a re-hired
+        // person stays banned in their location chat forever and no invite
+        // link will let them back in.
+        const chats = await this.getRevocationChats();
+        for (const { id: chatId } of chats) {
             await api.unbanChatMember(chatId, Number(telegramId), { only_if_banned: true }).catch((e: any) => {
                 const description = String(e?.description || "").toLowerCase();
                 if (!description.includes("user not found") && !description.includes("user is not a member")) {
@@ -132,7 +149,35 @@ export class AccessService {
         }
 
         const revokePromise = (async (): Promise<{ attemptedChats: number; failures: Array<{ chatId: number; error: string }> }> => {
-            const chatIds = this.getRevocationChatIds();
+            // Fetched before the try so the catch below can always read it, and
+            // handled separately: an unreadable registry means the scope is
+            // unknown, not empty. Returning a clean result there would record a
+            // revocation that never looked at a single chat while the dispatcher
+            // marks the row PROCESSED, so it has to come back as a failure to be
+            // retried.
+            let chats: Array<{ id: number; title: string | null }> = [];
+            try {
+                chats = await this.getRevocationChats();
+            } catch (e: any) {
+                securityAudit({
+                    event: "security.channel_access.revoked",
+                    result: "failed",
+                    actorType: "system",
+                    telegramId,
+                    entityType: "channel_access",
+                    error: e?.message,
+                    context: { reason, chats: [] }
+                });
+                logger.error({ err: e, telegramId }, "Failed to read the known chat registry for revocation");
+                return {
+                    attemptedChats: 0,
+                    failures: [{ chatId: 0, error: e?.description || e?.message || "Failed to read the known chat registry" }]
+                };
+            }
+
+            // Titles travel into the audit alongside the ids so the record
+            // answers "from where", not "which numbers were passed".
+            const auditChats = chats.map(chat => ({ id: chat.id, title: chat.title }));
             try {
                 securityAudit({
                     event: "security.channel_access.revoked",
@@ -140,12 +185,28 @@ export class AccessService {
                     actorType: "system",
                     telegramId,
                     entityType: "channel_access",
-                    context: { reason, chatIds }
+                    context: { reason, chats: auditChats }
                 });
                 const api = this.getSafeApi();
 
                 const failures: Array<{ chatId: number; error: string }> = [];
-                for (const chatId of chatIds) {
+                for (const { id: chatId } of chats) {
+                    // Ban only where the person actually is: a ban in a chat they
+                    // were never in is a false audit record of access that never
+                    // existed.
+                    let member: { status: string };
+                    try {
+                        member = await api.getChatMember(chatId, Number(telegramId));
+                    } catch (e: any) {
+                        // Чат, который не удалось опросить, — это НЕ «человека там нет». Считать
+                        // иначе значит превратить сетевой сбой в «мы проверили» и оставить
+                        // человека в чате с записью PROCESSED.
+                        failures.push({ chatId, error: e?.description || e?.message || "Presence check failed" });
+                        logger.error({ err: e, chatId, telegramId }, "Failed to check protected chat membership");
+                        continue;
+                    }
+                    if (member?.status === "left" || member?.status === "kicked") continue;
+
                     try {
                         await api.banChatMember(chatId, Number(telegramId));
                     } catch (e: any) {
@@ -164,11 +225,11 @@ export class AccessService {
                     actorType: "system",
                     telegramId,
                     entityType: "channel_access",
-                    context: { reason, chatIds, failedChats: failures.length }
+                    context: { reason, chats: auditChats, failedChats: failures.length }
                 });
-                return { attemptedChats: chatIds.length, failures };
+                return { attemptedChats: chats.length, failures };
             } catch (e: any) {
-                if (e.description?.includes("user is not a member")) return { attemptedChats: chatIds.length, failures: [] };
+                if (e.description?.includes("user is not a member")) return { attemptedChats: chats.length, failures: [] };
                 securityAudit({
                     event: "security.channel_access.revoked",
                     result: "failed",
@@ -180,7 +241,7 @@ export class AccessService {
                 });
                 logger.error({ err: e, telegramId }, "Failed to revoke channel access");
                 return {
-                    attemptedChats: chatIds.length,
+                    attemptedChats: chats.length,
                     failures: [{ chatId: this.chatId, error: e?.description || e?.message || "Unknown Telegram API error" }]
                 };
             }
