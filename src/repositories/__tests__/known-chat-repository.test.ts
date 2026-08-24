@@ -72,4 +72,19 @@ describe('knownChatRepository.listActive', () => {
 
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { lostAt: null } }));
   });
+
+  /**
+   * Тип чата — это то, по чему отзыв различает канал и групповой чат. Пропав из
+   * выборки, он приедет как `undefined`, правило тихо перестанет срабатывать, и
+   * уволенный снова сможет вернуться в канал по постоянной ссылке.
+   */
+  it('selects the chat type the revocation rules discriminate on', async () => {
+    findMany.mockResolvedValue([]);
+
+    await knownChatRepository.listActive();
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ select: expect.objectContaining({ type: true }) }),
+    );
+  });
 });

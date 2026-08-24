@@ -427,17 +427,18 @@ export class ScheduleSyncService {
      * ему строку в справочнике локаций.
      *
      * Идентификаторы в реестре `bigint`, а на границе Telegram API — `number`,
-     * поэтому сужаются здесь один раз, вместе с отсевом нулевых и NaN.
+     * поэтому сужаются здесь один раз, вместе с отсевом нулевых и NaN. Тип чата
+     * едет рядом: от него зависит, нужна ли проверка присутствия перед баном.
      */
-    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null }>> {
+    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null; type: string }>> {
         const chats = await knownChatRepository.listActive();
         const seen = new Set<number>();
-        const result: Array<{ id: number; title: string | null }> = [];
+        const result: Array<{ id: number; title: string | null; type: string }> = [];
         for (const chat of chats) {
             const id = Number(chat.id);
             if (!id || Number.isNaN(id) || seen.has(id)) continue;
             seen.add(id);
-            result.push({ id, title: chat.title });
+            result.push({ id, title: chat.title, type: chat.type });
         }
         return result;
     }
@@ -451,7 +452,7 @@ export class ScheduleSyncService {
         // сообщается любой другой: строкой в `failedChats`. Она делает событие
         // `result: "failed"` и попадает в `inactiveStaffRemovalFailures` отчёта
         // синхронизации.
-        let chats: Array<{ id: number; title: string | null }>;
+        let chats: Array<{ id: number; title: string | null; type: string }>;
         try {
             chats = await this.getRevocationChats();
         } catch (e: any) {
@@ -487,11 +488,23 @@ export class ScheduleSyncService {
         const failedChats: ChatRevokeFailure[] = [];
         const participantStatuses = new Set(["creator", "administrator", "member", "restricted"]);
 
-        for (const { id: chatId } of chats) {
+        for (const { id: chatId, type } of chats) {
             try {
-                const member = await api.getChatMember(chatId, Number(telegramId));
-                if (!participantStatuses.has(member.status)) {
-                    continue;
+                // В командном канале висит постоянная ссылка-приглашение, поэтому
+                // `left` там значит «сейчас не внутри», а не «войти нечем»:
+                // уволенный возвращается по той же ссылке. Бан в Telegram — это
+                // запись в чёрном списке чата, она действует и на того, кто в чате
+                // не состоит, и именно она закрывает вход, — значит спрашивать
+                // присутствие в канале не нужно и вредно. В групповых чатах
+                // локаций постоянной ссылки нет, и бан отсутствующего был бы
+                // ложной записью о доступе, которого не было, — там проверка
+                // остаётся. Различаем по колонке `type` реестра, а не по
+                // конкретному id: второй канал должен попасть под правило сам.
+                if (type !== "channel") {
+                    const member = await api.getChatMember(chatId, Number(telegramId));
+                    if (!participantStatuses.has(member.status)) {
+                        continue;
+                    }
                 }
 
                 await api.banChatMember(chatId, Number(telegramId));

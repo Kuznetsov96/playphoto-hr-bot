@@ -52,16 +52,20 @@ export class AccessService {
      * location chat, and a fired photographer must lose the chat they actually
      * worked in. Ids are `bigint` in the registry and `number` at the Telegram
      * API boundary, so they are narrowed here once.
+     *
+     * Тип чата едет вместе с id: от него зависит, нужна ли проверка присутствия
+     * перед баном. Разделять по конкретному id нельзя — второй канал появится
+     * и правило молча его не покроет.
      */
-    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null }>> {
+    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null; type: string }>> {
         const chats = await knownChatRepository.listActive();
         const seen = new Set<number>();
-        const result: Array<{ id: number; title: string | null }> = [];
+        const result: Array<{ id: number; title: string | null; type: string }> = [];
         for (const chat of chats) {
             const id = Number(chat.id);
             if (!id || Number.isNaN(id) || seen.has(id)) continue;
             seen.add(id);
-            result.push({ id, title: chat.title });
+            result.push({ id, title: chat.title, type: chat.type });
         }
         return result;
     }
@@ -75,7 +79,7 @@ export class AccessService {
         // требует того же: повтора, а не вердикта. Без этого сбой базы доезжал
         // до диспетчера как `null` и записывался причиной
         // `RESTORE_NOT_AUTHORIZED` — человек авторизован, недоступна была база.
-        let chats: Array<{ id: number; title: string | null }>;
+        let chats: Array<{ id: number; title: string | null; type: string }>;
         try {
             chats = await this.getRevocationChats();
         } catch (e: any) {
@@ -198,7 +202,7 @@ export class AccessService {
             // revocation that never looked at a single chat while the dispatcher
             // marks the row PROCESSED, so it has to come back as a failure to be
             // retried.
-            let chats: Array<{ id: number; title: string | null }> = [];
+            let chats: Array<{ id: number; title: string | null; type: string }> = [];
             try {
                 chats = await this.getRevocationChats();
             } catch (e: any) {
@@ -254,27 +258,48 @@ export class AccessService {
                 const api = this.getSafeApi();
 
                 const failures: Array<{ chatId: number; error: string }> = [];
-                for (const { id: chatId } of chats) {
-                    // Ban only where the person actually is: a ban in a chat they
-                    // were never in is a false audit record of access that never
-                    // existed.
-                    let member: { status: string };
-                    try {
-                        member = await api.getChatMember(chatId, Number(telegramId));
-                    } catch (e: any) {
-                        // Чат, который не удалось опросить, — это НЕ «человека там нет». Считать
-                        // иначе значит превратить сетевой сбой в «мы проверили» и оставить
-                        // человека в чате с записью PROCESSED.
-                        failures.push({ chatId, error: e?.description || e?.message || "Presence check failed" });
-                        logger.error({ err: e, chatId, telegramId }, "Failed to check protected chat membership");
-                        continue;
+                // «Откуда именно убрали» не выводится из `chats`: там весь
+                // осмотренный реестр, включая чаты, где человека не было. Без
+                // отдельного списка ответа на этот вопрос не остаётся, как
+                // только состояние на стороне Telegram уедет вперёд.
+                const bannedChats: Array<{ id: number; title: string | null }> = [];
+                for (const { id: chatId, title, type } of chats) {
+                    // В канале у нас висит постоянная ссылка (`staticJoinLink`),
+                    // поэтому `left` там значит «сейчас не внутри», а не «пути
+                    // назад нет»: уволенный просто переходит по ссылке обратно.
+                    // Бан в Telegram — запись в чёрном списке чата, она работает
+                    // и для того, кто не состоит в нём, и именно она закрывает
+                    // вход. В групповых чатах локаций постоянной ссылки нет, и
+                    // бан отсутствующего был бы ложной записью о доступе,
+                    // которого не было, — там проверка присутствия остаётся.
+                    const isChannel = type === "channel";
+                    if (!isChannel) {
+                        let member: { status: string };
+                        try {
+                            member = await api.getChatMember(chatId, Number(telegramId));
+                        } catch (e: any) {
+                            // Чат, который не удалось опросить, — это НЕ «человека там нет». Считать
+                            // иначе значит превратить сетевой сбой в «мы проверили» и оставить
+                            // человека в чате с записью PROCESSED.
+                            failures.push({ chatId, error: e?.description || e?.message || "Presence check failed" });
+                            logger.error({ err: e, chatId, telegramId }, "Failed to check protected chat membership");
+                            continue;
+                        }
+                        if (member?.status === "left" || member?.status === "kicked") continue;
                     }
-                    if (member?.status === "left" || member?.status === "kicked") continue;
 
                     try {
                         await api.banChatMember(chatId, Number(telegramId));
+                        bannedChats.push({ id: chatId, title });
                     } catch (e: any) {
                         const description = String(e?.description || "").toLowerCase();
+                        // Telegram так отвечает на бан того, кого в чате нет и
+                        // не было. Для канала это теперь штатный исход: цели
+                        // «закрыть вход» он не мешает, отказом в бане не
+                        // является и провалом строки быть не должен. Проверка
+                        // остаётся узкой — по тексту описания, — поэтому
+                        // настоящий отказ (`CHAT_ADMIN_REQUIRED` и прочие) как
+                        // шёл в `failures`, так и идёт.
                         if (description.includes("user not found") || description.includes("participant_id_invalid")) {
                             continue;
                         }
@@ -289,7 +314,9 @@ export class AccessService {
                     actorType: "system",
                     telegramId,
                     entityType: "channel_access",
-                    context: { reason, chats: auditChats, failedChats: failures.length }
+                    // `chats` и `failedChats` не трогаем: по ним ходят внешние
+                    // запросы к логам. `bannedChats` добавляется рядом.
+                    context: { reason, chats: auditChats, failedChats: failures.length, bannedChats }
                 });
                 return { attemptedChats: chats.length, failures };
             } catch (e: any) {

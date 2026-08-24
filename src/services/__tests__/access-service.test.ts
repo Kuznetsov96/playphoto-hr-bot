@@ -40,7 +40,7 @@ describe("AccessService", () => {
         // pre-existing cases below assert deduplication and unban-before-invite,
         // which are independent of *which* chats are in scope — one chat is
         // enough to exercise them.
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
     });
 
     it("deduplicates concurrent revoke attempts for the same user", async () => {
@@ -170,9 +170,9 @@ describe("revokeAccess — presence-driven scope", () => {
      */
     it("bans only the chats the person is in", async () => {
         mocks.listActive.mockResolvedValue([
-            { id: -100n, title: "Support" },
-            { id: -101n, title: "Fantasy Town" },
-            { id: -102n, title: "Dragon Park" },
+            { id: -100n, title: "Support", type: "supergroup" },
+            { id: -101n, title: "Fantasy Town", type: "supergroup" },
+            { id: -102n, title: "Dragon Park", type: "supergroup" },
         ]);
         getChatMember
             .mockResolvedValueOnce({ status: "member" })
@@ -187,7 +187,7 @@ describe("revokeAccess — presence-driven scope", () => {
     });
 
     it("bans nothing when the person is in no chat", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
         getChatMember.mockResolvedValue({ status: "left" });
 
         const result = await service.revokeAccess(12345n, "Звільнення");
@@ -201,7 +201,7 @@ describe("revokeAccess — presence-driven scope", () => {
      * blip into "we checked, they were not there" while the person stays in the chat.
      */
     it("treats an unqueryable chat as a failure, not an absence", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
         getChatMember.mockRejectedValue(new Error("500: Internal Server Error"));
 
         const result = await service.revokeAccess(12345n, "Звільнення");
@@ -212,7 +212,7 @@ describe("revokeAccess — presence-driven scope", () => {
 
     /** Already kicked is the goal already achieved, not a failure. */
     it("counts an already-kicked person as success", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
         getChatMember.mockResolvedValue({ status: "kicked" });
 
         const result = await service.revokeAccess(12345n, "Звільнення");
@@ -222,7 +222,7 @@ describe("revokeAccess — presence-driven scope", () => {
     });
 
     it("still fails the row when the ban itself is refused", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
         getChatMember.mockResolvedValue({ status: "member" });
         banChatMember.mockRejectedValue({ description: "CHAT_ADMIN_REQUIRED" });
 
@@ -233,7 +233,7 @@ describe("revokeAccess — presence-driven scope", () => {
 
     /** A person who vanished between the presence check and the ban is still a success. */
     it("counts a user who left between the check and the ban as success", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
         getChatMember.mockResolvedValue({ status: "member" });
         banChatMember.mockRejectedValue({ description: "Bad Request: user not found" });
 
@@ -244,7 +244,7 @@ describe("revokeAccess — presence-driven scope", () => {
 
     /** The audit must answer "from where", not "which numbers were passed". */
     it("records chat titles in the audit", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Fantasy Town" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Fantasy Town", type: "supergroup" }]);
         getChatMember.mockResolvedValue({ status: "member" });
 
         await service.revokeAccess(12345n, "Звільнення");
@@ -286,13 +286,154 @@ describe("revokeAccess — presence-driven scope", () => {
         expect(getChatMember).not.toHaveBeenCalled();
     });
 
+    /**
+     * Дефект прода: в командном канале висит постоянная ссылка, поэтому `left`
+     * там значит «сейчас не внутри», а не «войти нечем». Шесть уволенных из
+     * десяти оставались со статусом `left` и могли вернуться по ссылке.
+     */
+    it("банит в канале даже тогда, когда человек числится left", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support PlayPhoto", type: "channel" }]);
+        getChatMember.mockResolvedValue({ status: "left" });
+
+        const result = await service.revokeAccess(12345n, "Звільнення");
+
+        expect(banChatMember).toHaveBeenCalledWith(-100, 12345);
+        expect(result.failures).toHaveLength(0);
+    });
+
+    /**
+     * Признак — колонка `type` реестра, а не конкретный id: второй канал должен
+     * попадать под то же правило сам, без правки списка руками.
+     */
+    it("не спрашивает присутствие в канале вовсе", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -777n, title: "Другой канал", type: "channel" }]);
+
+        await service.revokeAccess(12345n, "Звільнення");
+
+        expect(getChatMember).not.toHaveBeenCalled();
+        expect(banChatMember).toHaveBeenCalledWith(-777, 12345);
+    });
+
+    /**
+     * Обратная половина правила: в групповом чате локации постоянной ссылки нет,
+     * и бан отсутствующего был бы ложной записью о доступе, которого не было.
+     */
+    it("по-прежнему пропускает групповой чат, где человек left", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -101n, title: "Fantasy Town", type: "supergroup" }]);
+        getChatMember.mockResolvedValue({ status: "left" });
+
+        const result = await service.revokeAccess(12345n, "Звільнення");
+
+        expect(banChatMember).not.toHaveBeenCalled();
+        expect(result.failures).toHaveLength(0);
+    });
+
+    it("по-прежнему банит в групповом чате, где человек присутствует", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -101n, title: "Fantasy Town", type: "supergroup" }]);
+        getChatMember.mockResolvedValue({ status: "member" });
+
+        await service.revokeAccess(12345n, "Звільнення");
+
+        expect(banChatMember).toHaveBeenCalledWith(-101, 12345);
+    });
+
+    /**
+     * Смешанный реестр разом: канал банится вслепую, группа — только по факту
+     * присутствия. Проверка присутствия при этом уходит только в группу.
+     */
+    it("разводит канал и группу в одном прогоне", async () => {
+        mocks.listActive.mockResolvedValue([
+            { id: -100n, title: "Support PlayPhoto", type: "channel" },
+            { id: -101n, title: "Fantasy Town", type: "supergroup" },
+        ]);
+        getChatMember.mockResolvedValue({ status: "left" });
+
+        await service.revokeAccess(12345n, "Звільнення");
+
+        expect(getChatMember).toHaveBeenCalledTimes(1);
+        expect(getChatMember).toHaveBeenCalledWith(-101, 12345);
+        expect(banChatMember).toHaveBeenCalledTimes(1);
+        expect(banChatMember).toHaveBeenCalledWith(-100, 12345);
+    });
+
+    /**
+     * Бан в канале теперь уходит и за того, кого там никогда не было, поэтому
+     * «user not found» стал штатным исходом. Настоящий отказ им прикрываться не
+     * должен — иначе строка отметится PROCESSED, а вход останется открытым.
+     */
+    it("отправляет настоящий отказ канала в failures", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support PlayPhoto", type: "channel" }]);
+        banChatMember.mockRejectedValue({ description: "Bad Request: CHAT_ADMIN_REQUIRED" });
+
+        const result = await service.revokeAccess(12345n, "Звільнення");
+
+        expect(result.failures).toHaveLength(1);
+        expect(result.failures[0]?.chatId).toBe(-100);
+    });
+
+    it("не считает провалом бан в канале, где человека никогда не было", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support PlayPhoto", type: "channel" }]);
+        banChatMember.mockRejectedValue({ description: "Bad Request: PARTICIPANT_ID_INVALID" });
+
+        const result = await service.revokeAccess(12345n, "Звільнення");
+
+        expect(result.failures).toHaveLength(0);
+    });
+
+    /**
+     * «Откуда именно убрали» не выводится из `chats`: там весь осмотренный
+     * реестр, включая чаты, где человека не было.
+     */
+    it("записывает в аудит чаты, где бан действительно прошёл, с названиями", async () => {
+        mocks.listActive.mockResolvedValue([
+            { id: -100n, title: "Support PlayPhoto", type: "channel" },
+            { id: -101n, title: "Fantasy Town", type: "supergroup" },
+            { id: -102n, title: "Dragon Park", type: "supergroup" },
+        ]);
+        getChatMember
+            .mockResolvedValueOnce({ status: "member" })
+            .mockResolvedValueOnce({ status: "left" });
+
+        await service.revokeAccess(12345n, "Звільнення");
+
+        const audit = mocks.securityAudit.mock.calls.at(-1)?.[0];
+        expect(audit.context.bannedChats).toEqual([
+            { id: -100, title: "Support PlayPhoto" },
+            { id: -101, title: "Fantasy Town" },
+        ]);
+    });
+
+    /** Существующие ключи читают внешние запросы к логам — они остаются на месте. */
+    it("сохраняет прежние ключи аудита рядом с новым", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -101n, title: "Fantasy Town", type: "supergroup" }]);
+        getChatMember.mockResolvedValue({ status: "member" });
+
+        await service.revokeAccess(12345n, "Звільнення");
+
+        const audit = mocks.securityAudit.mock.calls.at(-1)?.[0];
+        expect(audit.context.chats).toEqual([{ id: -101, title: "Fantasy Town" }]);
+        expect(audit.context.failedChats).toBe(0);
+    });
+
+    /** Отказавший чат не попадает в список забаненных. */
+    it("не записывает в забаненные чат, который отказал", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -101n, title: "Fantasy Town", type: "supergroup" }]);
+        getChatMember.mockResolvedValue({ status: "member" });
+        banChatMember.mockRejectedValue({ description: "CHAT_ADMIN_REQUIRED" });
+
+        await service.revokeAccess(12345n, "Звільнення");
+
+        const audit = mocks.securityAudit.mock.calls.at(-1)?.[0];
+        expect(audit.context.bannedChats).toEqual([]);
+    });
+
     /** Un-banning has to follow the same scope, or a re-hired person stays banned in their location chat. */
     it("clears bans across every registry chat, not just the team channel", async () => {
         const unbanChatMember = vi.fn().mockResolvedValue(undefined);
         service.setApi({ banChatMember, getChatMember, unbanChatMember });
         mocks.listActive.mockResolvedValue([
-            { id: -100n, title: "Support" },
-            { id: -101n, title: "Fantasy Town" },
+            { id: -100n, title: "Support", type: "supergroup" },
+            { id: -101n, title: "Fantasy Town", type: "supergroup" },
         ]);
         mocks.findWithProfilesByTelegramId.mockResolvedValue({
             role: Role.STAFF,
@@ -331,8 +472,8 @@ describe("createInviteLink — область разбана", () => {
 
     it("разбанивает во всех известных чатах и выдаёт ссылку, когда реестр наполнен", async () => {
         mocks.listActive.mockResolvedValue([
-            { id: -100n, title: "Support" },
-            { id: -101n, title: "Fantasy Town" },
+            { id: -100n, title: "Support", type: "supergroup" },
+            { id: -101n, title: "Fantasy Town", type: "supergroup" },
         ]);
 
         await expect(service.createInviteLink(123n)).resolves.toBe("https://t.me/+fresh");
@@ -368,7 +509,7 @@ describe("createInviteLink — область разбана", () => {
     });
 
     it("возвращает null, а не бросает, когда человек действительно не авторизован", async () => {
-        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support", type: "supergroup" }]);
         mocks.findWithProfilesByTelegramId.mockResolvedValue(null);
 
         await expect(service.createInviteLink(123n)).resolves.toBeNull();
