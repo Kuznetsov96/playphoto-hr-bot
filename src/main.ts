@@ -31,6 +31,7 @@ import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 import { ADMIN_IDS, BUSINESS_DATA_SOURCE } from "./config.js";
 import { awsBusinessSyncService } from "./services/aws-business-sync.js";
+import { reconcileKnownChats } from "./services/known-chat-reconciler.js";
 
 let runner: RunnerHandle | undefined;
 let queueWorkers: ReturnType<typeof startWorkers> = [];
@@ -175,6 +176,38 @@ async function bootstrap() {
         
         webhookService.listen(bot.api);
         queueWorkers = startWorkers();
+
+        // Сверка реестра при старте. Не ждём её: сбой Telegram во время сверки не
+        // должен задерживать запуск, фотографы обслуживаются, пока она идёт фоном.
+        //
+        // Плата за это — гонка, и она реальна: `run(bot, …)` стартует строкой ниже,
+        // а `deleteWebhook({ drop_pending_updates: false })` намеренно сохраняет
+        // накопленный бэклог, так что очередь `my_chat_member` начинает разбираться,
+        // пока сверка ещё идёт по чатам. Опасно одно направление: событие о
+        // возврате в чат уже проставило `lostAt = null`, а сверка следом получает
+        // транзиентный отказ `getChatMember` по тому же чату и своим `recordLost`
+        // затирает свежий верный вердикт устаревшим неверным. Чат выпадает из
+        // `listActive()`, и уволенный сохраняет к нему доступ.
+        //
+        // Терпим сознательно: `autoRetry` подключён глобально (`src/core/bot.ts:29`),
+        // сверка наследует backoff по 429, поэтому сам триггер — транзиентный отказ —
+        // маловероятен; окно узкое (одна проходка по чатам на старте); состояние
+        // самолечится на следующем рестарте, когда сверка отработает без гонки.
+        reconcileKnownChats(bot.api)
+            .then((result) => {
+                logBusinessEvent({
+                    event: "known_chat.reconcile.startup",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "main",
+                    operation: "reconcileKnownChats",
+                    safeContext: { ...result },
+                });
+            })
+            .catch((error) => {
+                logger.error({ err: error }, "known-chat-reconciler: startup sweep failed");
+            });
 
         // Start the bot with runner for parallel processing
         runner = run(bot, {

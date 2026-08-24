@@ -161,6 +161,13 @@ async function processRow(
  * first place). Marking the whole row `failed` instead would make the API
  * re-offer it forever, repeatedly minting and burning one-time links for
  * someone who already has access.
+ *
+ * Всё это верно ровно до тех пор, пока доступ действительно восстановлен.
+ * `createInviteLink` пробрасывает `UnknownChatScopeError`, когда реестр чатов
+ * пуст или нечитаем: разбан тогда не выполнялся ни в одном чате, и ссылка,
+ * даже выданная, привела бы забаненного человека в закрытую дверь. Эту ошибку
+ * специально не глушим — общий catch в `processRow` отметит строку FAILED и
+ * вернёт её на повтор, когда реестр наполнится.
  */
 async function processRestore(
     bot: Pick<Bot<MyContext>, "api">,
