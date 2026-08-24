@@ -31,6 +31,7 @@ import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 import { ADMIN_IDS, BUSINESS_DATA_SOURCE } from "./config.js";
 import { awsBusinessSyncService } from "./services/aws-business-sync.js";
+import { reconcileKnownChats } from "./services/known-chat-reconciler.js";
 
 let runner: RunnerHandle | undefined;
 let queueWorkers: ReturnType<typeof startWorkers> = [];
@@ -175,6 +176,29 @@ async function bootstrap() {
         
         webhookService.listen(bot.api);
         queueWorkers = startWorkers();
+
+        // Reconcile the known-chats registry before the runner starts taking
+        // `my_chat_member` updates. Not awaited: a Telegram outage during the sweep
+        // must not delay startup, so photographers can still be served while it runs
+        // in the background. Running it here (bot constructed, DB connected, but
+        // before the runner is polling) keeps the one-time startup sweep from
+        // racing the live event stream — though even a race would be harmless,
+        // since both paths only ever upsert/update the same rows.
+        reconcileKnownChats(bot.api)
+            .then((result) => {
+                logBusinessEvent({
+                    event: "known_chat.reconcile.startup",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "main",
+                    operation: "reconcileKnownChats",
+                    safeContext: { ...result },
+                });
+            })
+            .catch((error) => {
+                logger.error({ err: error }, "known-chat-reconciler: startup sweep failed");
+            });
 
         // Start the bot with runner for parallel processing
         runner = run(bot, {
