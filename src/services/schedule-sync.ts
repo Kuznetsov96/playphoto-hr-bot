@@ -5,12 +5,13 @@ import { randomUUID } from "crypto";
 import type { Location } from "@prisma/client";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
+import { knownChatRepository } from "../repositories/known-chat-repository.js";
 import { systemStateRepository } from "../repositories/system-state-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { workShiftRepository } from "../repositories/work-shift-repository.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
-import { BUSINESS_DATA_SOURCE, SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP, TEAM_CHATS } from "../config.js";
+import { BUSINESS_DATA_SOURCE, SPREADSHEET_ID_SCHEDULE, SPREADSHEET_ID_TEAM, CITY_NAME_MAP } from "../config.js";
 import { Bot, type Api } from "grammy";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
@@ -417,23 +418,76 @@ export class ScheduleSyncService {
         return preview;
     }
 
+    /**
+     * Область отзыва — все чаты, где бот сейчас состоит, а не собранный руками
+     * список. Прежняя сборка `TEAM_CHATS` + `Location.telegramChatId` уже
+     * разошлась с реальностью: у `Lviv / Dragon Park 2` не заполнен
+     * `telegramChatId`, поэтому чат был невидим для отзыва и уволенный фотограф
+     * сохранял в нём доступ. Реестр знает про чат независимо от того, завели ли
+     * ему строку в справочнике локаций.
+     *
+     * Идентификаторы в реестре `bigint`, а на границе Telegram API — `number`,
+     * поэтому сужаются здесь один раз, вместе с отсевом нулевых и NaN.
+     */
+    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null }>> {
+        const chats = await knownChatRepository.listActive();
+        const seen = new Set<number>();
+        const result: Array<{ id: number; title: string | null }> = [];
+        for (const chat of chats) {
+            const id = Number(chat.id);
+            if (!id || Number.isNaN(id) || seen.has(id)) continue;
+            seen.add(id);
+            result.push({ id, title: chat.title });
+        }
+        return result;
+    }
+
     private async revokeFromAllTeamChats(api: Api, telegramId: bigint, reason: string): Promise<{ removedFromAtLeastOneChat: boolean; removedFromChatsCount: number; failedChats: ChatRevokeFailure[] }> {
-        const locations = await locationRepository.findAll();
-        const chatIds = new Set<number>([
-            TEAM_CHATS.CHANNEL,
-            TEAM_CHATS.HUB,
-            TEAM_CHATS.SUPPORT,
-            ...locations
-                .filter((loc) => Boolean(loc.telegramChatId))
-                .map((loc) => Number(loc.telegramChatId))
-        ]);
+        // Нечитаемый реестр — это «не смогли выяснить область», а не «отзывать
+        // негде». Вернуть отсюда чистый ноль значит записать в
+        // `security.staff.channel_access_removed` успешный отзыв, который не
+        // заглянул ни в один чат. Очереди с повтором у этой функции нет, поэтому
+        // единственный честный выход — отдать провал тем же каналом, каким
+        // сообщается любой другой: строкой в `failedChats`. Она делает событие
+        // `result: "failed"` и попадает в `inactiveStaffRemovalFailures` отчёта
+        // синхронизации.
+        let chats: Array<{ id: number; title: string | null }>;
+        try {
+            chats = await this.getRevocationChats();
+        } catch (e: any) {
+            const error = e?.description || e?.message || "Failed to read the known chat registry";
+            logger.error({ err: e, telegramId, reason }, "Failed to read the known chat registry for revocation");
+            return {
+                removedFromAtLeastOneChat: false,
+                removedFromChatsCount: 0,
+                // chatId 0 — тот же признак «сбой уровня реестра, а не чата», что
+                // и в AccessService.revokeAccess: реального чата за этой строкой
+                // нет, а тип поля `number` не даёт выразить это иначе.
+                failedChats: [{ chatId: 0, error }],
+            };
+        }
+
+        // Пустой реестр — незаполненное состояние, а не ответ «человека нигде
+        // нет»: бот всегда состоит хотя бы в командном канале, поэтому ноль
+        // известных чатов означает, что сверка ещё не отработала. Без этой
+        // строки прогон, отозвавший доступ ниоткуда, выглядит в событии
+        // безопасности ровно так же, как человек, которого действительно не
+        // было ни в одном чате.
+        if (chats.length === 0) {
+            const error = "Known chat registry is empty — revocation scope is unknown";
+            logger.error({ telegramId, reason }, "Known chat registry is empty, refusing to record a revocation");
+            return {
+                removedFromAtLeastOneChat: false,
+                removedFromChatsCount: 0,
+                failedChats: [{ chatId: 0, error }],
+            };
+        }
 
         let removedFromChatsCount = 0;
         const failedChats: ChatRevokeFailure[] = [];
         const participantStatuses = new Set(["creator", "administrator", "member", "restricted"]);
 
-        for (const chatId of chatIds) {
-            if (!chatId || Number.isNaN(chatId)) continue;
+        for (const { id: chatId } of chats) {
             try {
                 const member = await api.getChatMember(chatId, Number(telegramId));
                 if (!participantStatuses.has(member.status)) {
@@ -466,7 +520,6 @@ export class ScheduleSyncService {
             failedChats,
         };
     }
-
     /**
      * Safely parses Telegram ID from string, handling scientific notation, spaces, and formatting.
      */
