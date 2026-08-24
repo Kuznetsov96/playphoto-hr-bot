@@ -268,6 +268,24 @@ describe("revokeAccess — presence-driven scope", () => {
         expect(banChatMember).not.toHaveBeenCalled();
     });
 
+    /**
+     * An empty registry is a system-state problem, not an answer. The bot is always in at least
+     * the team channel, so zero known chats means the registry has not been populated yet — the
+     * same "cannot determine" that a failed presence check represents, one level up. Recording it
+     * as a clean revocation would let the dispatcher mark the row PROCESSED with nobody banned and
+     * nothing retrying.
+     */
+    it("reports a failure when the registry is empty", async () => {
+        mocks.listActive.mockResolvedValue([]);
+
+        const result = await service.revokeAccess(12345n, "Звільнення");
+
+        expect(result.attemptedChats).toBe(0);
+        expect(result.failures).toHaveLength(1);
+        expect(banChatMember).not.toHaveBeenCalled();
+        expect(getChatMember).not.toHaveBeenCalled();
+    });
+
     /** Un-banning has to follow the same scope, or a re-hired person stays banned in their location chat. */
     it("clears bans across every registry chat, not just the team channel", async () => {
         const unbanChatMember = vi.fn().mockResolvedValue(undefined);

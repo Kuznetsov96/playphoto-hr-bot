@@ -175,6 +175,27 @@ export class AccessService {
                 };
             }
 
+            // Пустой реестр — это не ответ «человека нигде нет», а незаполненное
+            // состояние: бот всегда состоит хотя бы в командном канале, поэтому
+            // ноль известных чатов означает, что сверка ещё не отработала. Это та
+            // же «невозможность выяснить», что и упавшая проверка присутствия,
+            // только уровнем выше. Признать это чистым отзывом значит отметить
+            // строку PROCESSED, никого не забанив и ничего не повторив.
+            if (chats.length === 0) {
+                const error = "Known chat registry is empty — revocation scope is unknown";
+                securityAudit({
+                    event: "security.channel_access.revoked",
+                    result: "failed",
+                    actorType: "system",
+                    telegramId,
+                    entityType: "channel_access",
+                    error,
+                    context: { reason, chats: [] }
+                });
+                logger.error({ telegramId }, "Known chat registry is empty, refusing to record a revocation");
+                return { attemptedChats: 0, failures: [{ chatId: 0, error }] };
+            }
+
             // Titles travel into the audit alongside the ids so the record
             // answers "from where", not "which numbers were passed".
             const auditChats = chats.map(chat => ({ id: chat.id, title: chat.title }));
