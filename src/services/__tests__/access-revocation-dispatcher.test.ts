@@ -14,8 +14,16 @@ vi.mock('../aws-business-client.js', () => ({
     markAccessRevocationFailed: markFailed,
   },
 }));
+class FakeUnknownChatScopeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnknownChatScopeError';
+  }
+}
+
 vi.mock('../access-service.js', () => ({
   accessService: { revokeAccess, createInviteLink, syncUserAccess },
+  UnknownChatScopeError: FakeUnknownChatScopeError,
 }));
 vi.mock('../../core/logger.js', () => ({
   default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -258,5 +266,28 @@ describe('access revocation dispatcher', () => {
 
     expect(markProcessed).toHaveBeenCalledWith('req-5');
     expect(markFailed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Обратная сторона предыдущего случая. `null` значит «не авторизован» —
+   * вердикт, повторять нечего. Пустой или нечитаемый реестр чатов — не вердикт,
+   * а незаполненное состояние: разбан не выполнялся нигде, и отметить строку
+   * PROCESSED значит выдать вернувшемуся человеку ссылку в чаты, где он
+   * по-прежнему забанен. Такая строка обязана падать и повторяться.
+   */
+  it('fails a RESTORE row when the chat registry cannot answer, instead of reporting a silent success', async () => {
+    pending.mockResolvedValue({
+      items: [
+        { publicId: 'req-6', telegramId: '905284110', kind: 'RESTORE', reason: 'Повернулась' },
+      ],
+    });
+    createInviteLink.mockRejectedValue(
+      new FakeUnknownChatScopeError('Known chat registry is empty — unban scope is unknown'),
+    );
+
+    await runAccessRevocationsForTest(fakeBot());
+
+    expect(markProcessed).not.toHaveBeenCalled();
+    expect(markFailed).toHaveBeenCalledWith('req-6', expect.stringContaining('registry is empty'));
   });
 });

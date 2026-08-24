@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AccessService } from "../access-service.js";
+import { AccessService, UnknownChatScopeError } from "../access-service.js";
 import { CandidateStatus, Role } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({
@@ -304,5 +304,85 @@ describe("revokeAccess — presence-driven scope", () => {
         expect(unbanChatMember).toHaveBeenCalledTimes(2);
         expect(unbanChatMember).toHaveBeenCalledWith(-100, 123, { only_if_banned: true });
         expect(unbanChatMember).toHaveBeenCalledWith(-101, 123, { only_if_banned: true });
+    });
+});
+
+/**
+ * Зеркало гарда отзыва, но на стороне восстановления. Отзыв уже отказывается
+ * признавать пустой реестр ответом «человека нигде нет»; выдача ссылки обязана
+ * так же отказываться признавать его ответом «разбанивать негде».
+ */
+describe("createInviteLink — область разбана", () => {
+    let service: AccessService;
+    let unbanChatMember: ReturnType<typeof vi.fn>;
+    let createChatInviteLink: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        service = new AccessService();
+        unbanChatMember = vi.fn().mockResolvedValue(undefined);
+        createChatInviteLink = vi.fn().mockResolvedValue({ invite_link: "https://t.me/+fresh" });
+        service.setApi({ unbanChatMember, createChatInviteLink });
+        mocks.findWithProfilesByTelegramId.mockResolvedValue({
+            role: Role.STAFF,
+            staffProfile: { isActive: true },
+        });
+    });
+
+    it("разбанивает во всех известных чатах и выдаёт ссылку, когда реестр наполнен", async () => {
+        mocks.listActive.mockResolvedValue([
+            { id: -100n, title: "Support" },
+            { id: -101n, title: "Fantasy Town" },
+        ]);
+
+        await expect(service.createInviteLink(123n)).resolves.toBe("https://t.me/+fresh");
+
+        expect(unbanChatMember).toHaveBeenCalledTimes(2);
+        expect(unbanChatMember).toHaveBeenCalledWith(-100, 123, { only_if_banned: true });
+        expect(unbanChatMember).toHaveBeenCalledWith(-101, 123, { only_if_banned: true });
+        expect(createChatInviteLink).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Ключевой случай: молчаливый успех. Раньше пустой реестр означал ноль
+     * итераций цикла, валидную ссылку и строку PROCESSED — человек получал
+     * приглашение в чаты, где остался забанен.
+     */
+    it("не выдаёт ссылку, когда реестр пуст, а падает с отличимой ошибкой", async () => {
+        mocks.listActive.mockResolvedValue([]);
+
+        await expect(service.createInviteLink(123n)).rejects.toThrow(UnknownChatScopeError);
+        expect(createChatInviteLink).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Нечитаемый реестр — та же невозможность выяснить. Отдельно от `null`,
+     * потому что `null` наверху читается как «не авторизован», а человек
+     * авторизован — недоступна была база.
+     */
+    it("не выдаёт ссылку, когда реестр не читается", async () => {
+        mocks.listActive.mockRejectedValue(new Error("db down"));
+
+        await expect(service.createInviteLink(123n)).rejects.toThrow(UnknownChatScopeError);
+        expect(createChatInviteLink).not.toHaveBeenCalled();
+    });
+
+    it("возвращает null, а не бросает, когда человек действительно не авторизован", async () => {
+        mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support" }]);
+        mocks.findWithProfilesByTelegramId.mockResolvedValue(null);
+
+        await expect(service.createInviteLink(123n)).resolves.toBeNull();
+        expect(unbanChatMember).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Рутинный синк намеренно остаётся тихим: он идёт пачками по всей базе,
+     * ничего не обещает наверх и не должен начать шуметь исключениями.
+     */
+    it("не бросает из рутинного синка при пустом реестре", async () => {
+        mocks.listActive.mockResolvedValue([]);
+
+        await expect(service.syncUserAccess(123n, "Routine Sync")).resolves.toBeUndefined();
+        expect(mocks.loggerError).toHaveBeenCalled();
     });
 });

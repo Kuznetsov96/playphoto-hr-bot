@@ -5,6 +5,20 @@ import { Role, CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import { securityAudit } from "../core/audit-logger.js";
 
+/**
+ * Отличает «область действия неизвестна» от «делать было нечего». Нужен именно
+ * отдельный тип, а не строка в сообщении: `createInviteLink` глушит любую
+ * ошибку в `null`, а `null` там уже значит «человек не авторизован» — вердикт,
+ * который повторять бессмысленно. Незаполненный реестр повторить, наоборот,
+ * обязательно, поэтому эта ошибка должна пройти сквозь catch наверх.
+ */
+export class UnknownChatScopeError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "UnknownChatScopeError";
+    }
+}
+
 export class AccessService {
     public chatId: number;
     public staticJoinLink = "https://t.me/+FuFRMGsvMktkNGFi";
@@ -57,7 +71,31 @@ export class AccessService {
         // Un-banning follows the same scope as banning: otherwise a re-hired
         // person stays banned in their location chat forever and no invite
         // link will let them back in.
-        const chats = await this.getRevocationChats();
+        // Нечитаемый реестр — та же «невозможность выяснить», что и пустой, и
+        // требует того же: повтора, а не вердикта. Без этого сбой базы доезжал
+        // до диспетчера как `null` и записывался причиной
+        // `RESTORE_NOT_AUTHORIZED` — человек авторизован, недоступна была база.
+        let chats: Array<{ id: number; title: string | null }>;
+        try {
+            chats = await this.getRevocationChats();
+        } catch (e: any) {
+            logger.error({ err: e, telegramId }, "Failed to read the known chat registry for unban");
+            throw new UnknownChatScopeError(
+                e?.message || "Failed to read the known chat registry"
+            );
+        }
+
+        // Симметрично отзыву: пустой реестр — не «разбанивать негде», а
+        // неизвестная область. Бот всегда состоит хотя бы в командном канале,
+        // поэтому ноль чатов означает, что сверка ещё не отработала, а не что
+        // человек нигде не забанен. Промолчать здесь опаснее, чем на отзыве:
+        // наверх уходит валидная инвайт-ссылка человеку, который остался
+        // забанен во всех чатах, где его банили, — ссылка не сработает, а
+        // строка RESTORE отметится PROCESSED и повтора не будет.
+        if (chats.length === 0) {
+            throw new UnknownChatScopeError("Known chat registry is empty — unban scope is unknown");
+        }
+
         for (const { id: chatId } of chats) {
             await api.unbanChatMember(chatId, Number(telegramId), { only_if_banned: true }).catch((e: any) => {
                 const description = String(e?.description || "").toLowerCase();
@@ -117,6 +155,11 @@ export class AccessService {
         try {
             const authorized = await this.isAuthorized(telegramId);
             if (authorized) {
+                // Рутинный синк намеренно остаётся тихим: он идёт пачками по
+                // всей базе и ничего не обещает наверх — некому «провалить»
+                // строку и незачем повторять. Незаполненный реестр он лишь
+                // логирует общим catch ниже; настоящая цена ошибки — на выдаче
+                // ссылки, и там она проброшена.
                 await this.clearProtectedChatBan(telegramId);
                 return;
             }
@@ -294,6 +337,12 @@ export class AccessService {
             return link.invite_link;
         } catch (e) {
             logger.error({ err: e, telegramId }, "Failed to create invite link");
+            // `null` здесь читается вызывающими как «не авторизован» — вердикт
+            // окончательный, диспетчер по нему закрывает строку PROCESSED. Для
+            // неизвестной области это ложь в обе стороны: человек авторизован, а
+            // ссылку без разбана выдавать нельзя. Пробрасываем, чтобы строка
+            // RESTORE упала и вернулась на повтор.
+            if (e instanceof UnknownChatScopeError) throw e;
             return null;
         }
     }
