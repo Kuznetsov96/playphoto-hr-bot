@@ -44,17 +44,28 @@ export async function getRevocationChats(): Promise<RevocationChat[]> {
  * достигнута и без бана, а провал строки заставил бы диспетчер повторять бан,
  * которому нечего банить.
  *
- * Совпадение намеренно узкое — подстрока в тексте описания, — чтобы новый вид
- * отказа не начал молча считаться успехом.
+ * Одно и то же состояние Telegram называет двумя способами: человекочитаемым
+ * `user not participant` из Bot API и подчёркнутым кодом `USER_NOT_PARTICIPANT`
+ * из слоя MTProto. Поэтому перед сверкой подчёркивания приводятся к пробелам, а
+ * маркеры держатся в пробельной форме — иначе половина написаний проходит мимо
+ * списка. Так и было: маркер с пробелами не ловил подчёркнутый код вовсе, и
+ * отсутствующий участник уезжал в провал строки.
+ *
+ * Совпадение остаётся узким — подстрока в тексте описания, — чтобы новый вид
+ * отказа не начал молча считаться успехом. Нормализация его расширяет, поэтому
+ * контрольный список описаний отказов прогонялся ещё раз уже после неё: ни
+ * `CHAT_ADMIN_REQUIRED`, ни `PEER_ID_INVALID`, ни `USER_ADMIN_INVALID`,
+ * ни `PARTICIPANT_ID_EMPTY`, ни `USER_NOT_MUTUAL_CONTACT` под маркеры не
+ * попадают.
  */
 const ABSENT_MEMBER_ERRORS = [
     "user not found",
     "member not found",
-    "participant_id_invalid",
+    "participant id invalid",
     "user not participant",
 ];
 
 export function isAbsentMemberError(description: string | null | undefined): boolean {
-    const text = String(description || "").toLowerCase();
+    const text = String(description || "").toLowerCase().replace(/_/g, " ");
     return ABSENT_MEMBER_ERRORS.some(marker => text.includes(marker));
 }

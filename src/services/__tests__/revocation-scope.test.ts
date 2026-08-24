@@ -98,6 +98,37 @@ describe("isAbsentMemberError", () => {
         expect(isAbsentMemberError(description)).toBe(true);
     });
 
+    /**
+     * Одно состояние приходит в двух написаниях: с пробелами из Bot API и
+     * подчёркнутым кодом из слоя MTProto. Пробельный маркер не ловил
+     * подчёркнутую форму вовсе, и отсутствующий участник уезжал в провал строки.
+     */
+    it.each([
+        ["user not participant", "Bad Request: user not participant", "Bad Request: USER_NOT_PARTICIPANT"],
+        ["participant id invalid", "Bad Request: participant_id_invalid", "Bad Request: PARTICIPANT_ID_INVALID"],
+        ["user not found", "Bad Request: user not found", "Bad Request: USER_NOT_FOUND"],
+        ["member not found", "Bad Request: member not found", "Bad Request: MEMBER_NOT_FOUND"],
+    ])("ловит оба написания маркера %s", (_marker, spaced, underscored) => {
+        expect(isAbsentMemberError(spaced)).toBe(true);
+        expect(isAbsentMemberError(underscored)).toBe(true);
+    });
+
+    /**
+     * Приведение подчёркиваний к пробелам расширяет совпадение, поэтому
+     * подчёркнутые коды отказов проверяются отдельно: они не должны начать
+     * проходить как «участника здесь нет».
+     */
+    it.each([
+        "Bad Request: USER_ADMIN_INVALID",
+        "Bad Request: PEER_ID_INVALID",
+        "Bad Request: USER_ID_INVALID",
+        "Bad Request: PARTICIPANT_ID_EMPTY",
+        "Bad Request: USER_NOT_MUTUAL_CONTACT",
+        "Bad Request: USER_BANNED_IN_CHANNEL",
+    ])("не терпит подчёркнутый код отказа: %s", description => {
+        expect(isAbsentMemberError(description)).toBe(false);
+    });
+
     it.each([
         "Bad Request: CHAT_ADMIN_REQUIRED",
         "Bad Request: not enough rights to restrict/unrestrict chat member",
