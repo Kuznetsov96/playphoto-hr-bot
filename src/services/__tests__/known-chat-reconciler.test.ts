@@ -82,6 +82,28 @@ describe('reconcileKnownChats', () => {
     expect(recordLost).toHaveBeenCalledWith(-100n);
   });
 
+  /**
+   * Fix round 1, finding 2: a seed chat (never in the registry) that the bot can reach but
+   * is only a plain member of has no row to mark lost — `recordLost`'s Prisma `update`
+   * throws on a missing row. The outer catch would swallow that and still count it as lost,
+   * but it would also log "chat unreachable" for a chat that was in fact perfectly
+   * reachable and merely not an admin — a misleading signal in exactly the log a person
+   * reads while debugging why someone kept access. The demotion branch must skip
+   * `recordLost` for a seed exactly like the catch block already does.
+   */
+  it('does not call recordLost for a demoted seed chat that was never in the registry', async () => {
+    listActive.mockResolvedValue([]);
+    locationFindMany.mockResolvedValue([{ telegramChatId: -200n }]);
+    const demotedSeed = api({ getChatMember: vi.fn().mockResolvedValue({ status: 'member' }) });
+
+    const result = await reconcileKnownChats(demotedSeed);
+
+    expect(recordLost).not.toHaveBeenCalled();
+    expect(recordPresent).not.toHaveBeenCalled();
+    // -200 plus the 3 static TEAM_CHATS seeds, all demoted to plain member.
+    expect(result.lost).toBe(4);
+  });
+
   /** First run: the registry is empty and the known ids seed it. */
   it('seeds the registry from existing location chats', async () => {
     listActive.mockResolvedValue([]);
@@ -172,6 +194,30 @@ describe('reconcileKnownChats', () => {
     // -200 plus the 3 static TEAM_CHATS seeds, all unreachable.
     expect(result.lost).toBe(4);
     expect(recordLost).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Fix round 1: `getChatMember` returning `administrator` already proves the bot is
+   * present — that decision must not be overturned by a later, unrelated failure. A
+   * transient `getChat` failure (rate limit, network blip) must not be misclassified as
+   * the bot being absent, or a chat gets wrongly dropped from the registry, which is a
+   * chat a fired person keeps access to.
+   */
+  it('keeps a chat present when getChat fails after administrator is confirmed', async () => {
+    listActive.mockResolvedValue([{ id: -100n, title: 'Fantasy Town' }]);
+    const flakyGetChat = api({
+      getChatMember: vi.fn().mockResolvedValue({ status: 'administrator' }),
+      getChat: vi.fn().mockRejectedValue(new Error('Too Many Requests: retry after 5')),
+    });
+
+    const result = await reconcileKnownChats(flakyGetChat);
+
+    expect(recordLost).not.toHaveBeenCalled();
+    expect(recordPresent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: -100n, title: 'Fantasy Town' }),
+    );
+    expect(result.confirmed).toBe(1);
+    expect(result.lost).toBe(0);
   });
 
   /** getMe is called once per sweep, not once per chat. */

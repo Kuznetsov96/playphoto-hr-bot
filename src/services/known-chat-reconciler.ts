@@ -86,17 +86,38 @@ export async function reconcileKnownChats(api: Api): Promise<ReconcileResult> {
             // Any status other than administrator means the bot cannot check presence or
             // ban in this chat — demotion is a loss, not a degraded-but-usable state.
             if (member.status !== "administrator") {
-                await knownChatRepository.recordLost(target.id);
+                // Same guard as the catch below: a seed chat was never in the registry,
+                // so `recordLost`'s Prisma `update` would throw P2025 on the missing row.
+                // Reachable-but-demoted is still not persisted for a seed — there is no
+                // row to mark lost, only a count to report.
+                if (!target.isSeed) {
+                    await knownChatRepository.recordLost(target.id);
+                }
                 result.lost += 1;
                 continue;
             }
 
-            const chat = await api.getChat(target.id.toString());
-            const title = "title" in chat ? (chat.title ?? null) : target.title;
+            // getChatMember already proved the bot is administrator here — that is the
+            // presence check, full stop. getChat is only for a nicer title/type; a
+            // transient failure on it (rate limit, network blip) must not flip this
+            // chat to lost, or a chat wrongly dropped from the registry is a chat a
+            // fired person keeps access to. Fall back to what's already known.
+            let title = target.title;
+            let type = "unknown";
+            try {
+                const chat = await api.getChat(target.id.toString());
+                title = "title" in chat ? (chat.title ?? null) : target.title;
+                type = chat.type;
+            } catch (getChatError) {
+                logger.warn(
+                    { err: getChatError, chatId: target.id.toString() },
+                    "known-chat-reconciler: getChat failed after confirming administrator, using fallback title/type",
+                );
+            }
             await knownChatRepository.recordPresent({
                 id: target.id,
                 title,
-                type: chat.type,
+                type,
             });
             if (target.isSeed) {
                 result.discovered += 1;
