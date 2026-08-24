@@ -177,13 +177,22 @@ async function bootstrap() {
         webhookService.listen(bot.api);
         queueWorkers = startWorkers();
 
-        // Reconcile the known-chats registry before the runner starts taking
-        // `my_chat_member` updates. Not awaited: a Telegram outage during the sweep
-        // must not delay startup, so photographers can still be served while it runs
-        // in the background. Running it here (bot constructed, DB connected, but
-        // before the runner is polling) keeps the one-time startup sweep from
-        // racing the live event stream — though even a race would be harmless,
-        // since both paths only ever upsert/update the same rows.
+        // Сверка реестра при старте. Не ждём её: сбой Telegram во время сверки не
+        // должен задерживать запуск, фотографы обслуживаются, пока она идёт фоном.
+        //
+        // Плата за это — гонка, и она реальна: `run(bot, …)` стартует строкой ниже,
+        // а `deleteWebhook({ drop_pending_updates: false })` намеренно сохраняет
+        // накопленный бэклог, так что очередь `my_chat_member` начинает разбираться,
+        // пока сверка ещё идёт по чатам. Опасно одно направление: событие о
+        // возврате в чат уже проставило `lostAt = null`, а сверка следом получает
+        // транзиентный отказ `getChatMember` по тому же чату и своим `recordLost`
+        // затирает свежий верный вердикт устаревшим неверным. Чат выпадает из
+        // `listActive()`, и уволенный сохраняет к нему доступ.
+        //
+        // Терпим сознательно: `autoRetry` подключён глобально (`src/core/bot.ts:29`),
+        // сверка наследует backoff по 429, поэтому сам триггер — транзиентный отказ —
+        // маловероятен; окно узкое (одна проходка по чатам на старте); состояние
+        // самолечится на следующем рестарте, когда сверка отработает без гонки.
         reconcileKnownChats(bot.api)
             .then((result) => {
                 logBusinessEvent({
