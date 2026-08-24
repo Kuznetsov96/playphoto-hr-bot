@@ -1,6 +1,6 @@
 import { TEAM_CHATS } from "../config.js";
 import { userRepository } from "../repositories/user-repository.js";
-import { knownChatRepository } from "../repositories/known-chat-repository.js";
+import { getRevocationChats, isAbsentMemberError, type RevocationChat } from "./revocation-scope.js";
 import { Role, CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import { securityAudit } from "../core/audit-logger.js";
@@ -46,30 +46,6 @@ export class AccessService {
         return this.api;
     }
 
-    /**
-     * The scope of a revocation is every chat the bot is currently in, not a
-     * hardcoded list: the team channel arrives through the registry like any
-     * location chat, and a fired photographer must lose the chat they actually
-     * worked in. Ids are `bigint` in the registry and `number` at the Telegram
-     * API boundary, so they are narrowed here once.
-     *
-     * Тип чата едет вместе с id: от него зависит, нужна ли проверка присутствия
-     * перед баном. Разделять по конкретному id нельзя — второй канал появится
-     * и правило молча его не покроет.
-     */
-    private async getRevocationChats(): Promise<Array<{ id: number; title: string | null; type: string }>> {
-        const chats = await knownChatRepository.listActive();
-        const seen = new Set<number>();
-        const result: Array<{ id: number; title: string | null; type: string }> = [];
-        for (const chat of chats) {
-            const id = Number(chat.id);
-            if (!id || Number.isNaN(id) || seen.has(id)) continue;
-            seen.add(id);
-            result.push({ id, title: chat.title, type: chat.type });
-        }
-        return result;
-    }
-
     private async clearProtectedChatBan(telegramId: bigint) {
         const api = this.getSafeApi();
         // Un-banning follows the same scope as banning: otherwise a re-hired
@@ -79,9 +55,9 @@ export class AccessService {
         // требует того же: повтора, а не вердикта. Без этого сбой базы доезжал
         // до диспетчера как `null` и записывался причиной
         // `RESTORE_NOT_AUTHORIZED` — человек авторизован, недоступна была база.
-        let chats: Array<{ id: number; title: string | null; type: string }>;
+        let chats: RevocationChat[];
         try {
-            chats = await this.getRevocationChats();
+            chats = await getRevocationChats();
         } catch (e: any) {
             logger.error({ err: e, telegramId }, "Failed to read the known chat registry for unban");
             throw new UnknownChatScopeError(
@@ -202,9 +178,9 @@ export class AccessService {
             // revocation that never looked at a single chat while the dispatcher
             // marks the row PROCESSED, so it has to come back as a failure to be
             // retried.
-            let chats: Array<{ id: number; title: string | null; type: string }> = [];
+            let chats: RevocationChat[] = [];
             try {
-                chats = await this.getRevocationChats();
+                chats = await getRevocationChats();
             } catch (e: any) {
                 securityAudit({
                     event: "security.channel_access.revoked",
@@ -292,15 +268,17 @@ export class AccessService {
                         await api.banChatMember(chatId, Number(telegramId));
                         bannedChats.push({ id: chatId, title });
                     } catch (e: any) {
-                        const description = String(e?.description || "").toLowerCase();
                         // Telegram так отвечает на бан того, кого в чате нет и
                         // не было. Для канала это теперь штатный исход: цели
                         // «закрыть вход» он не мешает, отказом в бане не
-                        // является и провалом строки быть не должен. Проверка
-                        // остаётся узкой — по тексту описания, — поэтому
-                        // настоящий отказ (`CHAT_ADMIN_REQUIRED` и прочие) как
-                        // шёл в `failures`, так и идёт.
-                        if (description.includes("user not found") || description.includes("participant_id_invalid")) {
+                        // является и провалом строки быть не должен. Список
+                        // общий с пакетной сверкой: он был у́же на два описания,
+                        // и `member not found` уводил в `failures` строку,
+                        // которую диспетчер потом повторял, чтобы забанить
+                        // того, кого и так нет. Настоящий отказ
+                        // (`CHAT_ADMIN_REQUIRED` и прочие) как шёл в `failures`,
+                        // так и идёт.
+                        if (isAbsentMemberError(e?.description)) {
                             continue;
                         }
                         failures.push({ chatId, error: e?.description || e?.message || "Unknown Telegram API error" });
