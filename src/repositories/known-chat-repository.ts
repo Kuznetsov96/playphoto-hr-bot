@@ -24,10 +24,17 @@ export class KnownChatRepository {
         });
     }
 
-    async listActive(): Promise<Array<{ id: bigint; title: string | null }>> {
+    /**
+     * `type` выдаётся наравне с идентификатором, потому что правила отзыва
+     * различаются по типу чата: в канале с постоянной ссылкой бан нужен и тому,
+     * кто сейчас `left`, а в групповом чате локации — нет. Чтобы отличать их не
+     * захардкоженным списком id (ради ухода от которого реестр и заводился),
+     * признак должен ехать из базы вместе со строкой.
+     */
+    async listActive(): Promise<Array<{ id: bigint; title: string | null; type: string }>> {
         return prisma.knownChat.findMany({
             where: { lostAt: null },
-            select: { id: true, title: true }
+            select: { id: true, title: true, type: true }
         });
     }
 }
