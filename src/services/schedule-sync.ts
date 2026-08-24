@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import type { Location } from "@prisma/client";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { locationRepository } from "../repositories/location-repository.js";
-import { getRevocationChats, type RevocationChat } from "./revocation-scope.js";
+import { getRevocationChats, isAbsentMemberError, type RevocationChat } from "./revocation-scope.js";
 import { systemStateRepository } from "../repositories/system-state-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
@@ -485,13 +485,10 @@ export class ScheduleSyncService {
                 await api.banChatMember(chatId, Number(telegramId));
                 removedFromChatsCount++;
             } catch (e: any) {
-                const description = String(e?.description || "").toLowerCase();
-                if (
-                    description.includes("member not found") ||
-                    description.includes("user not found") ||
-                    description.includes("participant_id_invalid") ||
-                    description.includes("user not participant")
-                ) {
+                // Список терпимых описаний общий с отзывом по строке очереди —
+                // «здесь такого участника нет» значит одно и то же в обоих
+                // путях, и расходиться им незачем.
+                if (isAbsentMemberError(e?.description)) {
                     continue;
                 }
                 failedChats.push({

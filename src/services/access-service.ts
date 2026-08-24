@@ -1,6 +1,6 @@
 import { TEAM_CHATS } from "../config.js";
 import { userRepository } from "../repositories/user-repository.js";
-import { getRevocationChats, type RevocationChat } from "./revocation-scope.js";
+import { getRevocationChats, isAbsentMemberError, type RevocationChat } from "./revocation-scope.js";
 import { Role, CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import { securityAudit } from "../core/audit-logger.js";
@@ -268,15 +268,17 @@ export class AccessService {
                         await api.banChatMember(chatId, Number(telegramId));
                         bannedChats.push({ id: chatId, title });
                     } catch (e: any) {
-                        const description = String(e?.description || "").toLowerCase();
                         // Telegram так отвечает на бан того, кого в чате нет и
                         // не было. Для канала это теперь штатный исход: цели
                         // «закрыть вход» он не мешает, отказом в бане не
-                        // является и провалом строки быть не должен. Проверка
-                        // остаётся узкой — по тексту описания, — поэтому
-                        // настоящий отказ (`CHAT_ADMIN_REQUIRED` и прочие) как
-                        // шёл в `failures`, так и идёт.
-                        if (description.includes("user not found") || description.includes("participant_id_invalid")) {
+                        // является и провалом строки быть не должен. Список
+                        // общий с пакетной сверкой: он был у́же на два описания,
+                        // и `member not found` уводил в `failures` строку,
+                        // которую диспетчер потом повторял, чтобы забанить
+                        // того, кого и так нет. Настоящий отказ
+                        // (`CHAT_ADMIN_REQUIRED` и прочие) как шёл в `failures`,
+                        // так и идёт.
+                        if (isAbsentMemberError(e?.description)) {
                             continue;
                         }
                         failures.push({ chatId, error: e?.description || e?.message || "Unknown Telegram API error" });

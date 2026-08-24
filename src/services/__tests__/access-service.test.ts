@@ -381,6 +381,24 @@ describe("revokeAccess — presence-driven scope", () => {
     });
 
     /**
+     * Раньше эти два описания знала только пакетная сверка, а отзыв по строке
+     * очереди уводил их в `failures` — и диспетчер повторял бан, которому нечего
+     * банить. Списки сведены, повтор пропал.
+     */
+    it.each(["Bad Request: member not found", "Bad Request: user not participant"])(
+        "не считает провалом ответ «участника здесь нет»: %s",
+        async description => {
+            mocks.listActive.mockResolvedValue([{ id: -100n, title: "Support PlayPhoto", type: "channel" }]);
+            banChatMember.mockRejectedValue({ description });
+
+            const result = await service.revokeAccess(12345n, "Звільнення");
+
+            expect(result.failures).toHaveLength(0);
+            expect(result.attemptedChats).toBe(1);
+        }
+    );
+
+    /**
      * «Откуда именно убрали» не выводится из `chats`: там весь осмотренный
      * реестр, включая чаты, где человека не было.
      */
