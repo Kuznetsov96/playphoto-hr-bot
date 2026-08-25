@@ -28,6 +28,12 @@ const envSchema = z.object({
     // мгновенное подключение: новый фоновый цикл должен выключаться переменной
     // окружения, а не откатом деплоя.
     AWS_ACCESS_REVOCATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Проводит ли бот выручку в ДДС вебаппа. Булев, потому что таким его несёт
+    // форма деплоя: контракт `scripts/aws/check-production-deploy-contract.mjs`
+    // выводит список флагов из `printf 'AWS_..._ENABLED=%q'` в воркфлоу и
+    // требует для каждого все четыре звена. Переменная другой формы прошла бы
+    // мимо этой проверки — ровно так флаг и теряет одно звено незаметно.
+    AWS_DDS_API_WRITE_ENABLED: z.enum(["true", "false"]).default("false"),
 
     // Staff Ids (Comma-separated integers)
     ADMIN_IDS: z.string().default(""),
@@ -54,11 +60,9 @@ const envSchema = z.object({
     SPREADSHEET_ID_TECH_CASH: z.string().min(1, "TECH_CASH spreadsheet ID is missing"),
     SPREADSHEET_ID_DDS: z.string().min(1, "DDS spreadsheet ID is missing"),
     // Куда бот проводит выручку: в лист Google Sheets или в ДДС вебаппа.
-    //
-    // Флаг, а не мгновенное переключение, потому что расхождение между двумя
-    // путями обнаружится только на реальных данных. Откат должен быть
-    // переменной окружения, а не деплоем.
-    FINANCE_DDS_TARGET: z.enum(["sheets", "api", "both"]).default("sheets"),
+    // Задаётся напрямую только вне прода (локально, в тестах) — на проде
+    // выводится из `AWS_DDS_API_WRITE_ENABLED`, см. экспорт с обоснованием ниже.
+    FINANCE_DDS_TARGET: z.enum(["sheets", "api", "both"]).optional(),
     SPREADSHEET_ID_SCHEDULE: z.string().min(1, "SCHEDULE spreadsheet ID is missing"),
     SPREADSHEET_ID_TEAM: z.string().min(1, "TEAM spreadsheet ID is missing"),
 
@@ -180,7 +184,22 @@ export const FIRST_SHIFT_ONBOARDING_CHAT_ID = env.FIRST_SHIFT_ONBOARDING_CHAT_ID
 // Spreadsheets
 export const SPREADSHEET_ID_TECH_CASH = env.SPREADSHEET_ID_TECH_CASH;
 export const SPREADSHEET_ID_DDS = env.SPREADSHEET_ID_DDS;
-export const FINANCE_DDS_TARGET = env.FINANCE_DDS_TARGET;
+/**
+ * Куда бот проводит выручку.
+ *
+ * Прод задаёт булев `AWS_DDS_API_WRITE_ENABLED` — форма деплоя умеет только
+ * галочки, и контракт деплоя требует именно такой формы, чтобы флаг прошёл все
+ * четыре звена (форма → release.env → export в start-хуке → set_env).
+ * Преобразование живёт здесь, а не в bash воркфлоу: тут оно типизировано,
+ * покрыто тестами и видно из кода, который его читает.
+ *
+ * Включённый флаг даёт `both`, а не `api`: Google-таблица остаётся рабочей,
+ * и расхождение между двумя путями обнаружится на реальных данных.
+ *
+ * Явный `FINANCE_DDS_TARGET` в окружении имеет приоритет — им пользуются
+ * локальный запуск и тесты, где булева флага деплоя нет.
+ */
+export const FINANCE_DDS_TARGET = env.FINANCE_DDS_TARGET ?? (env.AWS_DDS_API_WRITE_ENABLED === "true" ? "both" : "sheets");
 export const SPREADSHEET_ID_SCHEDULE = env.SPREADSHEET_ID_SCHEDULE;
 export const SPREADSHEET_ID_TEAM = env.SPREADSHEET_ID_TEAM;
 
