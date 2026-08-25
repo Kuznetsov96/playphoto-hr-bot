@@ -19,7 +19,7 @@ export function startLogisticsLoop(bot: Bot) {
     });
     
     // Immediate sync on startup
-    logisticsService.syncIncomingParcels().catch(err => {
+    logisticsService.runLogisticsCycle().catch(err => {
         logger.error({ err }, "Initial logistics sync failed");
         logBusinessEvent({
             event: "logistics.sync_iteration.completed",
@@ -36,7 +36,7 @@ export function startLogisticsLoop(bot: Bot) {
 
     setInterval(async () => {
         try {
-            await logisticsService.syncIncomingParcels();
+            await logisticsService.runLogisticsCycle();
             logBusinessEvent({
                 event: "logistics.sync_iteration.completed",
                 actorType: "system",

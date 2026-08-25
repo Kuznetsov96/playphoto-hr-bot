@@ -3,8 +3,8 @@ import { novaPoshtaService } from './nova-poshta-service.js';
 import logger from '../core/logger.js';
 import { ParcelStatus } from '@prisma/client';
 import { Bot, InlineKeyboard } from 'grammy';
-import { BOT_TOKEN, TEAM_CHATS, NP_RECIPIENT_PHONE, AWS_PARCELS_CANONICAL_READ_ENABLED } from '../config.js';
-import { LOGISTICS_TEXTS_STAFF, NP_LOCATIONS_MAP, NP_PERSONAL_FILTER } from '../constants/logistics-constants.js';
+import { BOT_TOKEN, TEAM_CHATS, AWS_PARCELS_CANONICAL_READ_ENABLED } from '../config.js';
+import { LOGISTICS_TEXTS_STAFF } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
@@ -18,39 +18,39 @@ type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT
 
 export class LogisticsService {
     /**
-     * Synchronize incoming parcels from Nova Poshta
+     * Один цикл логистики бота: статусы посылок и весь разговор в Telegram.
+     *
+     * Имя сменилось с `syncIncomingParcels` не косметически. Опроса Новой Почты
+     * здесь больше нет — посылки находит веб, и старое имя обещало бы читателю
+     * ровно то, что удалено (Task 7). Осталось то, чем бот владеет: напоминания,
+     * эскалации, передача посылки следующей смене.
      */
-    async syncIncomingParcels() {
-        const now = new Date();
-        const dateFrom = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
-        const dateTo = now.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
-
+    async runLogisticsCycle() {
         try {
-            // 1. Auto-discover incoming parcels by recipient phone
-            if (NP_RECIPIENT_PHONE) {
-                const incoming = await novaPoshtaService.getIncomingByPhone(NP_RECIPIENT_PHONE, dateFrom, dateTo);
-                if (incoming && Array.isArray(incoming)) {
-                    for (const doc of incoming) {
-                        await this.processIncomingDocument(doc);
-                    }
-                }
-            } else {
-                logger.warn('Nova Poshta auto-discovery skipped because recipient phone is not configured');
-            }
+            // ОПРОС НП УДАЛЁН (Task 7). Раньше здесь бот сам ходил в Новую Почту по
+            // телефону получателя и заводил посылки у себя. Теперь их находит веб —
+            // он единственный владелец данных о посылке, и второй независимый опрос
+            // означал бы два источника правды с разными правилами сопоставления.
+            //
+            // Вместе с опросом ушёл и фильтр личных посылок менеджера: он переехал в
+            // веб (personal-parcel-filter.ts) — туда, где теперь происходит запись.
+            //
+            // Карточку для состояния разговора заводит syncActiveParcelsStatus, когда
+            // видит в списке от веба посылку, которой у бота ещё нет.
 
-            // 2. Sync existing active parcels via Tracking API (Manual & Auto)
+            // 1. Sync existing active parcels via Tracking API (Manual & Auto)
             await this.syncActiveParcelsStatus();
 
-            // 3. Remind staff to upload content photo (2h after pickup)
+            // 2. Remind staff to upload content photo (2h after pickup)
             await this.remindPhotoUpload();
 
-            // 4. Check for stale parcels (ARRIVED > 2 days)
+            // 3. Check for stale parcels (ARRIVED > 2 days)
             await this.checkStaleParcels();
 
-            // 5. Remind staff who accepted but haven't picked up (2h before shift end)
+            // 4. Remind staff who accepted but haven't picked up (2h before shift end)
             await this.remindBeforeShiftEnd();
 
-            // 6. Hand off parcels stuck in PICKUP_IN_PROGRESS after shift end
+            // 5. Hand off parcels stuck in PICKUP_IN_PROGRESS after shift end
             await this.handoffExpiredShiftParcels();
         } catch (error) {
             logger.error({ err: error }, 'Logistics synchronization failed');
@@ -102,8 +102,28 @@ export class LogisticsService {
 
                 // Conversation state (id, deliveryType) lives only in the bot's own
                 // table — resolved by ttn regardless of where the active-set came from.
-                const localParcel = await prisma.parcel.findUnique({ where: { ttn: parcel.ttn } });
-                if (!localParcel) continue;
+                //
+                // ЗАВОДИМ КАРТОЧКУ, ЕСЛИ ЕЁ НЕТ. Пока бот сам опрашивал НП, строку
+                // создавал processIncomingDocument. Когда активный список приходит из
+                // веба, такой строки может не быть вовсе — и раньше здесь стоял
+                // `continue`, то есть новая посылка молча выпадала: ни уведомления
+                // смене, ни отслеживания статуса. Карточка нужна не ради данных о
+                // посылке (они у веба), а ради состояния РАЗГОВОРА: кто отвечает за
+                // получение, какие напоминания уже отправлены. Поля НП копируем как
+                // есть — веб остаётся их владельцем, здесь это зеркало для джойна.
+                const localParcel =
+                    (await prisma.parcel.findUnique({ where: { ttn: parcel.ttn } })) ??
+                    (await prisma.parcel.create({
+                        data: {
+                            ttn: parcel.ttn,
+                            status: this.mapNPStatusToParcelStatus(statusDoc.StatusCode),
+                            locationId: parcel.locationId,
+                            deliveryType: parcel.npAddress ? 'Warehouse' : 'Address',
+                            npCity: parcel.npCity,
+                            npAddress: parcel.npAddress,
+                            scheduledDate: parcel.scheduledDate
+                        }
+                    }));
 
                 const npStatus = this.mapNPStatusToParcelStatus(statusDoc.StatusCode);
                 const newStatus = this.resolveStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
@@ -170,250 +190,6 @@ export class LogisticsService {
         }
 
         return npStatus;
-    }
-
-    /**
-     * Extracts warehouse/postomat number from NP document fields.
-     * Tries explicit fields first, then parses from address string
-     * (e.g. 'Поштомат "Нова Пошта" №38007' or 'Відділення №65').
-     */
-    private extractWarehouseNumber(doc: any): string {
-        const explicit = doc.WarehouseRecipientNumber || doc.RecipientWarehouseIndex || '';
-        if (explicit) return explicit;
-
-        // Parse from address description: "№38007", "№ 65", "No38007"
-        const addr = doc.RecipientAddressDescription || '';
-        const match = addr.match(/№\s*(\d+)/);
-        return match ? match[1] : '';
-    }
-
-    private async processIncomingDocument(doc: any) {
-        // getIncomingDocumentsByPhone returns TrackingStatusCode
-        // getDocumentList returns StatusCode — handle both
-
-        const npCity = doc.CityRecipientDescription || '';
-        const npWarehouse = this.extractWarehouseNumber(doc);
-        const npAddress = (doc.RecipientAddressDescription || '').toLowerCase();
-
-        // Ignore personal parcels (owner's private deliveries)
-        if (npCity.includes(NP_PERSONAL_FILTER.city)) {
-            if (NP_PERSONAL_FILTER.warehouses.includes(npWarehouse)) return;
-            if (NP_PERSONAL_FILTER.addresses.some(a => npAddress.includes(a))) return;
-        }
-
-        const ttn = doc.Number;
-        const statusCode = doc.TrackingStatusCode || doc.StatusCode || '1';
-        let parcel = await prisma.parcel.findUnique({ where: { ttn } });
-
-        if (!parcel) {
-            const addressRef = doc.RecipientAddress || doc.RecipientAddressRef || null;
-            const city = doc.CityRecipientDescription || null;
-            const addressDesc = doc.RecipientAddressDescription || null;
-            const warehouseNumber = npWarehouse || null;
-
-            // Try to find matching location (by addressRef, warehouse number, address, or city)
-            const location = await this.findLocationByMapping(addressRef, city, warehouseNumber, addressDesc);
-
-            parcel = await prisma.parcel.create({
-                data: {
-                    ttn,
-                    status: this.mapNPStatusToParcelStatus(statusCode),
-                    locationId: location?.id || null,
-                    deliveryType: warehouseNumber ? 'Warehouse' : 'Address',
-                    description: doc.CargoDescription || doc.CargoDescriptionString || null,
-                    scheduledDate: doc.ScheduledDeliveryDate ? new Date(doc.ScheduledDeliveryDate) : null,
-                    npAddressRef: addressRef,
-                    npCity: city,
-                    npAddress: addressDesc,
-                }
-            });
-
-            logBusinessEvent({
-                event: "logistics.parcel.registered",
-                actorType: "system",
-                actorRole: "system",
-                result: "success",
-                module: "logistics-service",
-                operation: "processIncomingDocument",
-                safeContext: {
-                    parcelId: parcel.id,
-                    locationId: parcel.locationId,
-                    city,
-                    deliveryType: parcel.deliveryType,
-                },
-            });
-
-            // Auto-learn: save npAddressRef to location for future instant matching
-            if (location && addressRef && !location.npAddressRef) {
-                await prisma.location.update({
-                    where: { id: location.id },
-                    data: { npAddressRef: addressRef }
-                });
-                logger.debug({ locationName: location.name }, 'Logistics location address reference learned');
-            }
-
-            if (parcel.locationId) {
-                await this.notifyStaffOnShift(parcel.id, parcel.status);
-            } else {
-                // Notify support about unmatched parcel
-                await this.notifyUnmatchedParcel(parcel.id, city, addressDesc);
-            }
-        } else {
-            // Skip cancelled/completed parcels — don't resurrect deleted ones
-            if (parcel.status === 'CANCELLED' || parcel.status === 'COMPLETED') return;
-
-            const npStatus = this.mapNPStatusToParcelStatus(statusCode);
-            const newStatus = this.resolveStatusTransition(parcel.status, npStatus, parcel.deliveryType);
-            if (parcel.status !== newStatus) {
-                const updated = await prisma.parcel.update({
-                    where: { id: parcel.id },
-                    data: { status: newStatus }
-                });
-
-                await this.notifyStaffOnShift(updated.id, newStatus);
-            }
-        }
-    }
-
-    /**
-     * Finds a location by NP data. Priority:
-     * 1. npAddressRef exact match (learned)
-     * 2. Warehouse number via NP_LOCATIONS_MAP
-     * 3. Fuzzy address match (street + number in same city)
-     * 4. City fallback (single location in city)
-     */
-    private async findLocationByMapping(addressRef: string | null, city: string | null, warehouseNumber: string | null, npAddress: string | null = null) {
-        // 1. Exact match by NP Address Ref (learned from previous assignments)
-        if (addressRef) {
-            const byRef = await prisma.location.findFirst({ where: { npAddressRef: addressRef } });
-            if (byRef) return byRef;
-
-            // 1b. Learn from past parcels: same addressRef was already manually assigned
-            const pastParcel = await prisma.parcel.findFirst({
-                where: { npAddressRef: addressRef, locationId: { not: null } },
-                include: { location: true },
-                orderBy: { updatedAt: 'desc' }
-            });
-            if (pastParcel?.location) return pastParcel.location;
-        }
-
-        // 2. Warehouse number match via static NP_LOCATIONS_MAP
-        if (warehouseNumber) {
-            const warehouseMatch = await this.findLocationByWarehouseMapping(warehouseNumber, city);
-            if (warehouseMatch) {
-                return warehouseMatch;
-            }
-        }
-
-        // 3. Fuzzy address match — compare NP address against Location.address in same city
-        if (city && npAddress) {
-            const cityLocations = await prisma.location.findMany({
-                where: { city, isHidden: false }
-            });
-
-            if (cityLocations.length > 1) {
-                const match = this.fuzzyMatchAddress(npAddress, cityLocations);
-                if (match) return match;
-            }
-
-            // 4. City fallback: if only one visible location in this city, auto-assign
-            if (cityLocations.length === 1) return cityLocations[0];
-
-            return null;
-        }
-
-        // 4. City fallback (no npAddress available)
-        if (city) {
-            const cityLocations = await prisma.location.findMany({
-                where: { city, isHidden: false }
-            });
-            if (cityLocations.length === 1) return cityLocations[0];
-        }
-
-        return null;
-    }
-
-    private normalizeCityName(city: string | null): string | null {
-        if (!city) return null;
-
-        return city
-            .toLowerCase()
-            .replace(/^м\.\s*/i, '')
-            .replace(/^місто\s+/i, '')
-            .split(',')[0]!
-            .trim();
-    }
-
-    private async findLocationByWarehouseMapping(warehouseNumber: string, city: string | null) {
-        const normalizedCity = this.normalizeCityName(city);
-        const matchingEntries = NP_LOCATIONS_MAP.filter((entry) => {
-            if (!entry.npPoints.includes(warehouseNumber)) return false;
-            if (!normalizedCity || !entry.city) return true;
-            return this.normalizeCityName(entry.city) === normalizedCity;
-        });
-
-        if (matchingEntries.length === 0) return null;
-        if (!normalizedCity && matchingEntries.length > 1) return null;
-
-        for (const entry of matchingEntries) {
-            const byName = await prisma.location.findFirst({
-                where: {
-                    isHidden: false,
-                    ...(entry.city ? { city: entry.city } : {}),
-                    OR: [
-                        { name: { equals: entry.name } },
-                        { legacyName: { equals: entry.name } },
-                        { name: { contains: entry.name } },
-                        { legacyName: { contains: entry.name } },
-                    ]
-                }
-            });
-
-            if (byName) return byName;
-        }
-
-        return null;
-    }
-
-    /**
-     * Extracts meaningful words from an address (street name keywords + building number).
-     * Strips common prefixes like "вул.", "просп.", "буд.", "бульвар" etc.
-     */
-    private extractAddressTokens(addr: string): string[] {
-        const noise = ['вул', 'вулиця', 'просп', 'проспект', 'бульв', 'бульвар', 'пров', 'провулок', 'буд', 'будинок', 'кв', 'м', 'тц', 'трц'];
-        return addr
-            .toLowerCase()
-            .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()«»"""]/g, ' ')
-            .split(/\s+/)
-            .filter(w => w.length >= 2 && !noise.includes(w));
-    }
-
-    /**
-     * Fuzzy-matches an NP address description against Location.address values.
-     * Matching logic: extract street keywords + building number from both,
-     * find the location with the most overlapping tokens (minimum 2).
-     */
-    private fuzzyMatchAddress(npAddress: string, locations: { id: string; address: string | null; name: string;[key: string]: any }[]) {
-        const npTokens = this.extractAddressTokens(npAddress);
-        if (npTokens.length === 0) return null;
-
-        let bestMatch: typeof locations[0] | null = null;
-        let bestScore = 0;
-
-        for (const loc of locations) {
-            if (!loc.address) continue;
-            // Remove city prefix if present (e.g. "Львів, вул. ..." → "вул. ...")
-            const locAddr = loc.address.replace(/^[^,]+,\s*/, '');
-            const locTokens = this.extractAddressTokens(locAddr);
-
-            const overlap = npTokens.filter(t => locTokens.some(lt => lt === t || lt.includes(t) || t.includes(lt)));
-            if (overlap.length >= 2 && overlap.length > bestScore) {
-                bestScore = overlap.length;
-                bestMatch = loc;
-            }
-        }
-
-        return bestMatch;
     }
 
     /**
