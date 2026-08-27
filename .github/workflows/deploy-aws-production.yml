@@ -96,6 +96,20 @@ on:
         required: true
         type: boolean
         default: true
+      # Шлёт ли бот снимок кандидата в вебапп при каждой записи воронки
+      # (фаза 1 рекрутинговой миграции). Приёмная сторона уже в проде и
+      # идемпотентна, так что повторные пуши безопасны; выключенный флаг —
+      # полный no-op, бот ведёт себя как раньше.
+      #
+      # Умолчание `true`, как у соседей и как требует контракт: форма
+      # переписывает окружение целиком, поэтому `false` превращал бы чужой
+      # обычный деплой в тихий откат зеркала. Флаг ещё не раскатан — первый
+      # выкат делается со СНЯТОЙ галочкой.
+      recruiting_mirror_enabled:
+        description: Mirror candidate snapshots from the hiring funnel into the webapp recruiting workspace
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -321,6 +335,7 @@ jobs:
             printf 'AWS_PARCELS_CANONICAL_READ_ENABLED=%q\n' "${{ inputs.parcels_canonical_read_enabled }}"
             printf 'AWS_ACCESS_REVOCATIONS_ENABLED=%q\n' "${{ inputs.access_revocations_enabled }}"
             printf 'AWS_DDS_API_WRITE_ENABLED=%q\n' "${{ inputs.dds_api_write_enabled }}"
+            printf 'AWS_RECRUITING_MIRROR_ENABLED=%q\n' "${{ inputs.recruiting_mirror_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -416,6 +431,7 @@ jobs:
             echo '- Parcels canonical read: `${{ inputs.parcels_canonical_read_enabled }}`'
             echo '- Access revocations: `${{ inputs.access_revocations_enabled }}`'
             echo '- DDS API revenue write: `${{ inputs.dds_api_write_enabled }}`'
+            echo '- Recruiting candidate mirror: `${{ inputs.recruiting_mirror_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'

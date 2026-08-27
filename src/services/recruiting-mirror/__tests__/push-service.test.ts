@@ -17,7 +17,7 @@ describe("enqueueCandidateMirrorPush", () => {
     });
 
     it("flag OFF: does not enqueue anything", async () => {
-        vi.doMock("../../../config.js", () => ({ RECRUITING_MIRROR_ENABLED: false }));
+        vi.doMock("../../../config.js", () => ({ AWS_RECRUITING_MIRROR_ENABLED: false }));
 
         const { enqueueCandidateMirrorPush } = await import("../push-service.js");
         await enqueueCandidateMirrorPush("cand-1");
@@ -26,7 +26,7 @@ describe("enqueueCandidateMirrorPush", () => {
     });
 
     it("flag ON: enqueues a recruiting-mirror-push job with retries and backoff", async () => {
-        vi.doMock("../../../config.js", () => ({ RECRUITING_MIRROR_ENABLED: true }));
+        vi.doMock("../../../config.js", () => ({ AWS_RECRUITING_MIRROR_ENABLED: true }));
 
         const { enqueueCandidateMirrorPush } = await import("../push-service.js");
         await enqueueCandidateMirrorPush("cand-1");
@@ -49,7 +49,7 @@ describe("processCandidateMirrorPush", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.resetModules();
-        vi.doMock("../../../config.js", () => ({ RECRUITING_MIRROR_ENABLED: true }));
+        vi.doMock("../../../config.js", () => ({ AWS_RECRUITING_MIRROR_ENABLED: true }));
         vi.doMock("../../../core/queue.js", () => ({ defaultQueue: { add: queueAdd } }));
         // Воркер читает через prisma напрямую, а не через candidateRepository:
         // репозиторий сам ставит эти джобы, обратный импорт замкнул бы цикл.
