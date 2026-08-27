@@ -5,7 +5,7 @@
  * Запуск (из корня репозитория, где лежит .env):
  *   npx tsx scripts/backfill-recruiting-mirror.ts
  *
- * Сознательно НЕ смотрит на RECRUITING_MIRROR_ENABLED: бэкфилл — явное
+ * Сознательно НЕ смотрит на AWS_RECRUITING_MIRROR_ENABLED: бэкфилл — явное
  * действие оператора, а флаг управляет только фоновым пушем при записях.
  * Но без AWS_BUSINESS_API_URL/TOKEN пушить некуда — тогда отказ сразу.
  *

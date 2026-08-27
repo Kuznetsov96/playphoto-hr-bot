@@ -12,7 +12,7 @@ describe('canonical replacement flags', () => {
 
   it('defaults the recruiting mirror push flag to false', async () => {
     const config = await import('../config.js');
-    expect(config.RECRUITING_MIRROR_ENABLED).toBe(false);
+    expect(config.AWS_RECRUITING_MIRROR_ENABLED).toBe(false);
   });
 });
 

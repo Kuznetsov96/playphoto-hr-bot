@@ -1,4 +1,4 @@
-import { RECRUITING_MIRROR_ENABLED } from "../../config.js";
+import { AWS_RECRUITING_MIRROR_ENABLED } from "../../config.js";
 import { logBusinessEvent } from "../../core/log-events.js";
 import { buildCandidateMirrorSnapshot } from "./snapshot.js";
 
@@ -15,7 +15,7 @@ export const RECRUITING_MIRROR_JOB_NAME = "recruiting-mirror-push";
  * свежим, так что ретрай после гонки записей пушит актуальное состояние.
  */
 export async function enqueueCandidateMirrorPush(candidateId: string): Promise<void> {
-    if (!RECRUITING_MIRROR_ENABLED) return;
+    if (!AWS_RECRUITING_MIRROR_ENABLED) return;
     const { defaultQueue } = await import("../../core/queue.js");
     await defaultQueue.add(
         RECRUITING_MIRROR_JOB_NAME,
