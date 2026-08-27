@@ -2,8 +2,10 @@
  * Одноразовый бэкфилл зеркала кандидатов: пушит ВСЕХ кандидатов бота в вебапп
  * через POST /internal/bot/recruiting/candidates.
  *
- * Запуск (из корня репозитория, где лежит .env):
+ * Запуск из корня репозитория (где лежит .env):
  *   npx tsx scripts/backfill-recruiting-mirror.ts
+ * Запуск внутри прод-контейнера (исходников src там нет, только dist):
+ *   docker exec playphoto-bot-bot-1 npx tsx /app/scripts/backfill-recruiting-mirror.ts
  *
  * Сознательно НЕ смотрит на AWS_RECRUITING_MIRROR_ENABLED: бэкфилл — явное
  * действие оператора, а флаг управляет только фоновым пушем при записях.
@@ -13,15 +15,54 @@
  * повторный прогон просто перезапишет зеркало теми же снимками.
  */
 import { PrismaClient } from "@prisma/client";
-import { AWS_BUSINESS_API_TOKEN, AWS_BUSINESS_API_URL } from "../src/config.js";
-import { awsBusinessClient } from "../src/services/aws-business-client.js";
-import { buildCandidateMirrorSnapshot } from "../src/services/recruiting-mirror/snapshot.js";
+
+/*
+ * Импорты — динамические с фолбэком на dist. Статический `../src/config.js`
+ * уронил первый прод-прогон 27.08.2026 мгновенной ошибкой ERR_MODULE_NOT_FOUND:
+ * в образ попадают только scripts/ и dist/, каталога src там нет. Из репозитория
+ * tsx резолвит src (свежий код без сборки), из контейнера — собранный dist.
+ */
+type BackfillDeps = {
+    AWS_BUSINESS_API_URL: string | undefined;
+    AWS_BUSINESS_API_TOKEN: string | undefined;
+    awsBusinessClient: {
+        pushRecruitingCandidate: (snapshot: unknown) => Promise<{ publicId: string; stage: string }>;
+    };
+    buildCandidateMirrorSnapshot: (candidate: unknown) => unknown;
+};
+
+async function loadDeps(): Promise<BackfillDeps> {
+    try {
+        const config = await import("../src/config.js");
+        const client = await import("../src/services/aws-business-client.js");
+        const snapshot = await import("../src/services/recruiting-mirror/snapshot.js");
+        return {
+            AWS_BUSINESS_API_URL: config.AWS_BUSINESS_API_URL,
+            AWS_BUSINESS_API_TOKEN: config.AWS_BUSINESS_API_TOKEN,
+            awsBusinessClient: client.awsBusinessClient,
+            buildCandidateMirrorSnapshot: snapshot.buildCandidateMirrorSnapshot,
+        };
+    } catch {
+        const config = await import("../dist/config.js");
+        const client = await import("../dist/services/aws-business-client.js");
+        const snapshot = await import("../dist/services/recruiting-mirror/snapshot.js");
+        return {
+            AWS_BUSINESS_API_URL: config.AWS_BUSINESS_API_URL,
+            AWS_BUSINESS_API_TOKEN: config.AWS_BUSINESS_API_TOKEN,
+            awsBusinessClient: client.awsBusinessClient,
+            buildCandidateMirrorSnapshot: snapshot.buildCandidateMirrorSnapshot,
+        };
+    }
+}
 
 const DELAY_BETWEEN_CALLS_MS = 50;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function main() {
+    const { AWS_BUSINESS_API_URL, AWS_BUSINESS_API_TOKEN, awsBusinessClient, buildCandidateMirrorSnapshot } =
+        await loadDeps();
+
     if (!AWS_BUSINESS_API_URL || !AWS_BUSINESS_API_TOKEN) {
         console.error("❌ AWS_BUSINESS_API_URL / AWS_BUSINESS_API_TOKEN не заданы — пушить некуда.");
         process.exit(1);
