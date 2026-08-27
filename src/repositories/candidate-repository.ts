@@ -196,6 +196,19 @@ export class CandidateRepository {
         return { normalizedData, transition };
     }
 
+    /**
+     * Зеркалирование кандидата в вебапп — fire-and-forget вслед за успешной
+     * записью, тем же приёмом, что и accessService.syncUserAccess: динамический
+     * импорт + .catch, чтобы сбой очереди НИКОГДА не ломал основную запись.
+     * Сознательно не внутри транзакций: воркер перечитывает кандидата свежим,
+     * так что пуш всегда несёт то, что реально лежит в базе.
+     */
+    private mirrorCandidate(candidateId: string) {
+        import("../services/recruiting-mirror/push-service.js").then(({ enqueueCandidateMirrorPush }) => {
+            enqueueCandidateMirrorPush(candidateId).catch(() => { });
+        }).catch(() => { });
+    }
+
     private touchPipeline<T extends Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput>(data: T): T {
         return {
             ...data,
@@ -501,6 +514,8 @@ export class CandidateRepository {
             }).catch(() => { });
         }
 
+        this.mirrorCandidate(candidate.id);
+
         return candidate;
     }
 
@@ -586,6 +601,8 @@ export class CandidateRepository {
                 accessService.syncUserAccess(candidate.user.telegramId).catch(() => { });
             }).catch(() => { });
         }
+
+        this.mirrorCandidate(candidate.id);
 
         return candidate;
     }
@@ -674,6 +691,8 @@ export class CandidateRepository {
             }).catch(() => { });
         }
 
+        this.mirrorCandidate(candidate.id);
+
         return candidate;
     }
 
@@ -741,6 +760,11 @@ export class CandidateRepository {
             data.hrDecision !== undefined ||
             data.interviewCompletedAt !== undefined;
 
+        // Ids затронутых кандидатов собираются ДО записи: update может изменить
+        // ровно те поля, по которым фильтрует where (status → новый status), и
+        // повторный запрос после записи вернул бы пустой список.
+        let affectedIds: string[] = [];
+
         if (touchesFunnelFields) {
             const candidates = await prisma.candidate.findMany({
                 where,
@@ -759,6 +783,8 @@ export class CandidateRepository {
                     trainingSlotId: true,
                 }
             }) as unknown as CandidateFunnelSnapshot[];
+
+            affectedIds = candidates.map(candidate => candidate.id);
 
             for (const candidate of candidates) {
                 try {
@@ -790,6 +816,9 @@ export class CandidateRepository {
                     throw error;
                 }
             }
+        } else {
+            const rows = await prisma.candidate.findMany({ where, select: { id: true } });
+            affectedIds = rows.map(row => row.id);
         }
 
         if ((normalizedData as any).status !== undefined) {
@@ -817,6 +846,11 @@ export class CandidateRepository {
                 },
             });
         }
+
+        for (const candidateId of affectedIds) {
+            this.mirrorCandidate(candidateId);
+        }
+
         return result;
     }
 
@@ -835,12 +869,16 @@ export class CandidateRepository {
     async upsert(args: Prisma.CandidateUpsertArgs): Promise<CandidateWithRelations> {
         const createData = this.touchPipeline(args.create as Prisma.CandidateUpdateInput) as typeof args.create;
         const updateData = this.touchPipeline(args.update as Prisma.CandidateUpdateInput) as typeof args.update;
-        return prisma.candidate.upsert({
+        const candidate = await prisma.candidate.upsert({
             ...args,
             create: createData,
             update: updateData,
             include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
-        }) as unknown as Promise<CandidateWithRelations>;
+        }) as unknown as CandidateWithRelations;
+
+        this.mirrorCandidate(candidate.id);
+
+        return candidate;
     }
 
     async delete(id: string) {
@@ -888,6 +926,9 @@ export class CandidateRepository {
                 });
             }
 
+            // Зеркалирование здесь не дублируется: вложенный this.update сам
+            // ставит recruiting-mirror-push, а воркер перечитывает кандидата
+            // свежим уже после коммита транзакции.
             return this.update(candidateId, {
                 status: CandidateStatus.BLOCKER,
                 candidateDecision,

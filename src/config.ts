@@ -34,6 +34,11 @@ const envSchema = z.object({
     // требует для каждого все четыре звена. Переменная другой формы прошла бы
     // мимо этой проверки — ровно так флаг и теряет одно звено незаметно.
     AWS_DDS_API_WRITE_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Зеркало кандидатов: пуш снимков в вебапп при каждой записи кандидата.
+    // Та же форма "true"/"false", что и у остальных AWS_*_ENABLED — форма
+    // деплоя несёт только галочки, и она ПЕРЕПИСЫВАЕТ окружение целиком:
+    // включённый флаг обязан быть добавлен в форму, иначе слетит на деплое.
+    RECRUITING_MIRROR_ENABLED: z.enum(["true", "false"]).default("false"),
 
     // Staff Ids (Comma-separated integers)
     ADMIN_IDS: z.string().default(""),
@@ -142,6 +147,7 @@ export const AWS_REMINDERS_CANONICAL_READ_ENABLED = env.AWS_REMINDERS_CANONICAL_
 export const AWS_PREFERENCES_CANONICAL_WRITE_ENABLED = env.AWS_PREFERENCES_CANONICAL_WRITE_ENABLED === "true";
 export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED === "true";
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
+export const RECRUITING_MIRROR_ENABLED = env.RECRUITING_MIRROR_ENABLED === "true";
 
 // Helper to parse number arrays
 const parseNumArray = (str: string) => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));

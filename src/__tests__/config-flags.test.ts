@@ -9,6 +9,11 @@ describe('canonical replacement flags', () => {
     expect(config.AWS_PREFERENCES_CANONICAL_WRITE_ENABLED).toBe(false);
     expect(config.AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED).toBe(false);
   });
+
+  it('defaults the recruiting mirror push flag to false', async () => {
+    const config = await import('../config.js');
+    expect(config.RECRUITING_MIRROR_ENABLED).toBe(false);
+  });
 });
 
 describe('FINANCE_DDS_TARGET derived from the deploy flag', () => {
