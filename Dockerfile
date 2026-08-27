@@ -35,7 +35,20 @@ ENV NODE_ENV=production
 
 COPY --from=deps /app/node_modules ./node_modules
 
-RUN apk upgrade --no-cache \
+# Дата патчей базового образа. Сборка идёт с `cache-from: type=gha`, и слой с
+# `apk upgrade` переиспользуется, пока НИ ОДНА строка выше не изменилась, —
+# то есть патчи Alpine замораживаются в кеше, а сканер ECR винит свежий
+# коммит. Так деплой 27.08.2026 встал на openssl 3.5.7-r0, хотя в
+# репозиториях уже лежал 3.5.8-r0.
+#
+# Правка этой даты инвалидирует слой и заставляет apk пойти в сеть. Менять её
+# при блокировке деплоя сканером; перезапуск джоба не поможет — нужен именно
+# НОВЫЙ коммит.
+ARG APK_PATCH_LEVEL=2026-08-27
+
+# `apk upgrade` идёт первым и обновляет индекс, чтобы `apk add` ниже ставил
+# пакеты из ТОГО ЖЕ свежего индекса, а не из старого снимка репозиториев.
+RUN apk --no-cache upgrade \
     && apk add --no-cache ca-certificates cairo pango libjpeg-turbo giflib librsvg
 
 # Copy artifacts from previous stages
