@@ -456,6 +456,50 @@ export interface AwsEmployeeUpsert {
     locationCode: string;
 }
 
+/**
+ * Полный снимок кандидата для зеркала рекрутинга в вебаппе. Бот шлёт ВЕСЬ
+ * профиль на каждом пуше: отсутствующее в боте поле уходит как null и
+ * перезаписывает колонку зеркала — так пропущенный пуш самоизлечивается
+ * следующим. Каждая дата — строгая ISO-строка или null; `telegramId` —
+ * строка из цифр (BigInt не переживает JSON.stringify).
+ *
+ * Контракт приёмной стороны: вебапп,
+ * `apps/api/src/recruiting/dto/bot-candidate-upsert.dto.ts`.
+ */
+export interface RecruitingCandidateSnapshot {
+    telegramId: string;
+    botCandidateId: string;
+    telegramUsername: string | null;
+    fullName: string | null;
+    phone: string | null;
+    gender: "female" | "male" | null;
+    birthDate: string | null;
+    city: string | null;
+    locationCode: string | null;
+    source: string | null;
+    botStatus: string;
+    hrDecision: string | null;
+    lossStage: string | null;
+    lossReason: string | null;
+    interviewAt: string | null;
+    statusChangedAt: string | null;
+    lastActivityAt: string | null;
+    botCreatedAt: string | null;
+}
+
+/**
+ * Подтверждение зеркала. НЕ `.strict()` — сознательно: разбор ответа строгой
+ * схемой уже ронял сохранение побажань, когда API добавил новое поле, а этот
+ * пуш сидит в хвосте каждой записи кандидата. Новое поле в ответе не должно
+ * превращаться в вечно падающий джоб.
+ */
+const recruitingCandidateAckSchema = z.object({
+    publicId: z.string(),
+    stage: z.string(),
+});
+
+export type RecruitingCandidateAck = z.infer<typeof recruitingCandidateAckSchema>;
+
 const locationCutoverSchema = z.object({
     items: z.array(
         z.object({
@@ -508,6 +552,19 @@ export class AwsBusinessClient {
     }> {
         const value = await this.request("/locations/cutover", { method: "GET" });
         return locationCutoverSchema.parse(value);
+    }
+
+    /**
+     * Зеркалит один снимок кандидата в вебапп. Идемпотентно на стороне API:
+     * upsert по `telegramId`, повторный пуш того же состояния безвреден —
+     * поэтому BullMQ-ретраи и бэкфилл могут накладываться без последствий.
+     */
+    async pushRecruitingCandidate(snapshot: RecruitingCandidateSnapshot): Promise<RecruitingCandidateAck> {
+        const body = await this.request("/recruiting/candidates", {
+            method: "POST",
+            body: JSON.stringify(snapshot),
+        });
+        return recruitingCandidateAckSchema.parse(body);
     }
 
     async upsertEmployee(employee: AwsEmployeeUpsert) {

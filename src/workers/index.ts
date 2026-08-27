@@ -28,6 +28,12 @@ export const startWorkers = () => {
             const { replacementService } = await import('../services/replacement-service.js');
             await replacementService.dispatchNextWave(bot.api, job.data.requestId);
         }
+        if (job.name === 'recruiting-mirror-push') {
+            // Ошибка пробрасывается — ретраями (attempts/backoff из джоба)
+            // управляет BullMQ; финально упавший джоб остаётся в failed.
+            const { processCandidateMirrorPush } = await import('../services/recruiting-mirror/push-service.js');
+            await processCandidateMirrorPush(job.data.candidateId);
+        }
     }, { connection });
 
     const broadcastWorker = new Worker(QUEUES.BROADCAST, async job => {
