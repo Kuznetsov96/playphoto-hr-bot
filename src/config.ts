@@ -39,6 +39,11 @@ const envSchema = z.object({
     // деплоя несёт только галочки, и она ПЕРЕПИСЫВАЕТ окружение целиком:
     // включённый флаг обязан быть добавлен в форму, иначе слетит на деплое.
     AWS_RECRUITING_MIRROR_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Канонические слоты интервью (фаза 2b): кандидатский флоу записи на
+    // собеседование читает свободные слоты и бронирует их в вебаппе, а не в
+    // локальных таблицах InterviewSlot. Слоты знакомств/навчання остаются
+    // локальными. Выключенный флаг — поведение байт-в-байт прежнее.
+    AWS_RECRUITING_SLOTS_ENABLED: z.enum(["true", "false"]).default("false"),
 
     // Staff Ids (Comma-separated integers)
     ADMIN_IDS: z.string().default(""),
@@ -148,6 +153,7 @@ export const AWS_PREFERENCES_CANONICAL_WRITE_ENABLED = env.AWS_PREFERENCES_CANON
 export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED === "true";
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
 export const AWS_RECRUITING_MIRROR_ENABLED = env.AWS_RECRUITING_MIRROR_ENABLED === "true";
+export const AWS_RECRUITING_SLOTS_ENABLED = env.AWS_RECRUITING_SLOTS_ENABLED === "true";
 
 // Helper to parse number arrays
 const parseNumArray = (str: string) => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));

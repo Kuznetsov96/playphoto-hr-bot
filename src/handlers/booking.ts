@@ -4,6 +4,16 @@ import { googleCalendar } from "../services/google-calendar.js";
 import { ADMIN_IDS, HR_NAME, MENTOR_NAME } from "../config.js";
 import { trackMessage, cleanupMessages } from "../utils/cleanup.js";
 import { bookingService } from "../services/booking-service.js";
+// Фаза 2b: под AWS_RECRUITING_SLOTS_ENABLED список и бронь слотов ИНТЕРВЬЮ
+// идут в канонический API вебаппа (с write-through локального зеркала);
+// без флага эти функции — прозрачные обёртки над прежним локальным путём.
+// Слоты знакомств/навчання остаются локальными в обоих режимах.
+import {
+    bookInterviewSlot as bookInterviewSlotFlow,
+    findAvailableInterviewSlots,
+    releaseCanonicalInterviewSlot,
+} from "../services/canonical-interview-slots.js";
+import { AwsBusinessApiError, RECRUITING_SLOT_TAKEN_CODE } from "../services/aws-business-client.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
@@ -249,7 +259,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     try {
         await ctx.answerCallbackQuery("Бронюємо... ⏳");
         logger.debug({ telegramId, slotId }, "Interview booking started");
-        const result = await bookingService.bookInterviewSlot(telegramId, slotId, ctx.from.username);
+        const result = await bookInterviewSlotFlow(telegramId, slotId, ctx.from.username);
 
         const startTime = (result.slot as any).startTime;
         const fullName = (result.slot as any).candidate?.fullName || ctx.from.first_name || "Кандидатко";
@@ -301,7 +311,21 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId }, "Interview booking failed");
-        if (e.message === "ALREADY_BOOKED") {
+        if (e instanceof AwsBusinessApiError && e.code === RECRUITING_SLOT_TAKEN_CODE) {
+            // Гонка за канонический слот: пока кандидатка думала, его забрала
+            // другая. Локально ничего не записано — просто обновляем список.
+            await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔").catch(() => {});
+            const freshSlots = await findAvailableInterviewSlots().catch(() => []);
+            if (freshSlots.length === 0) {
+                await ctx.editMessageText(`Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`).catch(() => {});
+            } else {
+                const freshKeyboard = buildSlotSelectionKeyboard(freshSlots, "book_slot_", "no_slots_fit");
+                await ctx.editMessageText(
+                    CANDIDATE_TEXTS["candidate-interview-slot-taken"],
+                    { reply_markup: freshKeyboard }
+                ).catch(() => {});
+            }
+        } else if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔");
         } else if (e.message === "UNDERAGE_CANDIDATE") {
             await ctx.answerCallbackQuery("Цей етап поки недоступний для твоєї анкети.");
@@ -356,6 +380,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+        // Сначала вебапп, потом локальная отмена: наоборот слот остался бы
+        // занятым для остальных кандидаток. Без флага вызов — no-op.
+        await releaseCanonicalInterviewSlot(ctx.from.id, "candidate_cancelled");
         await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
 
         if (candidate) {
@@ -429,6 +456,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     try {
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
         if (slotId !== "none") {
+            // Порядок тот же, что и при отмене: сначала вебапп, потом локально.
+            await releaseCanonicalInterviewSlot(ctx.from.id, "candidate_withdrew");
             await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
         }
 
@@ -478,7 +507,11 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
 
-        // Release current slot first so it appears in the new list
+        // Release current slot first so it appears in the new list.
+        // Бот освобождает слот сразу при «Змінити час», до выбора нового, —
+        // поэтому и в вебаппе освобождаем здесь же с причиной rescheduled
+        // (серверный «умный перенос» на этот путь не попадает). Без флага no-op.
+        await releaseCanonicalInterviewSlot(ctx.from.id, "rescheduled");
         await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
         if (candidate) {
             await candidateRepository.update(candidate.id, {
@@ -504,7 +537,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             }
         }
 
-        const slots = await interviewRepository.findActiveSlots();
+        const slots = await findAvailableInterviewSlots();
 
         if (slots.length === 0) {
             if (candidate) {
@@ -537,7 +570,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     await ctx.answerCallbackQuery();
 
-    const slots = await interviewRepository.findActiveSlots();
+    const slots = await findAvailableInterviewSlots();
     const telegramId = ctx.from.id;
 
     if (slots.length === 0) {
@@ -638,6 +671,11 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
 
     const candidate = await candidateRepository.findByTelegramId(telegramId);
     if (candidate?.interviewSlotId) {
+        // Отказ фиксируется в любом случае, поэтому здесь — в отличие от
+        // явной отмены — сбой веб-освобождения не блокирует, а только логируется.
+        await releaseCanonicalInterviewSlot(telegramId, "candidate_withdrew").catch((err) => {
+            logger.warn({ err, candidateId: candidate.id }, "Canonical slot release on decline failed");
+        });
         await bookingService.cancelInterviewSlot(candidate.interviewSlotId, telegramId).catch((err) => {
             logger.warn({ err, candidateId: candidate.id, slotId: candidate.interviewSlotId }, "Interview decline cleanup failed");
         });

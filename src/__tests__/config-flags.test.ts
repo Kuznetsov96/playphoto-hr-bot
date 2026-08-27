@@ -14,6 +14,11 @@ describe('canonical replacement flags', () => {
     const config = await import('../config.js');
     expect(config.AWS_RECRUITING_MIRROR_ENABLED).toBe(false);
   });
+
+  it('defaults the canonical interview slots flag to false', async () => {
+    const config = await import('../config.js');
+    expect(config.AWS_RECRUITING_SLOTS_ENABLED).toBe(false);
+  });
 });
 
 describe('FINANCE_DDS_TARGET derived from the deploy flag', () => {

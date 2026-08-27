@@ -110,6 +110,20 @@ on:
         required: true
         type: boolean
         default: true
+      # Канонические слоты интервью (фаза 2b): кандидатский флоу записи на
+      # собеседование читает свободные слоты и бронирует их в вебаппе, а не в
+      # локальных таблицах InterviewSlot (с write-through локального зеркала
+      # под напоминания). Слоты знакомств/навчання остаются локальными.
+      #
+      # Умолчание `true`, как у соседей и как требует контракт: форма
+      # переписывает окружение целиком, поэтому `false` превращал бы чужой
+      # обычный деплой в тихий откат фичи. Флаг ещё не раскатан — первый
+      # выкат делается со СНЯТОЙ галочкой.
+      recruiting_slots_enabled:
+        description: Book candidate interview slots through the webapp canonical slot API
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -336,6 +350,7 @@ jobs:
             printf 'AWS_ACCESS_REVOCATIONS_ENABLED=%q\n' "${{ inputs.access_revocations_enabled }}"
             printf 'AWS_DDS_API_WRITE_ENABLED=%q\n' "${{ inputs.dds_api_write_enabled }}"
             printf 'AWS_RECRUITING_MIRROR_ENABLED=%q\n' "${{ inputs.recruiting_mirror_enabled }}"
+            printf 'AWS_RECRUITING_SLOTS_ENABLED=%q\n' "${{ inputs.recruiting_slots_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -432,6 +447,7 @@ jobs:
             echo '- Access revocations: `${{ inputs.access_revocations_enabled }}`'
             echo '- DDS API revenue write: `${{ inputs.dds_api_write_enabled }}`'
             echo '- Recruiting candidate mirror: `${{ inputs.recruiting_mirror_enabled }}`'
+            echo '- Recruiting canonical interview slots: `${{ inputs.recruiting_slots_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'

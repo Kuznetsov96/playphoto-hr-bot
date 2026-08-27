@@ -347,6 +347,11 @@ model InterviewSlot {
   remindedCompletion Boolean          @default(false)
   candidateId        String?
   lastReminderMsgId  Int?
+  // Ссылка на канонический слот вебаппа (фаза 2b): при включённом
+  // AWS_RECRUITING_SLOTS_ENABLED бронь идёт в вебапп, а эта строка —
+  // write-through-зеркало для напоминаний и календаря HR. NULL — слот
+  // локальный, создан по-старому.
+  webSlotPublicId    String?          @unique
   candidate          Candidate?
   interviewSession   InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 

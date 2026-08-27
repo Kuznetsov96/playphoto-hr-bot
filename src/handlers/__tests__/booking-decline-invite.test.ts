@@ -64,6 +64,9 @@ vi.mock("../../config.js", () => ({
     MENTOR_IDS: [],
     HR_NAME: "HR",
     MENTOR_NAME: "Mentor",
+    // Флаг канонических слотов обязан присутствовать в моке: vitest падает на
+    // чтении несуществующего экспорта, а путь отмены теперь его читает.
+    AWS_RECRUITING_SLOTS_ENABLED: false,
 }));
 
 vi.mock("../../services/booking-service.js", () => ({
