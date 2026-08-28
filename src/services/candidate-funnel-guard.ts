@@ -222,6 +222,16 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
             return ([
                 CandidateStatus.TRAINING_SCHEDULED,
                 CandidateStatus.TRAINING_COMPLETED,
+                // Ручной owner-контур из вебаппа (MARK_TRAINING_PASSED):
+                // владелец ведёт кандидатку лично и отмечает пройденное
+                // навчання со ЛЮБОГО статуса стадии TRAINING зеркала —
+                // бот двигает воронку немо, без сообщений и уведомлений.
+                CandidateStatus.ACCEPTED,
+                CandidateStatus.MENTOR_MANUAL,
+                CandidateStatus.DISCOVERY_SCHEDULED,
+                CandidateStatus.DISCOVERY_COMPLETED,
+                CandidateStatus.NDA,
+                CandidateStatus.KNOWLEDGE_TEST,
             ] as CandidateStatus[]).includes(oldState.status);
         case CandidateStatus.NDA:
             return ([
@@ -242,6 +252,10 @@ function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: Candida
                 CandidateStatus.STAGING_SETUP,
                 CandidateStatus.STAGING_ACTIVE,
                 CandidateStatus.OFFLINE_STAGING,
+                // Ручной owner-контур из вебаппа (START_STAGING): целевой
+                // конвейер идёт TRAINING_COMPLETED → STAGING_SETUP без NDA и
+                // KNOWLEDGE_TEST (решение владельца от 27.08.2026).
+                CandidateStatus.TRAINING_COMPLETED,
             ] as CandidateStatus[]).includes(oldState.status);
         case CandidateStatus.STAGING_ACTIVE:
             return ([

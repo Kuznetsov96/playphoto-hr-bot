@@ -4,6 +4,7 @@ import { lazySession } from "./session.js";
 import { BOT_TOKEN } from "../config.js";
 import { createRateLimitMiddleware } from "../middleware/rate-limit.js";
 import { chatLoggerMiddleware, chatLogTransformer } from "../middleware/chat-logger.js";
+import { recruitingIncomingMiddleware } from "../middleware/recruiting-incoming.js";
 import { richMessageInputMiddleware } from "../middleware/rich-message.js";
 import { autoRetry } from "@grammyjs/auto-retry";
 import { sequentialize } from "@grammyjs/runner";
@@ -162,6 +163,10 @@ bot.use(async (ctx, next) => {
 
 // 5. Chat Logging
 bot.use(chatLoggerMiddleware);
+
+// 5.1. Зеркалирование входящих сообщений кандидаток в вебапп (фаза 3b).
+// Fire-and-forget: недоступный вебапп не влияет на обработку апдейта.
+bot.use(recruitingIncomingMiddleware);
 
 // 6. Normalize rich-message text before all role/conversation handlers.
 bot.use(richMessageInputMiddleware);
