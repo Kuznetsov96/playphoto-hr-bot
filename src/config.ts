@@ -44,6 +44,11 @@ const envSchema = z.object({
     // локальных таблицах InterviewSlot. Слоты знакомств/навчання остаются
     // локальными. Выключенный флаг — поведение байт-в-байт прежнее.
     AWS_RECRUITING_SLOTS_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Команды рекрутёра (фаза 3a): бот опрашивает outbox вебаппа и применяет
+    // решения рекрутёра СВОЕЙ воронкой — те же вызовы hr-service, что и кнопки
+    // HR-меню, со всеми их сообщениями и проверками. Выключенный флаг — цикл
+    // опроса не стартует вовсе, поведение байт-в-байт прежнее.
+    AWS_RECRUITING_COMMANDS_ENABLED: z.enum(["true", "false"]).default("false"),
 
     // Staff Ids (Comma-separated integers)
     ADMIN_IDS: z.string().default(""),
@@ -154,6 +159,7 @@ export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CON
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
 export const AWS_RECRUITING_MIRROR_ENABLED = env.AWS_RECRUITING_MIRROR_ENABLED === "true";
 export const AWS_RECRUITING_SLOTS_ENABLED = env.AWS_RECRUITING_SLOTS_ENABLED === "true";
+export const AWS_RECRUITING_COMMANDS_ENABLED = env.AWS_RECRUITING_COMMANDS_ENABLED === "true";
 
 // Helper to parse number arrays
 const parseNumArray = (str: string) => str.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
