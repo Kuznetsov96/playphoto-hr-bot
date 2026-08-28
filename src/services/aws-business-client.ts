@@ -500,6 +500,33 @@ const recruitingCandidateAckSchema = z.object({
 
 export type RecruitingCandidateAck = z.infer<typeof recruitingCandidateAckSchema>;
 
+/**
+ * Один канонический слот интервью из вебаппа (фаза 2b). НЕ `.strict()` —
+ * той же причиной, что и ack зеркала: новое поле в ответе API не должно
+ * ронять кандидатке весь флоу записи на собеседование.
+ */
+const recruitingInterviewSlotSchema = z.object({
+    publicId: z.string().uuid(),
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+});
+
+const recruitingInterviewSlotsSchema = z.object({
+    items: z.array(recruitingInterviewSlotSchema),
+});
+
+const recruitingSlotReleaseAckSchema = z.object({
+    released: z.boolean(),
+});
+
+export type RecruitingInterviewSlot = z.infer<typeof recruitingInterviewSlotSchema>;
+
+/**
+ * 409 с этим кодом означает «слот только что заняли» — единственная ожидаемая
+ * гонка кнопок: кандидатке предлагают выбрать другой, это не сбой.
+ */
+export const RECRUITING_SLOT_TAKEN_CODE = "RECRUITING_SLOT_TAKEN";
+
 const locationCutoverSchema = z.object({
     items: z.array(
         z.object({
@@ -565,6 +592,46 @@ export class AwsBusinessClient {
             body: JSON.stringify(snapshot),
         });
         return recruitingCandidateAckSchema.parse(body);
+    }
+
+    /** Свободные будущие слоты интервью — то, что кандидатка видит кнопками. */
+    async listRecruitingInterviewSlots(): Promise<{ items: RecruitingInterviewSlot[] }> {
+        const body = await this.request("/recruiting/interview-slots", { method: "GET" });
+        return recruitingInterviewSlotsSchema.parse(body);
+    }
+
+    /**
+     * Бронирует слот за кандидаткой. «Умный перенос» реализован приёмной
+     * стороной: новая бронь сама освобождает предыдущий слот кандидатки.
+     * Проигрыш гонки за слот — AwsBusinessApiError с кодом
+     * RECRUITING_SLOT_TAKEN (409); флоу ловит его и предлагает другой слот.
+     */
+    async bookRecruitingInterviewSlot(
+        slotPublicId: string,
+        telegramId: string,
+    ): Promise<RecruitingInterviewSlot> {
+        const body = await this.request(
+            `/recruiting/interview-slots/${encodeURIComponent(slotPublicId)}/book`,
+            { method: "POST", body: JSON.stringify({ telegramId }) },
+        );
+        return recruitingInterviewSlotSchema.parse(body);
+    }
+
+    /**
+     * Освобождает забронированный слот кандидатки. Причина обязательна
+     * контрактом (≤120 символов): отмена без причины была осознанным
+     * дефектом аудита в боте, приёмная сторона его не воспроизводит.
+     * `released: false` — у кандидатки не было брони; это не ошибка.
+     */
+    async releaseRecruitingInterviewSlot(
+        telegramId: string,
+        reason: string,
+    ): Promise<{ released: boolean }> {
+        const body = await this.request("/recruiting/interview-slots/release", {
+            method: "POST",
+            body: JSON.stringify({ telegramId, reason: reason.slice(0, 120) }),
+        });
+        return recruitingSlotReleaseAckSchema.parse(body);
     }
 
     async upsertEmployee(employee: AwsEmployeeUpsert) {
