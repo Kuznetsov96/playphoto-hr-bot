@@ -562,6 +562,51 @@ const recruitingCommandAckSchema = z.object({
 export type RecruitingCommand = z.infer<typeof recruitingCommandSchema>;
 export type RecruitingCommandAck = z.infer<typeof recruitingCommandAckSchema>;
 
+/**
+ * Исходящее сообщение рекрутёра из outbox вебаппа (фаза 3b, полный цикл
+ * найма). НЕ `.strict()` — по той же причине, что и команды: новое поле в
+ * ответе API не должно ронять доставку всей очереди.
+ */
+const recruitingOutgoingMessageSchema = z.object({
+    publicId: z.string().uuid(),
+    body: z.string(),
+    telegramId: z.string(),
+});
+
+const recruitingOutgoingMessagesSchema = z.object({
+    items: z.array(recruitingOutgoingMessageSchema),
+});
+
+const recruitingMessageAckSchema = z.object({
+    publicId: z.string(),
+    status: z.string(),
+});
+
+/**
+ * Одна рассылка по пулу города. Вместе со списком приходят стадии-получатели
+ * (`stages`) — им бот сопоставляет свои статусы тем же маппингом, что и
+ * зеркало (см. recruiting-broadcast-delivery).
+ */
+const recruitingBroadcastSchema = z.object({
+    publicId: z.string().uuid(),
+    city: z.string(),
+    body: z.string(),
+});
+
+const recruitingBroadcastsSchema = z.object({
+    items: z.array(recruitingBroadcastSchema),
+    stages: z.array(z.string()),
+});
+
+const recruitingBroadcastAckSchema = z.object({
+    publicId: z.string(),
+    status: z.string(),
+});
+
+export type RecruitingOutgoingMessage = z.infer<typeof recruitingOutgoingMessageSchema>;
+export type RecruitingBroadcast = z.infer<typeof recruitingBroadcastSchema>;
+export type RecruitingBroadcastsPending = z.infer<typeof recruitingBroadcastsSchema>;
+
 const locationCutoverSchema = z.object({
     items: z.array(
         z.object({
@@ -698,6 +743,76 @@ export class AwsBusinessClient {
             { method: "POST", body: JSON.stringify({ error: error.slice(0, 500) }) },
         );
         return recruitingCommandAckSchema.parse(body);
+    }
+
+    /** Очередь исходящих сообщений рекрутёра: старые вперёд, обычный текст без клавиатуры. */
+    async listPendingRecruitingMessages(limit: number): Promise<{ items: RecruitingOutgoingMessage[] }> {
+        const body = await this.request(
+            `/recruiting/messages/pending?limit=${encodeURIComponent(String(limit))}`,
+            { method: "GET" },
+        );
+        return recruitingOutgoingMessagesSchema.parse(body);
+    }
+
+    /** Бот доставил сообщение. Идемпотентен на стороне вебаппа. */
+    async ackRecruitingMessageSent(publicId: string, telegramMessageId?: string) {
+        const body = await this.request(
+            `/recruiting/messages/${encodeURIComponent(publicId)}/sent`,
+            { method: "POST", body: JSON.stringify({ telegramMessageId }) },
+        );
+        return recruitingMessageAckSchema.parse(body);
+    }
+
+    /**
+     * Сообщение не доставлено (в т.ч. кандидатка заблокировала бота). Статус
+     * и причина видны рекрутёру в треде — недоставка не прячется.
+     */
+    async ackRecruitingMessageFailed(publicId: string, error: string) {
+        const body = await this.request(
+            `/recruiting/messages/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ error: error.slice(0, 500) }) },
+        );
+        return recruitingMessageAckSchema.parse(body);
+    }
+
+    /**
+     * Входящее сообщение кандидатки → тред вебаппа. 404 с кодом
+     * RECRUITING_CANDIDATE_NOT_FOUND — ожидаемый ответ для чатов, которых нет
+     * в зеркале; вызывающая сторона глотает его молча.
+     */
+    async pushIncomingRecruitingMessage(input: {
+        telegramId: string;
+        body: string;
+        telegramMessageId?: string;
+        sentAt?: string;
+    }): Promise<void> {
+        await this.request("/recruiting/messages/incoming", {
+            method: "POST",
+            body: JSON.stringify(input),
+        });
+    }
+
+    /** Рассылки, ждущие исполнения, вместе со стадиями-получателями. */
+    async listPendingRecruitingBroadcasts(): Promise<RecruitingBroadcastsPending> {
+        const body = await this.request("/recruiting/broadcasts/pending", { method: "GET" });
+        return recruitingBroadcastsSchema.parse(body);
+    }
+
+    /** Счётчики — факты после исполнения, не оценка. Идемпотентен на стороне вебаппа. */
+    async ackRecruitingBroadcastDone(publicId: string, counts: { sent: number; failed: number }) {
+        const body = await this.request(
+            `/recruiting/broadcasts/${encodeURIComponent(publicId)}/done`,
+            { method: "POST", body: JSON.stringify(counts) },
+        );
+        return recruitingBroadcastAckSchema.parse(body);
+    }
+
+    async ackRecruitingBroadcastFailed(publicId: string, error: string) {
+        const body = await this.request(
+            `/recruiting/broadcasts/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ error: error.slice(0, 500) }) },
+        );
+        return recruitingBroadcastAckSchema.parse(body);
     }
 
     async upsertEmployee(employee: AwsEmployeeUpsert) {

@@ -265,7 +265,9 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         const fullName = (result.slot as any).candidate?.fullName || ctx.from.first_name || "Кандидатко";
         const firstName = extractFirstName(fullName);
 
-        let confirmationText = `✅ Вітаємо, <b>${firstName}</b>! Твій час для співбесіди заброньовано.\n\n📅 Дата: <b>${startTime.toLocaleDateString('uk-UA')}</b>\n⏰ Час: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
+        // Дата — в той же киевской зоне, что и время: без timeZone сервер в UTC
+        // показал бы соседний день для слота у полуночи.
+        let confirmationText = `✅ Вітаємо, <b>${firstName}</b>! Твій час для співбесіди заброньовано.\n\n📅 Дата: <b>${startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' })}</b>\n⏰ Час: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
 
         if (result.googleEvent.meetLink) {
             confirmationText += `📹 Google Meet: <a href="${result.googleEvent.meetLink}">Приєднатися до зустрічі</a>\n\nМожеш зберегти це посилання собі! ✨`;

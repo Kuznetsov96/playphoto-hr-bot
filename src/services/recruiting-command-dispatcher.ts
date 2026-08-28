@@ -1,10 +1,17 @@
 import type { Api } from "grammy";
+import { CandidateStatus } from "@prisma/client";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client.js";
 import { hrService } from "./hr-service.js";
+import { teamRegistrationService } from "./team-registration-service.js";
+import { describeCommandFailure } from "./recruiting-failure-reason.js";
+import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
+import { runPendingRecruitingBroadcasts } from "./recruiting-broadcast-delivery.js";
+
+export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
 const LEASE_KEY = "worker:recruiting-command-dispatcher:lease";
 const LEASE_TTL_MS = 5 * 60 * 1000;
@@ -17,27 +24,55 @@ const LEASE_HEARTBEAT_MS = 60 * 1000;
 const PENDING_LIMIT = 20;
 
 /**
- * Запас до контрактных 500: ack-клиент дорежет по контракту сам, но причина,
- * которую увидит рекрутёр, не должна обрываться на полуслове.
+ * Статусы ручного owner-контура: со стадий TRAINING/STAGING/DOCS зеркала
+ * владелец общается с кандидаткой ЛИЧНО со своего аккаунта, поэтому REJECT
+ * здесь немой — только перевод воронки, без сообщения от бота.
  */
-const MAX_ERROR_LENGTH = 450;
+const MANUAL_CONTOUR_STATUSES: ReadonlySet<CandidateStatus> = new Set([
+    CandidateStatus.MENTOR_MANUAL,
+    CandidateStatus.DISCOVERY_SCHEDULED,
+    CandidateStatus.DISCOVERY_COMPLETED,
+    CandidateStatus.TRAINING_SCHEDULED,
+    CandidateStatus.TRAINING_COMPLETED,
+    CandidateStatus.NDA,
+    CandidateStatus.KNOWLEDGE_TEST,
+    CandidateStatus.STAGING_SETUP,
+    CandidateStatus.STAGING_ACTIVE,
+    CandidateStatus.OFFLINE_STAGING,
+    CandidateStatus.READY_FOR_HIRE,
+    CandidateStatus.AWAITING_FIRST_SHIFT,
+]);
 
 /**
- * Сводит любую ошибку применения к короткой строке для карточки рекрутёра.
- * Код воронки (`reasonCode` у InvalidCandidateTransitionError, `code` у
- * AwsBusinessApiError) идёт первым — это то, по чему диагностируют; текст —
- * следом, для человека.
+ * Минимальные ЛЕГАЛЬНЫЕ пути по funnel-guard для немых owner-команд. Путь —
+ * это цепочка статусов до цели; уже достигнутые шаги applySilentStatusPath
+ * пропускает. Для статуса вне ожидаемых путь начинается с первого шага цепочки
+ * и guard сам отбивает переход своим reasonCode — он уедет в failed-ack.
  */
-export function describeCommandFailure(error: unknown): string {
-    if (error instanceof Error) {
-        const carrier = error as { reasonCode?: unknown; code?: unknown };
-        const code = typeof carrier.reasonCode === "string"
-            ? carrier.reasonCode
-            : typeof carrier.code === "string" ? carrier.code : null;
-        const text = code && code !== error.message ? `${code}: ${error.message}` : (code ?? error.message);
-        return text.slice(0, MAX_ERROR_LENGTH);
+function trainingPassedPath(_current: CandidateStatus): CandidateStatus[] {
+    // Из любого статуса стадии TRAINING гард пускает напрямую (owner-контур).
+    return [CandidateStatus.TRAINING_COMPLETED];
+}
+
+function startStagingPath(current: CandidateStatus): CandidateStatus[] {
+    if (current === CandidateStatus.STAGING_ACTIVE) return [CandidateStatus.STAGING_ACTIVE];
+    if (current === CandidateStatus.STAGING_SETUP || current === CandidateStatus.OFFLINE_STAGING) {
+        return [CandidateStatus.STAGING_ACTIVE];
     }
-    return String(error).slice(0, MAX_ERROR_LENGTH);
+    if (current === CandidateStatus.TRAINING_COMPLETED) {
+        return [CandidateStatus.STAGING_SETUP, CandidateStatus.STAGING_ACTIVE];
+    }
+    // Стадия TRAINING зеркала: через TRAINING_COMPLETED (целевой конвейер
+    // без NDA/KNOWLEDGE_TEST).
+    return [CandidateStatus.TRAINING_COMPLETED, CandidateStatus.STAGING_SETUP, CandidateStatus.STAGING_ACTIVE];
+}
+
+function stagingPassedPath(current: CandidateStatus): CandidateStatus[] {
+    // STAGING_SETUP не пускается в READY_FOR_HIRE напрямую — через ACTIVE.
+    if (current === CandidateStatus.STAGING_SETUP) {
+        return [CandidateStatus.STAGING_ACTIVE, CandidateStatus.READY_FOR_HIRE];
+    }
+    return [CandidateStatus.READY_FOR_HIRE];
 }
 
 /**
@@ -129,6 +164,31 @@ export class RecruitingCommandDispatcher {
                 operation: "runOnce",
                 safeContext: { pendingCount: pending.items.length, applied, failed },
             });
+
+            // Фаза 3b: исходящие сообщения рекрутёра и рассылки по пулу
+            // города живут в том же тике под той же лизой. Оба прохода
+            // спроектированы «никогда не бросать», но и неожиданный сбой
+            // одного не должен срывать другой.
+            await deliverPendingRecruitingMessages(api).catch(error => logBusinessEvent({
+                event: "bot.recruiting_messages.iteration_failed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                module: "recruiting-command-dispatcher",
+                operation: "runOnce",
+                error,
+            }));
+            await runPendingRecruitingBroadcasts(api).catch(error => logBusinessEvent({
+                event: "bot.recruiting_broadcasts.iteration_failed",
+                level: "error",
+                actorType: "system",
+                actorRole: "system",
+                result: "failed",
+                module: "recruiting-command-dispatcher",
+                operation: "runOnce",
+                error,
+            }));
         } catch (error) {
             logBusinessEvent({
                 event: "bot.recruiting_commands.iteration_failed",
@@ -253,9 +313,66 @@ export class RecruitingCommandDispatcher {
                 return;
             }
             case "REJECT": {
-                // Отказ до интервью — тот же путь, что кнопочный, с кодом GENERAL.
+                // Owner-контур (навчання/стажування/документи): владелец уже
+                // сообщил кандидатке лично — воронка двигается НЕМО, без
+                // сообщения от бота. До интервью — прежний кнопочный путь
+                // rejectCandidate с сообщением GENERAL.
+                if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
+                    await candidateRepository.update(candidate.id, {
+                        status: CandidateStatus.REJECTED,
+                        hrDecision: "REJECTED",
+                    });
+                    return;
+                }
                 const ok = await hrService.rejectCandidate(api, candidate.id, "GENERAL");
                 if (!ok) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
+                return;
+            }
+            // ---- Немые owner-команды полного цикла (фаза 3b). Владелец
+            // общается с кандидаткой лично, поэтому здесь НЕТ ни сообщений
+            // кандидатке, ни уведомлений менторам/стейджингу — только
+            // последовательные легальные шаги воронки через репозиторий
+            // (каждый шаг проверяет funnel-guard и зеркалится в вебапп). ----
+            case "MARK_TRAINING_PASSED": {
+                await this.applySilentStatusPath(candidate.id, candidate.status,
+                    trainingPassedPath(candidate.status));
+                return;
+            }
+            case "START_STAGING": {
+                // Без sendStagingNotifications — владелец договаривается сам.
+                await this.applySilentStatusPath(candidate.id, candidate.status,
+                    startStagingPath(candidate.status));
+                return;
+            }
+            case "MARK_STAGING_PASSED": {
+                // Без промпта о сборе документов — владелец собирает их лично
+                // (явное решение владельца от 28.08.2026).
+                await this.applySilentStatusPath(candidate.id, candidate.status,
+                    stagingPassedPath(candidate.status));
+                return;
+            }
+            case "CONFIRM_HIRE": {
+                // Тот же пост-найм, что и кнопка admin_hire_final, МИНУС вся
+                // переписка с кандидаткой. Сначала Employee в вебаппе
+                // (upsert, идемпотентно) — если локация не смаплена, команда
+                // падает ДО перевода статуса и честно ретраится; затем
+                // confirmFinalSchedule: HIRED + accessService.syncUserAccess
+                // + таймлайн (сообщений кандидатке он не шлёт).
+                await teamRegistrationService.registerNewHire({
+                    fullName: candidate.fullName || "—",
+                    phone: candidate.phone || "—",
+                    email: candidate.email || "—",
+                    telegramId: String(candidate.user.telegramId),
+                    username: candidate.user.username || "—",
+                    instagram: candidate.instagram || "—",
+                    iban: candidate.iban || "—",
+                    city: candidate.city || "—",
+                    locationName: candidate.location?.name || "—",
+                    ...(candidate.location?.canonicalCode ? { locationCode: candidate.location.canonicalCode } : {}),
+                    birthDate: candidate.birthDate,
+                });
+                const hired = await hrService.confirmFinalSchedule(candidate.id);
+                if (!hired) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
             }
             default:
@@ -263,6 +380,25 @@ export class RecruitingCommandDispatcher {
                 // failed вместо тихого пропуска — после пятой попытки рекрутёр
                 // увидит FAILED с этим кодом в карточке.
                 throw new Error(`UNKNOWN_COMMAND_KIND:${command.kind}`);
+        }
+    }
+
+    /**
+     * Последовательно проводит кандидатку по цепочке статусов. Каждый шаг —
+     * обычный candidateRepository.update: funnel-guard валидирует переход
+     * (невозможный путь даёт failed-ack с его reasonCode), зеркало пушится,
+     * доступ к каналам синкается фоном. Сообщений НЕ шлётся нигде.
+     */
+    private async applySilentStatusPath(
+        candidateId: string,
+        currentStatus: CandidateStatus,
+        path: CandidateStatus[],
+    ): Promise<void> {
+        for (const status of path) {
+            // Пропуск уже достигнутого статуса делает команду идемпотентной
+            // при ретрае после потерянного ack.
+            if (status === currentStatus) continue;
+            await candidateRepository.update(candidateId, { status });
         }
     }
 
