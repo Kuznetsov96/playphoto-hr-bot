@@ -315,8 +315,9 @@ export class RecruitingCommandDispatcher {
             case "REJECT": {
                 // Owner-контур (навчання/стажування/документи): владелец уже
                 // сообщил кандидатке лично — воронка двигается НЕМО, без
-                // сообщения от бота. До интервью — прежний кнопочный путь
-                // rejectCandidate с сообщением GENERAL.
+                // сообщения от бота. На тату-проверке — тату-отказ с его
+                // сообщением (APPEARANCE), до интервью — прежний кнопочный
+                // путь rejectCandidate с сообщением GENERAL.
                 if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
                     await candidateRepository.update(candidate.id, {
                         status: CandidateStatus.REJECTED,
@@ -324,7 +325,15 @@ export class RecruitingCommandDispatcher {
                     });
                     return;
                 }
-                const ok = await hrService.rejectCandidate(api, candidate.id, "GENERAL");
+                const reason = candidate.status === CandidateStatus.MANUAL_REVIEW ? "APPEARANCE" : "GENERAL";
+                const ok = await hrService.rejectCandidate(api, candidate.id, reason);
+                if (!ok) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
+                return;
+            }
+            case "APPROVE_REVIEW": {
+                // Кнопка «✅ Approve Tattoo»: возврат в SCREENING существующим
+                // тату-флоу бота — с его сообщением кандидатке.
+                const ok = await hrService.approveTattoo(api, candidate.id);
                 if (!ok) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
             }

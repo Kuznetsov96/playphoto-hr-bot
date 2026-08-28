@@ -24,6 +24,7 @@ vi.mock("../aws-business-client.js", () => ({
 
 const rejectCandidate = vi.fn();
 const confirmFinalSchedule = vi.fn();
+const approveTattoo = vi.fn();
 
 vi.mock("../hr-service.js", () => ({
     hrService: {
@@ -32,6 +33,7 @@ vi.mock("../hr-service.js", () => ({
         markNoShow: vi.fn(),
         rejectCandidate,
         confirmFinalSchedule,
+        approveTattoo,
     },
 }));
 
@@ -112,6 +114,7 @@ beforeEach(() => {
     ackFailed.mockResolvedValue({ publicId: "x", status: "PENDING" });
     update.mockResolvedValue({});
     rejectCandidate.mockResolvedValue(true);
+    approveTattoo.mockResolvedValue(true);
     registerNewHire.mockResolvedValue(true);
     confirmFinalSchedule.mockResolvedValue({ candidate: { status: "HIRED" }, mentorId: null, candidateId: 1164289764 });
 });
@@ -256,6 +259,49 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
         expect(rejectCandidate).toHaveBeenCalledWith(api, "cand-1", "GENERAL");
+        expect(update).not.toHaveBeenCalled();
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    /**
+     * Очередь тату (стадия REVIEW в вебе = MANUAL_REVIEW в боте): апрув и
+     * отказ идут существующим тату-флоу бота — С сообщением кандидатке,
+     * в отличие от немого owner-контура.
+     */
+    it("APPROVE_REVIEW — тату-апрув существующим флоу бота", async () => {
+        findByTelegramId.mockResolvedValue(localCandidate("MANUAL_REVIEW"));
+        const api = makeApi();
+        listPending.mockResolvedValue({ items: [command({ kind: "APPROVE_REVIEW" })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(approveTattoo).toHaveBeenCalledWith(api, "cand-1");
+        expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
+        expect(ackFailed).not.toHaveBeenCalled();
+    });
+
+    it("APPROVE_REVIEW: кандидатки нет в боте — контрактный failed", async () => {
+        findByTelegramId.mockResolvedValue(localCandidate("MANUAL_REVIEW"));
+        approveTattoo.mockResolvedValue(false);
+        listPending.mockResolvedValue({ items: [command({ kind: "APPROVE_REVIEW" })] });
+
+        await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
+
+        expect(ackFailed).toHaveBeenCalledWith(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            expect.stringContaining("CANDIDATE_NOT_FOUND_IN_BOT"),
+        );
+        expect(ackApplied).not.toHaveBeenCalled();
+    });
+
+    it("REJECT на тату-проверке (MANUAL_REVIEW) — rejectCandidate с причиной APPEARANCE", async () => {
+        const api = makeApi();
+        findByTelegramId.mockResolvedValue(localCandidate("MANUAL_REVIEW"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT" })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(rejectCandidate).toHaveBeenCalledWith(api, "cand-1", "APPEARANCE");
         expect(update).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalled();
     });

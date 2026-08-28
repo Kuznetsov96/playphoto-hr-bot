@@ -583,19 +583,24 @@ const recruitingMessageAckSchema = z.object({
 });
 
 /**
- * Одна рассылка по пулу города. Вместе со списком приходят стадии-получатели
- * (`stages`) — им бот сопоставляет свои статусы тем же маппингом, что и
- * зеркало (см. recruiting-broadcast-delivery).
+ * Одна рассылка по пулу города. Получателей выбирает ВЕБАПП и присылает
+ * готовым списком telegramId (`recipients`) — та же выборка, что показала
+ * число на кнопке подтверждения; бот не выбирает сам, иначе два словаря
+ * городов (анкета vs справочник) дали бы разные множества. kind: INVITE —
+ * стандартное запрошення на выбор слота (body null), MESSAGE — произвольный
+ * текст. kind строкой, не enum: незнакомый вид от более свежего вебаппа
+ * должен дойти до контрактного failed-ack, а не убить разбор всей очереди.
  */
 const recruitingBroadcastSchema = z.object({
     publicId: z.string().uuid(),
     city: z.string(),
-    body: z.string(),
+    kind: z.string(),
+    body: z.string().nullable(),
+    recipients: z.array(z.string()),
 });
 
 const recruitingBroadcastsSchema = z.object({
     items: z.array(recruitingBroadcastSchema),
-    stages: z.array(z.string()),
 });
 
 const recruitingBroadcastAckSchema = z.object({
