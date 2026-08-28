@@ -114,10 +114,17 @@ describe("AwsBusinessClient recruiting loop endpoints", () => {
     });
 
     describe("listPendingRecruitingBroadcasts", () => {
-        it("GETs /recruiting/broadcasts/pending и разбирает items со stages", async () => {
+        it("GETs /recruiting/broadcasts/pending и разбирает kind, nullable body и recipients", async () => {
             vi.mocked(fetch).mockResolvedValue(new Response(
                 JSON.stringify({
-                    items: [{ publicId: "7c9e6679-7425-40de-944b-e07fc1f90ae7", city: "Київ", body: "Текст" }],
+                    items: [{
+                        publicId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                        city: "Київ",
+                        kind: "INVITE",
+                        body: null,
+                        recipients: ["101", "102"],
+                    }],
+                    // Поле совместимости для бота до редеплоя — новый разбор его отбрасывает.
                     stages: ["SCREENING", "WAITLIST"],
                 }),
                 { status: 200 },
@@ -127,8 +134,12 @@ describe("AwsBusinessClient recruiting loop endpoints", () => {
             const result = await new AwsBusinessClient().listPendingRecruitingBroadcasts();
 
             expect(result).toEqual({
-                items: [expect.objectContaining({ city: "Київ" })],
-                stages: ["SCREENING", "WAITLIST"],
+                items: [expect.objectContaining({
+                    city: "Київ",
+                    kind: "INVITE",
+                    body: null,
+                    recipients: ["101", "102"],
+                })],
             });
             expect(fetch).toHaveBeenCalledWith(
                 "https://api.example.test/api/v1/internal/bot/recruiting/broadcasts/pending",
