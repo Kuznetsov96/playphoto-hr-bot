@@ -11,7 +11,7 @@ import { logBusinessEvent } from "./core/log-events.js";
 import { bot } from "./core/bot.js";
 import { redis } from "./core/redis.js";
 import prisma from "./db/core.js";
-import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher, startAccessRevocationDispatcher } from "./services/worker.js";
+import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher, startAccessRevocationDispatcher, startRecruitingCommandDispatcher } from "./services/worker.js";
 import { startBirthdayLoop } from "./services/birthday-service.js";
 import { startShiftReminderLoop } from "./services/shift-reminder-service.js";
 import { startScheduleMirrorWatch } from "./services/stale-schedule-mirror.js";
@@ -41,6 +41,7 @@ let shiftReminderTimer: NodeJS.Timeout | undefined;
 let scheduleNotificationTimer: NodeJS.Timeout | undefined;
 let replacementNotificationTimer: NodeJS.Timeout | undefined;
 let accessRevocationTimer: NodeJS.Timeout | undefined;
+let recruitingCommandTimer: NodeJS.Timeout | undefined;
 let scheduleMirrorTimer: NodeJS.Timeout | undefined;
 
 async function bootstrap() {
@@ -158,6 +159,7 @@ async function bootstrap() {
         scheduleNotificationTimer = startScheduleNotificationDispatcher(bot as any);
         replacementNotificationTimer = startReplacementNotificationDispatcher(bot as any);
         accessRevocationTimer = startAccessRevocationDispatcher(bot as any);
+        recruitingCommandTimer = startRecruitingCommandDispatcher(bot as any);
         startBirthdayLoop(bot);
         shiftReminderTimer = startShiftReminderLoop(bot);
         // Nothing else notices when the schedule sync dies: the loop swallows its
@@ -257,6 +259,7 @@ async function shutdown(signal: string) {
         if (scheduleNotificationTimer) clearInterval(scheduleNotificationTimer);
         if (replacementNotificationTimer) clearInterval(replacementNotificationTimer);
         if (accessRevocationTimer) clearInterval(accessRevocationTimer);
+        if (recruitingCommandTimer) clearInterval(recruitingCommandTimer);
         if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
         if (shiftReminderTimer) clearInterval(shiftReminderTimer);
         if (runner?.isRunning()) {

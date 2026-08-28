@@ -527,6 +527,41 @@ export type RecruitingInterviewSlot = z.infer<typeof recruitingInterviewSlotSche
  */
 export const RECRUITING_SLOT_TAKEN_CODE = "RECRUITING_SLOT_TAKEN";
 
+/**
+ * Одна команда рекрутёра из outbox вебаппа (фаза 3a). НЕ `.strict()` — той же
+ * причиной, что и слоты. `kind` — сознательно `z.string()`, а не enum: более
+ * свежий вебапп может добавить новый вид команды, и он не должен ронять разбор
+ * всей очереди — неизвестный kind диспетчер отбивает поштучно громким failed.
+ */
+const recruitingCommandSchema = z.object({
+    publicId: z.string().uuid(),
+    kind: z.string(),
+    reasonCode: z.string().nullable().optional().default(null),
+    reasonText: z.string().nullable().optional().default(null),
+    attempts: z.number().int(),
+    candidate: z.object({
+        telegramId: z.string(),
+        botCandidateId: z.string().nullable().optional().default(null),
+        publicId: z.string().uuid(),
+    }),
+});
+
+const recruitingCommandsSchema = z.object({
+    items: z.array(recruitingCommandSchema),
+});
+
+/**
+ * Ack идемпотентен: повторный applied по уже закрытой команде отвечает тем же
+ * статусом, а failed по не-PENDING возвращает текущий статус без изменений.
+ */
+const recruitingCommandAckSchema = z.object({
+    publicId: z.string().uuid(),
+    status: z.string(),
+});
+
+export type RecruitingCommand = z.infer<typeof recruitingCommandSchema>;
+export type RecruitingCommandAck = z.infer<typeof recruitingCommandAckSchema>;
+
 const locationCutoverSchema = z.object({
     items: z.array(
         z.object({
@@ -632,6 +667,37 @@ export class AwsBusinessClient {
             body: JSON.stringify({ telegramId, reason: reason.slice(0, 120) }),
         });
         return recruitingSlotReleaseAckSchema.parse(body);
+    }
+
+    /** Очередь команд рекрутёра: старые вперёд, с Telegram-идентичностью кандидата. */
+    async listPendingRecruitingCommands(limit: number): Promise<{ items: RecruitingCommand[] }> {
+        const body = await this.request(
+            `/recruiting/commands/pending?limit=${encodeURIComponent(String(limit))}`,
+            { method: "GET" },
+        );
+        return recruitingCommandsSchema.parse(body);
+    }
+
+    /** Бот применил команду своей воронкой. Идемпотентен на стороне вебаппа. */
+    async ackRecruitingCommandApplied(publicId: string): Promise<RecruitingCommandAck> {
+        const body = await this.request(
+            `/recruiting/commands/${encodeURIComponent(publicId)}/applied`,
+            { method: "POST" },
+        );
+        return recruitingCommandAckSchema.parse(body);
+    }
+
+    /**
+     * Команда не применилась. Вебапп считает попытки и на пятой хоронит команду
+     * в FAILED — вечного тихого ретрая нет, рекрутёр видит ошибку в карточке.
+     * Текст обрезается до контрактных 500 символов.
+     */
+    async ackRecruitingCommandFailed(publicId: string, error: string): Promise<RecruitingCommandAck> {
+        const body = await this.request(
+            `/recruiting/commands/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ error: error.slice(0, 500) }) },
+        );
+        return recruitingCommandAckSchema.parse(body);
     }
 
     async upsertEmployee(employee: AwsEmployeeUpsert) {

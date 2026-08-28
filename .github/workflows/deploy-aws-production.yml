@@ -124,6 +124,19 @@ on:
         required: true
         type: boolean
         default: true
+      # Команды рекрутёра (фаза 3a): бот опрашивает outbox вебаппа
+      # (/recruiting/commands/pending) и применяет решения рекрутёра своей
+      # воронкой — теми же вызовами hr-service, что и кнопки HR-меню.
+      #
+      # Умолчание `true`, как у соседей и как требует контракт: форма
+      # переписывает окружение целиком, поэтому `false` превращал бы чужой
+      # обычный деплой в тихий откат фичи. Флаг ещё не раскатан — первый
+      # выкат делается со СНЯТОЙ галочкой.
+      recruiting_commands_enabled:
+        description: Apply recruiter commands from the webapp through the bot funnel
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -351,6 +364,7 @@ jobs:
             printf 'AWS_DDS_API_WRITE_ENABLED=%q\n' "${{ inputs.dds_api_write_enabled }}"
             printf 'AWS_RECRUITING_MIRROR_ENABLED=%q\n' "${{ inputs.recruiting_mirror_enabled }}"
             printf 'AWS_RECRUITING_SLOTS_ENABLED=%q\n' "${{ inputs.recruiting_slots_enabled }}"
+            printf 'AWS_RECRUITING_COMMANDS_ENABLED=%q\n' "${{ inputs.recruiting_commands_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -448,6 +462,7 @@ jobs:
             echo '- DDS API revenue write: `${{ inputs.dds_api_write_enabled }}`'
             echo '- Recruiting candidate mirror: `${{ inputs.recruiting_mirror_enabled }}`'
             echo '- Recruiting canonical interview slots: `${{ inputs.recruiting_slots_enabled }}`'
+            echo '- Recruiting webapp commands: `${{ inputs.recruiting_commands_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'

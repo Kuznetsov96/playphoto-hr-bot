@@ -6,8 +6,9 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
+import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { runAccessRevocations } from "./access-revocation-dispatcher.js";
 import { taskService } from "./task-service.js";
@@ -811,6 +812,48 @@ export function startAccessRevocationDispatcher(bot: Bot<MyContext>) {
             logger.error({ err: error }, "Access revocation dispatcher iteration failed");
         });
     }, ACCESS_REVOCATION_POLL_MS);
+}
+
+const RECRUITING_COMMAND_POLL_MS = 60 * 1000;
+
+/**
+ * Опрашивает outbox команд рекрутёра в вебаппе (фаза 3a) и применяет каждую
+ * команду существующей воронкой бота — теми же вызовами hr-service, что и
+ * кнопки HR-меню. Та же форма, что и `startScheduleNotificationDispatcher`:
+ * plain `setInterval`, дубли между инстансами гасятся Redis-лизой самого
+ * диспетчера. Выключен, пока AWS_RECRUITING_COMMANDS_ENABLED не true.
+ */
+export function startRecruitingCommandDispatcher(bot: Bot<MyContext>) {
+    if (!AWS_RECRUITING_COMMANDS_ENABLED) {
+        logBusinessEvent({
+            event: "bot.recruiting_commands.disabled",
+            actorType: "system",
+            actorRole: "system",
+            result: "skipped",
+            reasonCode: "FEATURE_FLAG_OFF",
+            module: "worker",
+            operation: "startRecruitingCommandDispatcher",
+        });
+        return undefined;
+    }
+
+    logBusinessEvent({
+        event: "bot.recruiting_commands.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "worker",
+        operation: "startRecruitingCommandDispatcher",
+        safeContext: { pollIntervalMs: RECRUITING_COMMAND_POLL_MS },
+    });
+
+    return setInterval(() => {
+        // Общий Api живущего бота: hr-действия шлют сообщения тем же
+        // инстансом, что и кнопки, — не new Bot() на каждую команду.
+        recruitingCommandDispatcher.runOnce(bot.api).catch(error => {
+            logger.error({ err: error }, "Recruiting command dispatcher iteration failed");
+        });
+    }, RECRUITING_COMMAND_POLL_MS);
 }
 
 type AlertState = {
