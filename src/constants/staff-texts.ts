@@ -692,7 +692,6 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-removed-unknown": `➖ Знято зміну — деталі уточнюються`,
   "schedule-notif-moved-unknown": `🔀 Перенесено зміну — деталі уточнюються`,
   "schedule-notif-changed-unknown": `🔄 Змінено зміну — деталі уточнюються`,
-  "schedule-notif-reason": (p: { reason: string | number }) => `💬 Причина: ${p.reason}`,
   "schedule-notif-summary": (p: { count: string | number }) => `Всього змін: <b>${p.count}</b>`,
   // Терміново означає прохання відповісти — і воно сказане словами, а не
   // лише кнопками. Для знятої зміни питати «чи вийдеш» нема сенсу.

@@ -10,7 +10,6 @@ import {
     monthNameOf,
     type ScheduleMessageShift
 } from "../utils/format-schedule-message.js";
-import { escapeHtml } from "../handlers/admin/utils.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
     awsBusinessClient,
@@ -96,8 +95,8 @@ export function groupForDelivery(
  * Pure rendering of one delivery group into Telegram HTML.
  *
  * Structure follows how a person reads it: what happened (title) → one
- * sentence per event with the shift line → why, if the owner said → a plain
- * request when the message is urgent. No footer duplicating the button below.
+ * sentence per event with the shift line → a plain request when the message
+ * is urgent. No footer duplicating the button below.
  */
 export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): string {
     // Публікація місяця — це пакет, де кожен рядок «додано зміну». Для нього
@@ -115,9 +114,9 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     ];
 
     for (const notification of group.notifications) {
+        // Причина скасування — внутрішня помітка власника; навіть якщо
+        // старий рядок ще несе `reason`, фотографу вона не показується.
         lines.push(...describeChange(notification));
-        const reason = notification.payload.reason?.trim() ?? "";
-        if (reason) lines.push(STAFF_TEXTS["schedule-notif-reason"]({ reason: escapeHtml(reason) }));
         lines.push("");
     }
 

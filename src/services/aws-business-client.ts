@@ -271,6 +271,8 @@ const scheduleNotificationSnapshotSchema = z.object({
 const scheduleNotificationPayloadSchema = z.object({
     before: scheduleNotificationSnapshotSchema.optional(),
     after: scheduleNotificationSnapshotSchema.optional(),
+    // Ще може прийти зі старих рядків; бот її не показує — це внутрішня
+    // помітка власника (рішення 29.08.2026).
     reason: z.string().optional(),
     replacementPublicId: z.string().optional(),
     role: z.enum(["accepted", "requester"]).optional(),

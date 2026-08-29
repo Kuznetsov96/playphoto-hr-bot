@@ -200,7 +200,8 @@ describe("renderDeliveryGroup", () => {
         expect(text).toContain("11.08");
         expect(text).toContain("12:00");
         expect(text).toContain("20:00");
-        expect(text).toContain("хвороба колеги");
+        // Причина власника — внутрішня помітка, фотографу не показується.
+        expect(text).not.toContain("хвороба колеги");
         expect(text).not.toContain(FALLBACK_LINE);
     });
 
@@ -411,6 +412,27 @@ describe("renderDeliveryGroup", () => {
         const removedButtons = buildDeliveryKeyboard(removed).inline_keyboard.flat();
         expect(removedButtons.map((button) => button.text)).toEqual(["✅ Бачу"]);
         expect((removedButtons[0] as { callback_data: string }).callback_data).toMatch(/^cb:snack:b:/u);
+    });
+
+    it("never shows the owner's cancellation reason to the photographer", () => {
+        // Поле «Reason» у діалозі скасування — внутрішня помітка власника.
+        // Старі рядки ще можуть нести його в payload.
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { before: snapshot(), reason: "не дуже старалась" },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).not.toContain("не дуже старалась");
+        expect(text).not.toContain("Причина");
     });
 
     it("keeps a normal message free of any question", () => {
