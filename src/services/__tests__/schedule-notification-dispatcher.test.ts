@@ -243,6 +243,92 @@ describe("renderDeliveryGroup", () => {
         expect(text).not.toContain(FALLBACK_LINE);
     });
 
+    it("renders a published month as a calendar with a summary, not as a change log", () => {
+        // Публікація — пакет із самих «додано». Людині потрібен календар і
+        // підсумок по всіх локаціях (вихідні — найкасовіші, їх порівнюють),
+        // а не одинадцять однакових заголовків «➕ Додано зміну».
+        const [group] = groupForDelivery(
+            [
+                ["2026-09-08T10:00:00", "Dragon Park 2"], // вт, навмисно не за порядком
+                ["2026-09-01T10:00:00", "Dragon Park"], // вт
+                ["2026-09-05T10:00:00", "Dragon Park"], // сб
+                ["2026-09-06T10:00:00", "Dragon Park 2"], // нд
+            ].map(([startsAtLocal, locationName], index) => ({
+                publicId: `n${index}`,
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED" as const,
+                urgency: "NORMAL" as const,
+                batchId: "b1",
+                payload: {
+                    after: snapshot({
+                        startsAtLocal: startsAtLocal!,
+                        endsAtLocal: startsAtLocal!.replace("10:00", "20:00"),
+                        locationName: locationName!,
+                        locationCity: "Львів",
+                    }),
+                },
+            }))
+        );
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Графік на вересень готовий");
+        expect(text).toContain("Змін: <b>4</b> · у вихідні: <b>2</b>");
+        expect(text).not.toContain("Додано зміну");
+        expect(text).not.toContain("Тепер:");
+        // За датою, з локацією і часом; вихідні виділені.
+        expect(text.indexOf("01.09")).toBeLessThan(text.indexOf("05.09"));
+        expect(text).toContain("<b>сб 05.09</b> · Dragon Park (Lviv) · 10:00–20:00");
+        expect(text).toContain("вт 08.09 · Dragon Park 2 (Lviv) · 10:00–20:00");
+        expect(text).toContain("попроси підміну");
+    });
+
+    it("keeps a mixed batch as a change log, even when it contains added shifts", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { after: snapshot({ startsAtLocal: "2026-09-05T10:00:00" }) },
+            },
+            {
+                publicId: "b",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { before: snapshot({ startsAtLocal: "2026-09-06T10:00:00" }) },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Додано зміну");
+        expect(text).toContain("Знято зміну");
+        expect(text).not.toContain("Графік на");
+    });
+
+    it("keeps a single added shift as a change, not a published month", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: "b1",
+                payload: { after: snapshot({ startsAtLocal: "2026-09-05T10:00:00" }) },
+            },
+        ]);
+
+        expect(renderDeliveryGroup(group!)).toContain("Додано зміну");
+    });
+
     it("renders SHIFT_REMOVED with only a before snapshot and no empty 'now' line", () => {
         const [group] = groupForDelivery([
             {

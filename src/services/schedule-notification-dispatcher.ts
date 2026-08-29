@@ -4,6 +4,11 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
 import { formatLocation } from "../utils/location-label.js";
+import {
+    formatScheduleMessage,
+    monthNameOf,
+    type ScheduleMessageShift
+} from "../utils/format-schedule-message.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
@@ -98,6 +103,13 @@ const CHANGE_KIND_TEXT: Record<AwsScheduleChangeKind, string> = {
  * Pure rendering of one delivery group into Telegram HTML.
  */
 export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): string {
+    // Публікація місяця — це пакет, де кожен рядок «додано зміну». Для нього
+    // формат окремих змін («➕ Додано зміну / Тепер: …» одинадцять разів
+    // поспіль) не читається: людині потрібен календар і підсумок, а не
+    // журнал подій. Поодинокі зміни і змішані пакети лишаються журналом.
+    const publication = asPublication(group);
+    if (publication !== null) return formatScheduleMessage(publication);
+
     const lines: string[] = [
         group.urgency === "URGENT"
             ? STAFF_TEXTS["schedule-notif-urgent-title"]
@@ -123,6 +135,35 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     lines.push(STAFF_TEXTS["schedule-notif-footer"]);
 
     return lines.join("\n");
+}
+
+/**
+ * A batched group made only of added shifts with snapshots — what publishing
+ * a month produces. Anything else (single change, removals, moves, a row
+ * without a snapshot) is not a publication and renders as a change log.
+ */
+function asPublication(
+    group: ScheduleNotificationDeliveryGroup
+): { monthName: string; shifts: ScheduleMessageShift[] } | null {
+    if (group.urgency !== "NORMAL" || group.notifications.length < 2) return null;
+    const shifts: ScheduleMessageShift[] = [];
+    for (const notification of group.notifications) {
+        const after = notification.payload.after;
+        if (notification.changeKind !== "SHIFT_ADDED" || after === undefined) return null;
+        const localDate = /^(\d{4}-\d{2}-\d{2})/u.exec(after.startsAtLocal)?.[1];
+        if (localDate === undefined) return null;
+        shifts.push({
+            localDate,
+            locationLabel: formatLocation(
+                { name: after.locationName, branch: after.locationBranch, city: after.locationCity },
+                "listing"
+            ),
+            startsAtLocal: formatLocalTime(after.startsAtLocal),
+            endsAtLocal: formatLocalTime(after.endsAtLocal)
+        });
+    }
+    const first = [...shifts].sort((left, right) => left.localDate.localeCompare(right.localDate))[0]!;
+    return { monthName: monthNameOf(first.localDate), shifts };
 }
 
 /**
