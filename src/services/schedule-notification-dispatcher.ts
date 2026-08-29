@@ -126,11 +126,7 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     }
 
     if (group.urgency === "URGENT") {
-        lines.push(
-            asksWhetherComing(group)
-                ? STAFF_TEXTS["schedule-notif-urgent-ask"]
-                : STAFF_TEXTS["schedule-notif-urgent-ask-seen"]
-        );
+        lines.push(STAFF_TEXTS["schedule-notif-urgent-ask-seen"]);
     }
 
     return lines.join("\n").trimEnd();
@@ -180,15 +176,6 @@ function describeChange(notification: AwsScheduleNotification): string[] {
                 : [STAFF_TEXTS["schedule-notif-changed-unknown"]];
         }
     }
-}
-
-/**
- * An urgent message asks "will you come?" only when there is a shift to come
- * to. An urgent removal has nothing to confirm or decline — it asks to be
- * seen. Urgent groups are never batched, so this reads one notification.
- */
-export function asksWhetherComing(group: ScheduleNotificationDeliveryGroup): boolean {
-    return group.notifications.some((notification) => notification.changeKind !== "SHIFT_REMOVED");
 }
 
 /**
@@ -274,8 +261,8 @@ function findUndoableAcceptance(
 }
 
 /**
- * Urgent messages ask for an acknowledgement of the notification only. A reply
- * never cancels or changes a shift — the backend owns the schedule.
+ * Urgent messages ask for an acknowledgement of the notification only — one
+ * "seen" button, never a yes/no. The backend owns the schedule.
  */
 export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
     const undoable = findUndoableAcceptance(group);
@@ -294,14 +281,14 @@ export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup):
     }
 
     const publicId = group.notificationPublicIds[0]!;
-    // «Не зможу» на зняту зміну — не зможу що? Для зняття лишається одне:
-    // підтвердити, що людина це бачила. Той самий callback, що й
-    // «Підтверджую», — бекенд записує лише факт відповіді.
-    const keyboard = asksWhetherComing(group)
-        ? new InlineKeyboard()
-              .text(STAFF_TEXTS["schedule-notif-btn-confirm"], buildSignedCallback("snack", publicId))
-              .text(STAFF_TEXTS["schedule-notif-btn-decline"], buildSignedCallback("sndec", publicId))
-        : new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-seen"], buildSignedCallback("snack", publicId));
+    // Термінова зміна — рішення власника, а не пропозиція: зміну додали не
+    // просто так. Тому не «Підтверджую / Не зможу», а одна кнопка «Бачу»,
+    // щоб власник знав, що людина прочитала. Callback той самий — бекенд
+    // записує лише факт відповіді (рішення власника 29.08.2026).
+    const keyboard = new InlineKeyboard().text(
+        STAFF_TEXTS["schedule-notif-btn-seen"],
+        buildSignedCallback("snack", publicId)
+    );
     if (undoable) {
         keyboard
             .row()

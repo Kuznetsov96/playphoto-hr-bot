@@ -382,7 +382,9 @@ describe("renderDeliveryGroup", () => {
         expect(renderDeliveryGroup(taken)).not.toContain("Змінено локацію або фотографа");
     });
 
-    it("asks an urgent question in words, matching the buttons underneath", () => {
+    it("treats an urgent change as a fact to be seen, not a question — one button, said in words", () => {
+        // Термінову зміну додали не просто так: «Не зможу» перетворило б
+        // рішення власника на переговори. Лишається підтвердження прочитання.
         const added = groupForDelivery([
             {
                 publicId: "a",
@@ -406,33 +408,13 @@ describe("renderDeliveryGroup", () => {
             },
         ])[0]!;
 
-        expect(renderDeliveryGroup(added)).toContain("Підтверди, будь ласка, чи вийдеш.");
-        expect(renderDeliveryGroup(removed)).toContain("Підтверди, будь ласка, що бачиш це.");
-        // «Не зможу» на зняту зміну — не зможу що? Лишається одна кнопка.
-        const removedButtons = buildDeliveryKeyboard(removed).inline_keyboard.flat();
-        expect(removedButtons.map((button) => button.text)).toEqual(["✅ Бачу"]);
-        expect((removedButtons[0] as { callback_data: string }).callback_data).toMatch(/^cb:snack:b:/u);
-    });
-
-    it("never shows the owner's cancellation reason to the photographer", () => {
-        // Поле «Reason» у діалозі скасування — внутрішня помітка власника.
-        // Старі рядки ще можуть нести його в payload.
-        const [group] = groupForDelivery([
-            {
-                publicId: "a",
-                employeePublicId: "e1",
-                telegramId: "100",
-                changeKind: "SHIFT_REMOVED",
-                urgency: "NORMAL",
-                batchId: null,
-                payload: { before: snapshot(), reason: "не дуже старалась" },
-            },
-        ]);
-
-        const text = renderDeliveryGroup(group!);
-
-        expect(text).not.toContain("не дуже старалась");
-        expect(text).not.toContain("Причина");
+        for (const group of [added, removed]) {
+            expect(renderDeliveryGroup(group)).toContain("Підтверди, будь ласка, що бачиш це.");
+            expect(renderDeliveryGroup(group)).not.toContain("чи вийдеш");
+            const buttons = buildDeliveryKeyboard(group).inline_keyboard.flat();
+            expect(buttons.map((button) => button.text)).toEqual(["✅ Бачу"]);
+            expect((buttons[0] as { callback_data: string }).callback_data).toMatch(/^cb:snack:/u);
+        }
     });
 
     it("keeps a normal message free of any question", () => {
@@ -582,7 +564,7 @@ describe("buildDeliveryKeyboard", () => {
         ]);
 
         const urgentButtons = buildDeliveryKeyboard(urgent!).inline_keyboard.flat();
-        expect(urgentButtons.map(button => button.text)).toEqual(["✅ Підтверджую", "🚫 Не зможу"]);
+        expect(urgentButtons.map(button => button.text)).toEqual(["✅ Бачу"]);
 
         const normalButtons = buildDeliveryKeyboard(normal!).inline_keyboard.flat();
         expect(normalButtons.map(button => button.text)).toEqual(["🗓 Мій графік"]);
@@ -690,11 +672,7 @@ describe("buildDeliveryKeyboard", () => {
 
         const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
 
-        expect(buttons.map(button => button.text)).toEqual([
-            "✅ Підтверджую",
-            "🚫 Не зможу",
-            "↩️ Це помилка, скасувати",
-        ]);
+        expect(buttons.map(button => button.text)).toEqual(["✅ Бачу", "↩️ Це помилка, скасувати"]);
     });
 });
 

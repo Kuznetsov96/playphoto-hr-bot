@@ -693,13 +693,11 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-moved-unknown": `🔀 Перенесено зміну — деталі уточнюються`,
   "schedule-notif-changed-unknown": `🔄 Змінено зміну — деталі уточнюються`,
   "schedule-notif-summary": (p: { count: string | number }) => `Всього змін: <b>${p.count}</b>`,
-  // Терміново означає прохання відповісти — і воно сказане словами, а не
-  // лише кнопками. Для знятої зміни питати «чи вийдеш» нема сенсу.
-  "schedule-notif-urgent-ask": `Підтверди, будь ласка, чи вийдеш.`,
+  // Терміново — це факт, а не питання: зміну додали не просто так. Просимо
+  // лише підтвердити, що людина це бачила, і кажемо це словами, а не
+  // самими кнопками.
   "schedule-notif-urgent-ask-seen": `Підтверди, будь ласка, що бачиш це.`,
   "schedule-notif-btn-schedule": `🗓 Мій графік`,
-  "schedule-notif-btn-confirm": `✅ Підтверджую`,
-  "schedule-notif-btn-decline": `🚫 Не зможу`,
   "schedule-notif-btn-seen": `✅ Бачу`,
   "schedule-notif-ans-confirmed": `Дякуємо! Ми записали твоє підтвердження ✨`,
   "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Щоб змінити цю зміну, напиши в підтримку 🌸`,
