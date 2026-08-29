@@ -308,7 +308,7 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("Додано зміну");
+        expect(text).toContain("Нова зміна");
         expect(text).toContain("Знято зміну");
         expect(text).not.toContain("Графік на");
     });
@@ -326,7 +326,107 @@ describe("renderDeliveryGroup", () => {
             },
         ]);
 
-        expect(renderDeliveryGroup(group!)).toContain("Додано зміну");
+        expect(renderDeliveryGroup(group!)).toContain("Нова зміна");
+    });
+
+    it("writes one sentence per event with the weekday in the shift line", () => {
+        // Людина не має рахувати, чи 12.09 — вихідний, і читати «Стало»
+        // там, де нічого не було. Один рядок: подія + зміна.
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { after: snapshot({ startsAtLocal: "2026-09-12T10:00:00", endsAtLocal: "2026-09-12T20:00:00" }) },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("➕ Нова зміна: <b>сб 12.09</b> · Гулівер (Kyiv) · 10:00–20:00");
+        expect(text).not.toContain("Стало:");
+        // Дія живе в кнопці «Мій графік», текст її не дублює.
+        expect(text).not.toContain("Загляни у");
+    });
+
+    it("names the person's role in a replacement instead of 'location or photographer changed'", () => {
+        const taken = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { after: snapshot(), role: "accepted", offerPublicId: "o1" },
+            },
+        ])[0]!;
+        const given = groupForDelivery([
+            {
+                publicId: "b",
+                employeePublicId: "e2",
+                telegramId: "200",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { before: snapshot(), role: "requester" },
+            },
+        ])[0]!;
+
+        expect(renderDeliveryGroup(taken)).toContain("Зміну передано тобі: ");
+        expect(renderDeliveryGroup(given)).toContain("Твою зміну передано іншому фотографу: ");
+        expect(renderDeliveryGroup(taken)).not.toContain("Змінено локацію або фотографа");
+    });
+
+    it("asks an urgent question in words, matching the buttons underneath", () => {
+        const added = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: { after: snapshot() },
+            },
+        ])[0]!;
+        const removed = groupForDelivery([
+            {
+                publicId: "b",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: { before: snapshot() },
+            },
+        ])[0]!;
+
+        expect(renderDeliveryGroup(added)).toContain("Підтверди, будь ласка, чи вийдеш.");
+        expect(renderDeliveryGroup(removed)).toContain("Підтверди, будь ласка, що бачиш це.");
+        // «Не зможу» на зняту зміну — не зможу що? Лишається одна кнопка.
+        const removedButtons = buildDeliveryKeyboard(removed).inline_keyboard.flat();
+        expect(removedButtons.map((button) => button.text)).toEqual(["✅ Бачу"]);
+        expect((removedButtons[0] as { callback_data: string }).callback_data).toMatch(/^cb:snack:b:/u);
+    });
+
+    it("keeps a normal message free of any question", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_ADDED",
+                urgency: "NORMAL",
+                batchId: null,
+                payload: { after: snapshot() },
+            },
+        ]);
+
+        expect(renderDeliveryGroup(group!)).not.toContain("Підтверди");
     });
 
     it("renders SHIFT_REMOVED with only a before snapshot and no empty 'now' line", () => {

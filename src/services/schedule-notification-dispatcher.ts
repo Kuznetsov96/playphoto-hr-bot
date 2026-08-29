@@ -6,6 +6,7 @@ import { redis } from "../core/redis.js";
 import { formatLocation } from "../utils/location-label.js";
 import {
     formatScheduleMessage,
+    formatShiftLine,
     monthNameOf,
     type ScheduleMessageShift
 } from "../utils/format-schedule-message.js";
@@ -13,7 +14,6 @@ import { escapeHtml } from "../handlers/admin/utils.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
     awsBusinessClient,
-    type AwsScheduleChangeKind,
     type AwsScheduleNotification,
     type AwsScheduleNotificationShiftSnapshot
 } from "./aws-business-client.js";
@@ -92,15 +92,12 @@ export function groupForDelivery(
     return groups;
 }
 
-const CHANGE_KIND_TEXT: Record<AwsScheduleChangeKind, string> = {
-    SHIFT_ADDED: STAFF_TEXTS["schedule-notif-kind-added"],
-    SHIFT_REMOVED: STAFF_TEXTS["schedule-notif-kind-removed"],
-    SHIFT_MOVED: STAFF_TEXTS["schedule-notif-kind-moved"],
-    SHIFT_REASSIGNED: STAFF_TEXTS["schedule-notif-kind-reassigned"]
-};
-
 /**
  * Pure rendering of one delivery group into Telegram HTML.
+ *
+ * Structure follows how a person reads it: what happened (title) → one
+ * sentence per event with the shift line → why, if the owner said → a plain
+ * request when the message is urgent. No footer duplicating the button below.
  */
 export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): string {
     // Публікація місяця — це пакет, де кожен рядок «додано зміну». Для нього
@@ -118,12 +115,7 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     ];
 
     for (const notification of group.notifications) {
-        lines.push(CHANGE_KIND_TEXT[notification.changeKind]);
-        const before = describeSnapshot(notification.payload.before);
-        const after = describeSnapshot(notification.payload.after);
-        if (before) lines.push(STAFF_TEXTS["schedule-notif-line-was"]({ details: escapeHtml(before) }));
-        if (after) lines.push(STAFF_TEXTS["schedule-notif-line-now"]({ details: escapeHtml(after) }));
-        if (!before && !after) lines.push(STAFF_TEXTS["schedule-notif-details-unknown"]);
+        lines.push(...describeChange(notification));
         const reason = notification.payload.reason?.trim() ?? "";
         if (reason) lines.push(STAFF_TEXTS["schedule-notif-reason"]({ reason: escapeHtml(reason) }));
         lines.push("");
@@ -131,10 +123,73 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
 
     if (group.notifications.length > 1) {
         lines.push(STAFF_TEXTS["schedule-notif-summary"]({ count: group.notifications.length }));
+        lines.push("");
     }
-    lines.push(STAFF_TEXTS["schedule-notif-footer"]);
 
-    return lines.join("\n");
+    if (group.urgency === "URGENT") {
+        lines.push(
+            asksWhetherComing(group)
+                ? STAFF_TEXTS["schedule-notif-urgent-ask"]
+                : STAFF_TEXTS["schedule-notif-urgent-ask-seen"]
+        );
+    }
+
+    return lines.join("\n").trimEnd();
+}
+
+/**
+ * One event as the reader experiences it. A single-sided event is one
+ * sentence with the shift line; only a real before→after gets two lines.
+ * Replacements name the person's role — the backend already knows it.
+ */
+function describeChange(notification: AwsScheduleNotification): string[] {
+    const before = notification.payload.before === undefined ? null : toShift(notification.payload.before);
+    const after = notification.payload.after === undefined ? null : toShift(notification.payload.after);
+    const wasNow = (title: string) => {
+        const rows = [title];
+        if (before) rows.push(STAFF_TEXTS["schedule-notif-line-was"]({ details: formatShiftLine(before) }));
+        if (after) rows.push(STAFF_TEXTS["schedule-notif-line-now"]({ details: formatShiftLine(after) }));
+        return rows;
+    };
+
+    switch (notification.changeKind) {
+        case "SHIFT_ADDED":
+            return after
+                ? [STAFF_TEXTS["schedule-notif-added"]({ shift: formatShiftLine(after) })]
+                : [STAFF_TEXTS["schedule-notif-added-unknown"]];
+        case "SHIFT_REMOVED":
+            return before
+                ? [STAFF_TEXTS["schedule-notif-removed"]({ shift: formatShiftLine(before) })]
+                : [STAFF_TEXTS["schedule-notif-removed-unknown"]];
+        case "SHIFT_MOVED":
+            if (before && after) return wasNow(STAFF_TEXTS["schedule-notif-moved-title"]);
+            return before || after
+                ? wasNow(STAFF_TEXTS["schedule-notif-moved-title"])
+                : [STAFF_TEXTS["schedule-notif-moved-unknown"]];
+        case "SHIFT_REASSIGNED": {
+            const role = notification.payload.role;
+            if (role === "accepted" && after) {
+                return [STAFF_TEXTS["schedule-notif-replacement-taken"]({ shift: formatShiftLine(after) })];
+            }
+            if (role === "requester" && before) {
+                return [STAFF_TEXTS["schedule-notif-replacement-given"]({ shift: formatShiftLine(before) })];
+            }
+            if (before && after) return wasNow(STAFF_TEXTS["schedule-notif-changed-title"]);
+            const only = after ?? before;
+            return only
+                ? [STAFF_TEXTS["schedule-notif-changed"]({ shift: formatShiftLine(only) })]
+                : [STAFF_TEXTS["schedule-notif-changed-unknown"]];
+        }
+    }
+}
+
+/**
+ * An urgent message asks "will you come?" only when there is a shift to come
+ * to. An urgent removal has nothing to confirm or decline — it asks to be
+ * seen. Urgent groups are never batched, so this reads one notification.
+ */
+export function asksWhetherComing(group: ScheduleNotificationDeliveryGroup): boolean {
+    return group.notifications.some((notification) => notification.changeKind !== "SHIFT_REMOVED");
 }
 
 /**
@@ -150,54 +205,34 @@ function asPublication(
     for (const notification of group.notifications) {
         const after = notification.payload.after;
         if (notification.changeKind !== "SHIFT_ADDED" || after === undefined) return null;
-        const localDate = /^(\d{4}-\d{2}-\d{2})/u.exec(after.startsAtLocal)?.[1];
-        if (localDate === undefined) return null;
-        shifts.push({
-            localDate,
-            locationLabel: formatLocation(
-                { name: after.locationName, branch: after.locationBranch, city: after.locationCity },
-                "listing"
-            ),
-            startsAtLocal: formatLocalTime(after.startsAtLocal),
-            endsAtLocal: formatLocalTime(after.endsAtLocal)
-        });
+        const shift = toShift(after);
+        if (shift === null) return null;
+        shifts.push(shift);
     }
     const first = [...shifts].sort((left, right) => left.localDate.localeCompare(right.localDate))[0]!;
     return { monthName: monthNameOf(first.localDate), shifts };
 }
 
 /**
- * Renders one snapshot as `ДД.ММ, HH:MM-HH:MM, Локація (Місто)`.
- *
- * `startsAtLocal` / `endsAtLocal` are already local wall-clock strings for the
- * location's timezone, so they are read as text and never passed through `Date`
- * — constructing a Date here would re-interpret them in the bot's own timezone
- * and shift the time the photographer sees.
- *
- * `locationPublicId` is deliberately never rendered; it is correlation data.
+ * Snapshot → shift line input. `startsAtLocal` / `endsAtLocal` are already
+ * local wall-clock strings for the location's timezone, so they are read as
+ * text and never passed through `Date` — constructing a Date here would
+ * re-interpret them in the bot's own timezone and shift what the photographer
+ * sees. `locationPublicId` is deliberately never rendered; it is correlation
+ * data. Null when the date cannot be read at all.
  */
-function describeSnapshot(snapshot: AwsScheduleNotificationShiftSnapshot | undefined): string {
-    if (!snapshot) return "";
-
-    const day = formatLocalDay(snapshot.startsAtLocal);
-    const startTime = formatLocalTime(snapshot.startsAtLocal);
-    const endTime = formatLocalTime(snapshot.endsAtLocal);
-    const time = startTime && endTime ? `${startTime}-${endTime}` : startTime;
-
-    const place = formatLocation(
-        { name: snapshot.locationName, branch: snapshot.locationBranch, city: snapshot.locationCity },
-        "listing"
-    );
-
-    const parts = [day, time, place].filter(part => part.length > 0);
-    return parts.join(", ");
-}
-
-/** `2026-08-10T10:00:00` -> `10.08`. Pure string reading, no timezone maths. */
-function formatLocalDay(localDateTime: string): string {
-    const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(localDateTime);
-    if (!match) return "";
-    return `${match[3]}.${match[2]}`;
+function toShift(snapshot: AwsScheduleNotificationShiftSnapshot): ScheduleMessageShift | null {
+    const localDate = /^(\d{4}-\d{2}-\d{2})/u.exec(snapshot.startsAtLocal)?.[1];
+    if (localDate === undefined) return null;
+    return {
+        localDate,
+        locationLabel: formatLocation(
+            { name: snapshot.locationName, branch: snapshot.locationBranch, city: snapshot.locationCity },
+            "listing"
+        ),
+        startsAtLocal: formatLocalTime(snapshot.startsAtLocal),
+        endsAtLocal: formatLocalTime(snapshot.endsAtLocal)
+    };
 }
 
 /** `2026-08-10T10:00:00` -> `10:00`. Pure string reading, no timezone maths. */
@@ -260,9 +295,14 @@ export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup):
     }
 
     const publicId = group.notificationPublicIds[0]!;
-    const keyboard = new InlineKeyboard()
-        .text(STAFF_TEXTS["schedule-notif-btn-confirm"], buildSignedCallback("snack", publicId))
-        .text(STAFF_TEXTS["schedule-notif-btn-decline"], buildSignedCallback("sndec", publicId));
+    // «Не зможу» на зняту зміну — не зможу що? Для зняття лишається одне:
+    // підтвердити, що людина це бачила. Той самий callback, що й
+    // «Підтверджую», — бекенд записує лише факт відповіді.
+    const keyboard = asksWhetherComing(group)
+        ? new InlineKeyboard()
+              .text(STAFF_TEXTS["schedule-notif-btn-confirm"], buildSignedCallback("snack", publicId))
+              .text(STAFF_TEXTS["schedule-notif-btn-decline"], buildSignedCallback("sndec", publicId))
+        : new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-seen"], buildSignedCallback("snack", publicId));
     if (undoable) {
         keyboard
             .row()

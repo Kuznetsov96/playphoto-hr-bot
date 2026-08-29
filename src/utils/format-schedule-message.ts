@@ -50,6 +50,27 @@ export function monthNameOf(localDate: string): string {
 }
 
 /**
+ * Один рядок зміни: `сб 12.09 · Dragon Park (Lviv) · 10:00–20:00`.
+ *
+ * Єдиний формат для публікації місяця і для сповіщень про зміни: людина
+ * читає дату однаково скрізь, і день тижня завжди поруч — вихідний видно,
+ * а не рахується. Вихідні виділені. Роздільник, а не колонки з пробілів:
+ * у Telegram шрифт пропорційний, і «вирівняні» пробілами стовпці
+ * розповзаються на кожному рядку. Підпис локації екранується — результат
+ * іде в Telegram як HTML.
+ */
+export function formatShiftLine(shift: ScheduleMessageShift): string {
+    const weekday = WEEKDAY_SHORT_UK[weekdayOf(shift.localDate)];
+    const dayMonth = `${shift.localDate.slice(8)}.${shift.localDate.slice(5, 7)}`;
+    const day = isWeekend(shift.localDate) ? `<b>${weekday} ${dayMonth}</b>` : `${weekday} ${dayMonth}`;
+    const time =
+        shift.startsAtLocal && shift.endsAtLocal
+            ? `${shift.startsAtLocal}–${shift.endsAtLocal}`
+            : shift.startsAtLocal;
+    return [day, escapeHtml(shift.locationLabel), time].filter((part) => part.length > 0).join(" · ");
+}
+
+/**
  * Повідомлення фотографу про те, що графік місяця опубліковано.
  *
  * Будова — за ієрархією читання: що сталося → скільки і скільки з них у
@@ -74,16 +95,7 @@ export function formatScheduleMessage(input: { monthName: string; shifts: Schedu
     const weekends = ordered.filter((shift) => isWeekend(shift.localDate)).length;
     const shown = total <= FULL_LIST_LIMIT ? ordered : ordered.slice(0, LIST_HEAD);
 
-    const rows = shown
-        .map((shift) => {
-            const weekday = WEEKDAY_SHORT_UK[weekdayOf(shift.localDate)];
-            const dayMonth = `${shift.localDate.slice(8)}.${shift.localDate.slice(5, 7)}`;
-            const day = isWeekend(shift.localDate) ? `<b>${weekday} ${dayMonth}</b>` : `${weekday} ${dayMonth}`;
-            // Роздільник, а не колонки з пробілів: у Telegram шрифт пропорційний,
-            // і «вирівняні» пробілами стовпці розповзаються на кожному рядку.
-            return `${day} · ${escapeHtml(shift.locationLabel)} · ${shift.startsAtLocal}–${shift.endsAtLocal}`;
-        })
-        .join("\n");
+    const rows = shown.map((shift) => formatShiftLine(shift)).join("\n");
 
     const tail = total > FULL_LIST_LIMIT ? `\n\nта ще ${total - LIST_HEAD} — дивись у розділі «Мій графік»` : "";
     const title = input.monthName ? `Графік на ${input.monthName} готовий` : "Графік готовий";
