@@ -693,12 +693,7 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-moved-unknown": `🔀 Перенесено зміну — деталі уточнюються`,
   "schedule-notif-changed-unknown": `🔄 Змінено зміну — деталі уточнюються`,
   "schedule-notif-summary": (p: { count: string | number }) => `Всього змін: <b>${p.count}</b>`,
-  // Терміново — це факт, а не питання: зміну додали не просто так. Просимо
-  // лише підтвердити, що людина це бачила, і кажемо це словами, а не
-  // самими кнопками.
-  "schedule-notif-urgent-ask-seen": `Підтверди, будь ласка, що бачиш це.`,
   "schedule-notif-btn-schedule": `🗓 Мій графік`,
-  "schedule-notif-btn-seen": `✅ Бачу`,
   "schedule-notif-ans-confirmed": `Дякуємо! Ми записали твоє підтвердження ✨`,
   "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Щоб змінити цю зміну, напиши в підтримку 🌸`,
   "schedule-notif-ans-expired": `Це сповіщення вже неактуальне 🌸`,

@@ -95,8 +95,9 @@ export function groupForDelivery(
  * Pure rendering of one delivery group into Telegram HTML.
  *
  * Structure follows how a person reads it: what happened (title) → one
- * sentence per event with the shift line → a plain request when the message
- * is urgent. No footer duplicating the button below.
+ * sentence per event with the shift line. No footer duplicating the button
+ * below, and no request to answer: an urgent change is a fact the owner has
+ * already decided, and nobody reads the acknowledgements (owner, 29.08.2026).
  */
 export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): string {
     // Публікація місяця — це пакет, де кожен рядок «додано зміну». Для нього
@@ -122,11 +123,6 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
 
     if (group.notifications.length > 1) {
         lines.push(STAFF_TEXTS["schedule-notif-summary"]({ count: group.notifications.length }));
-        lines.push("");
-    }
-
-    if (group.urgency === "URGENT") {
-        lines.push(STAFF_TEXTS["schedule-notif-urgent-ask-seen"]);
     }
 
     return lines.join("\n").trimEnd();
@@ -261,34 +257,15 @@ function findUndoableAcceptance(
 }
 
 /**
- * Urgent messages ask for an acknowledgement of the notification only — one
- * "seen" button, never a yes/no. The backend owns the schedule.
+ * One keyboard for every schedule message: "My schedule", plus the undo
+ * button on the single message where undo can mean what it says. Urgent
+ * messages differ only by title — the acknowledgement buttons were removed
+ * on 29.08.2026 because nobody reads the answers; the `snack`/`sndec`
+ * handlers stay for messages already sitting in chats.
  */
 export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
+    const keyboard = new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
     const undoable = findUndoableAcceptance(group);
-
-    if (group.urgency !== "URGENT") {
-        const keyboard = new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
-        if (undoable) {
-            keyboard
-                .row()
-                .text(
-                    STAFF_TEXTS["staff-replacement-accepted-btn-undo"],
-                    buildSignedCallback(REPLACEMENT_UNDO_CALLBACK_CODE, undoable.offerPublicId)
-                );
-        }
-        return keyboard;
-    }
-
-    const publicId = group.notificationPublicIds[0]!;
-    // Термінова зміна — рішення власника, а не пропозиція: зміну додали не
-    // просто так. Тому не «Підтверджую / Не зможу», а одна кнопка «Бачу»,
-    // щоб власник знав, що людина прочитала. Callback той самий — бекенд
-    // записує лише факт відповіді (рішення власника 29.08.2026).
-    const keyboard = new InlineKeyboard().text(
-        STAFF_TEXTS["schedule-notif-btn-seen"],
-        buildSignedCallback("snack", publicId)
-    );
     if (undoable) {
         keyboard
             .row()

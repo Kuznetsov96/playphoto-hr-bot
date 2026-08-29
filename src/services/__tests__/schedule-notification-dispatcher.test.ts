@@ -382,10 +382,10 @@ describe("renderDeliveryGroup", () => {
         expect(renderDeliveryGroup(taken)).not.toContain("Змінено локацію або фотографа");
     });
 
-    it("treats an urgent change as a fact to be seen, not a question — one button, said in words", () => {
-        // Термінову зміну додали не просто так: «Не зможу» перетворило б
-        // рішення власника на переговори. Лишається підтвердження прочитання.
-        const added = groupForDelivery([
+    it("states an urgent change as a fact: no question and no answer buttons", () => {
+        // Термінову зміну додали не просто так — це рішення власника.
+        // Відповіді ніхто не читає, тому й не питаємо (рішення 29.08.2026).
+        const [group] = groupForDelivery([
             {
                 publicId: "a",
                 employeePublicId: "e1",
@@ -395,26 +395,14 @@ describe("renderDeliveryGroup", () => {
                 batchId: null,
                 payload: { after: snapshot() },
             },
-        ])[0]!;
-        const removed = groupForDelivery([
-            {
-                publicId: "b",
-                employeePublicId: "e1",
-                telegramId: "100",
-                changeKind: "SHIFT_REMOVED",
-                urgency: "URGENT",
-                batchId: null,
-                payload: { before: snapshot() },
-            },
-        ])[0]!;
+        ]);
 
-        for (const group of [added, removed]) {
-            expect(renderDeliveryGroup(group)).toContain("Підтверди, будь ласка, що бачиш це.");
-            expect(renderDeliveryGroup(group)).not.toContain("чи вийдеш");
-            const buttons = buildDeliveryKeyboard(group).inline_keyboard.flat();
-            expect(buttons.map((button) => button.text)).toEqual(["✅ Бачу"]);
-            expect((buttons[0] as { callback_data: string }).callback_data).toMatch(/^cb:snack:/u);
-        }
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Термінова зміна у графіку");
+        expect(text).not.toContain("Підтверди");
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+        expect(buttons.map((button) => button.text)).toEqual(["🗓 Мій графік"]);
     });
 
     it("keeps a normal message free of any question", () => {
@@ -539,7 +527,7 @@ describe("renderDeliveryGroup", () => {
 });
 
 describe("buildDeliveryKeyboard", () => {
-    it("offers acknowledgement buttons only for an urgent message", () => {
+    it("gives urgent and normal messages the same single button — nobody reads acknowledgements", () => {
         const [urgent] = groupForDelivery([
             {
                 publicId: "a",
@@ -564,7 +552,7 @@ describe("buildDeliveryKeyboard", () => {
         ]);
 
         const urgentButtons = buildDeliveryKeyboard(urgent!).inline_keyboard.flat();
-        expect(urgentButtons.map(button => button.text)).toEqual(["✅ Бачу"]);
+        expect(urgentButtons.map(button => button.text)).toEqual(["🗓 Мій графік"]);
 
         const normalButtons = buildDeliveryKeyboard(normal!).inline_keyboard.flat();
         expect(normalButtons.map(button => button.text)).toEqual(["🗓 Мій графік"]);
@@ -657,7 +645,7 @@ describe("buildDeliveryKeyboard", () => {
         expect(buttons.map(button => button.text)).not.toContain("↩️ Це помилка, скасувати");
     });
 
-    it("still offers undo on an urgent reassignment, alongside the acknowledgement buttons", () => {
+    it("still offers undo on an urgent reassignment, next to the schedule button", () => {
         const [group] = groupForDelivery([
             {
                 publicId: "a",
@@ -672,7 +660,7 @@ describe("buildDeliveryKeyboard", () => {
 
         const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
 
-        expect(buttons.map(button => button.text)).toEqual(["✅ Бачу", "↩️ Це помилка, скасувати"]);
+        expect(buttons.map(button => button.text)).toEqual(["🗓 Мій графік", "↩️ Це помилка, скасувати"]);
     });
 });
 
