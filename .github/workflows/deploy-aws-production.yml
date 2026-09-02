@@ -137,6 +137,19 @@ on:
         required: true
         type: boolean
         default: true
+      # Гейт вебапповских маршрутов кабинета рекрутёра (фаза завершения web-миграции):
+      # GET .../tattoo-photo и GET /inbox отдают 404, а не 403, пока флаг снят —
+      # отключённая фича должна выглядеть отсутствующей, а не просто запрещённой.
+      #
+      # Умолчание `true`, как у соседей и как требует контракт: форма
+      # переписывает окружение целиком, поэтому `false` превращал бы чужой
+      # обычный деплой в тихий откат фичи. Флаг ещё не раскатан — первый
+      # выкат делается со СНЯТОЙ галочкой.
+      recruiting_tattoo_web_enabled:
+        description: Serve the recruiter tattoo photo proxy and inbox routes in the webapp
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -365,6 +378,7 @@ jobs:
             printf 'AWS_RECRUITING_MIRROR_ENABLED=%q\n' "${{ inputs.recruiting_mirror_enabled }}"
             printf 'AWS_RECRUITING_SLOTS_ENABLED=%q\n' "${{ inputs.recruiting_slots_enabled }}"
             printf 'AWS_RECRUITING_COMMANDS_ENABLED=%q\n' "${{ inputs.recruiting_commands_enabled }}"
+            printf 'AWS_RECRUITING_TATTOO_WEB_ENABLED=%q\n' "${{ inputs.recruiting_tattoo_web_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -463,6 +477,7 @@ jobs:
             echo '- Recruiting candidate mirror: `${{ inputs.recruiting_mirror_enabled }}`'
             echo '- Recruiting canonical interview slots: `${{ inputs.recruiting_slots_enabled }}`'
             echo '- Recruiting webapp commands: `${{ inputs.recruiting_commands_enabled }}`'
+            echo '- Recruiting tattoo web routes: `${{ inputs.recruiting_tattoo_web_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'
