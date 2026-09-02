@@ -487,6 +487,7 @@ export interface RecruitingCandidateSnapshot {
     statusChangedAt: string | null;
     lastActivityAt: string | null;
     botCreatedAt: string | null;
+    tattooPhotoFileId: string | null;
 }
 
 /**

@@ -56,6 +56,7 @@ describe("buildCandidateMirrorSnapshot", () => {
             statusChangedAt: "2026-08-20T10:00:00.000Z",
             lastActivityAt: "2026-08-21T09:30:00.000Z",
             botCreatedAt: "2026-08-01T08:00:00.000Z",
+            tattooPhotoFileId: null,
         });
     });
 
@@ -101,6 +102,7 @@ describe("buildCandidateMirrorSnapshot", () => {
             statusChangedAt: null,
             location: null,
             interviewSlot: null,
+            tattooPhotoId: null,
             user: { telegramId: 42n, username: null, createdAt: null },
         }) as never);
 
@@ -123,6 +125,7 @@ describe("buildCandidateMirrorSnapshot", () => {
             statusChangedAt: null,
             lastActivityAt: expect.any(String),
             botCreatedAt: null,
+            tattooPhotoFileId: null,
         });
     });
 
@@ -145,5 +148,21 @@ describe("buildCandidateMirrorSnapshot", () => {
         expect(snapshot.hrDecision).toBe("NOSHOW");
         expect(snapshot.lossStage).toBe("INTERVIEW");
         expect(snapshot.lossReason).toBe("INTERVIEW_NO_SHOW");
+    });
+
+    it("переносит file_id фото тату в снимок", () => {
+        const snapshot = buildCandidateMirrorSnapshot(buildRow({
+            tattooPhotoId: "AgACAgIAAxkBAAI",
+        }) as never);
+
+        expect(snapshot.tattooPhotoFileId).toBe("AgACAgIAAxkBAAI");
+    });
+
+    it("без фото шлёт null, а не пустую строку", () => {
+        const snapshot = buildCandidateMirrorSnapshot(buildRow({
+            tattooPhotoId: null,
+        }) as never);
+
+        expect(snapshot.tattooPhotoFileId).toBeNull();
     });
 });

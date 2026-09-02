@@ -23,6 +23,7 @@ export interface MirrorCandidateRow {
     lossReason?: string | null;
     statusChangedAt?: Date | string | null;
     pipelineTouchedAt?: Date | string | null;
+    tattooPhotoId?: string | null;
     user: {
         telegramId: bigint | number | string;
         username?: string | null;
@@ -95,5 +96,6 @@ export function buildCandidateMirrorSnapshot(candidate: MirrorCandidateRow): Rec
         statusChangedAt: toIsoDateTime(candidate.statusChangedAt),
         lastActivityAt: toIsoDateTime(candidate.pipelineTouchedAt),
         botCreatedAt: toIsoDateTime(candidate.user.createdAt),
+        tattooPhotoFileId: candidate.tattooPhotoId ?? null,
     };
 }
