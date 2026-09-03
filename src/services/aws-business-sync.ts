@@ -245,6 +245,9 @@ export class AwsBusinessSyncService {
                             city: location.city,
                             address: location.address,
                             isHidden: false,
+                            // Решение владельца из вебаппа; исторически правилось руками в
+                            // админке бота, теперь снимок — источник истины.
+                            isHiddenFromCandidates: location.isHiddenFromCandidates,
                         },
                         select: { id: true },
                     })
@@ -257,6 +260,9 @@ export class AwsBusinessSyncService {
                             city: location.city,
                             address: location.address,
                             isHidden: false,
+                            // Решение владельца из вебаппа; исторически правилось руками в
+                            // админке бота, теперь снимок — источник истины.
+                            isHiddenFromCandidates: location.isHiddenFromCandidates,
                         },
                         select: { id: true },
                     });

@@ -23,6 +23,7 @@ import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { sessionRepository } from "../repositories/session-repository.js";
 import { isImpossibleMentorState } from "./funnel-anomaly-detector.js";
+import { selectAbandonedScreeningCandidates } from "./abandoned-screening-selection.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
@@ -1628,23 +1629,31 @@ async function processAutoCloseTickets(bot: Bot<MyContext>) {
 async function processAbandonedApplications(bot: Bot<MyContext>) {
     try {
         const { default: prisma } = await import("../db/core.js");
-        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const twoDaysAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
-
-        // 1. Анкетування (SCREENING)
-        const abandonedScreening = await prisma.candidate.findMany({
+        // 1. Анкетування (SCREENING).
+        // Отбор идёт от последней активности, а не от создания аккаунта: по
+        // user.createdAt кандидатка, знакомая боту давно, не попадала в выборку
+        // никогда — 376 из 420 анкет в проде на 03.09.2026.
+        const screeningPending = await prisma.candidate.findMany({
             where: {
                 status: "SCREENING",
-                user: {
-                    createdAt: { lte: yesterday, gte: twoDaysAgo }
-                }
+                screeningReminderSentAt: null,
             },
             include: { user: true }
         });
+        const abandonedScreening = selectAbandonedScreeningCandidates(screeningPending, new Date());
 
         for (const cand of abandonedScreening) {
             try {
-                await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], { parse_mode: "HTML" });
+                await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], {
+                    parse_mode: "HTML",
+                    reply_markup: new InlineKeyboard().text("📝 Продовжити анкету", "resume_screening"),
+                });
+                // Отметка держит напоминание однократным: вокер крутится каждые
+                // 5 минут, окна по времени для этого мало.
+                await prisma.candidate.update({
+                    where: { id: cand.id },
+                    data: { screeningReminderSentAt: new Date() },
+                });
                 logBusinessEvent({
                     event: "candidate.screening.reminder_sent",
                     candidateId: cand.id,
