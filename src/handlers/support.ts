@@ -615,8 +615,16 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         }
 
         if (isRecoveryFlow) {
+            // Прим.: этот блок фактически недостижим — ветка isRecoveryFlow
+            // выше (пересылка в recovery-топик) всегда возвращает true раньше,
+            // чем выполнение доходит сюда. Оставлено как объявленная
+            // маршрутизация на случай, если контроль-флоу выше изменится;
+            // HR больше не участвует как получатель по умолчанию — при
+            // отсутствии ADMIN_IDS сообщение уходит в лог как failure ниже
+            // по функции (result: "failure" + ctx.reply "Не вдалося доставити"),
+            // а не пропадает молча.
             categoryLabel = "Admin (Recovery)";
-            targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : (HR_IDS.length > 0 ? [HR_IDS[0]!] : []);
+            targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
         }
 
         const recoveryBadge = entryReason === "RETURNED_AFTER_BOT_BLOCK"
