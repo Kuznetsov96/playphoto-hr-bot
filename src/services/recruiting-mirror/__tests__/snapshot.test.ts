@@ -29,6 +29,7 @@ function buildRow(overrides: Record<string, unknown> = {}) {
         },
         location: { canonicalCode: "fantasy-town-cherkasy" },
         interviewSlot: { startTime: new Date("2026-08-28T14:00:00.000Z") },
+        noSlotsAt: null,
         ...overrides,
     };
 }
@@ -57,6 +58,7 @@ describe("buildCandidateMirrorSnapshot", () => {
             lastActivityAt: "2026-08-21T09:30:00.000Z",
             botCreatedAt: "2026-08-01T08:00:00.000Z",
             tattooPhotoFileId: null,
+            noSlotsAt: null,
         });
     });
 
@@ -126,6 +128,7 @@ describe("buildCandidateMirrorSnapshot", () => {
             lastActivityAt: expect.any(String),
             botCreatedAt: null,
             tattooPhotoFileId: null,
+            noSlotsAt: null,
         });
     });
 
@@ -164,5 +167,21 @@ describe("buildCandidateMirrorSnapshot", () => {
         }) as never);
 
         expect(snapshot.tattooPhotoFileId).toBeNull();
+    });
+
+    it("mirrors noSlotsAt as a strict ISO string when the candidate hit the no-slots branch", () => {
+        const snapshot = buildCandidateMirrorSnapshot(buildRow({
+            noSlotsAt: new Date("2026-09-02T18:00:00.000Z"),
+        }) as never);
+
+        expect(snapshot.noSlotsAt).toBe("2026-09-02T18:00:00.000Z");
+    });
+
+    it("sends null for noSlotsAt once the candidate has booked a slot", () => {
+        const snapshot = buildCandidateMirrorSnapshot(buildRow({
+            noSlotsAt: null,
+        }) as never);
+
+        expect(snapshot.noSlotsAt).toBeNull();
     });
 });

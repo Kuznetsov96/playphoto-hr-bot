@@ -202,6 +202,27 @@ describe("interview booking over canonical slots", () => {
         );
     });
 
+    it("start_scheduling with no active slots stamps noSlotsAt for the web inbox and sends no HR telegram alert", async () => {
+        findByTelegramId.mockResolvedValue({ id: "cand-1", status: "SCREENING", gender: "female", fullName: "Олена Тест" });
+        findAvailableInterviewSlots.mockResolvedValue([]);
+        updateMany.mockResolvedValue({ count: 1 });
+
+        const ctx = makeCtx(111008);
+        await bookingHandlers.__runCallback("start_scheduling", ctx);
+
+        expect(updateMany).toHaveBeenCalledWith(
+            { user: { telegramId: 111008n } },
+            expect.objectContaining({ noSlotsAt: expect.any(Date) }),
+        );
+        expect(ctx.reply).toHaveBeenCalledWith(
+            expect.stringContaining("Зараз графік співбесід оновлюється"),
+            expect.anything(),
+        );
+        // Раньше здесь дублировался телеграм-алерт HR — теперь сигнал уходит
+        // только через noSlotsAt в зеркало, живого HR_IDS[0] в моке нет вовсе.
+        expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+    });
+
     it("book_slot_<uuid> books through the switch with the web slot publicId", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", userId: "user-1", interviewSlotId: null });
         bookInterviewSlotFlow.mockResolvedValue({

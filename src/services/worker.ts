@@ -6,14 +6,13 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, HR_IDS, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { runAccessRevocations } from "./access-revocation-dispatcher.js";
 import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
-import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
 import { extractFirstName } from "../utils/string-utils.js";
@@ -143,14 +142,6 @@ export async function startWorker(bot: Bot<MyContext>) {
                                     },
                                     error: sendErr,
                                 });
-                                // Notify HR about delivery failure
-                                if (HR_IDS.length > 0) {
-                                    await bot.api.sendMessage(
-                                        HR_IDS[0]!,
-                                        ADMIN_TEXTS["admin-notif-delivery-failed"]({ name: cand.fullName || "Candidate", error: sendErr.message }),
-                                        { parse_mode: "HTML" }
-                                    ).catch(() => { });
-                                }
                             }
                         }
                     } else if (decision === "REJECTED") {
@@ -324,27 +315,6 @@ export async function startWorker(bot: Bot<MyContext>) {
                         });
                     }
                 }
-            }
-
-            // 4. HR Reminder (~2 minutes, window 1-4 min before start)
-            const fourMinFuture = new Date(nowTime + 4 * 60 * 1000);
-            const oneMinFuture = new Date(nowTime + 1 * 60 * 1000);
-            const slots2mHR = (await interviewRepository.findForReminder('reminded2mHR', fourMinFuture))
-                .filter(s => s.startTime >= oneMinFuture);
-
-            for (const slot of slots2mHR) {
-                if (HR_IDS.length === 0) break;
-                try {
-                    const name = slot.candidate?.fullName || "Candidate";
-                    const meetLink = slot.candidate?.googleMeetLink;
-                    const minsLeft = Math.max(1, Math.round((slot.startTime.getTime() - nowTime) / 60000));
-                    let text = `🕵️‍♀️ <b>${HR_NAME}, interview in ${minsLeft} min!</b>\n\n👤 Candidate: <b>${name}</b>\n`;
-                    if (meetLink) {
-                        text += `🔗 <b>Meet:</b> <a href="${meetLink}">Enter Room</a>`;
-                    }
-                    await bot.api.sendMessage(HR_IDS[0]!, text, { parse_mode: "HTML" });
-                    await interviewRepository.updateSlot(slot.id, { reminded2mHR: true });
-                } catch (e) { }
             }
 
             // --- TRAINING & DISCOVERY REMINDERS ---
@@ -564,14 +534,6 @@ export async function startWorker(bot: Bot<MyContext>) {
                         },
                     });
 
-                    // Notify HR to make a decision (Proactive Assistance)
-                    if (HR_IDS.length > 0) {
-                        const name = slot.candidate.fullName || "Candidate";
-                        const text = `🏁 <b>Interview Completed: ${name}</b>\n\nTime is up, status updated to "Completed". Please review the profile and make an offer decision! ⚖️🌸`;
-                        const kb = new InlineKeyboard().text("👤 View and Decide", `view_candidate_${slot.candidate.id}`);
-
-                        await bot.api.sendMessage(HR_IDS[0]!, text, { parse_mode: "HTML", reply_markup: kb });
-                    }
                     await interviewRepository.updateSlot(slot.id, { remindedCompletion: true });
                 } catch (e) { }
             }
@@ -1092,18 +1054,6 @@ async function recoverStaleInterviewCandidates(bot: Bot<MyContext>) {
         } catch (err) {
             logger.error({ err, candidateId: cand.id, slotId: slot.id }, "Failed to recover stale interview candidate");
         }
-    }
-
-    if (recovered.length > 0 && HR_IDS[0]) {
-        const preview = recovered
-            .slice(0, 5)
-            .map(c => `• ${c.name}`)
-            .join("\n");
-        await bot.api.sendMessage(
-            HR_IDS[0],
-            `⚠️ <b>Recovered stuck interview candidates</b>\n\nMoved <b>${recovered.length}</b> candidate(s) from stale <b>SCREENING/INTERVIEW</b> to <b>INTERVIEW_COMPLETED</b> so HR can decide.\n\n${preview}`,
-            { parse_mode: "HTML" }
-        ).catch(() => { });
     }
 
     return recovered;

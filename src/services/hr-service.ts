@@ -154,16 +154,6 @@ export const hrService = {
             stagingNotifiedAt: null
         });
 
-        const { HR_IDS } = await import("../config.js");
-        const hrMessage = `⚠️ <b>Internship Cancelled!</b>\n\n👤 Candidate: <b>${escapeHtml(cand.fullName || "Candidate")}</b>\n🏙️ City: ${escapeHtml(cand.city || "—")}\n\nShe clicked "I can't come".`;
-        for (const hrId of HR_IDS) {
-            try {
-                await api.sendMessage(hrId, hrMessage, { parse_mode: "HTML" });
-            } catch (error) {
-                logger.warn({ err: error, hrId, candidateId: cand.id }, "Failed to notify HR about candidate staging cancellation");
-            }
-        }
-
         audit({
             event: "candidate_staging_cancelled",
             result: "success",

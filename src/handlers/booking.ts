@@ -300,17 +300,6 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
             }
         }).catch(() => {});
 
-        const { HR_IDS } = await import("../config.js");
-        if (HR_IDS.length > 0) {
-            const hrNotifyText = `🆕 <b>New interview appointment!</b>\n\n` +
-                `👤 Candidate: <b>${fullName}</b>\n` +
-                `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n\n` +
-                `📍 Appointment added to Google Calendar.`;
-
-            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${(result as any).candidate?.id}`);
-            await ctx.api.sendMessage(HR_IDS[0]!, hrNotifyText, { parse_mode: "HTML", reply_markup: hrKb });
-        }
-
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId }, "Interview booking failed");
         if (e instanceof AwsBusinessApiError && e.code === RECRUITING_SLOT_TAKEN_CODE) {
@@ -407,18 +396,6 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             { reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling") }
         );
 
-        // Notify HR
-        if (candidate) {
-            const { HR_IDS } = await import("../config.js");
-            const name = candidate.fullName || "Candidate";
-            const alertText = `🗓 <b>Interview Booking Cancelled</b>\n\n` +
-                `👤 <b>${name}</b> cancelled her interview slot and can choose another time.`;
-            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-            for (const hrId of HR_IDS) {
-                await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
-            }
-        }
-
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview cancellation failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
@@ -479,17 +456,6 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             "Дякуємо, що повідомила. 🌸\n\n" +
             "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
         );
-
-        if (candidate) {
-            const { HR_IDS } = await import("../config.js");
-            const name = candidate.fullName || "Candidate";
-            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
-                `👤 <b>${name}</b> declined the vacancy after booking an interview.`;
-            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-            for (const hrId of HR_IDS) {
-                await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
-            }
-        }
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview vacancy withdrawal failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
@@ -525,18 +491,6 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 interviewSlot: { disconnect: true },
                 googleMeetLink: null
             });
-        }
-
-        // Notify HR
-        if (candidate) {
-            const { HR_IDS } = await import("../config.js");
-            const name = candidate.fullName || "Candidate";
-            const alertText = `🗓 <b>Interview Rescheduled</b>\n\n` +
-                `👤 <b>${name}</b> is choosing a new interview time.`;
-            const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-            for (const hrId of HR_IDS) {
-                await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
-            }
         }
 
         const slots = await findAvailableInterviewSlots();
@@ -578,9 +532,11 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     if (slots.length === 0) {
         logger.debug({ telegramId }, "Interview scheduling waitlist fallback activated");
 
+        // noSlotsAt зеркалится в вебапп — веб-инбокс показывает этот сигнал
+        // вместо телеграм-уведомления HR (см. Task 1 в feat/silence-hr-notifications).
         await candidateRepository.updateMany(
             { user: { telegramId: BigInt(telegramId) } },
-            buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_SLOTS)
+            { ...buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_SLOTS), noSlotsAt: new Date() }
         );
 
         const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
@@ -592,22 +548,6 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
-
-        // Notify HRs that someone is stuck
-        const { HR_IDS } = await import("../config.js");
-        if (HR_IDS && HR_IDS.length > 0) {
-            const cand = candidate || await candidateRepository.findByTelegramId(telegramId);
-            const name = cand?.fullName || ctx.from.first_name || "Candidate";
-            const alertMsg = `📥 <b>INBOX: No interview slots available!</b>\n\n` +
-                `👤 <b>${name}</b>\n\n` +
-                `This candidate tried to book an interview, but there are no active slots. Please add slots or contact her directly.`;
-
-            for (const hrId of HR_IDS) {
-                try {
-                    await ctx.api.sendMessage(hrId, alertMsg, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand?.id}`) });
-                } catch (e) { }
-            }
-        }
         return;
     }
 
@@ -643,22 +583,6 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     );
 
     await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
-
-    const { HR_IDS } = await import("../config.js");
-    if (HR_IDS && HR_IDS.length > 0) {
-        const name = (await candidateRepository.findByTelegramId(telegramId))?.fullName || ctx.from.first_name || "Candidate";
-        const alertMsg = `📥 <b>INBOX: Candidate cannot find interview slot!</b>\n\n` +
-            `👤 <b>${name}</b>\n\n` +
-            `This candidate clicked "No date fits". Vacancy is still open; please contact her or add more interview slots.`;
-
-        for (const hrId of HR_IDS) {
-            try {
-                await ctx.api.sendMessage(hrId, alertMsg, { parse_mode: "HTML" });
-            } catch (e) {
-                logger.error({ err: e, hrId }, "Failed to send no_slots_fit alert to HR");
-            }
-        }
-    }
 });
 
 // 6.5 Відмова кандидата від співбесіди
@@ -697,19 +621,6 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
 
     const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
     await ctx.editMessageText(STAFF_TEXTS["hr-info-invite-declined"] as string);
-
-    // Notify HR
-    if (candidate) {
-        const { HR_IDS } = await import("../config.js");
-        const name = candidate.fullName || "Candidate";
-        const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
-            `👤 <b>${name}</b> declined the interview invite.\n` +
-            `Reason: no longer relevant for her.`;
-        const hrKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-        for (const hrId of HR_IDS) {
-            await ctx.api.sendMessage(hrId, alertText, { parse_mode: "HTML", reply_markup: hrKb }).catch(() => {});
-        }
-    }
 });
 
 // 7. Початок запису НА НАВЧАННЯ / ЗНАЙОМСТВО

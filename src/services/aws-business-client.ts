@@ -488,6 +488,13 @@ export interface RecruitingCandidateSnapshot {
     lastActivityAt: string | null;
     botCreatedAt: string | null;
     tattooPhotoFileId: string | null;
+    /**
+     * Момент, когда кандидатка нажала «Обрати час», а активных слотов
+     * интервью не нашлось вообще. Заполняется в handlers/booking.ts,
+     * очищается при успешной броне слота — веб показывает это в инбоксе
+     * вместо телеграм-уведомления HR.
+     */
+    noSlotsAt: string | null;
 }
 
 /**
