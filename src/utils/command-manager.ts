@@ -9,14 +9,13 @@ import logger from "../core/logger.js";
 const COMMAND_SETS: Record<string, BotCommand[]> = {
     SUPER_ADMIN: [
         { command: "start", description: "🏠 Admin Panel" },
-        { command: "hr", description: "🚀 HR Hub" },
         { command: "mentor", description: "🎓 Mentor Hub" },
     ],
     CO_FOUNDER: [
         { command: "start", description: "🏠 Admin Panel" },
     ],
     HR_LEAD: [
-        { command: "start", description: "🚀 HR Hub" },
+        { command: "start", description: "🏠 Admin Panel" },
     ],
     MENTOR_LEAD: [
         { command: "start", description: "🎓 Mentor Hub" },

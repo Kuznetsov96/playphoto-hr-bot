@@ -11,7 +11,7 @@ export type CtxDbUser = User & {
 // CI Trigger Comment
 export type MenuId =
     | "admin-main" | "admin-team-ops" | "admin-ops" | "admin-finance" | "admin-system" | "admin-stats"
-    | "hr-hub-menu" | "hr-dashboard-dates" | "mentor-hub-menu" | "candidate-root"
+    | "mentor-hub-menu" | "candidate-root"
     | string;
 
 export interface StackEntry {

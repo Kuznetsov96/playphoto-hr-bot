@@ -263,7 +263,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
         if (!candidate || !candidate.user) return false;
 
-        const { MENTOR_IDS, HR_IDS, ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
+        const { MENTOR_IDS, ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
         const { supportService } = await import("../services/support-service.js");
         const { supportRepository } = await import("../repositories/support-repository.js");
         const preferredTarget = ctx.session.supportData?.preferredTarget;
@@ -592,8 +592,15 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const msgText = payload.content;
 
         // --- Route by stage to responsible person ---
+        // HR-stage candidates: recruiting-incoming.ts already mirrors every private
+        // text message from a pre-hire candidate into the web app's message thread
+        // (verified in production — 66 messages already there), so this handler no
+        // longer DMs the recruiter directly to avoid a duplicate delivery. Instead
+        // it falls through to ADMIN_IDS below, same as every other stage whose
+        // target list comes up empty, so the message still reaches a human in
+        // Telegram and is never silently dropped.
         let categoryLabel = "HR";
-        let targetAdminIds = HR_IDS;
+        let targetAdminIds: number[] = [];
 
         if (isSetupStage) {
             categoryLabel = "Admin (Setup)";
@@ -603,9 +610,9 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
         } else if (isHRStage) {
             categoryLabel = "HR";
-            targetAdminIds = HR_IDS;
+            targetAdminIds = [];
         }
-        // Unknown/future status → also defaults to HR_IDS
+        // Unknown/future status → also falls through to ADMIN_IDS below
 
         if (targetAdminIds.length === 0) targetAdminIds = ADMIN_IDS;
 
