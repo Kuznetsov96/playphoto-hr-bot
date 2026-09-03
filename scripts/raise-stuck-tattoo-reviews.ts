@@ -30,15 +30,17 @@ async function main(): Promise<void> {
             fullName: true,
             city: true,
             statusChangedAt: true,
-            createdAt: true,
+            pipelineTouchedAt: true,
             tattooPhotoId: true,
         },
-        orderBy: { createdAt: "asc" },
+        // У Candidate нет createdAt: возраст и порядок считаем по последнему
+        // касанию воронки — самые давние сверху.
+        orderBy: { pipelineTouchedAt: "asc" },
     });
 
     console.log(`Анкет с фото тату в WAITLIST_HR: ${stuck.length}`);
     for (const candidate of stuck) {
-        const waitingSince = candidate.statusChangedAt ?? candidate.createdAt;
+        const waitingSince = candidate.statusChangedAt ?? candidate.pipelineTouchedAt;
         const days = Math.floor((Date.now() - waitingSince.getTime()) / 86_400_000);
         console.log(
             `  ${candidate.id}  ${candidate.fullName ?? "—"}  ${candidate.city ?? "—"}  ждёт ${days} дн.`,
