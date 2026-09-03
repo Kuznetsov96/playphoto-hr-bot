@@ -69,3 +69,29 @@ describe("candidate screening birth date validation", () => {
         expect(CandidateSchema.shape.birthDate.safeParse(futureDate).success).toBe(false);
     });
 });
+
+describe("resolveScreeningStatus", () => {
+    it("ставит MANUAL_REVIEW, даже когда мест нет: ревью внешности не зависит от вакансии", async () => {
+        const { resolveScreeningStatus } = await import("../index.js");
+
+        expect(resolveScreeningStatus({ hasVacancy: false, appearance: "[Фото]" })).toBe("MANUAL_REVIEW");
+    });
+
+    it("без особенностей и без мест — WAITLIST_HR", async () => {
+        const { resolveScreeningStatus } = await import("../index.js");
+
+        expect(resolveScreeningStatus({ hasVacancy: false, appearance: "Без особливостей" })).toBe("WAITLIST_HR");
+    });
+
+    it("без особенностей и с местом — SCREENING", async () => {
+        const { resolveScreeningStatus } = await import("../index.js");
+
+        expect(resolveScreeningStatus({ hasVacancy: true, appearance: "Без особливостей" })).toBe("SCREENING");
+    });
+
+    it("особенности есть и место есть — MANUAL_REVIEW", async () => {
+        const { resolveScreeningStatus } = await import("../index.js");
+
+        expect(resolveScreeningStatus({ hasVacancy: true, appearance: "пірсинг у носі" })).toBe("MANUAL_REVIEW");
+    });
+});
