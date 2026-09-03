@@ -102,11 +102,13 @@ async function bootstrap() {
         const { staffRootMenu } = await import("./menus/staff.js");
         bot.use(staffRootMenu);
         
-        // --- HR MENUS ---
-        const { hrHubMenu } = await import("./menus/hr.js");
+        // --- MENTOR MENUS ---
+        // NOTE: The recruiter's own HR hub (hrHubMenu) was removed 2026-09-03 —
+        // recruiting now happens in the web app. What remains in menus/hr.ts
+        // (Final Step Pipeline, candidate detail views) is registered via the
+        // admin bootstrap (src/handlers/admin/bootstrap.ts), not here.
         const { mentorRootMenu } = await import("./menus/mentor.js");
-        
-        bot.use(hrHubMenu);
+
         bot.use(mentorRootMenu);
 
         // --- CANDIDATE MENUS ---

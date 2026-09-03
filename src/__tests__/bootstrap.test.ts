@@ -45,8 +45,11 @@ describe("Bot Bootstrap & Menu Integrity", () => {
     }, 30_000);
 
     it("should load HR menus without errors", async () => {
-        const { hrHubMenu } = await import("../menus/hr.js");
-        expect(hrHubMenu).toBeDefined();
+        // The recruiter's own HR hub (hrHubMenu) was removed 2026-09-03 — recruiting
+        // now happens in the web app. What remains is the owner/admin "Final Step
+        // Pipeline" flow, registered via the admin bootstrap.
+        const { hrFinalStepMenu } = await import("../menus/hr.js");
+        expect(hrFinalStepMenu).toBeDefined();
     });
 
     it("should load Mentor menus without errors", async (ctx) => {

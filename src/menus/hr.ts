@@ -2,56 +2,27 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { Menu } from "@grammyjs/menu";
 import { formatLocation } from "../utils/location-label.js";
 import type { MyContext } from "../types/context.js";
-import { HR_INTERVIEW_WAITLIST_REASONS, type HrInterviewWaitlistReason, hrService } from "../services/hr-service.js";
+import { hrService } from "../services/hr-service.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
 import { menuRegistry } from "../utils/menu-registry.js";
-import { cleanupUserSessionMessages, trackUserMessage } from "../utils/cleanup.js";
-import { formatCandidateProfile, formatMessagePreview } from "../utils/profile-formatter.js";
-import { getPriorityLabel, getCityCode, getShortLocationName } from "../utils/location-helpers.js";
+import { trackUserMessage } from "../utils/cleanup.js";
+import { formatCandidateProfile } from "../utils/profile-formatter.js";
 import { extractFirstName, formatCompactName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { getUserAdminRole } from "../middleware/role-check.js";
-import { AdminRole, CandidateStatus } from "@prisma/client";
-import { hiringNeedsService } from "../services/hiring-needs-service.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 
-const HIRING_NEEDS_PAGE_SIZE = 7;
-
 // --- MENUS (Declared first to prevent circular dependency issues) ---
-export const hrHubMenu = new Menu<MyContext>("hr-hub-menu");
-menuRegistry.register(hrHubMenu);
-export const hrToolsMenu = new Menu<MyContext>("hr-tools");
-menuRegistry.register(hrToolsMenu);
-export const hrHiringNeedsMenu = new Menu<MyContext>("hr-hiring-needs");
-menuRegistry.register(hrHiringNeedsMenu);
-export const hrInboxMenu = new Menu<MyContext>("hr-inbox");
-menuRegistry.register(hrInboxMenu);
-export const hrInboxNewMenu = new Menu<MyContext>("hr-inbox-new");
-menuRegistry.register(hrInboxNewMenu);
-export const hrInboxTattooMenu = new Menu<MyContext>("hr-inbox-tattoo");
-menuRegistry.register(hrInboxTattooMenu);
-export const hrInboxMessagesMenu = new Menu<MyContext>("hr-inbox-messages");
-menuRegistry.register(hrInboxMessagesMenu);
-export const hrBroadcastCitiesMenu = new Menu<MyContext>("hr-broadcast-cities");
-menuRegistry.register(hrBroadcastCitiesMenu);
-export const hrBroadcastConfirmMenu = new Menu<MyContext>("hr-broadcast-confirm");
-menuRegistry.register(hrBroadcastConfirmMenu);
-export const hrWaitlistMenu = new Menu<MyContext>("hr-waitlist-menu");
-menuRegistry.register(hrWaitlistMenu);
-export const hrWaitlistCityMenu = new Menu<MyContext>("hr-waitlist-city");
-menuRegistry.register(hrWaitlistCityMenu);
-export const hrWaitlistLocMenu = new Menu<MyContext>("hr-waitlist-loc");
-menuRegistry.register(hrWaitlistLocMenu);
-export const hrWaitlistProfilesMenu = new Menu<MyContext>("hr-waitlist-profiles");
-menuRegistry.register(hrWaitlistProfilesMenu);
-export const hrNoSlotQuickMenu = new Menu<MyContext>("hr-no-slot-quick");
-menuRegistry.register(hrNoSlotQuickMenu);
-export const hrNoSlotProfilesMenu = new Menu<MyContext>("hr-no-slot-profiles");
-menuRegistry.register(hrNoSlotProfilesMenu);
+// NOTE: The recruiter's own HR hub (Inbox, Calendar, Hiring Needs, Broadcast Tools,
+// Candidate Pools) was removed 2026-09-03 — the recruiter now works entirely in the
+// web app. What remains below is used exclusively by the owner/admin "Final Step
+// Pipeline" flow (registered via src/handlers/admin/bootstrap.ts) and by the
+// admin/mentor candidate-detail views (src/handlers/admin/recruitment.ts,
+// src/handlers/admin/search.ts). Do not assume this file is one unit.
 export const hrCandidateUnifiedMenu = new Menu<MyContext>("hr-candidate-unified");
 menuRegistry.register(hrCandidateUnifiedMenu);
 export const hrChangeLocationUnifiedMenu = new Menu<MyContext>("hr-change-location-unified");
@@ -75,116 +46,6 @@ menuRegistry.register(hrFinalStepFillingMenu);
 export const hrFinalStepScheduleMenu = new Menu<MyContext>("hr-final-step-schedule");
 menuRegistry.register(hrFinalStepScheduleMenu);
 
-// --- DASHBOARD MENUS ---
-export const hrDashboardDatesMenu = new Menu<MyContext>("hr-dashboard-dates");
-menuRegistry.register(hrDashboardDatesMenu);
-export const hrDayViewMenu = new Menu<MyContext>("hr-day-view");
-menuRegistry.register(hrDayViewMenu);
-
-// --- DASHBOARD HELPERS ---
-const getDayViewText = async (dateStr: string) => {
-    const slots = await hrService.getDaySlots(dateStr);
-    const isPending = (s: any) => {
-        if (!s.isBooked || !s.candidate) return false;
-        const c = s.candidate;
-        return !c.hrDecision || (c.hrDecision === "ACCEPTED" && !c.notificationSent);
-    };
-
-    const booked = slots.filter(isPending).length;
-    const free = slots.filter((s: any) => !s.isBooked).length;
-
-    let text = `📅 <b>Date: ${dateStr}</b>\n\n`;
-    text += `👥 Booked: <b>${booked}</b> / 🔘 Free: <b>${free}</b>\n\n`;
-
-    if (booked > 0 || free > 0) text += `Select a slot to view or manage:`;
-    else text += `No bookings for today. ✨`;
-
-    return text;
-};
-
-// --- HUB ---
-hrHubMenu.dynamic(async (ctx, range) => {
-    logger.info({ userId: ctx.from?.id }, `[UX] HR Lead entering Hub`);
-    const stats = await hrService.getHubStats();
-    range.text(STAFF_TEXTS["hr-menu-inbox"]({ count: stats.inboxTotal }), async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "📥 <b>Inbox</b>", "hr-inbox", { pushToStack: true });
-    }).row();
-    range.text(STAFF_TEXTS["hr-menu-calendar"]({ count: stats.todayInterviews }), async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates", { pushToStack: true });
-    });
-    range.text("🎯 Hiring Needs", async (ctx) => {
-        ctx.session.hiringNeedsPage = 1;
-        const board = await hiringNeedsService.getBoard();
-        const text = hiringNeedsService.formatRoleSummary(board, "HR", 1, HIRING_NEEDS_PAGE_SIZE);
-        await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs", { pushToStack: true });
-    }).row();
-    range.text(STAFF_TEXTS["hr-menu-tools"], async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "📣 <b>Broadcasts & Tools</b>", "hr-tools", { pushToStack: true });
-    }).row();
-});
-
-hrHiringNeedsMenu.dynamic(async (ctx, range) => {
-    const board = await hiringNeedsService.getBoard();
-    const totalItems = board.items.filter((item) => item.needed > 0).length;
-    const totalPages = Math.ceil(totalItems / HIRING_NEEDS_PAGE_SIZE);
-    const page = Math.min(Math.max(1, ctx.session.hiringNeedsPage || 1), Math.max(1, totalPages));
-
-    if (totalPages > 1) {
-        if (page > 1) {
-            range.text("⬅️ Previous", async (ctx) => {
-                ctx.session.hiringNeedsPage = page - 1;
-                const fresh = await hiringNeedsService.getBoard();
-                const text = hiringNeedsService.formatRoleSummary(fresh, "HR", ctx.session.hiringNeedsPage, HIRING_NEEDS_PAGE_SIZE);
-                await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs");
-            });
-        }
-
-        if (page < totalPages) {
-            range.text("Next ➡️", async (ctx) => {
-                ctx.session.hiringNeedsPage = page + 1;
-                const fresh = await hiringNeedsService.getBoard();
-                const text = hiringNeedsService.formatRoleSummary(fresh, "HR", ctx.session.hiringNeedsPage, HIRING_NEEDS_PAGE_SIZE);
-                await ScreenManager.renderScreen(ctx, text, "hr-hiring-needs");
-            });
-        }
-        range.row();
-    }
-
-    range.text(STAFF_TEXTS["hr-menu-back-home"], async (ctx) => {
-        await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
-    });
-});
-
-// --- INBOX ---
-hrInboxMenu.dynamic(async (ctx, range) => {
-    const stats = await hrService.getHubStats();
-    range.text(STAFF_TEXTS["hr-menu-messages"]({ count: stats.unreadCount }), async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "💬 <b>Unread Messages</b>", "hr-inbox-messages", { pushToStack: true });
-    });
-    range.text(STAFF_TEXTS["hr-menu-tattoo"]({ count: stats.tattooCount }), async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "💍 <b>Tattoo Review</b>", "hr-inbox-tattoo", { pushToStack: true });
-    });
-    range.text(STAFF_TEXTS["hr-menu-new-candidates"]({ count: stats.newCandidates }), async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "🆕 <b>New Candidates</b>", "hr-inbox-new", { pushToStack: true });
-    }).row();
-
-    const waitlistLabel = (stats.noSlotCount || 0) > 0
-        ? `⏳ Candidate Pools: ${stats.waitlistCount} (🗓️ ${stats.noSlotCount})`
-        : `⏳ Candidate Pools: ${stats.waitlistCount}`;
-    range.text(waitlistLabel, async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu", { pushToStack: true });
-    }).row();
-
-    range.text(STAFF_TEXTS["hr-menu-back-home"], async (ctx) => {
-        await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
-    });
-});
-
 // --- FINAL STEP PIPELINE IMPLEMENTATION ---
 const getTimeWaiting = (date: Date | null) => {
     if (!date) return "";
@@ -196,12 +57,6 @@ const getTimeWaiting = (date: Date | null) => {
     if (diffDays > 0) return ` (${diffDays}d)`;
     if (diffHours > 0) return ` (${diffHours}h)`;
     return " (<1h)";
-};
-
-const getInboxMessageSnippet = (candidate: any) => {
-    const latest = candidate.messages?.[0];
-    if (!latest) return "";
-    return formatMessagePreview(latest.content, Boolean(latest.photoId), 32);
 };
 
 hrFinalStepMenu.dynamic(async (ctx, range) => {
@@ -228,7 +83,7 @@ hrFinalStepMenu.dynamic(async (ctx, range) => {
     }).row();
 
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "hr-inbox");
+        await ScreenManager.goBack(ctx, "🎯 <b>Recruitment</b>", "admin-ops");
     });
 });
 
@@ -340,156 +195,6 @@ hrFinalStepScheduleMenu.dynamic(async (ctx, range) => {
     }
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
-    });
-});
-
-// --- CANDIDATE POOLS ---
-const NO_SLOT_REASON_LABELS: Record<string, string> = {
-    [HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE]: "🚫 No Slots Available",
-    [HR_INTERVIEW_WAITLIST_REASONS.NO_DATE_FITS]: "🗓️ No Date Fits"
-};
-
-const getNoSlotReasonLabel = (reason: string | null | undefined) => {
-    if (reason === null) return "❔ Reason Unknown";
-    return NO_SLOT_REASON_LABELS[reason || ""] || "❔ Reason Unknown";
-};
-
-const normalizeNoSlotReason = (reason: string | null | undefined): HrInterviewWaitlistReason | null => {
-    if (reason === HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE) return reason;
-    if (reason === HR_INTERVIEW_WAITLIST_REASONS.NO_DATE_FITS) return reason;
-    return null;
-};
-
-hrWaitlistMenu.dynamic(async (ctx, range) => {
-    const stats = await hrService.getHubStats();
-    range.text(`🗓️ Needs Interview Slot (${stats.noSlotCount || 0})`, async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "🗓️ <b>Needs Interview Slot</b>", "hr-no-slot-quick", { pushToStack: true });
-    }).row();
-    range.text(`📍 Location Reserve (${(stats.waitlistCount || 0) - (stats.noSlotCount || 0)})`, async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "📍 <b>Location Reserve</b>", "hr-waitlist-city", { pushToStack: true });
-    }).row();
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "hr-inbox");
-    });
-});
-
-hrNoSlotQuickMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getWaitlistNoSlot();
-    if (candidates.length === 0) {
-        range.text("All caught up! ✨", (ctx) => { }).row();
-    } else {
-        range.text(`🔔 Notify Needs Slot (${candidates.length})`, async (ctx) => {
-            const count = await hrService.notifyWaitlist(ctx.api);
-            await ctx.answerCallbackQuery(`Sent ${count} slot invite(s).`).catch(() => { });
-            await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
-        }).row();
-        const reasonCounts = new Map<string | null, number>();
-        for (const cand of candidates) {
-            const reason = normalizeNoSlotReason((cand as any).interviewWaitlistReason);
-            reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
-        }
-
-        const reasonOrder: Array<HrInterviewWaitlistReason | null> = [
-            HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE,
-            HR_INTERVIEW_WAITLIST_REASONS.NO_DATE_FITS,
-            null
-        ];
-
-        for (const reason of reasonOrder) {
-            const count = reasonCounts.get(reason) || 0;
-            if (count === 0) continue;
-            range.text(`${getNoSlotReasonLabel(reason)} (${count})`, async (ctx) => {
-                ctx.session.selectedNoSlotReason = reason;
-                ctx.session.candidatePage = 1;
-                await ScreenManager.renderScreen(ctx, `${getNoSlotReasonLabel(reason)} <b>Candidates</b>`, "hr-no-slot-profiles", { pushToStack: true });
-            }).row();
-        }
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
-    });
-});
-
-hrNoSlotProfilesMenu.dynamic(async (ctx, range) => {
-    const reason = ctx.session.selectedNoSlotReason as HrInterviewWaitlistReason | null | undefined;
-    const candidates = await hrService.getWaitlistNoSlot(reason);
-    if (candidates.length === 0) {
-        range.text("All caught up! ✨", (ctx) => { }).row();
-    } else {
-        for (const cand of candidates) {
-            range.text(`🗓️ ${formatCompactName(cand.fullName)}`, async (ctx) => {
-                ctx.session.candidateData = { id: cand.id } as any;
-                delete ctx.session.selectedSlotId; // Not from dashboard
-                const actionLabel = getNoSlotReasonLabel(normalizeNoSlotReason((cand as any).interviewWaitlistReason));
-                const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true, actionLabel });
-                await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-            }).row();
-        }
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🗓️ <b>Needs Interview Slot</b>", "hr-no-slot-quick");
-    });
-});
-
-hrWaitlistCityMenu.dynamic(async (ctx, range) => {
-    const cities = await hrService.getWaitlistCities();
-    for (const city of cities) {
-        range.text(`🏙️ ${city}`, async (ctx) => {
-            ctx.session.broadcastCity = city;
-            await ScreenManager.renderScreen(ctx, "📍 <b>Reserve Locations</b>", "hr-waitlist-loc", { pushToStack: true });
-        }).row();
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "⏳ <b>Candidate Pools</b>", "hr-waitlist-menu");
-    });
-});
-
-hrWaitlistLocMenu.dynamic(async (ctx, range) => {
-    const city = ctx.session.broadcastCity;
-    if (!city) return;
-    const locations = await hrService.getWaitlistLocationsByCity(city);
-    for (const loc of locations) {
-        range.text(`📍 ${loc.label} (${loc.count})`, async (ctx) => {
-            ctx.session.broadcastLocationId = loc.id || "";
-            ctx.session.candidatePage = 1;
-            await ScreenManager.renderScreen(ctx, "👤 <b>Reserve Profiles</b>", "hr-waitlist-profiles", { pushToStack: true });
-        }).row();
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📍 <b>Location Reserve</b>", "hr-waitlist-city");
-    });
-});
-
-hrWaitlistProfilesMenu.dynamic(async (ctx, range) => {
-    const city = ctx.session.broadcastCity;
-    const locId = ctx.session.broadcastLocationId || null;
-    const page = ctx.session.candidatePage || 1;
-    if (!city) return;
-    const { items, total, totalPages } = await hrService.getWaitlistCandidatesByLocationPaginated(city, locId, page, 5);
-    for (const cand of items) {
-        range.text(`👤 ${formatCompactName(cand.fullName)}`, async (ctx) => {
-            ctx.session.candidateData = { id: cand.id } as any;
-            delete ctx.session.selectedSlotId; // Not from dashboard
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
-            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-        }).row();
-    }
-    if (page > 1) range.text("⬅️ Previous", (ctx) => { ctx.session.candidatePage = page - 1; ctx.menu.update(); });
-    if (page < totalPages) range.text("Next ➡️", (ctx) => { ctx.session.candidatePage = page + 1; ctx.menu.update(); });
-    range.row().text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📍 <b>Reserve Locations</b>", "hr-waitlist-loc");
-    });
-});
-
-// --- TOOLS ---
-hrToolsMenu.dynamic(async (ctx, range) => {
-    range.text(STAFF_TEXTS["hr-menu-broadcast-screening"], async (ctx) => {
-        await ScreenManager.renderScreen(ctx, "📣 <b>Invite New Candidates</b>", "hr-broadcast-cities", { pushToStack: true });
-    }).row();
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
     });
 });
 
@@ -831,275 +536,6 @@ hrChangeLocationUnifiedMenu.dynamic(async (ctx, range) => {
     range.text(STAFF_TEXTS["hr-menu-back"], (ctx) => ScreenManager.goBack(ctx, "👤 <b>Candidate Details</b>", "hr-candidate-unified"));
 });
 
-// --- INBOX LISTS ---
-hrInboxNewMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getNewCandidates(100);
-    const page = ctx.session.candidatePage || 1;
-    const pageSize = 8;
-    const total = candidates.length;
-    const totalPages = Math.ceil(total / pageSize);
-    const items = candidates.slice((page - 1) * pageSize, page * pageSize);
-
-    for (const cand of items) {
-        const cityCode = getCityCode(cand.city);
-        range.text(`🆕 ${formatCompactName(cand.fullName)} [${cityCode}]`, async (ctx) => {
-            ctx.session.candidateData = { id: cand.id } as any;
-            delete ctx.session.selectedSlotId;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
-            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-        }).row();
-    }
-
-    if (totalPages > 1) {
-        if (page > 1) range.text("⬅️ Previous", (ctx) => { ctx.session.candidatePage = page - 1; ctx.menu.update(); });
-        if (page < totalPages) range.text("Next ➡️", (ctx) => { ctx.session.candidatePage = page + 1; ctx.menu.update(); });
-        range.row();
-    }
-
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "hr-inbox");
-    });
-});
-
-hrInboxTattooMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getManualReviewCandidates();
-    const page = ctx.session.candidatePage || 1;
-    const pageSize = 8;
-    const total = candidates.length;
-    const totalPages = Math.ceil(total / pageSize);
-    const items = candidates.slice((page - 1) * pageSize, page * pageSize);
-
-    for (const cand of items) {
-        range.text(`💍 ${formatCompactName(cand.fullName)}`, async (ctx) => {
-            ctx.session.candidateData = { id: cand.id } as any;
-            delete ctx.session.selectedSlotId;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
-            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-        }).row();
-    }
-
-    if (totalPages > 1) {
-        if (page > 1) range.text("⬅️ Previous", (ctx) => { ctx.session.candidatePage = page - 1; ctx.menu.update(); });
-        if (page < totalPages) range.text("Next ➡️", (ctx) => { ctx.session.candidatePage = page + 1; ctx.menu.update(); });
-        range.row();
-    }
-
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "hr-inbox");
-    });
-});
-
-hrInboxMessagesMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getUnreadCandidates();
-    const page = ctx.session.candidatePage || 1;
-    const pageSize = 8;
-    const total = candidates.length;
-    const totalPages = Math.ceil(total / pageSize);
-    const items = candidates.slice((page - 1) * pageSize, page * pageSize);
-
-    for (const cand of items) {
-        const snippet = getInboxMessageSnippet(cand);
-        const label = snippet ? `💬 ${formatCompactName(cand.fullName)} • ${snippet}` : `💬 ${formatCompactName(cand.fullName)}`;
-        range.text(label, async (ctx) => {
-            ctx.session.candidateData = { id: cand.id } as any;
-            ctx.session.viewingFromInbox = true; // Flag for showing 'Mark as Read'
-            delete ctx.session.selectedSlotId;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true, includeHistory: true, viewerRole: "HR" });
-            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-        }).row();
-    }
-
-    if (totalPages > 1) {
-        if (page > 1) range.text("⬅️ Previous", (ctx) => { ctx.session.candidatePage = page - 1; ctx.menu.update(); });
-        if (page < totalPages) range.text("Next ➡️", (ctx) => { ctx.session.candidatePage = page + 1; ctx.menu.update(); });
-        range.row();
-    }
-
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📥 <b>Inbox</b>", "hr-inbox");
-    });
-});
-
-// --- BROADCASTS ---
-hrBroadcastCitiesMenu.dynamic(async (ctx, range) => {
-    const stats = await hrService.getCityRecruitmentStats();
-    if (stats.length === 0) {
-        range.text("📭 No active recruitment", (ctx) => ctx.answerCallbackQuery("Everything is full! ✨").catch(() => { })).row();
-    }
-    for (const s of stats) {
-        const cityCode = getCityCode(s.city);
-        const label = `[${cityCode}] ${s.locationName} • ${s.candidateCount}/${s.totalNeeded}`;
-
-        range.text(label, async (ctx) => {
-            if (s.candidateCount === 0) {
-                return ctx.answerCallbackQuery("No new candidates to invite. 📭").catch(() => { });
-            }
-            ctx.session.broadcastCity = s.city;
-            ctx.session.broadcastLocationId = s.locationId;
-            (ctx.session as any).broadcastLimit = s.totalNeeded > 0 ? s.totalNeeded * 3 : undefined; // Limit is 3x open slots
-            const limitText = (ctx.session as any).broadcastLimit ? `(Up to ${(ctx.session as any).broadcastLimit} max)` : `(All)`;
-
-            const text = STAFF_TEXTS["hr-info-invite-new-confirm"]({
-                city: s.city,
-                locationName: s.locationName || 'Any',
-                count: s.candidateCount.toString(),
-                totalNeeded: `${s.totalNeeded} ${limitText}`
-            } as any);
-            await ScreenManager.renderScreen(ctx, text, "hr-broadcast-confirm", { pushToStack: true });
-        }).row();
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        delete ctx.session.broadcastLocationId;
-        delete (ctx.session as any).broadcastLimit;
-        await ScreenManager.goBack(ctx, "📣 <b>Broadcasts & Tools</b>", "hr-tools");
-    });
-});
-
-hrBroadcastConfirmMenu.text("✅ Confirm & Send", async (ctx) => {
-    const city = ctx.session.broadcastCity;
-    const locationId = ctx.session.broadcastLocationId;
-    const limit = (ctx.session as any).broadcastLimit;
-    if (!city) return;
-
-    const newCandidates = await hrService.getBroadcastCandidates(city, false, locationId, limit);
-    await ctx.answerCallbackQuery("Broadcast started...").catch(() => { });
-    let sent = 0;
-    for (const cand of newCandidates) {
-        const result = await hrService.inviteCandidate(ctx.api, cand.id);
-        if (result.ok) sent++;
-    }
-    const failedCount = newCandidates.length - sent;
-    const failedNote = failedCount > 0 ? ` (${failedCount} unreachable)` : '';
-    await ctx.reply(`📢 Broadcast finished! Sent ${sent}/${newCandidates.length} invitations.${failedNote}`);
-    delete ctx.session.broadcastLocationId;
-    delete (ctx.session as any).broadcastLimit;
-    await ScreenManager.goBack(ctx, "📣 <b>Broadcasts & Tools</b>", "hr-tools");
-}).row().text("✖️ Cancel", async (ctx) => {
-    delete ctx.session.broadcastLocationId;
-    delete (ctx.session as any).broadcastLimit;
-    await ScreenManager.goBack(ctx, "📣 <b>Invite New Candidates</b>", "hr-broadcast-cities");
-});
-
-// --- DASHBOARD IMPLEMENTATIONS ---
-hrDashboardDatesMenu.dynamic(async (ctx, range) => {
-    const uniqueDates = await hrService.getOccupiedDates();
-    if (uniqueDates.length === 0) {
-        range.text("Schedule is empty 📭", (ctx) => ctx.answerCallbackQuery("Empty for now...").catch(() => { })).row();
-    } else {
-        for (const dateStr of uniqueDates) {
-            range.text(dateStr, async (ctx) => {
-                ctx.session.selectedDate = dateStr as string;
-                const text = await getDayViewText(dateStr as string);
-                await ScreenManager.renderScreen(ctx, text, "hr-day-view", { pushToStack: true });
-            }).row();
-        }
-    }
-    range.row();
-    range.text("➕ Add New Slots", async (ctx) => {
-        delete ctx.session.selectedCandidateId;
-        const { createDatePickerKb } = await import("../utils/slot-builder.js");
-        ctx.session.slotBuilder = { date: "", mode: "calendar" };
-        await ctx.reply("📅 <b>Select Date for Interview Slots:</b>", {
-            parse_mode: "HTML",
-            reply_markup: createDatePickerKb("hr_sb")
-        });
-        await ctx.answerCallbackQuery("✓").catch(() => { });
-    }).row();
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, await hrService.getHubText(), "hr-hub-menu");
-    });
-});
-
-hrDayViewMenu.dynamic(async (ctx, range) => {
-    try {
-        const selectedDate = ctx.session.selectedDate;
-        if (!selectedDate) {
-            range.text("⚠️ No date selected", async (ctx) => {
-                await ScreenManager.goBack(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates");
-            }).row();
-            return;
-        }
-        const daySlots = await hrService.getDaySlots(selectedDate).catch(() => []);
-        const isPending = (s: any) => {
-            if (!s.isBooked || !s.candidate) return false;
-            const c = s.candidate;
-            // 1. Visible if NO decision yet
-            if (!c.hrDecision) return true;
-            // 2. Visible if ACCEPTED but offer not sent yet (for ⏳ status)
-            if (c.hrDecision === "ACCEPTED" && !c.notificationSent) return true;
-            // Otherwise hide (REJECTED or ACCEPTED+SENT)
-            return false;
-        };
-        const bookedSlots = daySlots.filter(isPending);
-        const freeSlots = daySlots.filter((s: any) => !s.isBooked);
-
-        if (bookedSlots.length > 0) {
-            range.text("BOOKED SLOTS").row();
-            for (const slot of bookedSlots) {
-                const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                const name = slot.candidate?.fullName || "Unknown";
-                const c = slot.candidate;
-
-                let icon = "📅"; // Default for future
-                if (slot.startTime < new Date()) {
-                    icon = "📋"; // Conducted, needs decision
-                }
-                if (c?.hrDecision === "ACCEPTED" && !c?.notificationSent) {
-                    icon = "⏳"; // Accepted, waiting for offer
-                }
-
-                range.text(`${icon} ${timeStr} - ${name}`, async (ctx) => {
-                    ctx.session.selectedSlotId = slot.id;
-                    ctx.session.candidateData = { id: slot.candidate?.id } as any;
-                    delete ctx.session.viewingFromInbox; // Clear flag when coming from calendar
-                    const text = await formatCandidateProfile(ctx as any, slot.candidate, { interviewSlot: slot });
-                    await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-                }).row();
-            }
-            range.row();
-        }
-        if (freeSlots.length > 0) {
-            range.text("FREE SLOTS").row();
-            for (const slot of freeSlots) {
-                const time = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                range.text(`🔘 ${time}`, (ctx) => ctx.answerCallbackQuery("Available").catch(() => { }));
-                range.text("🗑️", async (ctx) => {
-                    const res = await hrService.deleteInterviewSlot(slot.id);
-                    if (res) {
-                        await ctx.answerCallbackQuery("Deleted ✅").catch(() => { });
-                        const text = await getDayViewText(selectedDate);
-                        await ScreenManager.renderScreen(ctx, text, "hr-day-view");
-                    } else {
-                        await ctx.answerCallbackQuery("Error ❌").catch(() => { });
-                    }
-                }).row();
-            }
-        }
-        if (bookedSlots.length === 0 && freeSlots.length === 0) {
-            range.text("🤷‍♀️ No slots for this date", (ctx) => { }).row();
-        }
-    } catch (e) {
-        logger.error({ err: e }, "[HR Dashboard] Critical error in hr-day-view");
-        range.text("❌ Error loading slots", (ctx) => ctx.answerCallbackQuery("Please try again").catch(() => { })).row();
-    }
-    range.row().text("➕ Add time", async (ctx) => {
-        const selectedDate = ctx.session.selectedDate;
-        if (!selectedDate) return ctx.answerCallbackQuery("Error: No date selected").catch(() => { });
-        delete ctx.session.selectedCandidateId;
-        const { createTimePickerKb } = await import("../utils/slot-builder.js");
-        const dateParts = selectedDate.split('.');
-        const isoDate = `${new Date().getFullYear()}-${dateParts[1]}-${dateParts[0]}`;
-        ctx.session.slotBuilder = { date: isoDate, mode: "calendar" };
-        await ctx.reply(`🕒 <b>Adding time for ${selectedDate}</b>\n\nSelect the <b>Start Time</b>:`, {
-            parse_mode: "HTML", reply_markup: createTimePickerKb("hr_sb")
-        });
-        await ctx.answerCallbackQuery("✓").catch(() => { });
-    }).row();
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🗓️ <b>Interview Calendar</b>", "hr-dashboard-dates");
-    });
-});
-
 hrStagingConfirmMenu.dynamic(async (ctx, range) => {
     const candId = ctx.session.selectedCandidateId;
     if (!candId) return;
@@ -1141,27 +577,12 @@ hrStagingConfirmMenu.dynamic(async (ctx, range) => {
 });
 
 // --- REGISTRATION ---
-hrHubMenu.register(hrInboxMenu);
-hrHubMenu.register(hrDashboardDatesMenu);
-hrHubMenu.register(hrDayViewMenu);
-hrHubMenu.register(hrHiringNeedsMenu);
-hrHubMenu.register(hrToolsMenu);
-hrHubMenu.register(hrCandidateUnifiedMenu);
+// hrFinalStepMenu itself is registered under the admin tree's recruitmentOpsMenu
+// by src/handlers/admin/bootstrap.ts. This only wires up its own children plus the
+// shared candidate-detail submenus.
 hrCandidateUnifiedMenu.register(hrChangeLocationUnifiedMenu);
 hrCandidateUnifiedMenu.register(hrStagingConfirmMenu);
 
-hrInboxMenu.register(hrWaitlistMenu);
-hrWaitlistMenu.register(hrNoSlotQuickMenu);
-hrNoSlotQuickMenu.register(hrNoSlotProfilesMenu);
-hrWaitlistMenu.register(hrWaitlistCityMenu);
-hrWaitlistCityMenu.register(hrWaitlistLocMenu);
-hrWaitlistLocMenu.register(hrWaitlistProfilesMenu);
-hrToolsMenu.register(hrBroadcastCitiesMenu);
-hrInboxMenu.register(hrInboxNewMenu);
-hrBroadcastCitiesMenu.register(hrBroadcastConfirmMenu);
-hrInboxMenu.register(hrInboxTattooMenu);
-hrInboxMenu.register(hrInboxMessagesMenu);
-hrInboxMenu.register(hrFinalStepMenu);
 hrFinalStepMenu.register(hrFinalStepNDAMenu);
 hrFinalStepMenu.register(hrFinalStepTestMenu);
 hrFinalStepMenu.register(hrFinalStepSetupMenu);

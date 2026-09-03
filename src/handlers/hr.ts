@@ -1,17 +1,15 @@
-import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
-import { Bot, Composer, InlineKeyboard, type NextFunction } from "grammy";
+import { Composer, InlineKeyboard, type NextFunction } from "grammy";
 import type { MyContext } from "../types/context.js";
-import { hrHubMenu } from "../menus/hr.js";
-import { interviewService } from "../services/interview-service.js";
-import { candidateRepository } from "../repositories/candidate-repository.js";
 import { hrService } from "../services/hr-service.js";
-import { createKyivDate } from "../utils/bot-utils.js";
 import { formatCandidateProfile } from "../utils/profile-formatter.js";
-import { CandidateStatus } from "@prisma/client";
 import logger from "../core/logger.js";
 import { readCallbackPayload } from "../utils/signed-callback.js";
 import { ScreenManager } from "../utils/screen-manager.js";
+
+// NOTE: The recruiter's own HR hub (Inbox, Calendar, Hiring Needs, Broadcast Tools,
+// Candidate Pools) was removed 2026-09-03 — the recruiter now works entirely in the
+// web app. What remains here serves the owner/admin "Final Step Pipeline" flow
+// (src/menus/hr.ts: hrFinalStepMenu and its candidate-detail submenus).
 
 export const hrHandlers = new Composer<MyContext>();
 
@@ -33,39 +31,11 @@ async function renderHrCandidateUnified(ctx: MyContext, candId: string) {
     await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
 }
 
-async function buildInterviewSlotsCreatedKeyboard() {
-    const stats = await hrService.getHubStats();
-    const kb = new InlineKeyboard();
-    if ((stats.noSlotCount || 0) > 0) {
-        kb.text(`🔔 Notify Needs Slot (${stats.noSlotCount})`, "hr_notify_waitlist").row();
-    }
-    kb.text(STAFF_TEXTS["hr-btn-back-to-calendar"], "hr_main_calendar");
-    return kb;
-}
-
-hrHandlers.callbackQuery(/^hr_view_candidate_(.+)$/, async (ctx) => {
-    const candId = ctx.match[1]!;
-    await ctx.answerCallbackQuery().catch(() => { });
-    ctx.session.viewingFromInbox = true; // Show 'Mark as Read' since this comes from notification
-    delete ctx.session.selectedSlotId;
-    await renderHrCandidateUnified(ctx, candId);
-});
-
 hrHandlers.callbackQuery(/^hr_back_candidate_(.+)$/, async (ctx) => {
     const candId = ctx.match[1]!;
     await ctx.answerCallbackQuery().catch(() => { });
     delete ctx.session.selectedSlotId;
     await renderHrCandidateUnified(ctx, candId);
-});
-
-hrHandlers.callbackQuery("hr_main_calendar", async (ctx) => {
-    try {
-        await ctx.answerCallbackQuery().catch(() => { });
-        const { ScreenManager } = await import("../utils/screen-manager.js");
-        await ScreenManager.renderScreen(ctx, "🗓️ <b>Interview Calendar</b>\n\nSelect a date to manage slots: 👇", "hr-dashboard-dates", { pushToStack: true });
-    } catch (e) {
-        logger.error({ err: e }, "Failed to navigate to hr_main_calendar");
-    }
 });
 
 hrHandlers.callbackQuery("nav_final_step_pipeline", async (ctx) => {
@@ -101,22 +71,8 @@ hrHandlers.on("callback_query:data", async (ctx, next) => {
     );
 });
 
-hrHandlers.command("hr", async (ctx) => {
-    const { getUserAdminRole } = await import("../middleware/role-check.js");
-    const { hasAnyRole } = await import("../config/roles.js");
-    const role = await getUserAdminRole(BigInt(ctx.from!.id));
-
-    if (!hasAnyRole(role, 'SUPER_ADMIN', 'CO_FOUNDER', 'HR_LEAD')) {
-        return ctx.reply("❌ No access rights.");
-    }
-
-    const { hrService } = await import("../services/hr-service.js");
-    const { ScreenManager } = await import("../utils/screen-manager.js");
-    const text = await hrService.getHubText();
-    await ScreenManager.renderScreen(ctx, text, "hr-hub-menu", { pushToStack: true, forceNew: true });
-});
-
-// Handle text input for HR
+// Handle text input for HR/mentor replies to candidates (still used from the
+// Final Step Pipeline candidate detail view's "Message" button).
 hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
     const step = ctx.session.step || "";
     const text = ctx.msg?.text;
@@ -172,8 +128,7 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
             if (cand) {
                 successKb.text("👤 Back to Profile", `hr_back_candidate_${cand.id}`).row();
             }
-            successKb.text("🗓 Calendar", "hr_main_calendar");
-            await ScreenManager.renderScreen(ctx, `✅ Message sent to ${name}! 🕊️`, successKb);
+            await ScreenManager.renderScreen(ctx, `✅ Message sent to ${name}! 🕊️`, successKb.inline_keyboard.length > 0 ? successKb : undefined);
             ctx.session.step = "idle";
         } catch (e: any) {
             if (e.description?.includes("forbidden") || e.description?.includes("blocked") || e.error_code === 403) {
@@ -191,136 +146,5 @@ hrHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) => {
         return;
     }
 
-    if (step === "add_hr_time_unified") {
-        const rangeRegex = /^(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/;
-        const singleRegex = /^(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})$/;
-
-        const rangeMatch = text.match(rangeRegex);
-        const singleMatch = text.match(singleRegex);
-        const currentYear = new Date().getFullYear();
-
-        if (rangeMatch) {
-            const day = parseInt(rangeMatch[1]!);
-            const month = parseInt(rangeMatch[2]!);
-            const startH = parseInt(rangeMatch[3]!);
-            const startM = parseInt(rangeMatch[4]!);
-            const endH = parseInt(rangeMatch[5]!);
-            const endM = parseInt(rangeMatch[6]!);
-
-            const start = createKyivDate(currentYear, month - 1, day, startH, startM);
-            const end = createKyivDate(currentYear, month - 1, day, endH, endM);
-
-            if (start < new Date()) return ctx.reply(STAFF_TEXTS["hr-error-past-time"]);
-            if (end <= start) return ctx.reply(STAFF_TEXTS["hr-error-end-before-start"]);
-
-            try {
-                // Now using 20 minutes as default from InterviewService update
-                const { createdCount } = await interviewService.createSessionWithSlots(start, end);
-                const kb = await buildInterviewSlotsCreatedKeyboard();
-                await ctx.reply(STAFF_TEXTS["hr-success-created-slots"]({ count: createdCount, date: start.toLocaleDateString('uk-UA') }), { reply_markup: kb });
-                ctx.session.step = "idle";
-            } catch (e: any) {
-                await ctx.reply(STAFF_TEXTS["hr-error-generic"]({ error: e.message }));
-            }
-            return;
-        }
-
-        if (singleMatch) {
-            const day = parseInt(singleMatch[1]!);
-            const month = parseInt(singleMatch[2]!);
-            const startH = parseInt(singleMatch[3]!);
-            const startM = parseInt(singleMatch[4]!);
-            const start = createKyivDate(currentYear, month - 1, day, startH, startM);
-
-            if (start < new Date()) return ctx.reply(STAFF_TEXTS["hr-error-past-time"]);
-
-            try {
-                await interviewService.createSingleSlot(start);
-                const kb = await buildInterviewSlotsCreatedKeyboard();
-                await ctx.reply(`✅ Slot for ${start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })} created and added to calendar!`, { reply_markup: kb });
-                ctx.session.step = "idle";
-            } catch (e: any) {
-                await ctx.reply(STAFF_TEXTS["hr-error-generic"]({ error: e.message }));
-            }
-            return;
-        }
-    }
-
-    if (step === "hr_assign_manual_slot") {
-        const candId = ctx.session.candidateData?.id;
-        if (!candId) {
-            await ctx.reply("❌ Error: Candidate not selected.");
-            ctx.session.step = "idle";
-            return;
-        }
-
-        const regex = /^(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})$/;
-        const match = text.match(regex);
-        if (match) {
-            const day = parseInt(match[1]!);
-            const month = parseInt(match[2]!);
-            const hour = parseInt(match[3]!);
-            const min = parseInt(match[4]!);
-            const start = createKyivDate(new Date().getFullYear(), month - 1, day, hour, min);
-
-            try {
-                const dbSlot = await interviewService.createSingleSlot(start);
-                await interviewService.bookSlot(dbSlot.id, candId);
-                await candidateRepository.update(candId, {
-                    status: CandidateStatus.INTERVIEW_SCHEDULED,
-                    interviewSlot: { connect: { id: dbSlot.id } }
-                });
-
-                const cand = await candidateRepository.findById(candId);
-                if (cand) {
-                    await ctx.api.sendMessage(Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["hr-manual-interview-assigned"](start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })),
-                        { parse_mode: "HTML" }
-                    );
-                }
-
-                await ctx.reply(`✅ Interview scheduled for ${start.toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' })}! Calendar updated.`);
-                ctx.session.step = "idle";
-            } catch (e: any) {
-                await ctx.reply(`❌ Error: ${e.message}`);
-            }
-            return;
-        }
-    }
     await next();
-});
-
-// --- NOTIFY CANDIDATES WHO NEED INTERVIEW SLOTS ---
-hrHandlers.callbackQuery("hr_notify_waitlist", async (ctx) => {
-    await ctx.answerCallbackQuery("Sending slot invites...").catch(() => { });
-    try {
-        const count = await hrService.notifyWaitlist(ctx.api);
-        await ctx.reply(`✅ Sent interview slot invite(s): ${count}`);
-    } catch (e) {
-        logger.error({ err: e }, "Failed to notify candidates who need interview slots");
-        await ctx.reply("❌ Failed to send slot invites.");
-    }
-});
-
-// --- INDIVIDUAL INVITATION ---
-hrHandlers.callbackQuery(/^invite_candidate_(.+)$/, async (ctx) => {
-    const candId = ctx.match![1]!;
-    const { hrService } = await import("../services/hr-service.js");
-    try {
-        const result = await hrService.inviteCandidate(ctx.api, candId);
-        if (result.ok) {
-            await ctx.answerCallbackQuery(`✅ Invitation sent!`).catch(() => { });
-        } else if (result.reason === "bot_blocked") {
-            await ctx.answerCallbackQuery("Candidate blocked the bot.").catch(() => { });
-        } else if (result.reason === "age_ineligible") {
-            await ctx.answerCallbackQuery("Candidate no longer meets age requirements.").catch(() => { });
-        } else if (result.reason === "gender_ineligible") {
-            await ctx.answerCallbackQuery("Candidate does not meet gender requirements.").catch(() => { });
-        } else {
-            await ctx.answerCallbackQuery("Invite failed.").catch(() => { });
-        }
-    } catch (e) {
-        logger.error({ err: e }, "Failed to send individual invitation");
-        await ctx.answerCallbackQuery("Send error ❌").catch(() => { });
-    }
 });

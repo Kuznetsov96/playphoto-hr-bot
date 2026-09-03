@@ -28,7 +28,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
         adminHiringNeedCitiesMenu, adminHiringNeedLocationsMenu
     } = await import("./recruitment.js");
 
-    const { hrFinalStepMenu } = await import("../../menus/hr.js");
+    const { hrFinalStepMenu, hrCandidateUnifiedMenu, hrChangeLocationUnifiedMenu, hrStagingConfirmMenu } = await import("../../menus/hr.js");
 
     const { 
         adminBroadcastHubMenu, adminBroadcastListMenu, adminBroadcastArchiveMenu, adminBroadcastManageMenu 
@@ -77,7 +77,10 @@ export async function registerAdminMenusHierarchy(bot: any) {
     bot.use(adminHiringNeedCitiesMenu);
     bot.use(adminHiringNeedLocationsMenu);
     bot.use(hrFinalStepMenu);
-    
+    bot.use(hrCandidateUnifiedMenu);
+    bot.use(hrChangeLocationUnifiedMenu);
+    bot.use(hrStagingConfirmMenu);
+
     bot.use(adminBroadcastHubMenu);
     bot.use(adminBroadcastListMenu);
     bot.use(adminBroadcastArchiveMenu);
@@ -157,7 +160,10 @@ export async function registerAdminMenusHierarchy(bot: any) {
     adminHiringNeedsMenu.register(adminHiringNeedCitiesMenu);
     adminHiringNeedCitiesMenu.register(adminHiringNeedLocationsMenu);
     recruitmentOpsMenu.register(hrFinalStepMenu);
-    
+    // hrCandidateUnifiedMenu already registers its own children
+    // (hrChangeLocationUnifiedMenu, hrStagingConfirmMenu) inside menus/hr.ts.
+    hrFinalStepMenu.register(hrCandidateUnifiedMenu);
+
     adminMenu.register(adminFinanceMenu);
     adminFinanceMenu.register(adminDdsSyncMenu);
     adminFinanceMenu.register(adminStatementFopMenu);
