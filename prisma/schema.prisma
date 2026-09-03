@@ -126,6 +126,10 @@ model Candidate {
   stagingNotifiedAt       DateTime?
   interviewInvitedAt      DateTime?
   interviewWaitlistReason String?
+  // Момент, когда кандидатка нажала "start_scheduling" и активных слотов не
+  // нашлось вообще (не "не подошёл день" — тот случай в interviewWaitlistReason).
+  // Зеркалится в вебапп полем noSlotsAt; очищается при успешной броне слота.
+  noSlotsAt               DateTime?
   materialsSent           Boolean         @default(false)
   materialsSentAt         DateTime?
   candidateDecision       String?

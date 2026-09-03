@@ -2,7 +2,7 @@ import type { MyContext } from "../../../types/context.js";
 import { formatLocation } from "../../../utils/location-label.js";
 import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { CANDIDATE_TEXTS } from "../../../constants/candidate-texts.js";
-import { InlineKeyboard, Composer } from "grammy";
+import { Composer } from "grammy";
 import { z } from "zod";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import logger from "../../../core/logger.js";
@@ -608,29 +608,6 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
             currentStep: "INITIAL_TEST"
         }
     }, "Candidate screening finalized");
-
-    // Notify HR if needed
-    if (status === CandidateStatus.MANUAL_REVIEW || status === CandidateStatus.WAITLIST_HR) {
-        try {
-            const { HR_IDS } = await import("../../../config.js");
-            if (HR_IDS && HR_IDS.length > 0) {
-                const name = fullName || ctx.from?.first_name || "Candidate";
-                const username = ctx.from?.username ? `@${ctx.from.username}` : "No username";
-                const alertMsg = `⚠️ <b>INBOX: New ${status === CandidateStatus.MANUAL_REVIEW ? 'Manual Review' : 'Waitlist'}</b>\n\n👤 Candidate: <b>${name}</b>\n🏙️ City: <b>${city}</b>\n📱 Username: ${username}\n\n<i>Reason: ${status === CandidateStatus.MANUAL_REVIEW ? 'Tattoo review' : 'Team is full'}</i>`;
-                const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_new_${ctx.from?.id}`);
-
-                for (const hrId of HR_IDS) {
-                    try {
-                        if (status === CandidateStatus.MANUAL_REVIEW && finalTattooId) {
-                            await ctx.api.sendPhoto(hrId, finalTattooId, { caption: alertMsg, parse_mode: "HTML", reply_markup: kb });
-                        } else {
-                            await ctx.api.sendMessage(hrId, alertMsg, { parse_mode: "HTML", reply_markup: kb });
-                        }
-                    } catch (e) { }
-                }
-            }
-        } catch (e) { }
-    }
 
     ctx.session.step = "idle";
     const finalKey = status === CandidateStatus.REJECTED && hrDecision === "AGE_LIMIT" ? "candidate-reject-age-limit" :

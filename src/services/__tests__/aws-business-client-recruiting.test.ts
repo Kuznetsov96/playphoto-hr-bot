@@ -40,6 +40,7 @@ describe("AwsBusinessClient.pushRecruitingCandidate", () => {
         lastActivityAt: "2026-08-21T09:30:00.000Z",
         botCreatedAt: "2026-08-01T08:00:00.000Z",
         tattooPhotoFileId: null,
+        noSlotsAt: null,
     };
 
     it("POSTs the snapshot to /recruiting/candidates with bearer auth and parses the ack", async () => {

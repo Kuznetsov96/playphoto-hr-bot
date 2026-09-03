@@ -119,7 +119,10 @@ export class BookingService {
             await candidateRepository.update(candidate.id, {
                 googleMeetLink: googleEvent.meetLink || null,
                 interviewSlot: { connect: { id: updatedSlot.id } },
-                interviewWaitlistReason: null
+                interviewWaitlistReason: null,
+                // Успешная бронь закрывает "нема вільних слотів" — веб-инбокс
+                // не должен продолжать показывать устаревший сигнал.
+                noSlotsAt: null
             }, tx);
 
             // Update slot with event ID if needed

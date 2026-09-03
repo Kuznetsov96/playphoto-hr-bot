@@ -176,6 +176,29 @@ describe('BookingService', () => {
             expect(googleCalendar.createInterviewEvent).toHaveBeenCalled();
             expect(result.googleEvent.meetLink).toBe('http://meet');
         });
+
+        it('clears noSlotsAt on successful booking — the web inbox stops showing the stale signal', async () => {
+            const startTime = new Date();
+            const endTime = new Date();
+            const txMock = {};
+
+            vi.mocked(prisma.$transaction).mockImplementationOnce(async (cb: any) => cb(txMock));
+            vi.mocked(interviewRepository.findSlotById).mockResolvedValue({ id: 'slot1', isBooked: false } as any);
+            vi.mocked(candidateRepository.findByTelegramId).mockResolvedValue({ id: 'cand1', FullName: 'Ivanov' } as any);
+            vi.mocked(interviewRepository.updateSlot).mockResolvedValue({
+                id: 'slot1',
+                startTime,
+                endTime,
+                candidate: { fullName: 'Ivanov' }
+            } as any);
+            vi.mocked(googleCalendar.createInterviewEvent).mockResolvedValue({ meetLink: 'http://meet' } as any);
+
+            await bookingService.bookInterviewSlot(12345, 'slot1', 'user');
+
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', expect.objectContaining({
+                noSlotsAt: null,
+            }), txMock);
+        });
     });
 
     describe('bookTrainingSlot', () => {

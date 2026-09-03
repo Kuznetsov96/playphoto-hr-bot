@@ -12,10 +12,6 @@ vi.mock("../../repositories/candidate-repository.js", () => ({
     }
 }));
 
-vi.mock("../../config.js", () => ({
-    HR_IDS: [111],
-}));
-
 vi.mock("../../core/logger.js", () => ({
     default: {
         info: vi.fn(),
@@ -28,7 +24,7 @@ describe("handleBlockedCandidate", () => {
         sendMessage.mockResolvedValue(undefined);
     });
 
-    it("archives candidate as blocker and notifies HR", async () => {
+    it("archives candidate as blocker without sending a Telegram alert — HR sees it in the web inbox", async () => {
         findById.mockResolvedValue({
             id: "cand-1",
             status: CandidateStatus.SCREENING,
@@ -40,11 +36,7 @@ describe("handleBlockedCandidate", () => {
         await handleBlockedCandidate({ sendMessage } as any, "cand-1", "Jane Doe");
 
         expect(archiveBlockedCandidate).toHaveBeenCalledWith("cand-1", BLOCKED_CANDIDATE_DECISION);
-        expect(sendMessage).toHaveBeenCalledWith(
-            111,
-            expect.stringContaining("BLOCKER"),
-            { parse_mode: "HTML" }
-        );
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 
     it("does not reprocess candidate already archived with botBlockedAt", async () => {

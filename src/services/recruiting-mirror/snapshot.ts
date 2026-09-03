@@ -31,6 +31,7 @@ export interface MirrorCandidateRow {
     };
     location?: { canonicalCode?: string | null } | null;
     interviewSlot?: { startTime?: Date | string | null } | null;
+    noSlotsAt?: Date | string | null;
 }
 
 /** Дата-время → строгая ISO-строка; всё невалидное → null. */
@@ -97,5 +98,6 @@ export function buildCandidateMirrorSnapshot(candidate: MirrorCandidateRow): Rec
         lastActivityAt: toIsoDateTime(candidate.pipelineTouchedAt),
         botCreatedAt: toIsoDateTime(candidate.user.createdAt),
         tattooPhotoFileId: candidate.tattooPhotoId ?? null,
+        noSlotsAt: toIsoDateTime(candidate.noSlotsAt),
     };
 }

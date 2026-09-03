@@ -193,7 +193,7 @@ describe('hrService', () => {
             sendMessage: vi.fn().mockResolvedValue({})
         };
 
-        it('cancels candidate staging, clears assignment, and notifies partner and HR', async () => {
+        it('cancels candidate staging, clears assignment, and notifies the partner (HR sees it in the web inbox)', async () => {
             vi.mocked(candidateRepository.findById).mockResolvedValue({
                 id: 'cand1',
                 fullName: 'Аліна Шульська',
@@ -223,10 +223,12 @@ describe('hrService', () => {
                 expect.stringContaining('Стажування скасовано'),
                 { parse_mode: 'HTML' }
             );
-            expect(mockApi.sendMessage).toHaveBeenCalledWith(
+            // HR больше не получает телеграм-уведомление про отмену стажування —
+            // сигнал уходит только в веб-инбокс через зеркало кандидата.
+            expect(mockApi.sendMessage).not.toHaveBeenCalledWith(
                 111111,
-                expect.stringContaining('Internship Cancelled!'),
-                { parse_mode: 'HTML' }
+                expect.anything(),
+                expect.anything()
             );
         });
 
