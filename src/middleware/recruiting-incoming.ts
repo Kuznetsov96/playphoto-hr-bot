@@ -9,6 +9,53 @@ import { getRichMessagePlainText } from "../utils/rich-message.js";
 /** API-контракт: `body` ограничен @MaxLength(4000), Telegram отдаёт до 4096. */
 const MAX_BODY_LENGTH = 4000;
 
+/**
+ * Шаги, на которых входящее ФОТО — не переписка, а документ или уже
+ * показанный на другом экране снимок. Зеркалировать их в тред рекрутёра
+ * нельзя: паспорт — это не корреспонденция, и onboarding-handler.ts уже
+ * применяет свою приватность-меру (await ctx.deleteMessage() сразу после
+ * получения) специально для того, чтобы файл нигде не задержался кроме
+ * файлового хранилища Telegram под id кандидатки. Зеркало обходило эту меру
+ * стороной — пушило file_id ДО того, как ctx.deleteMessage() в
+ * onboarding-handler.ts успевал сработать — и документ всё равно попадал в
+ * веб-карточку кандидатки, доступную роли RECRUITER.
+ *
+ * Значения из ctx.session.candidateData.step (onboarding-handler.ts, STEPS):
+ * см. src/handlers/onboarding-handler.ts:266-268.
+ */
+const DOCUMENT_COLLECTION_CANDIDATE_STEPS: readonly string[] = [
+    "ONB_PASSPORT_FRONT", // паспорт/ID-картка, лицьова сторона
+    "ONB_PASSPORT_BACK",  // паспорт/ID-картка, зворотна сторона
+    "ONB_PASSPORT_ANNEX", // прописка (додаток до ID-картки) або скрін з Дії
+];
+
+/**
+ * Значение из ctx.session.step (modules/candidate/handlers/index.ts) — экран
+ * скрининга, где кандидатка присылает фото внешности/татуировки. Оно уже
+ * показывается рекрутёру на экране REVIEW по дизайну; зеркало не должно
+ * создавать для него ВТОРОЙ долгоживущий указатель (S3-кеш при первом
+ * просмотре) в отдельном треде.
+ * См. src/modules/candidate/handlers/index.ts:447-452.
+ */
+const DOCUMENT_COLLECTION_SESSION_STEPS: readonly string[] = [
+    "screening_appearance", // фото зовнішності/татуювання на скринінгу
+];
+
+/**
+ * true, если сейчас нельзя зеркалить фото — кандидатка на шаге сбора
+ * документов или на экране, чей снимок уже показан рекрутёру по дизайну.
+ * Не текстовые сообщения этим шагом никогда не гейтятся — риск только у фото.
+ */
+function isOnDocumentCollectionStep(ctx: MyContext): boolean {
+    const candidateStep = ctx.session?.candidateData?.step;
+    if (candidateStep && DOCUMENT_COLLECTION_CANDIDATE_STEPS.includes(candidateStep)) return true;
+
+    const sessionStep = ctx.session?.step;
+    if (sessionStep && DOCUMENT_COLLECTION_SESSION_STEPS.includes(sessionStep)) return true;
+
+    return false;
+}
+
 type MirrorAttachment = { fileId: string; kind: "PHOTO" | "VOICE" | "VIDEO" | "VIDEO_NOTE" };
 
 /**
@@ -68,6 +115,11 @@ function forwardCandidateMessage(ctx: MyContext): void {
     if (ctx.dbUser?.staffProfile?.isActive) return;
 
     const message = ctx.message as Record<string, any> | undefined;
+    // Приватность: фото на шаге сбора документов (паспорт/ID/прописка) или
+    // на экране скрининга с татуировкой — не зеркалим вообще. См.
+    // DOCUMENT_COLLECTION_*_STEPS выше и isOnDocumentCollectionStep.
+    if (Array.isArray(message?.photo) && message.photo.length > 0 && isOnDocumentCollectionStep(ctx)) return;
+
     const { attachment, label } = extractAttachment(message);
     const richText = getRichMessagePlainText(message?.rich_message);
     const caption = message?.text || message?.caption || richText || "";

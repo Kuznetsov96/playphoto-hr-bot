@@ -300,4 +300,71 @@ describe("recruitingIncomingMiddleware", () => {
         expect(payload.body).toHaveLength(4000);
         expect(payload.body).toBe(longText.slice(0, 4000));
     });
+
+    // Приватность: фото на шагах сбора документов и на экране скрининга
+    // с татуировкой не должно зеркалиться — см. DOCUMENT_COLLECTION_STEPS
+    // в recruiting-incoming.ts.
+    describe("документы и скрининг: фото на этих шагах не пушится", () => {
+        it("паспорт (перед): фото на ONB_PASSPORT_FRONT — без пуша", async () => {
+            const ctx = makeCtx({
+                message: { message_id: 70, date: 1_756_300_000, photo: [{ file_id: "passport-front-id" }] },
+                session: { candidateData: { step: "ONB_PASSPORT_FRONT" } },
+            });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn());
+            await flush();
+
+            expect(pushIncoming).not.toHaveBeenCalled();
+        });
+
+        it("паспорт (зворот): фото на ONB_PASSPORT_BACK — без пуша", async () => {
+            const ctx = makeCtx({
+                message: { message_id: 71, date: 1_756_300_000, photo: [{ file_id: "passport-back-id" }] },
+                session: { candidateData: { step: "ONB_PASSPORT_BACK" } },
+            });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn());
+            await flush();
+
+            expect(pushIncoming).not.toHaveBeenCalled();
+        });
+
+        it("прописка/Дія: фото на ONB_PASSPORT_ANNEX — без пуша", async () => {
+            const ctx = makeCtx({
+                message: { message_id: 72, date: 1_756_300_000, photo: [{ file_id: "annex-id" }] },
+                session: { candidateData: { step: "ONB_PASSPORT_ANNEX" } },
+            });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn());
+            await flush();
+
+            expect(pushIncoming).not.toHaveBeenCalled();
+        });
+
+        it("фото татуювання на screening_appearance — без пуша", async () => {
+            const ctx = makeCtx({
+                message: { message_id: 73, date: 1_756_300_000, photo: [{ file_id: "tattoo-id" }] },
+                session: { step: "screening_appearance", candidateData: {} },
+            });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn());
+            await flush();
+
+            expect(pushIncoming).not.toHaveBeenCalled();
+        });
+
+        it("звичайне фото поза кроками збору документів — усе ще пушиться", async () => {
+            const ctx = makeCtx({
+                message: { message_id: 74, date: 1_756_300_000, caption: "ось моє фото", photo: [{ file_id: "ordinary-id" }] },
+                session: { step: "idle", candidateData: { step: "ONB_FINAL" } },
+            });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn());
+            await flush();
+
+            expect(pushIncoming).toHaveBeenCalledWith(
+                expect.objectContaining({ attachment: { fileId: "ordinary-id", kind: "PHOTO" } }),
+            );
+        });
+    });
 });
