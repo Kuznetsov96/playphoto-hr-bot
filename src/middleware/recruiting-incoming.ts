@@ -20,6 +20,17 @@ const MAX_BODY_LENGTH = 4000;
  * onboarding-handler.ts успевал сработать — и документ всё равно попадал в
  * веб-карточку кандидатки, доступную роли RECRUITER.
  *
+ * ВАЖНО ПРО ДОСТИЖИМОСТЬ (проверено 04.09.2026): в текущей воронке эти шаги
+ * НЕ достигаются. Путь кандидатки в боте заканчивается решением после
+ * собеседования, а единственное место, выставляющее ONB_PASSPORT_*, — это
+ * dev-команда /set_step (handlers/commands.ts:661) за флагом
+ * ALLOW_DEV_COMMANDS (по умолчанию false) и только для админов/кофаундеров.
+ * То есть список ниже — не заплатка действующей утечки, а предохранитель:
+ * онбординг в боте живой код, и если его когда-нибудь снова подключат к
+ * воронке, зеркало не должно молча начать выкладывать паспорта в веб-карточку.
+ * Стоит он дёшево (сравнение строки), а восстанавливать его задним числом
+ * пришлось бы уже после утечки.
+ *
  * Значения из ctx.session.candidateData.step (onboarding-handler.ts, STEPS):
  * см. src/handlers/onboarding-handler.ts:266-268.
  */
@@ -129,7 +140,6 @@ function forwardCandidateMessage(ctx: MyContext): void {
     // Активный сотрудник пишет боту как сотрудник — это не переписка
     // рекрутёр ↔ кандидатка, даже если Candidate-строка сохранилась.
     if (ctx.dbUser?.staffProfile?.isActive) return;
-    if (!shouldMirrorCandidateText(text, ctx.session?.step)) return;
 
     const message = ctx.message as Record<string, any> | undefined;
     // Приватность: фото на шаге сбора документов (паспорт/ID/прописка) или
@@ -143,6 +153,14 @@ function forwardCandidateMessage(ctx: MyContext): void {
     const rawBody = label && caption ? `${label}: ${caption}` : label || caption;
     // Ни текста, ни медиа — зеркалить нечего.
     if (!rawBody) return;
+
+    // Служебный ввод — не переписка (команды, ответы анкеты). Проверяется по
+    // ТЕКСТУ, а не по вложению: подпись под фото — такое же сообщение человеку,
+    // и медиа с ней зеркалить надо. Поэтому фильтр стоит здесь, после сборки
+    // caption, а не в начале функции: до слияния он читал ctx.message.text,
+    // которого у медиа с подписью просто нет.
+    if (!shouldMirrorCandidateText(caption, ctx.session?.step)) return;
+
     const body = rawBody.slice(0, MAX_BODY_LENGTH);
 
     const telegramId = ctx.from.id;
