@@ -44,7 +44,7 @@ const openingHoursSchema = z.object({
     closes: z.string().regex(/^\d{2}:\d{2}$/u),
 }).strict();
 
-const locationSchema = z.object({
+export const locationSchema = z.object({
     publicId: z.string().uuid(),
     canonicalCode: z.string().min(1),
     name: z.string().min(1),
@@ -65,6 +65,17 @@ const locationSchema = z.object({
      * and the display layer already falls back to the legacy text schedule.
      */
     openingHours: z.array(openingHoursSchema).optional().default([]),
+    /**
+     * Скрывает локацию из анкеты кандидатки. Рычаг владельца: он живёт в
+     * карточке локации вебаппа, бот только исполняет решение.
+     *
+     * Отдельно от «сколько людей нужно»: укомплектованную локацию можно
+     * продолжать показывать, чтобы копить пул, а недоукомплектованную —
+     * скрыть. Optional по той же причине, что branch и openingHours: бот
+     * выкатывается раньше бэкенда, а схема снимка .strict(), и обязательное
+     * поле уронило бы валидацию всего снимка вместе с синком расписания.
+     */
+    isHiddenFromCandidates: z.boolean().optional().default(false),
 }).strict();
 
 const assignmentSchema = z.object({

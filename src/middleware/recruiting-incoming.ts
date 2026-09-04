@@ -106,6 +106,22 @@ export const recruitingIncomingMiddleware: MiddlewareFn<MyContext> = async (ctx,
     await next();
 };
 
+/**
+ * Является ли текст перепиской с рекрутёром.
+ *
+ * Мидлварь стоит в цепочке РАНЬШЕ перехвата /start (core/bot.ts) и раньше
+ * обработчиков анкеты, поэтому отсечь служебный ввод можно только здесь —
+ * ниже по цепочке сообщение уже не наше. Отсекаем два класса:
+ *  - команды: это обращение к боту, а не к человеку;
+ *  - любой ввод во время анкеты: имя, дата рождения, город, «+» — ответы на
+ *    вопросы бота, и рекрутёру они приходили как отдельные сообщения.
+ */
+export function shouldMirrorCandidateText(text: string, step: string | undefined): boolean {
+    if (text.startsWith("/")) return false;
+    if (step?.startsWith("screening_")) return false;
+    return true;
+}
+
 function forwardCandidateMessage(ctx: MyContext): void {
     if (!AWS_RECRUITING_COMMANDS_ENABLED) return;
     if (ctx.chat?.type !== "private") return;
@@ -113,6 +129,7 @@ function forwardCandidateMessage(ctx: MyContext): void {
     // Активный сотрудник пишет боту как сотрудник — это не переписка
     // рекрутёр ↔ кандидатка, даже если Candidate-строка сохранилась.
     if (ctx.dbUser?.staffProfile?.isActive) return;
+    if (!shouldMirrorCandidateText(text, ctx.session?.step)) return;
 
     const message = ctx.message as Record<string, any> | undefined;
     // Приватность: фото на шаге сбора документов (паспорт/ID/прописка) или

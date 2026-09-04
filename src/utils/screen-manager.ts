@@ -185,20 +185,11 @@ export class ScreenManager {
             if (fallbackMenuOrId) {
                 await navigateTo(fallbackMenuOrId, fallbackText);
             } else {
-                // Determine module context for better fallback
-                const isHR = ctx.session.step?.startsWith('hr_') || ctx.session.candidateData;
-                if (isHR) {
-                    try {
-                        const { hrService } = await import("../services/hr-service.js");
-                        const text = await hrService.getHubText();
-                        await navigateTo('hr-hub-menu', text);
-                    } catch (e) {
-                        await navigateTo('admin-main', "🤖 <b>PlayPhoto Admin</b>");
-                    }
-                } else {
-                    // Absolute fallback to main admin menu
-                    await navigateTo('admin-main', "🤖 <b>PlayPhoto Admin</b>");
-                }
+                // Absolute fallback to main admin menu. (The recruiter's own HR hub
+                // was removed 2026-09-03; candidate-detail screens like
+                // hr-candidate-unified are now reached only from the admin tree,
+                // so admin-main is the correct fallback for them too.)
+                await navigateTo('admin-main', "🤖 <b>PlayPhoto Admin</b>");
             }
             return;
         }

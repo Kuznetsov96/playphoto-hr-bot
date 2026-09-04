@@ -368,3 +368,58 @@ describe("recruitingIncomingMiddleware", () => {
         });
     });
 });
+
+/**
+ * «Входящие» рекрутёра — это переписка, а не след работы с ботом. Мидлварь
+ * стоит в цепочке РАНЬШЕ перехвата /start и обработчиков анкеты, поэтому
+ * отсекать команды и ответы анкеты приходится здесь: ниже по цепочке уже
+ * некому. До 03.09.2026 фильтра не было вовсе, и каждая дата рождения,
+ * выбранный город и «+» попадали рекрутёру как отдельное сообщение.
+ */
+describe("recruitingIncomingMiddleware: что НЕ является перепиской", () => {
+    it("не зеркалит команды", async () => {
+        for (const text of ["/start", "/reset_me", "/help"]) {
+            vi.clearAllMocks();
+            const ctx = makeCtx({ message: { message_id: 55, date: 1_756_300_000, text } });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn().mockResolvedValue(undefined));
+            await flush();
+
+            expect(pushIncoming, `команда ${text} не должна уходить рекрутёру`).not.toHaveBeenCalled();
+        }
+    });
+
+    it("не зеркалит ответы, пока кандидатка заполняет анкету", async () => {
+        const steps = ["screening_name", "screening_birthdate", "screening_other_city", "screening_appearance"];
+        for (const step of steps) {
+            vi.clearAllMocks();
+            const ctx = makeCtx({
+                session: { step },
+                message: { message_id: 55, date: 1_756_300_000, text: "23.03.2009" },
+            });
+
+            await recruitingIncomingMiddleware(ctx as never, vi.fn().mockResolvedValue(undefined));
+            await flush();
+
+            expect(pushIncoming, `шаг ${step} не должен уходить рекрутёру`).not.toHaveBeenCalled();
+        }
+    });
+
+    it("зеркалит обычное сообщение вне анкеты", async () => {
+        const ctx = makeCtx({ session: { step: "idle" } });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn().mockResolvedValue(undefined));
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalled();
+    });
+
+    it("зеркалит сообщение, когда шага нет вовсе", async () => {
+        const ctx = makeCtx({ session: {} });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn().mockResolvedValue(undefined));
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalled();
+    });
+});

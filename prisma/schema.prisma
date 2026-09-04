@@ -148,6 +148,9 @@ model Candidate {
   ndaConfirmedAt          DateTime?
   ndaSentAt               DateTime?
   ndaReminderSentAt       DateTime?
+  /// Когда отправлено напоминание о брошенной анкете. Держит его однократным:
+  /// вокер крутится каждые 5 минут, и временного окна для этого мало.
+  screeningReminderSentAt DateTime?
   mentorReminderSent      Boolean         @default(false)
   mentorReminderSentAt    DateTime?
   mentorManualContactedAt DateTime?

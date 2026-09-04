@@ -1,7 +1,6 @@
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { ADMIN_IDS, MENTOR_IDS, CO_FOUNDER_IDS, ALLOW_DEV_COMMANDS } from "../config.js";
-import { hrHubMenu } from "../menus/hr.js";
 import { mentorHubMenu } from "../menus/mentor.js";
 import { adminMenu } from "./admin/index.js";
 import { cleanupMessages, trackMessage } from "../utils/cleanup.js";
@@ -36,9 +35,11 @@ async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaite
     }
 
     if (adminRole === 'HR_LEAD') {
-        const { hrService } = await import("../services/hr-service.js");
-        const text = await hrService.getHubText();
-        await ScreenManager.renderScreen(ctx, text, "hr-hub-menu", { forceNew: true });
+        // The recruiter's own HR hub was removed 2026-09-03 — recruiting now happens
+        // in the web app. HR_LEAD still has admin-shell access (search, etc.) via
+        // the HR_MENU permission, so land there instead of a dead menu.
+        const text = await staffService.getAdminHeader(adminRole as any);
+        await ScreenManager.renderScreen(ctx, text, "admin-main", { forceNew: true });
         return;
     }
 
@@ -213,16 +214,12 @@ commandHandlers.command("start", async (ctx) => {
                 });
                 await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
 
-                if (userAdminRole === 'SUPER_ADMIN' || userAdminRole === 'CO_FOUNDER' || userAdminRole === 'SUPPORT') {
+                if (userAdminRole === 'SUPER_ADMIN' || userAdminRole === 'CO_FOUNDER' || userAdminRole === 'SUPPORT' || userAdminRole === 'HR_LEAD') {
+                    // HR_LEAD: the recruiter's own HR hub was removed 2026-09-03 —
+                    // recruiting now happens in the web app. HR_LEAD still has
+                    // admin-shell access (search, etc.) via the HR_MENU permission.
                     const text = await staffService.getAdminHeader(userAdminRole as any);
                     await ScreenManager.renderScreen(ctx, text, "admin-main", { forceNew: true, pushToStack: true });
-                    return;
-                }
-
-                if (userAdminRole === 'HR_LEAD') {
-                    const { hrService } = await import("../services/hr-service.js");
-                    const text = await hrService.getHubText();
-                    await ScreenManager.renderScreen(ctx, text, "hr-hub-menu", true);
                     return;
                 }
 
@@ -397,17 +394,6 @@ commandHandlers.command("start", async (ctx) => {
     if (shouldEnterScreening) {
         await startScreening(ctx);
     }
-});
-
-commandHandlers.command("hr", requireRole('SUPER_ADMIN', 'HR_LEAD'), async (ctx) => {
-    if (ctx.chat?.type !== "private") return;
-    try { await ctx.deleteMessage(); } catch (e) { }
-    const userAdminRole = await getUserAdminRole(BigInt(ctx.from!.id));
-    await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
-
-    const { hrService } = await import("../services/hr-service.js");
-    const text = await hrService.getHubText();
-    await ScreenManager.renderScreen(ctx, text, "hr-hub-menu", { forceNew: true, pushToStack: true });
 });
 
 commandHandlers.command("ping_admin", async (ctx) => {

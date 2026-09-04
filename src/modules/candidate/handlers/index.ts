@@ -74,6 +74,24 @@ export const CandidateSchema = z.object({
         .refine(date => date > new Date(1950, 0, 1) && date <= new Date(), "Введіть реальну дату народження"),
 });
 
+/**
+ * Статус кандидатки после скрининга.
+ *
+ * Ревью внешности НЕ вложено в ветку «есть место»: пригодность человека не
+ * зависит от того, открыта ли сейчас вакансия. Раньше проверка стояла под
+ * `status === SCREENING`, и кандидатка с фото тату на укомплектованной
+ * локации уходила в WAITLIST_HR — её фото не видел никто. На 03.09.2026 в
+ * проде так осело 16 анкет при трёх реально стоящих на ревью.
+ */
+export function resolveScreeningStatus(input: {
+    hasVacancy: boolean;
+    appearance: string;
+}): "SCREENING" | "WAITLIST_HR" | "MANUAL_REVIEW" {
+    const needsReview = input.appearance.includes("[Фото]") || input.appearance !== "Без особливостей";
+    if (needsReview) return "MANUAL_REVIEW";
+    return input.hasVacancy ? "SCREENING" : "WAITLIST_HR";
+}
+
 export function shouldDeferCandidateAtBirthDate(birthDate: Date | string): boolean {
     return getCandidateAge(birthDate) < MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
 }
@@ -529,16 +547,17 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
         const availableLoc = ageEligibleLocs.find((l: any) => l.neededCount > 0);
         if (availableLoc) {
             finalLocationId = availableLoc.id;
-            status = CandidateStatus.SCREENING;
-        } else {
-            if (ageEligibleLocs.length > 0 && ageEligibleLocs[0]) finalLocationId = ageEligibleLocs[0].id;
-            status = CandidateStatus.WAITLIST_HR;
-            isWaitlisted = true;
+        } else if (ageEligibleLocs.length > 0 && ageEligibleLocs[0]) {
+            finalLocationId = ageEligibleLocs[0].id;
         }
 
-        if (status === CandidateStatus.SCREENING && (appearance.includes("[Фото]") || appearance !== "Без особливостей")) {
-            status = CandidateStatus.MANUAL_REVIEW;
-        }
+        status = resolveScreeningStatus({
+            hasVacancy: Boolean(availableLoc),
+            appearance,
+        }) as CandidateStatus;
+        // Очередь ожидания — это отсутствие места, а не отложенное решение по
+        // внешности: кандидатка на ревью в неё не попадает.
+        isWaitlisted = status === CandidateStatus.WAITLIST_HR;
     }
 
     const locNames = (await Promise.all((locationIds || []).map(async (id: string) => {
