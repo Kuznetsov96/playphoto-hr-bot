@@ -140,15 +140,6 @@ describe("recruitingIncomingMiddleware", () => {
         expect(pushIncoming).not.toHaveBeenCalled();
     });
 
-    it("не-текстовое сообщение (фото) — без пуша", async () => {
-        const ctx = makeCtx({ message: { message_id: 56, date: 1_756_300_000, photo: [{ file_id: "f1" }] } });
-
-        await recruitingIncomingMiddleware(ctx as never, vi.fn());
-        await flush();
-
-        expect(pushIncoming).not.toHaveBeenCalled();
-    });
-
     it("групповой чат — без пуша", async () => {
         const ctx = makeCtx({ chat: { type: "supergroup", id: -100123 } });
 
@@ -156,5 +147,157 @@ describe("recruitingIncomingMiddleware", () => {
         await flush();
 
         expect(pushIncoming).not.toHaveBeenCalled();
+    });
+
+    it("фото: пушит file_id, вид и подпись как текст", async () => {
+        const ctx = makeCtx({
+            message: {
+                message_id: 55,
+                date: 1_756_300_000,
+                caption: "ось моє фото",
+                photo: [
+                    { file_id: "small-id" },
+                    { file_id: "largest-id" },
+                ],
+            },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({
+                body: "📷 Фото: ось моє фото",
+                // Берётся ПОСЛЕДНИЙ элемент photo — это максимальный размер.
+                attachment: { fileId: "largest-id", kind: "PHOTO" },
+            }),
+        );
+    });
+
+    it("голосове без підпису: тіло не порожнє (інакше API відповість 400)", async () => {
+        const ctx = makeCtx({
+            message: { message_id: 56, date: 1_756_300_000, voice: { file_id: "voice-id" } },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({
+                body: "🎙 Голосове повідомлення",
+                attachment: { fileId: "voice-id", kind: "VOICE" },
+            }),
+        );
+    });
+
+    it("відеозаписка: kind VIDEO_NOTE", async () => {
+        const ctx = makeCtx({
+            message: { message_id: 57, date: 1_756_300_000, video_note: { file_id: "note-id" } },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({ attachment: { fileId: "note-id", kind: "VIDEO_NOTE" } }),
+        );
+    });
+
+    it("відео: kind VIDEO", async () => {
+        const ctx = makeCtx({
+            message: { message_id: 58, date: 1_756_300_000, video: { file_id: "video-id" } },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({ attachment: { fileId: "video-id", kind: "VIDEO" } }),
+        );
+    });
+
+    it("текстове повідомлення: без блоку attachment", async () => {
+        await recruitingIncomingMiddleware(makeCtx() as never, vi.fn());
+        await flush();
+
+        const payload = pushIncoming.mock.calls[0]?.[0];
+        expect(payload.attachment).toBeUndefined();
+    });
+
+    it("повідомлення без тексту й без медіа: пуша немає", async () => {
+        const ctx = makeCtx({ message: { message_id: 59, date: 1_756_300_000 } });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).not.toHaveBeenCalled();
+    });
+
+    it("порядок веток совпадает с getCandidateSupportPayload: photo побеждает video_note", async () => {
+        const ctx = makeCtx({
+            message: {
+                message_id: 60,
+                date: 1_756_300_000,
+                photo: [{ file_id: "photo-id" }],
+                video_note: { file_id: "note-id" },
+            },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({ attachment: { fileId: "photo-id", kind: "PHOTO" } }),
+        );
+    });
+
+    it("порядок веток совпадает с getCandidateSupportPayload: video_note побеждает voice", async () => {
+        const ctx = makeCtx({
+            message: {
+                message_id: 61,
+                date: 1_756_300_000,
+                video_note: { file_id: "note-id" },
+                voice: { file_id: "voice-id" },
+            },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({ attachment: { fileId: "note-id", kind: "VIDEO_NOTE" } }),
+        );
+    });
+
+    it("порядок веток совпадает с getCandidateSupportPayload: voice побеждает video", async () => {
+        const ctx = makeCtx({
+            message: {
+                message_id: 62,
+                date: 1_756_300_000,
+                voice: { file_id: "voice-id" },
+                video: { file_id: "video-id" },
+            },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledWith(
+            expect.objectContaining({ attachment: { fileId: "voice-id", kind: "VOICE" } }),
+        );
+    });
+
+    it("длинное тело обрезается до 4000 символов (API отвергает 4096 Telegram-лимитом)", async () => {
+        const longText = "а".repeat(4096);
+        const ctx = makeCtx({
+            message: { message_id: 63, date: 1_756_300_000, text: longText },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await flush();
+
+        const payload = pushIncoming.mock.calls[0]?.[0];
+        expect(payload.body).toHaveLength(4000);
+        expect(payload.body).toBe(longText.slice(0, 4000));
     });
 });

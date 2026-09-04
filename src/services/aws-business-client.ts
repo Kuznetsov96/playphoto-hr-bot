@@ -800,6 +800,7 @@ export class AwsBusinessClient {
         body: string;
         telegramMessageId?: string;
         sentAt?: string;
+        attachment?: { fileId: string; kind: "PHOTO" | "VOICE" | "VIDEO" | "VIDEO_NOTE" };
     }): Promise<void> {
         await this.request("/recruiting/messages/incoming", {
             method: "POST",
