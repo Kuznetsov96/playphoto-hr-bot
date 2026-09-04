@@ -8,9 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 let flagEnabled = true;
 
+let adminIds: number[] = [107794048];
+
 vi.mock("../../config.js", () => ({
     get AWS_RECRUITING_COMMANDS_ENABLED() {
         return flagEnabled;
+    },
+    get ADMIN_IDS() {
+        return adminIds;
     },
 }));
 
@@ -40,10 +45,16 @@ const { AwsBusinessApiError } = await import("../../services/aws-business-client
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** Чуть больше паузы ретрая в middleware — чтобы отложенный DM успел долететь. */
+const RETRY_DELAY_SETTLE_MS = 1_200;
+
+const sendMessage = vi.fn();
+
 const makeCtx = (overrides: Partial<Record<string, unknown>> = {}) => ({
     chat: { type: "private", id: 1164289764 },
-    from: { id: 1164289764, is_bot: false },
+    from: { id: 1164289764, is_bot: false, username: "kandydatka" },
     dbUser: null,
+    api: { sendMessage },
     message: {
         message_id: 55,
         date: 1_756_300_000,
@@ -421,5 +432,97 @@ describe("recruitingIncomingMiddleware: что НЕ является переп�
         await flush();
 
         expect(pushIncoming).toHaveBeenCalled();
+    });
+});
+
+/**
+ * Подстраховка после снятия HR-DM (04.09.2026). Вебапп стал единственным
+ * каналом для обращений кандидаток, поэтому провалившийся пуш означает
+ * ПОТЕРЯННОЕ обращение — кандидатка уверена, что написала, рекрутёр ничего не
+ * видит. Тревог на INCOMING_PUSH_FAILED нет, так что аварийный DM владельцу —
+ * единственное, что делает сбой заметным.
+ */
+describe("recruitingIncomingMiddleware: подстраховка при сбое зеркала", () => {
+    /**
+     * Пуш — fire-and-forget с паузой перед повтором, поэтому его DM может
+     * долететь уже ПОСЛЕ конца своего теста и попасть в счётчик следующего.
+     * Ждём тишины перед каждым тестом и только потом чистим моки — иначе
+     * тест видит чужой вызов и проверяет не то, что написано в его названии.
+     */
+    beforeEach(async () => {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_SETTLE_MS));
+        sendMessage.mockClear();
+        pushIncoming.mockClear();
+    });
+
+    const waitFor = async (assertion: () => void) => {
+        for (let i = 0; i < 40; i += 1) {
+            try {
+                assertion();
+                return;
+            } catch {
+                await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+        }
+        assertion();
+    };
+
+    it("временный сбой: повторяет пуш и НЕ беспокоит владельца", async () => {
+        pushIncoming.mockRejectedValueOnce(new AwsBusinessApiError(502, undefined, "HTTP 502"));
+        pushIncoming.mockResolvedValueOnce({ publicId: "msg-1" });
+
+        await recruitingIncomingMiddleware(makeCtx() as never, vi.fn());
+        await waitFor(() => expect(pushIncoming).toHaveBeenCalledTimes(2));
+
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("обе попытки провалились: шлёт владельцу полный текст обращения", async () => {
+        pushIncoming.mockRejectedValue(new AwsBusinessApiError(500, undefined, "HTTP 500"));
+
+        await recruitingIncomingMiddleware(makeCtx() as never, vi.fn());
+        await waitFor(() => expect(sendMessage).toHaveBeenCalled());
+
+        const [target, text] = sendMessage.mock.calls[0]!;
+        expect(target).toBe(107794048);
+        // Смысл DM — спасти обращение, а не уведомить о поломке: текст обязан
+        // быть внутри, иначе владельцу нечего ответить кандидатке.
+        expect(text).toContain("Доброго дня! Ще актуальна вакансія?");
+        expect(text).toContain("@kandydatka");
+    });
+
+    it("медиа: в аварийном DM видно, что было вложение", async () => {
+        pushIncoming.mockRejectedValue(new AwsBusinessApiError(500, undefined, "HTTP 500"));
+        const ctx = makeCtx({
+            message: { message_id: 90, date: 1_756_300_000, voice: { file_id: "voice-id" } },
+        });
+
+        await recruitingIncomingMiddleware(ctx as never, vi.fn());
+        await waitFor(() => expect(sendMessage).toHaveBeenCalled());
+
+        expect(sendMessage.mock.calls[0]![1]).toContain("VOICE");
+    });
+
+    it("кандидатки нет в зеркале: не повторяет и не пишет владельцу", async () => {
+        pushIncoming.mockRejectedValue(
+            new AwsBusinessApiError(404, "RECRUITING_CANDIDATE_NOT_FOUND", "HTTP 404"),
+        );
+
+        await recruitingIncomingMiddleware(makeCtx() as never, vi.fn());
+        await flush();
+
+        expect(pushIncoming).toHaveBeenCalledTimes(1);
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("владельца нет в ADMIN_IDS: молчит, а не падает", async () => {
+        adminIds = [];
+        pushIncoming.mockRejectedValue(new AwsBusinessApiError(500, undefined, "HTTP 500"));
+
+        await recruitingIncomingMiddleware(makeCtx() as never, vi.fn());
+        await flush();
+
+        expect(sendMessage).not.toHaveBeenCalled();
+        adminIds = [107794048];
     });
 });

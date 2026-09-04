@@ -5,9 +5,17 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { AwsBusinessApiError, awsBusinessClient } from "../services/aws-business-client.js";
 import { getRichMessagePlainText } from "../utils/rich-message.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 
 /** API-контракт: `body` ограничен @MaxLength(4000), Telegram отдаёт до 4096. */
 const MAX_BODY_LENGTH = 4000;
+
+/**
+ * Пауза перед повтором пуша. Секунда, а не мгновенно: типичная причина сбоя —
+ * перезапуск вебапа при деплое, когда прокси несколько секунд отдаёт 502.
+ * Мгновенный повтор попал бы в то же окно.
+ */
+const RETRY_DELAY_MS = 1_000;
 
 /**
  * Шаги, на которых входящее ФОТО — не переписка, а документ или уже
@@ -171,14 +179,25 @@ function forwardCandidateMessage(ctx: MyContext): void {
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (!candidate || candidate.status === "HIRED") return;
 
-        await awsBusinessClient.pushIncomingRecruitingMessage({
+        const payload = {
             telegramId: String(telegramId),
             body,
             ...(telegramMessageId === undefined ? {} : { telegramMessageId: String(telegramMessageId) }),
             ...(sentAtSeconds === undefined ? {} : { sentAt: new Date(sentAtSeconds * 1000).toISOString() }),
             ...(attachment === null ? {} : { attachment }),
-        });
-    })().catch((error) => {
+        };
+
+        try {
+            await awsBusinessClient.pushIncomingRecruitingMessage(payload);
+        } catch (first) {
+            // Кандидатки ещё нет в зеркале — не ошибка, повторять нечего.
+            if (first instanceof AwsBusinessApiError && first.code === "RECRUITING_CANDIDATE_NOT_FOUND") return;
+            // Одна повторная попытка: почти все сбои здесь — перезапуск вебапа
+            // при деплое (несколько секунд 502), и второй заход их проходит.
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+            await awsBusinessClient.pushIncomingRecruitingMessage(payload);
+        }
+    })().catch(async (error) => {
         if (error instanceof AwsBusinessApiError && error.code === "RECRUITING_CANDIDATE_NOT_FOUND") {
             return;
         }
@@ -194,5 +213,32 @@ function forwardCandidateMessage(ctx: MyContext): void {
             operation: "forwardCandidateMessage",
             error,
         });
+
+        // Последний рубеж. С 04.09.2026 обращения кандидаток на HR-стадиях не
+        // дублируются владельцу в Telegram (handlers/support.ts) — вебапп
+        // единственный канал. Значит провалившийся пуш означает потерянное
+        // обращение: кандидатка уверена, что написала, а рекрутёр ничего не
+        // видит. Лога для этого мало — тревог на INCOMING_PUSH_FAILED нет, и
+        // без этого DM сбой замечает только тот, кто сам полез в логи.
+        //
+        // Шлём ПОЛНЫЙ текст, а не «случился сбой»: смысл сообщения — спасти
+        // само обращение, а не уведомить о поломке. Ошибка доставки этого DM
+        // намеренно проглатывается: мы уже в catch, и падать здесь некуда.
+        try {
+            const { ADMIN_IDS } = await import("../config.js");
+            const target = ADMIN_IDS[0];
+            if (target === undefined) return;
+            const who = ctx.from?.username ? `@${ctx.from.username}` : `id ${telegramId}`;
+            await ctx.api.sendMessage(
+                Number(target),
+                `⚠️ <b>Зеркало не сработало — обращение НЕ дошло до вебапа</b>\n` +
+                `👤 ${escapeHtml(who)}\n` +
+                (attachment === null ? "" : `📎 Вложение: ${attachment.kind}\n`) +
+                `\n<b>Текст:</b> ${escapeHtml(body)}`,
+                { parse_mode: "HTML" },
+            );
+        } catch {
+            // Некуда эскалировать: запись о сбое уже в логе выше.
+        }
     });
 }

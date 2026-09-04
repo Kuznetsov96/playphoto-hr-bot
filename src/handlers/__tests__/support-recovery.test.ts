@@ -305,10 +305,22 @@ describe("candidate recovery support routing", () => {
         expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({ result: "failure" }));
     });
 
-    it("does not acknowledge direct HR delivery when both primary and fallback sends fail", async () => {
+    /**
+     * До 04.09.2026 HR-обращение уходило владельцу в Telegram, и этот тест
+     * стерёг честный ответ кандидатке, когда доставка проваливалась.
+     *
+     * Теперь DM для HR-стадий снят: вебапп — единственный канал, а зеркало
+     * (middleware/recruiting-incoming.ts) само повторяет пуш и шлёт владельцу
+     * аварийный DM, если и повтор не прошёл. Поэтому здесь проверяется
+     * обратное утверждение: обработчик НЕ должен слать ни одного Telegram-
+     * сообщения на HR-стадии — иначе вернётся ровно тот дубль, ради снятия
+     * которого всё и делалось. Запись в БД и таймлайн при этом обязана
+     * сохраниться: без неё обращение исчезнет и из истории кандидатки.
+     */
+    it("HR-стадия: не шлёт DM вообще, но сохраняет сообщение и отвечает кандидатке", async () => {
         const { handleSupportMessage } = await import("../support.js");
         const reply = vi.fn().mockResolvedValue({});
-        const sendMessage = vi.fn().mockRejectedValue(new Error("Telegram unavailable"));
+        const sendMessage = vi.fn().mockResolvedValue({});
         const ctx = {
             from: { id: 555 },
             chat: { id: 555 },
@@ -320,11 +332,12 @@ describe("candidate recovery support routing", () => {
         } as any;
 
         expect(await handleSupportMessage(ctx)).toBe(true);
-        expect(sendMessage).toHaveBeenCalledTimes(2);
-        expect(reply).toHaveBeenCalledOnce();
-        expect(reply).toHaveBeenCalledWith(expect.stringContaining("Не вдалося доставити"));
-        expect(ctx.session.step).toBe("support_chat");
-        expect(messageCreate).not.toHaveBeenCalled();
-        expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({ stage: "HR", result: "failure" }));
+        expect(sendMessage).not.toHaveBeenCalled();
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining("Повідомлення надіслано"));
+        expect(ctx.session.step).toBe("idle");
+        expect(messageCreate).toHaveBeenCalled();
+        expect(logBusinessEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ stage: "HR", result: "success" }),
+        );
     });
 });

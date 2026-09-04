@@ -614,6 +614,57 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         }
         // Unknown/future status → also falls through to ADMIN_IDS below
 
+        // HR-стадии: DM не отправляется вообще, включая владельца.
+        //
+        // До 04.09.2026 пустой список выше проваливался в ADMIN_IDS ниже, и
+        // владелец получал копию каждого обращения кандидатки с меткой «(HR)» —
+        // при том, что то же сообщение уже лежало в треде вебапа. Волна 2
+        // считала этот DM снятым, но сняла лишь недостижимую recovery-ветку.
+        //
+        // Теперь единственный канал — вебапп. Подстраховка не потеряна:
+        // middleware/recruiting-incoming.ts при неудачном пуше повторяет его и,
+        // если и повтор не прошёл, шлёт владельцу DM с пометкой, что зеркало не
+        // сработало. То есть DM приходит ровно тогда, когда он что-то значит.
+        if (isHRStage) {
+            try {
+                const { messageRepository } = await import("../repositories/message-repository.js");
+                const { timelineRepository } = await import("../repositories/timeline-repository.js");
+
+                await messageRepository.create({
+                    candidate: { connect: { id: candidate.id } },
+                    sender: "USER",
+                    scope: "HR",
+                    content: msgText,
+                    photoId: payload.media
+                });
+                await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', msgText, {
+                    category: categoryLabel,
+                    entryReason,
+                });
+                await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
+            } catch (e) {
+                logger.error({ err: e, candidateId: candidate.id }, "Failed to log candidate support message");
+            }
+
+            logBusinessEvent({
+                event: "candidate.support.message_sent",
+                correlationId: ctx.correlationId,
+                updateId: ctx.update.update_id,
+                telegramId,
+                candidateId: candidate.id,
+                actorType: "candidate",
+                stage: "HR",
+                result: "success",
+                module: "support",
+                safeContext: { routing: "web_mirror_only", status: candidate.status }
+            });
+
+            ctx.session.step = "idle";
+            clearSupportRouteData(ctx);
+            await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
+            return true;
+        }
+
         if (targetAdminIds.length === 0) targetAdminIds = ADMIN_IDS;
 
         if (targetAdminIds.length === 0) {
