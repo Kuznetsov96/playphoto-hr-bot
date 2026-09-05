@@ -516,7 +516,7 @@ export const hrService = {
         return true;
     },
 
-    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "not_found" | "age_ineligible" | "gender_ineligible" }> {
+    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "state_write_failed" | "not_found" | "age_ineligible" | "gender_ineligible" }> {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return { ok: false, reason: "not_found" };
 
@@ -582,10 +582,15 @@ export const hrService = {
 
         const tid = Number(cand.user.telegramId);
 
+        // Доставка и запись состояния разведены по разным try. Раньше они делили
+        // один блок, и падение записи возвращалось рекрутёру как send_failed —
+        // сообщение уже у кандидата, а карточка винила Telegram. Диагностика по
+        // такому коду уводит в сторону: искать надо в базе, а не в доставке.
+        let msg: { message_id: number } | undefined;
         try {
             await cleanupUserSessionMessages(api, tid);
             const locName = cand.location?.name || cand.city || 'вашого міста';
-            const msg = await api.sendMessage(tid,
+            msg = await api.sendMessage(tid,
                 STAFF_TEXTS["hr-info-broadcast-item"]({ locationName: locName } as any),
                 {
                     parse_mode: "HTML",
@@ -594,27 +599,6 @@ export const hrService = {
                         .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite").danger()
                 }
             );
-
-            if (msg) await trackUserMessage(tid, msg.message_id);
-            await candidateRepository.update(candId, {
-                notificationSent: true,
-                status: CandidateStatus.SCREENING,
-                isWaitlisted: false,
-                interviewWaitlistReason: null,
-                interviewInvitedAt: new Date()
-            });
-
-            audit({
-                event: "candidate_interview_invited",
-                result: "success",
-                actorType: "admin",
-                telegramId: cand.user.telegramId,
-                entityType: "candidate",
-                entityId: cand.id,
-                context: { locationId: cand.locationId, city: cand.city }
-            });
-
-            return { ok: true };
         } catch (e: any) {
             logger.warn({ err: e, candId, tid }, "inviteCandidate: failed to send invitation");
             audit({
@@ -646,6 +630,46 @@ export const hrService = {
             // otherwise the candidate gets stuck: invite-reminder can't see them,
             // and future broadcasts skip them.
             return { ok: false, reason: "send_failed" };
+        }
+
+        try {
+            if (msg) await trackUserMessage(tid, msg.message_id);
+            await candidateRepository.update(candId, {
+                notificationSent: true,
+                status: CandidateStatus.SCREENING,
+                isWaitlisted: false,
+                interviewWaitlistReason: null,
+                interviewInvitedAt: new Date()
+            });
+
+            audit({
+                event: "candidate_interview_invited",
+                result: "success",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: { locationId: cand.locationId, city: cand.city }
+            });
+
+            return { ok: true };
+        } catch (e: any) {
+            // Сообщение кандидату УЖЕ доставлено, упала только отметка о нём.
+            // Ретрай повторит отправку — кандидат получит второе приглашение;
+            // это осознанный размен: без отметки его не увидит invite-reminder,
+            // и он потеряется молча, что хуже дубля.
+            logger.warn({ err: e, candId, tid }, "inviteCandidate: invitation sent, state write failed");
+            audit({
+                event: "candidate_interview_invited",
+                result: "failed",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                error: e.message,
+                context: { locationId: cand.locationId, city: cand.city, reason: "STATE_WRITE_FAILED" }
+            });
+            return { ok: false, reason: "state_write_failed" };
         }
     },
 
