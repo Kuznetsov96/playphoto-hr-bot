@@ -280,7 +280,16 @@ export class RecruitingCommandDispatcher {
                 // Та же логика, что кнопка «Invite»: проверки пола/возраста,
                 // приглашение с кнопками записи, отметка interviewInvitedAt.
                 const result = await hrService.inviteCandidate(api, candidate.id);
-                if (!result.ok) throw new Error(`INVITE_NOT_SENT:${result.reason ?? "unknown"}`);
+                if (!result.ok) {
+                    // Префикс говорит рекрутёру, дошло сообщение или нет.
+                    // state_write_failed — единственная причина, при которой
+                    // кандидат приглашение УЖЕ получил: врать про NOT_SENT
+                    // здесь значит отправить рекрутёра искать не тот сбой.
+                    const prefix = result.reason === "state_write_failed"
+                        ? "INVITE_SENT_STATE_NOT_SAVED"
+                        : "INVITE_NOT_SENT";
+                    throw new Error(`${prefix}:${result.reason ?? "unknown"}`);
+                }
                 return;
             }
             case "ACCEPT_AFTER_INTERVIEW": {

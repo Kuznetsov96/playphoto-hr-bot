@@ -212,6 +212,22 @@ describe("RecruitingCommandDispatcher", () => {
         expect(ackApplied).not.toHaveBeenCalled();
     });
 
+    it("does not claim the invite was never sent when only the state write failed", async () => {
+        inviteCandidate.mockResolvedValue({ ok: false, reason: "state_write_failed" });
+        listPending.mockResolvedValue({ items: [command({ kind: "INVITE_TO_INTERVIEW" })] });
+
+        await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
+
+        expect(ackFailed).toHaveBeenCalledWith(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            expect.stringContaining("state_write_failed"),
+        );
+        expect(ackFailed).not.toHaveBeenCalledWith(
+            expect.anything(),
+            expect.stringContaining("INVITE_NOT_SENT"),
+        );
+    });
+
     it("surfaces the funnel guard's reasonCode when the transition is refused", async () => {
         const guardError = Object.assign(new Error("Invalid transition"), {
             reasonCode: "DECISION_ALREADY_MADE",

@@ -22,6 +22,9 @@ vi.mock('../../db/core.js', () => ({
         staffProfile: {
             findUnique: vi.fn().mockResolvedValue(null)
         },
+        user: {
+            update: vi.fn().mockResolvedValue({})
+        },
         workShift: {
             findFirst: vi.fn().mockResolvedValue(null)
         }
@@ -448,6 +451,46 @@ describe('hrService', () => {
                 interviewInvitedAt: null,
                 hasUnreadMessage: false,
             });
+        });
+
+        const eligibleCandidate = (id: string) => ({
+            id,
+            city: 'Kyiv',
+            locationId: 'loc1',
+            gender: 'female',
+            birthDate: new Date('2004-09-23T00:00:00.000Z'),
+            location: { name: 'Volkland' },
+            user: { id: `user-${id}`, telegramId: 789n }
+        });
+
+        it('reports a delivery failure when Telegram refuses the invitation', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue(eligibleCandidate('cand-net') as any);
+            const api = { sendMessage: vi.fn().mockRejectedValue(new Error('socket hang up')) };
+
+            const result = await hrService.inviteCandidate(api, 'cand-net');
+
+            expect(result).toEqual({ ok: false, reason: 'send_failed' });
+        });
+
+        it('reports a bot block instead of a delivery failure when Telegram answers 403', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue(eligibleCandidate('cand-blocked') as any);
+            const blocked = Object.assign(new Error('Forbidden: bot was blocked by the user'), { error_code: 403 });
+            const api = { sendMessage: vi.fn().mockRejectedValue(blocked) };
+
+            const result = await hrService.inviteCandidate(api, 'cand-blocked');
+
+            expect(result).toEqual({ ok: false, reason: 'bot_blocked' });
+        });
+
+        it('does not disguise a database failure as a delivery failure once the invitation is sent', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue(eligibleCandidate('cand-db') as any);
+            vi.mocked(candidateRepository.update).mockRejectedValue(new Error('write conflict'));
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
+
+            const result = await hrService.inviteCandidate(api, 'cand-db');
+
+            expect(api.sendMessage).toHaveBeenCalled();
+            expect(result).toEqual({ ok: false, reason: 'state_write_failed' });
         });
     });
 
