@@ -642,6 +642,47 @@ const locationCutoverSchema = z.object({
     ),
 });
 
+/**
+ * Сводка за день для вечернего отчёта.
+ *
+ * Без `.strict()` намеренно: вебапп волен добавить в ответ поле раньше, чем
+ * бот научится его читать, и такой релиз не должен ронять разбор здесь — иначе
+ * отчёт молча перестанет уходить в тот вечер, когда выкатили API.
+ */
+const dailySummarySchema = z.object({
+    totals: z.object({
+        salesTotal: z.number(),
+        cashTotal: z.number(),
+        terminalTotal: z.number(),
+    }),
+    locations: z.array(
+        z.object({
+            publicId: z.string(),
+            label: z.string(),
+            salesTotal: z.number(),
+            cashTotal: z.number(),
+            terminalTotal: z.number(),
+        })
+    ),
+    overdue: z.array(
+        z.object({
+            publicId: z.string(),
+            label: z.string(),
+            openedAt: z.string().nullable(),
+        })
+    ),
+    neverOpened: z.array(
+        z.object({
+            publicId: z.string(),
+            label: z.string(),
+        })
+    ),
+    localDates: z.array(z.string()).optional(),
+    generatedAt: z.string().optional(),
+});
+
+export type DailySummary = z.infer<typeof dailySummarySchema>;
+
 export class AwsBusinessClient {
     async snapshot(from: string, to: string): Promise<AwsBusinessSnapshot> {
         const query = new URLSearchParams({ from, to });
@@ -685,6 +726,17 @@ export class AwsBusinessClient {
     }> {
         const value = await this.request("/locations/cutover", { method: "GET" });
         return locationCutoverSchema.parse(value);
+    }
+
+    /**
+     * Выручка за сегодня по всем локациям и то, что осталось незакрытым.
+     *
+     * Считает вебапп, а не бот: там лежат и кассы, и часы работы локаций, по
+     * которым открытая смена отличается от просроченной.
+     */
+    async dailySummary(): Promise<DailySummary> {
+        const value = await this.request("/daily-summary", { method: "GET" });
+        return dailySummarySchema.parse(value);
     }
 
     /**
