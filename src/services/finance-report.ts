@@ -9,48 +9,37 @@ import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { getReportableCashAmount, shouldExcludeTerminalFromFopAccounting } from "./finance/location-rules.js";
+import { awsBusinessClient, type DailySummary } from "./aws-business-client.js";
+import { renderDailySummary } from "./finance/daily-summary-message.js";
 
-const CITY_ALIASES: Record<string, string[]> = {
-    "Київ": ["київ", "kyiv", "kiev"],
-    "Львів": ["львів", "lviv"],
-    "Харків": ["харків", "kharkiv"],
-    "Рівне": ["рівне", "рівно", "rivne", "rovno"],
-    "Запоріжжя": ["запоріжжя", "zaporizhzhia", "zaporizhia"],
-    "Черкаси": ["черкаси", "cherkasy"],
-    "Хмельницький": ["хмельницький", "khmelnytskyi"],
-    "Самбір": ["самбір", "sambir"],
-    "Коломия": ["коломия", "коломія", "kolomyya", "kolomyia"],
-    "Шептицький": ["шептицький", "sheptytskyi"],
-};
-
-function normalizeLocationPart(value: string): string {
-    return value
-        .normalize("NFC")
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}]+/gu, " ")
-        .trim();
+/** Сегодняшняя дата в Киеве как `YYYY-MM-DD`. */
+function kyivIsoDate(instant: Date): string {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/Kyiv",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+    }).formatToParts(instant);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+        parts.find(candidate => candidate.type === type)?.value ?? "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-function formatFinanceLocationLabel(name: string, city: string): string {
-    const cleanName = name.trim();
-    const cleanCity = city.trim();
-    if (!cleanCity) return cleanName;
-
-    const normalizedName = normalizeLocationPart(cleanName);
-    const normalizedCity = normalizeLocationPart(cleanCity);
-    const cityAliases = CITY_ALIASES[cleanCity] || [normalizedCity];
-
-    if (cityAliases.some(alias => normalizedName.split(" ").includes(alias))) {
-        return cleanName;
-    }
-
-    return `${cleanName} (${cleanCity})`;
-}
-
-// Export for manual testing via command
+/**
+ * Вечерняя сводка выручки.
+ *
+ * Источник — вебапп, а не Google Sheets: все локации закрывают смены в
+ * приложении, а лист перестаёт наполняться после переезда локации. Пока отчёт
+ * читал лист, переехавшая локация выпадала из выручки и попадала в «нет
+ * данных» — то есть выглядела как невыход, хотя смену там закрыли.
+ *
+ * Сообщение уходит даже когда сводку получить не удалось: тишина в 21:40
+ * читается как «день пустой», а не как «отчёт сломался».
+ */
 export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number, forceSync: boolean = false) {
     try {
         const todayStr = new Date().toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" }); // DD.MM.YYYY
+        const todayIso = kyivIsoDate(new Date());
         logBusinessEvent({
             event: "finance.daily_income_report.started",
             actorType: "system",
@@ -65,70 +54,25 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
             },
         });
 
-        const incomes = await techCashService.getIncomeForDate(todayStr);
-
-        if (!incomes || incomes.length === 0) {
+        let summary: DailySummary | null = null;
+        try {
+            summary = await awsBusinessClient.dailySummary();
+        } catch (error) {
+            logger.error({ err: error }, "Daily summary fetch failed");
             logBusinessEvent({
                 event: "finance.daily_income_report.completed",
-                level: "warn",
+                level: "error",
                 actorType: "system",
                 actorRole: "system",
-                result: "empty",
-                reasonCode: "NO_INCOME_DATA",
+                result: "failed",
+                reasonCode: "SUMMARY_UNAVAILABLE",
                 module: "finance-report",
                 operation: "sendDailyIncomeReport",
-                safeContext: {
-                    reportDate: todayStr,
-                },
+                safeContext: { reportDate: todayStr },
             });
-            if (chatId) await bot.api.sendMessage(chatId, `⚠️ No data found for report on ${todayStr}.`);
-            return;
         }
 
-        const allLocations = await locationRepository.findAllActive();
-
-        const reportRows = incomes
-            .map(inc => {
-                const displayedIncome = inc.totalCash + inc.totalTerminal;
-
-                return {
-                    ...inc,
-                    displayedIncome,
-                    label: formatFinanceLocationLabel(inc.locationName, inc.city)
-                };
-            })
-            .sort((a, b) => b.displayedIncome - a.displayedIncome);
-
-        let totalCash = 0;
-        let totalTerminal = 0;
-        let totalIncome = 0;
-
-        let reportText = `📊 <b>REPORT FOR ${todayStr}</b>\n\n`;
-
-        reportRows.forEach(inc => {
-            reportText += `📍 ${inc.label}: <b>${inc.displayedIncome.toLocaleString()} грн</b>\n`;
-
-            totalCash += inc.totalCash;
-            totalTerminal += inc.totalTerminal;
-            totalIncome += inc.displayedIncome;
-        });
-
-        reportText += `--------------------------\n`;
-        reportText += `💰 <b>NETWORK TOTALS:</b>\n`;
-        reportText += `💵 Cash: ${totalCash.toLocaleString()} UAH\n`;
-        reportText += `💳 Terminal: ${totalTerminal.toLocaleString()} UAH\n`;
-        reportText += `🔥 <b>TOTAL: ${totalIncome.toLocaleString()} UAH</b>`;
-
-        // Calculate missing locations
-        const reportKeys = new Set(incomes.map(inc => `${inc.locationName}|${inc.city}`));
-        const missingLocations = allLocations
-            .filter(l => !reportKeys.has(`${l.name}|${l.city}`))
-            .map(l => formatFinanceLocationLabel(l.name, l.city));
-
-        if (missingLocations.length > 0) {
-            reportText += `\n\n⚠️ <b>Missing Data:</b>\n`;
-            missingLocations.forEach(name => reportText += `- ${name}\n`);
-        }
+        const reportText = renderDailySummary(summary, todayIso);
 
         // Send to Finance Administrators
         const RECIPIENTS = chatId ? [chatId] : FINANCE_IDS;
@@ -150,15 +94,24 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
             operation: "sendDailyIncomeReport",
             safeContext: {
                 reportDate: todayStr,
-                locationCount: incomes.length,
+                locationCount: summary?.locations.length ?? 0,
+                overdueCount: summary?.overdue.length ?? 0,
+                neverOpenedCount: summary?.neverOpened.length ?? 0,
+                summaryAvailable: summary !== null,
                 recipientCount: RECIPIENTS.length,
             },
         });
 
-        // AUTO-SYNC TO DDS
-        // Only if running automatically (no chatId specified) or explicitly requested
+        /*
+         * Проводка в ДДС осталась на данных листа и НЕ получает сводку вебаппа.
+         *
+         * Выручка локации в приложении уже проведена при закрытии смены —
+         * второй приход поверх задвоил бы деньги. `syncToDDS` читает лист сам:
+         * для локаций вне контура он отработает как раньше, а раз лист больше
+         * не наполняется, просто не найдёт строк.
+         */
         if (!chatId || forceSync) {
-            await syncToDDS(todayStr, incomes);
+            await syncToDDS(todayStr);
         }
 
     } catch (e) {

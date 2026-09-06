@@ -59,7 +59,15 @@ vi.mock("../../core/queue.js", () => ({
     }
 }));
 
+vi.mock("../aws-business-client.js", () => ({
+    awsBusinessClient: {
+        dailySummary: vi.fn()
+    }
+}));
+
 import { locationRepository } from "../../repositories/location-repository.js";
+import { awsBusinessClient } from "../aws-business-client.js";
+import { ddsService } from "../finance/dds.js";
 import { techCashService } from "../finance/tech-cash.js";
 import { calculateCashSalaryDeduction, sendDailyIncomeReport, syncToDDS } from "../finance-report.js";
 
@@ -132,59 +140,28 @@ describe("finance report DDS sync", () => {
 });
 
 describe("daily finance report", () => {
-    it("formats location labels once and sorts by actual income", async () => {
-        vi.mocked(locationRepository.findAllActive).mockResolvedValue([
-            {
-                id: "loc-fk-kyiv",
-                name: "Fly Kids (Київ)",
-                city: "Київ",
-            } as any,
-            {
-                id: "loc-sp-lviv",
-                name: "Smile Park (Львів)",
-                city: "Львів",
-            } as any,
-            {
-                id: "loc-sp-troieshchyna",
-                name: "Smile Park (Troieshchyna)",
-                city: "Київ",
-            } as any,
-            {
-                id: "loc-drive",
-                name: "Drive City (Львів)",
-                city: "Львів",
-            } as any
-        ]);
-
-        vi.mocked(techCashService.getIncomeForDate).mockResolvedValue([
-            {
-                locationId: "loc-fk-kyiv",
-                locationName: "Fly Kids (Київ)",
-                city: "Київ",
-                totalCash: 1600,
-                totalTerminal: 1300,
-                totalIncome: 2900,
-                date: "10.07.2026",
-            },
-            {
-                locationId: "loc-sp-lviv",
-                locationName: "Smile Park (Львів)",
-                city: "Львів",
-                totalCash: 1250,
-                totalTerminal: 6000,
-                totalIncome: 7250,
-                date: "10.07.2026",
-            },
-            {
-                locationId: "loc-sp-troieshchyna",
-                locationName: "Smile Park (Troieshchyna)",
-                city: "Київ",
-                totalCash: 2550,
-                totalTerminal: 0,
-                totalIncome: 2550,
-                date: "10.07.2026",
-            }
-        ]);
+    it("renders the summary the webapp returned and does not feed it to the DDS sync", async () => {
+        vi.mocked(awsBusinessClient.dailySummary).mockResolvedValue({
+            totals: { salesTotal: 12700, cashTotal: 5400, terminalTotal: 7300 },
+            locations: [
+                {
+                    publicId: "loc-sp-lviv",
+                    label: "Smile Park, Львів",
+                    salesTotal: 7250,
+                    cashTotal: 1250,
+                    terminalTotal: 6000
+                },
+                {
+                    publicId: "loc-fk-kyiv",
+                    label: "Fly Kids, Київ",
+                    salesTotal: 2900,
+                    cashTotal: 1600,
+                    terminalTotal: 1300
+                }
+            ],
+            overdue: [{ publicId: "loc-a", label: "Fly Kids, Рівне", openedAt: "2026-07-10T07:15:00.000Z" }],
+            neverOpened: [{ publicId: "loc-b", label: "Volkland (Shevchyk), Запоріжжя" }]
+        });
 
         const sendMessage = vi.fn();
         const bot = { api: { sendMessage } } as any;
@@ -193,16 +170,29 @@ describe("daily finance report", () => {
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         const reportText = sendMessage.mock.calls[0]![1] as string;
-        expect(reportText).toContain("📍 Smile Park (Львів): <b>7,250 грн</b>");
-        expect(reportText).toContain("📍 Fly Kids (Київ): <b>2,900 грн</b>");
-        expect(reportText).not.toContain("Smile Park (Львів) (Львів)");
-        expect(reportText).not.toContain("Fly Kids (Київ) (Київ)");
-        expect(reportText).toContain("- Drive City (Львів)\n");
-        expect(reportText).toContain("💳 Terminal: 7,300 UAH");
-        expect(reportText).toContain("🔥 <b>TOTAL: 12,700 UAH</b>");
+        expect(reportText).toContain("Smile Park, Львів");
+        expect(reportText).toContain("Still open (1)");
+        expect(reportText).toContain("Never opened (1)");
 
-        expect(reportText.indexOf("Fly Kids (Київ)")).toBeLessThan(
-            reportText.indexOf("Smile Park (Troieshchyna) (Київ)")
+        // Выручка приложения уже проведена при закрытии смены: сводка не должна
+        // попасть в ДДС вторым приходом.
+        expect(vi.mocked(techCashService.getIncomeForDate)).not.toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ locations: expect.anything() })
         );
+        expect(vi.mocked(ddsService.addTransaction)).not.toHaveBeenCalled();
+    });
+
+    it("still sends a message when the webapp summary cannot be fetched", async () => {
+        vi.mocked(awsBusinessClient.dailySummary).mockRejectedValue(new Error("upstream down"));
+
+        const sendMessage = vi.fn();
+        const bot = { api: { sendMessage } } as any;
+
+        await sendDailyIncomeReport(bot, 123);
+
+        // Тишина в 21:40 читается как «день пустой», а не как «отчёт сломался».
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0]![1] as string).toContain("could not be loaded");
     });
 });
