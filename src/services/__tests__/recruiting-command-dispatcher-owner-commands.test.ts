@@ -190,35 +190,44 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(updatedStatuses()).toEqual(["STAGING_ACTIVE", "READY_FOR_HIRE"]);
     });
 
-    it("CONFIRM_HIRE — registerNewHire (Employee в вебаппе) + confirmFinalSchedule, ни одного сообщения кандидатке", async () => {
+    /**
+     * Сотрудника заводит форма найма в вебаппе (RecruitingHireDialog): владелец
+     * правит ФИО, дату найма и локацию руками, и запись создаётся ЕЁ данными.
+     *
+     * registerNewHire отсюда убран 08.09.2026: он делал upsert по telegramId,
+     * то есть попадал в того же сотрудника и перетирал заполненную форму
+     * данными анкеты — разрезанным своей эвристикой ФИО, телефоном из анкеты и
+     * hiredAt = сегодня, — а заодно перевешивал assignment на локацию анкеты.
+     * Дубля не было, но результат ручного ввода пропадал через полминуты.
+     *
+     * confirmFinalSchedule остаётся: бот обязан знать о найме, чтобы поставить
+     * HIRED у себя и синкнуть доступы к каналам, иначе продолжит писать
+     * сотруднику как кандидатке.
+     */
+    it("CONFIRM_HIRE — только confirmFinalSchedule, без registerNewHire и без сообщений кандидатке", async () => {
         const api = makeApi();
         findByTelegramId.mockResolvedValue(localCandidate("READY_FOR_HIRE"));
         listPending.mockResolvedValue({ items: [command({ kind: "CONFIRM_HIRE" })] });
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
-        expect(registerNewHire).toHaveBeenCalledWith(expect.objectContaining({
-            telegramId: "1164289764",
-            fullName: "Тестова Кандидатка",
-            locationCode: "FT_CHERKASY",
-        }));
+        expect(registerNewHire).not.toHaveBeenCalled();
         expect(confirmFinalSchedule).toHaveBeenCalledWith("cand-1");
         expect(api.sendMessage).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalled();
         expect(ackFailed).not.toHaveBeenCalled();
     });
 
-    it("CONFIRM_HIRE: сбой registerNewHire — failed-ack, статус не трогается", async () => {
+    it("CONFIRM_HIRE: кандидатка не найдена у бота — failed-ack", async () => {
         findByTelegramId.mockResolvedValue(localCandidate("READY_FOR_HIRE"));
-        registerNewHire.mockRejectedValue(new Error("Candidate location is not mapped to an AWS canonical location code"));
+        confirmFinalSchedule.mockResolvedValue(false);
         listPending.mockResolvedValue({ items: [command({ kind: "CONFIRM_HIRE" })] });
 
         await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
 
-        expect(confirmFinalSchedule).not.toHaveBeenCalled();
         expect(ackFailed).toHaveBeenCalledWith(
             "0f8fad5b-d9cb-469f-a165-70867728950e",
-            expect.stringContaining("not mapped"),
+            expect.stringContaining("CANDIDATE_NOT_FOUND_IN_BOT"),
         );
         expect(ackApplied).not.toHaveBeenCalled();
     });
