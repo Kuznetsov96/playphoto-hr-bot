@@ -117,7 +117,9 @@ candidateBirthMonthMenu.dynamic((ctx, range) => {
             ctx.session.step = "screening_birth_day";
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-day"](year, label), "candidate-birth-day", { pushToStack: true });
         });
-        if ((index + 1) % 3 === 0) range.row();
+        // По двоє в рядок: «Березень», «Листопад», «Вересень» — по вісім
+        // символів, і три такі кнопки поруч обрізаються на вузькому екрані.
+        if ((index + 1) % 2 === 0) range.row();
     });
     range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year"));
 });
@@ -169,7 +171,11 @@ candidateCityMenu.dynamic(async (ctx, range) => {
                 await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
             }
         });
-        if ((i + 1) % 2 === 0) range.row();
+        // Одне місто в рядок. По двоє назви на кшталт «Хмельницький» (12
+        // символів) обрізалися на вузькому екрані, а обрізана назва міста —
+        // це не косметика, а ризик обрати не те. Міст близько десятка, тож
+        // вертикальний список лишається оглядним.
+        range.row();
     });
     range.row().text("Назад", async (ctx) => {
         // Крок імені — вільний ввід без клавіатури, тож у стек він не
@@ -202,7 +208,9 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
             ctx.session.candidateData.locationIds = Array.from(selectedIds);
             await ctx.menu.update();
         });
-        if ((i + 1) % 2 === 0) range.row();
+        // Одна локація в рядок: назви на кшталт «Smile Park (Даринок)» довгі,
+        // а позначка вибору «• » ще й зсуває хвіст за край кнопки.
+        range.row();
     });
 
     if (selectedIds.size > 0) {

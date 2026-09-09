@@ -161,6 +161,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
     // Actions that are step-specific
+    // "decline_invite" покриває префіксом і decline_invite_confirm/_cancel —
+    // гард має стерегти обидва кроки підтвердження, а не лише перший.
     const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite"];
     const trainingActions = ["book_training_slot_", "reschedule_training_", "start_training_scheduling", "cancel_training_"];
     // send_nda_/confirm_nda_/start_quiz прибрані разом з етапами NDA й тесту:
@@ -330,7 +332,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         }
 
         const kb = new InlineKeyboard()
-            .text("Змінити час", buildSignedCallback("rb", result.slot.id)).row()
+            .text(CANDIDATE_TEXTS["candidate-btn-reschedule"], buildSignedCallback("rb", result.slot.id)).row()
             .text("Скасувати запис", buildSignedCallback("cb", result.slot.id)).danger().row()
             .text("Не планую продовжувати", buildSignedCallback("wi", result.slot.id)).danger();
         if ((result as any).candidate?.gender !== "male") {
@@ -446,7 +448,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await ctx.editMessageText(
             "<b>Запис скасовано</b>\n\n" +
             "Оберіть інший зручний час, коли буде зручно.",
-            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Обрати інший час", "start_scheduling") }
+            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-other-time"], "start_scheduling") }
         );
 
     } catch (e: any) {
@@ -566,7 +568,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit");
 
         await ctx.editMessageText(
-            "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
+            "Оберіть інший зручний час:\n\nЧас київський.",
             { reply_markup: keyboard }
         );
 
@@ -617,7 +619,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 
     await cleanupMessages(ctx);
     const msg = await ctx.reply(
-        "Оберіть зручний час для співбесіди:\n\nНатисніть кнопку з потрібною датою та часом.",
+        "Оберіть зручний час для співбесіди:\n\nЧас київський.",
         { reply_markup: keyboard }
     );
     trackMessage(ctx, msg.message_id);
@@ -653,7 +655,49 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
 });
 
 // 6.5 Відмова кандидата від співбесіди
+/**
+ * Крок 1: підтвердження відмови від запрошення.
+ *
+ * Кнопка стоїть просто під «Обрати час» у повідомленні-нагадуванні, а дія
+ * незворотна — статус одразу REJECTED. Це була єдина руйнівна дія воронки,
+ * яка спрацьовувала з першого тапу; решта (скасування запису, завершення
+ * заявки) вже питали підтвердження.
+ */
 bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(
+        CANDIDATE_TEXTS["candidate-decline-invite-confirm"],
+        {
+            parse_mode: "HTML",
+            reply_markup: new InlineKeyboard()
+                .text(CANDIDATE_TEXTS["candidate-btn-decline-confirm"], "decline_invite_confirm").danger().row()
+                .text(CANDIDATE_TEXTS["candidate-btn-restart-cancel"], "decline_invite_cancel"),
+        },
+    );
+});
+
+/** Крок 2: передумала — повертаємо список слотів. */
+bookingHandlers.callbackQuery("decline_invite_cancel", async (ctx) => {
+    await ctx.answerCallbackQuery();
+
+    const slots = await findAvailableInterviewSlots();
+    if (slots.length === 0) {
+        await editWithContactButton(
+            ctx,
+            ctx.from.id,
+            `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`,
+        );
+        return;
+    }
+
+    await ctx.editMessageText(
+        "Оберіть зручний час для співбесіди:\n\nЧас київський.",
+        { reply_markup: buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit") },
+    );
+});
+
+/** Крок 2: підтверджено — фіксуємо відмову. */
+bookingHandlers.callbackQuery("decline_invite_confirm", async (ctx) => {
     if (isDuplicateBookingAction(`decline-invite:${ctx.from.id}`)) {
         await ctx.answerCallbackQuery("Відмову вже зафіксовано");
         return;
@@ -820,7 +864,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         }
 
         const kb = new InlineKeyboard()
-            .text("Змінити час", buildSignedCallback("rt", slotId)).row()
+            .text(CANDIDATE_TEXTS["candidate-btn-reschedule"], buildSignedCallback("rt", slotId)).row()
             .text("Скасувати запис", buildSignedCallback("ct", slotId)).danger().row()
             .text("Не планую продовжувати", buildSignedCallback("wm", slotId)).danger().row()
             .text("Написати нам", "contact_hr");
@@ -941,7 +985,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await ctx.editMessageText(
             "<b>Запис скасовано</b>\n\n" +
             "Оберіть інший зручний час, коли буде зручно.",
-            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Обрати інший час", "start_training_scheduling") }
+            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-other-time"], "start_training_scheduling") }
         );
 
         // Notify Mentor
@@ -1107,7 +1151,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit");
 
         await ctx.editMessageText(
-            "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
+            "Оберіть інший зручний час:\n\nЧас київський.",
             { reply_markup: keyboard }
         );
 

@@ -269,7 +269,11 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
     }, "Candidate screening completed with no vacancies");
 
     if (ageMeta.status === CandidateStatus.REJECTED) {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS[ageMeta.finalKey],
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status, ageMeta.hrDecision),
+        );
     } else {
         // Немає вакансій — це очікування, а не відмова: анкета збережена, і
         // питання про неї доречні. Тому екран лишається з виходом на людину.
@@ -510,7 +514,11 @@ export async function handleBirthDateSelected(ctx: MyContext, day: number) {
             hrDecision: "REJECTED_SYSTEM_UNDERAGE"
         });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS["candidate-reject-underage"],
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, CandidateStatus.REJECTED, "REJECTED_SYSTEM_UNDERAGE"),
+        );
         return;
     }
 
@@ -551,7 +559,11 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
             hrDecision: ageMeta.hrDecision
         });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS[ageMeta.finalKey],
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status, ageMeta.hrDecision),
+        );
         return;
     }
 
@@ -721,7 +733,7 @@ async function finalizeScreening(ctx: MyContext) {
             status === CandidateStatus.WAITLIST_HR ? "candidate-success-waitlist" :
                 "candidate-success-screening";
 
-    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[finalKey], buildFinalScreenKeyboard(gender, status));
+    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[finalKey], buildFinalScreenKeyboard(gender, status, hrDecision));
 }
 
 /**
@@ -737,9 +749,19 @@ async function finalizeScreening(ctx: MyContext) {
  * можна обговорити. Так само нічого не отримує кандидат-хлопець — це та
  * сама межа, що діє в showCandidateStatus.
  */
-function buildFinalScreenKeyboard(gender: string | undefined, status: CandidateStatus) {
+function buildFinalScreenKeyboard(
+    gender: string | undefined,
+    status: CandidateStatus,
+    hrDecision?: string | null,
+) {
     if (gender === "male") return undefined;
-    if (status === CandidateStatus.REJECTED) return undefined;
+
+    // Виняток серед відмов — надто юний вік: текст обіцяє, що бот нагадає в
+    // день повноліття, тобто стосунки тривають. Людині, яка хоче спитати
+    // «коли саме?», має бути куди написати.
+    const isUnderage = status === CandidateStatus.REJECTED && hrDecision === "REJECTED_SYSTEM_UNDERAGE";
+    if (status === CandidateStatus.REJECTED && !isUnderage) return undefined;
+
     return new InlineKeyboard().text("Написати нам", "contact_hr");
 }
 

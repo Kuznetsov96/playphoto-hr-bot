@@ -104,7 +104,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 ? CANDIDATE_TEXTS["candidate-waitlist-slots"](typeText)
                 : CANDIDATE_TEXTS["candidate-success-waitlist"];
 
-            if (isWaitingForSlots) kb.text("Перевірити вільний час", candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
+            if (isWaitingForSlots) kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
             if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
         }
@@ -127,7 +127,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
             } else text = "Вас записано на співбесіду.";
-            kb.text("Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
+            kb.text(CANDIDATE_TEXTS["candidate-btn-reschedule"], buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
                 .text("Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).danger().row()
                 .text("Не планую продовжувати", buildSignedCallback("wi", candidate.interviewSlotId || "none")).danger();
             if (canContactStaff) kb.row().text("Написати нам", "contact_hr");
