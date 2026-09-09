@@ -173,9 +173,9 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
         // Посилання на канал більше не зашите в код: воно персональне й
         // одноразове, тож видається через accessService під конкретну людину.
         kb.text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link").row()
-            .text("💬 Підтримка", "open_support_dialog");
+            .text("Підтримка", "open_support_dialog");
 
-        text = `💫 <b>Вітаємо в команді PlayPhoto!</b>\n\n${shiftLine}`;
+        text = `<b>Вітаємо в команді PlayPhoto</b>\n\n${shiftLine}`;
         return ScreenManager.renderScreen(ctx, text, kb, { forceNew, pushToStack: true });
     }
 
