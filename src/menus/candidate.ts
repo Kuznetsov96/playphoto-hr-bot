@@ -92,7 +92,7 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
     });
 
     if (selectedIds.size > 0) {
-        range.row().text("✨ Готово", async (ctx) => {
+        range.row().text("Готово", async (ctx) => {
             const primaryLocId = Array.from(selectedIds)[0];
             const targetLoc = await locationRepository.findById(primaryLocId!);
             const { handleLocationSelected } = await import("../modules/candidate/handlers/index.js");
