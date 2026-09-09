@@ -40,6 +40,9 @@ export interface SessionData {
         id?: string;
         fullName?: string;
         birthDate?: string;
+        /** Проміжні частини дати народження між екранами вибору рік → місяць → день. */
+        birthYear?: number;
+        birthMonth?: number;
         gender?: string;
         age?: number;
         city?: string;

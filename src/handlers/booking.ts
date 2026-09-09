@@ -273,7 +273,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
             confirmationText += `📹 Google Meet: <a href="${result.googleEvent.meetLink}">Приєднатися до зустрічі</a>\n\nМожеш зберегти це посилання собі! ✨`;
         } else {
             const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `HR ${HR_NAME}`;
-            confirmationText += `\nТвій запис з'явився у нашому графіку. ${hrDisplay} надішле тобі посилання на відеозустріч ближче до часу проведення. До зустрічі! 🌸✨`;
+            confirmationText += `\nЗапис з’явився у нашому графіку. ${hrDisplay} надішле посилання на відеозустріч ближче до початку.`;
         }
 
         const kb = new InlineKeyboard()
@@ -308,7 +308,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
             await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔").catch(() => {});
             const freshSlots = await findAvailableInterviewSlots().catch(() => []);
             if (freshSlots.length === 0) {
-                await ctx.editMessageText(`Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`).catch(() => {});
+                await ctx.editMessageText(`Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`).catch(() => {});
             } else {
                 const freshKeyboard = buildSlotSelectionKeyboard(freshSlots, "book_slot_", "no_slots_fit");
                 await ctx.editMessageText(
@@ -319,7 +319,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         } else if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔");
         } else if (e.message === "UNDERAGE_CANDIDATE") {
-            await ctx.answerCallbackQuery("Цей етап поки недоступний для твоєї анкети.");
+            await ctx.answerCallbackQuery("Цей етап поки недоступний для вашої анкети.");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
         } else if (e.message === "AGE_LIMIT_CANDIDATE") {
             await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
@@ -328,7 +328,7 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
             await ctx.answerCallbackQuery("Спершу потрібно оновити анкету.");
             await ScreenManager.renderScreen(
                 ctx,
-                "Анкету потрібно оновити перед записом на співбесіду 🌸\n\nНатисни кнопку нижче, щоб продовжити з того місця, де ми зупинилися.",
+                "Перед записом на співбесіду потрібно оновити анкету.\n\nНатисніть кнопку нижче, щоб продовжити з того місця, де зупинилися.",
                 new InlineKeyboard().text("Продовжити анкету ✨", "resume_screening")
             );
         } else if (e.message === "MALE_CANDIDATE") {
@@ -354,7 +354,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     await ctx.editMessageText(
         `⚠️ <b>Ти впевнена, що хочеш скасувати запис?</b>\n\n` +
-        `Ми звільнимо цей час, а ти зможеш обрати інший слот для співбесіди, коли буде зручно. 🌸`,
+        `Ми звільнимо цей час, і ви зможете обрати інший, коли буде зручно.`,
         { parse_mode: "HTML", reply_markup: kb }
     );
     return;
@@ -418,7 +418,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     await ctx.editMessageText(
         `⚠️ <b>Ти впевнена, що не плануєш продовжувати?</b>\n\n` +
-        `Ми закриємо твою заявку та скасуємо запис на співбесіду. Якщо тобі просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        `Ми закриємо заявку та скасуємо запис на співбесіду. Якщо просто не підходить час — поверніться й оберіть «Скасувати запис» або «Змінити час».`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
@@ -454,7 +454,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await ctx.answerCallbackQuery("Відмову зафіксовано.");
         await ctx.editMessageText(
             "Дякуємо, що повідомила. 🌸\n\n" +
-            "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
+            "Заявку закрито. Бажаємо успіхів — і будемо раді, якщо колись захочете повернутися."
         );
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview vacancy withdrawal failed");
@@ -501,14 +501,14 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                     interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
                 });
             }
-            await ctx.editMessageText(`Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`);
+            await ctx.editMessageText(`Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`);
             return;
         }
 
         const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit", 20);
 
         await ctx.editMessageText(
-            "Добре, давай оберемо інший зручний час: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+            "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
             { reply_markup: keyboard }
         );
 
@@ -539,7 +539,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
             { ...buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_SLOTS), noSlotsAt: new Date() }
         );
 
-        const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
+        const text = `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`;
         const kb = new InlineKeyboard().text("🔔 Повідомити мене", "no_slots_available_ack");
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (candidate?.gender !== "male") {
@@ -556,7 +556,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 
     await cleanupMessages(ctx);
     const msg = await ctx.reply(
-        "Обери зручний час для співбесіди: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+        "Оберіть зручний час для співбесіди:\n\nНатисніть кнопку з потрібною датою та часом.",
         { reply_markup: keyboard }
     );
     trackMessage(ctx, msg.message_id);
@@ -582,7 +582,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
     );
 
-    await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
+    await ctx.editMessageText(`Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 });
 
 // 6.5 Відмова кандидата від співбесіди
@@ -660,7 +660,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
             { status: CandidateStatus.WAITLIST_MENTOR, isWaitlisted: true, currentStep: FunnelStep.TRAINING }
         );
 
-        const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на коротку зустріч-знайомство. ✨`;
+        const text = `Графік зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться вікна для зустрічі-знайомства.`;
         const kb = new InlineKeyboard()
             .text("🔔 Повідомити мене", "training_no_slots_fit")
             .text("💬 Написати нам", "contact_hr");
@@ -690,7 +690,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
 
     await cleanupMessages(ctx);
     const msg = await ctx.reply(
-        `Обери зручний час для зустрічі-знайомства: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.`,
+        `Оберіть зручний час для зустрічі-знайомства:\n\nНатисніть кнопку з потрібною датою та часом.`,
         { reply_markup: keyboard }
     );
     trackMessage(ctx, msg.message_id);
@@ -787,7 +787,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         if (e.message === "ALREADY_BOOKED") {
             await ctx.answerCallbackQuery("Цей час вже зайнятий, обери інший.");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка. Спробуй ще раз. 😔");
+            await ctx.answerCallbackQuery("Сталася помилка. Спробуйте ще раз.");
         }
     } finally {
         bookingLocks.delete(telegramId);
@@ -814,7 +814,7 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
         }
     );
 
-    await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
+    await ctx.editMessageText(`Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 
     const { MENTOR_IDS } = await import("../config.js");
     if (MENTOR_IDS && MENTOR_IDS.length > 0) {
@@ -845,7 +845,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     await ctx.editMessageText(
         `⚠️ <b>Ти впевнена, що хочеш скасувати запис?</b>\n\n` +
-        `Ми звільнимо цей час, а ти зможеш обрати інший слот для зустрічі, коли буде зручно. 🌸`,
+        `Ми звільнимо цей час, і ви зможете обрати інший, коли буде зручно.`,
         { parse_mode: "HTML", reply_markup: kb }
     );
     return;
@@ -913,7 +913,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 
     await ctx.editMessageText(
         `⚠️ <b>Ти впевнена, що не плануєш продовжувати?</b>\n\n` +
-        `Ми закриємо твою заявку та скасуємо запис. Якщо тобі просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        `Ми закриємо заявку та скасуємо запис. Якщо просто не підходить час — поверніться й оберіть «Скасувати запис» або «Змінити час».`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
@@ -949,7 +949,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await ctx.answerCallbackQuery("Відмову зафіксовано.");
         await ctx.editMessageText(
             "Дякуємо, що повідомила. 🌸\n\n" +
-            "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
+            "Заявку закрито. Бажаємо успіхів — і будемо раді, якщо колись захочете повернутися."
         );
 
         if (candidate) {
@@ -1032,7 +1032,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 }
             }
 
-            return ctx.editMessageText("Зараз вільних слотів немає. Наставник скоро запропонує тобі зручний час! 🌸✨", {
+            return ctx.editMessageText("Зараз вільних слотів немає. Ми запропонуємо зручний час найближчим часом.", {
                 reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
             });
         }
@@ -1040,7 +1040,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit", 20);
 
         await ctx.editMessageText(
-            "Добре, давай оберемо інший зручний час: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+            "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
             { reply_markup: keyboard }
         );
 

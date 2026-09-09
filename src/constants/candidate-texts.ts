@@ -5,10 +5,20 @@ export const CANDIDATE_TEXTS = {
     "welcome-message": "Привіт! Це анкета для фотографів PlayPhoto 📸\n\nСім коротких питань — хвилин на п’ять.",
     "ask-name": "Як вас звати?\n\nНапишіть ім’я та прізвище.",
     "error-name-format": (error: string) => `${error}\n\nНапишіть ім’я та прізвище ще раз.`,
-    "candidate-greeting-nicetomeet": (_fullName: string) => `Приємно познайомитись!\n\nЩоб підібрати зручну локацію, дай відповідь на кілька питань.`,
+    "candidate-greeting-nicetomeet": (_fullName: string) => `Приємно познайомитись!\n\nЩоб підібрати зручну локацію, дайте відповідь на кілька питань.`,
 
-    "candidate-ask-birthday": "Коли ви народилися?\n\nНапишіть дату так: <code>15.05.2005</code>",
-    "candidate-ask-city": "У якому місті хочеш працювати?",
+    /**
+     * Дата народження збирається кнопками: рік → місяць → день. Ручний ввід
+     * ДД.ММ.РРРР давав опечатки (бот не керує клавіатурою телефону), три гілки
+     * помилок і екран без кнопки «Назад». Питаємо повну дату, а не лише рік:
+     * точний день потрібен привітанням з днем народження і розблокуванню
+     * анкети рівно на 16-річчя. Деталі — в utils/birth-date-picker.ts.
+     */
+    "candidate-ask-birth-year": "Якого року ви народилися?",
+    "candidate-ask-birth-month": (year: number) => `Рік: <b>${year}</b>\n\nОберіть місяць.`,
+    "candidate-ask-birth-day": (year: number, monthLabel: string) => `Рік: <b>${year}</b> · Місяць: <b>${monthLabel}</b>\n\nОберіть день.`,
+
+    "candidate-ask-city": "У якому місті хочете працювати?",
     "candidate-ask-location-multiple": "У цьому місті кілька локацій. Оберіть найзручнішу.",
     "candidate-ask-appearance": "Чи маєте ви видимі татуювання (на руках, шиї) або пірсинг на обличчі?\n\nЦе не відмова — такі анкети ми просто розглядаємо окремо.",
     "candidate-ask-source": "Останнє питання: звідки ви дізналися про вакансію?",
@@ -19,15 +29,15 @@ export const CANDIDATE_TEXTS = {
     "candidate-success-screening": "<b>Анкету отримано</b>\n\nМи розглянемо її і запропонуємо час для співбесіди найближчим часом.",
     "candidate-success-manual-review": "<b>Анкету отримано</b>\n\nВи пройшли первинний етап. Оскільки ви вказали татуювання або пірсинг, анкету подивиться HR — вона напише вам сюди.",
     "candidate-success-waitlist": "Дякуємо! Зараз команда на цій локації повна.\n\nВаша анкета в списку очікування — щойно звільниться місце, ми напишемо.",
-    "candidate-waitlist-slots": (_firstName: string, typeText: string) => `🌸 Привіт! ✨ Ми вже готуємо нові вікна у графіку для <b>${typeText}</b>. ✨\n\nМи надішлемо вам сповіщення, як тільки вони з’являться.`,
+    "candidate-waitlist-slots": (_firstName: string, typeText: string) => `Ми готуємо нові вікна у графіку для <b>${typeText}</b>.\n\nНадішлемо сповіщення, щойно вони з’являться.`,
     // Гонка кнопок при канонических слотах интервью: пока кандидатка думала,
     // слот забрала другая. Показывается вместе со свежим списком слотов.
-    "candidate-interview-slot-taken": "Ой, цей час щойно забронювали. 😔\n\nОберіть інший зручний слот: 🗓️✨",
+    "candidate-interview-slot-taken": "Цей час щойно забронювали.\n\nОберіть, будь ласка, інший:",
 
     "candidate-interview-scheduled": (dateStr: string, timeStr: string, meetLink?: string) => {
-        let text = `🗓️ <b>Ваша співбесіда запланована!</b>\n\n📅 Дата: <b>${dateStr}</b>\n⏰ Час: <b>${timeStr}</b>\n`;
-        if (meetLink) text += `📹 <a href="${meetLink}">Приєднатися до зустрічі</a>\n`;
-        else text += `\nHR надішле посилання на відеозустріч ближче до часу проведення. ✨\n`;
+        let text = `<b>Співбесіду заплановано</b>\n\nДата: <b>${dateStr}</b>\nЧас: <b>${timeStr}</b>\n`;
+        if (meetLink) text += `\n<a href="${meetLink}">Приєднатися до зустрічі</a>\n`;
+        else text += `\nПосилання на відеозустріч надішлемо ближче до початку.\n`;
         return text;
     },
 
@@ -38,10 +48,13 @@ export const CANDIDATE_TEXTS = {
      */
     "candidate-accepted-welcome": (_firstName: string) => `<b>Вітаємо в команді PlayPhoto</b>\n\nМи зв’яжемося з вами щодо навчання найближчим часом. Якщо виникнуть питання — напишіть нам просто в цей чат.`,
 
+    // «Наставник» прибраний з тексту: роль ментора вилучена з бота (див.
+    // «refactor(bot): прибрано меню ментора»), і обіцяти зустріч із ним не
+    // можна — на зустрічі буде хтось із команди.
     "candidate-training-scheduled": (typeLabel: string, dateStr: string, timeStr: string, meetLink?: string) => {
-        let text = `🗓️ <b>Ваше ${typeLabel} заплановане!</b>\n\n📅 Дата: <b>${dateStr}</b>\n⏰ Час: <b>${timeStr}</b>\n`;
-        if (meetLink) text += `📹 <a href="${meetLink}">Приєднатися до зустрічі</a>\n`;
-        text += `\nТвій наставник чекатиме на вас! ✨`;
+        let text = `<b>${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)} заплановано</b>\n\nДата: <b>${dateStr}</b>\nЧас: <b>${timeStr}</b>\n`;
+        if (meetLink) text += `\n<a href="${meetLink}">Приєднатися до зустрічі</a>\n`;
+        text += `\nЧекаємо на вас.`;
         return text;
     },
 
@@ -51,14 +64,16 @@ export const CANDIDATE_TEXTS = {
     "candidate-reject-underage": "Дякуємо, ми зберегли вашу анкету.\n\nЗараз ми беремо в команду з 16 років. Коли вам виповниться — бот нагадає, і ви зможете продовжити.",
     "candidate-reject-age-limit": "Дякуємо, що заповнили анкету.\n\nЦього разу ми не зможемо запропонувати місце. Дані зберігаються — якщо з’явиться відповідна вакансія, ми напишемо.",
     "candidate-info-no-vacancies": (city: string) => `У місті ${city} зараз немає відкритих вакансій.\n\nМи зберегли вашу анкету — щойно з’явиться місце, напишемо.`,
-    "candidate-error-birthday-invalid": "Такої дати не існує. Напишіть так: 15.05.2005",
+
+    /** Прийшло фото на кроці, де фото не питали. */
+    "candidate-error-photo-unexpected": "На це питання потрібна відповідь текстом.",
 
     // --- 3. DISCOVERY ТА ОНЛАЙН СТАЖУВАННЯ ---
 
     // --- 4. NDA ---
 
     // --- 5. ТЕСТ ТА ОФЛАЙН СТАЖУВАННЯ ---
-    "staging-cancelled-by-candidate": "🌸 <b>Зрозумів, плани змінилися.</b>\n\nМи зняли твій запис на стажування. Адміністратор зв’яжеться з тобою, щоб підібрати інший час! ✨",
+    "staging-cancelled-by-candidate": "<b>Запис на стажування скасовано</b>\n\nАдміністратор зв’яжеться з вами, щоб підібрати інший час.",
 
     // --- 6. ЖИВА КАРТКА (UI В ГОЛОВНОМУ МЕНЮ) ---
     
@@ -104,27 +119,32 @@ export const CANDIDATE_TEXTS = {
     "candidate-reject-male-location": (_locationName: string, _city: string) => `Дякуємо, що заповнили анкету.\n\nЦього разу ми не зможемо запросити вас у команду. Ваші дані залишаються в нашій базі — щойно з’явиться відповідна вакансія, ми напишемо.\n\nГарного дня.`,
 
     // --- 8. WORKER NOTIFICATIONS ---
-    "worker-offer-accepted": (_firstName: string, mentorDisplay: string) => `Ура! 🎉 Ви в команді!\n\nМи впевнені, що ви ідеально впишетеся в нашу сім’ю PlayPhoto. 📸\n\nНаступний крок — навчання. ${mentorDisplay} зв’яжеться з тобою найближчим часом, щоб домовитись про перший день.\n\nГотуйся створювати магію! ✨`,
-    "worker-offer-rejected": "Привіт! 🌸\n\nДякуємо за час та спілкування. Наразі ми не можемо запропонувати вам оффер. Це було непросте рішення.\n\nБажаємо успіхів у пошуку роботи мрії! Можливо, наші шляхи ще перетнуться в майбутньому. ✨",
-    
-    "worker-interview-reminder-6h": (_firstName: string, timeStr: string, hrDisplay: string) => `🔔 <b>Нагадування</b>\n\nПривіт! ✨ 👋\n\nСьогодні о <b>${timeStr}</b> на вас чекає ${hrDisplay}. 🌸\nБудь ласка, перевірте стабільність інтернету та підготуйте гарний настрій!`,
+    /**
+     * Усі сповіщення нижче — на «ви». Раніше вони змішували звертання в одному
+     * повідомленні («Ви в команді… зв’яжеться з тобою… Готуйся»), що читалося
+     * як два різні автори. Емодзі лишилися тільки там, де несуть значення.
+     */
+    "worker-offer-accepted": (_firstName: string, mentorDisplay: string) => `<b>Вітаємо в команді PlayPhoto</b> 🎉\n\nНаступний крок — навчання. ${mentorDisplay} зв’яжеться з вами найближчим часом, щоб домовитися про перший день.`,
+    "worker-offer-rejected": "Дякуємо за час і за розмову.\n\nЦього разу ми не зможемо зробити вам пропозицію. Бажаємо успіхів у пошуку.",
+
+    "worker-interview-reminder-6h": (_firstName: string, timeStr: string, hrDisplay: string) => `<b>Нагадування про співбесіду</b>\n\nСьогодні о <b>${timeStr}</b> на вас чекає ${hrDisplay}.\n\nПеревірте, будь ласка, зв’язок незадовго до початку.`,
     "worker-interview-reminder-10m": (timeStr: string, hrDisplay: string, meetLink?: string) => {
-        let text = `🚀 <b>Співбесіда вже за 10 хвилин!</b>\n\n⏰ Час: <b>${timeStr}</b>\n✨ На вас чекає ${hrDisplay}.`;
-        if (meetLink) text += `\n\n🔗 <b>Meet:</b> <a href="${meetLink}">Приєднатися зараз</a>`;
+        let text = `<b>Співбесіда за 10 хвилин</b>\n\nЧас: <b>${timeStr}</b>\nНа вас чекає ${hrDisplay}.`;
+        if (meetLink) text += `\n\n<a href="${meetLink}">Приєднатися до зустрічі</a>`;
         return text;
     },
 
-    "worker-training-reminder-6h": (_firstName: string, typeText: string, timeStr: string, mentorDisplay: string) => `🔔 <b>Нагадування про ${typeText}</b>\n\nПривіт! ✨ 👋\n\nСьогодні о <b>${timeStr}</b> на вас чекає ${mentorDisplay}. 🎓\nБудь ласка, переконайтеся, що у вас є стабільний інтернет.`,
+    "worker-training-reminder-6h": (_firstName: string, typeText: string, timeStr: string, mentorDisplay: string) => `<b>Нагадування про ${typeText}</b>\n\nСьогодні о <b>${timeStr}</b> на вас чекає ${mentorDisplay}.\n\nПеревірте, будь ласка, зв’язок незадовго до початку.`,
     "worker-training-reminder-10m": (typeText: string, timeStr: string, mentorDisplay: string, meetLink?: string) => {
-        let text = `🚀 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} вже за 10 хвилин!</b>\n\n⏰ Час: <b>${timeStr}</b>\n✨ На вас чекає ${mentorDisplay}.`;
-        if (meetLink) text += `\n\n🔗 <b>Meet:</b> <a href="${meetLink}">Приєднатися</a>`;
+        let text = `<b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} за 10 хвилин</b>\n\nЧас: <b>${timeStr}</b>\nНа вас чекає ${mentorDisplay}.`;
+        if (meetLink) text += `\n\n<a href="${meetLink}">Приєднатися до зустрічі</a>`;
         return text;
     },
 
     "worker-abandoned-screening": "<b>Анкета не дозаповнена</b>\n\nЛишилося кілька питань. Натисніть кнопку нижче, щоб продовжити з того місця, де зупинилися.",
 
     // --- 9. ADMIN TRIGGERED NOTIFICATIONS ---
-    "admin-re-invite-interview": "Привіт! ✨ Ми оновили графік співбесід. Оберіть зручний час для зустрічі:",
+    "admin-re-invite-interview": "Ми оновили графік співбесід. Оберіть зручний час:",
     
 
 
@@ -132,8 +152,8 @@ export const CANDIDATE_TEXTS = {
 
 
     "hr-rejection-appearance": "Дякуємо за інтерес до PlayPhoto.\n\nЦього разу ми не зможемо запропонувати вам співпрацю. Бажаємо успіхів у пошуку.",
-    "hr-manual-review-approved": "Вітаємо! 🎉\n\nТвоя анкета розглянута та прийнята. Наша HR зв’яжеться з тобою найближчим часом для наступних кроків. ✨",
+    "hr-manual-review-approved": "<b>Вашу анкету прийнято</b>\n\nHR зв’яжеться з вами найближчим часом щодо наступних кроків.",
 
     // --- 11. PREFERENCES (CANONICAL WRITE) ---
-    "preferences-save-failed": "❌ Не вдалося зберегти побажання. Спробуй ще раз трохи пізніше.",
+    "preferences-save-failed": "Не вдалося зберегти побажання. Спробуйте ще раз трохи пізніше.",
 };

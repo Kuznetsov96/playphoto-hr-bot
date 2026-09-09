@@ -197,7 +197,7 @@ describe("interview booking over canonical slots", () => {
 
         expect(findAvailableInterviewSlots).toHaveBeenCalledTimes(1);
         expect(ctx.reply).toHaveBeenCalledWith(
-            expect.stringContaining("Обери зручний час"),
+            expect.stringContaining("Оберіть зручний час"),
             expect.anything(),
         );
     });
@@ -215,7 +215,7 @@ describe("interview booking over canonical slots", () => {
             expect.objectContaining({ noSlotsAt: expect.any(Date) }),
         );
         expect(ctx.reply).toHaveBeenCalledWith(
-            expect.stringContaining("Зараз графік співбесід оновлюється"),
+            expect.stringContaining("Графік співбесід зараз оновлюється"),
             expect.anything(),
         );
         // Раньше здесь дублировался телеграм-алерт HR — теперь сигнал уходит

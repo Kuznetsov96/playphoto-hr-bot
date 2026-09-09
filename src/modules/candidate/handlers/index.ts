@@ -16,6 +16,7 @@ import {
     getCandidateAge,
     type CandidateAgeLocation,
 } from "../../../utils/candidate-age.js";
+import { buildBirthDate } from "../../../utils/birth-date-picker.js";
 
 // --- HELPERS ---
 /**
@@ -142,8 +143,10 @@ export async function startScreening(ctx: MyContext) {
         const firstName = extractFirstName(candidateData.fullName || "");
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](firstName), "candidate-gender");
     } else if (!candidateData.birthDate) {
-        ctx.session.step = "screening_birthdate";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birthday"]);
+        ctx.session.step = "screening_birth_year";
+        delete candidateData.birthYear;
+        delete candidateData.birthMonth;
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year");
     } else if (!candidateData.city) {
         ctx.session.step = "screening_city";
         await triggerPrompt(ctx, "screening_city");
@@ -181,7 +184,7 @@ async function renderLocationSelection(ctx: MyContext) {
         await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
     } catch (e: any) {
         logger.error({ err: e }, "Candidate location selection rendering failed");
-        await ScreenManager.renderScreen(ctx, "🐾 Ой! Виникла помилка при завантаженні локацій. Спробуй /start ще раз.");
+        await ScreenManager.renderScreen(ctx, "Не вдалося завантажити список локацій. Спробуйте ще раз через /start.");
     }
 }
 
@@ -295,7 +298,7 @@ candidateHandlers.callbackQuery("restart_screening", async (ctx) => {
         });
     }
 
-    await ctx.answerCallbackQuery("Починаємо спочатку! ✨");
+    await ctx.answerCallbackQuery("Починаємо спочатку");
     ctx.session.candidateData = {};
     await startScreening(ctx);
 });
@@ -321,7 +324,7 @@ candidateHandlers.callbackQuery("candidate_start_screening", async (ctx) => {
         ];
 
         if (protectedStatuses.includes(user.candidate.status)) {
-            await ctx.answerCallbackQuery("⚠️ Твій профіль уже в роботі! Анкета не потребує оновлення. ✨");
+            await ctx.answerCallbackQuery("Вашу анкету вже взято в роботу — оновлювати її не потрібно.");
             const { showCandidateStatus } = await import("../../../utils/candidate-ui.js");
             await showCandidateStatus(ctx, user.candidate);
             return;
@@ -362,43 +365,6 @@ candidateHandlers.on("message:text", async (ctx, next) => {
             await ScreenManager.renderScreen(ctx, errorText + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
         }
         return;
-    } else if (step === "screening_birthdate") {
-        const text = ctx.message.text;
-        if (/^\d{2}\.\d{2}\.\d{4}$/.test(text)) {
-            const [d, m, y] = text.split(".").map(Number);
-            const date = new Date(y!, m! - 1, d!);
-            if (!isNaN(date.getTime()) && date.getDate() === d) {
-                const val = CandidateSchema.shape.birthDate.safeParse(date);
-                if (val.success) {
-                    ctx.session.candidateData.birthDate = date.toISOString();
-                    await persistCandidate(ctx, { birthDate: date });
-
-                    if (shouldDeferCandidateAtBirthDate(date)) {
-                        await persistCandidate(ctx, {
-                            fullName: ctx.session.candidateData.fullName,
-                            birthDate: date,
-                            gender: ctx.session.candidateData.gender,
-                            status: CandidateStatus.REJECTED,
-                            isWaitlisted: false,
-                            hrDecision: "REJECTED_SYSTEM_UNDERAGE"
-                        });
-                        ctx.session.step = "idle";
-                        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
-                        return;
-                    }
-
-                    ctx.session.step = "screening_city";
-                    await triggerPrompt(ctx, "screening_city");
-                } else {
-                    await ScreenManager.renderScreen(ctx, `⚠️ ${val.error.issues[0]?.message}\n\n${CANDIDATE_TEXTS["candidate-ask-birthday"]}`);
-                }
-            } else {
-                await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-birthday-invalid"]);
-            }
-        } else {
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-birthday-invalid"]);
-        }
-        return;
     } else if (step === "screening_appearance") {
         await finishScreening(ctx, ctx.message.text);
         return;
@@ -408,15 +374,68 @@ candidateHandlers.on("message:text", async (ctx, next) => {
 });
 
 candidateHandlers.on("message:photo", async (ctx) => {
+    if (!ctx.session.step?.startsWith("screening_")) return;
+
+    // Приватність + SMI: фото прибирається з переписки так само, як текстові
+    // відповіді. Раніше видалявся тільки текст, і особисте фото, надіслане на
+    // прохання бота, лишалося висіти в чаті — асиметрія саме в найделікатнішому
+    // місці анкети. Знімок не губиться: file_id зберігається в tattooPhotoId і
+    // показується рекрутеру на екрані REVIEW.
+    await ctx.deleteMessage().catch(() => { });
+
     if (ctx.session.step === "screening_appearance") {
         const photo = ctx.message.photo.pop();
         if (photo) {
             await finishScreening(ctx, "[Фото]", photo.file_id);
         }
-    } else if (ctx.session.step?.startsWith("screening_")) {
-        await ScreenManager.renderScreen(ctx, "📝 Будь ласка, надішли текстову відповідь, а не фото. ✨");
+        return;
     }
+
+    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-photo-unexpected"]);
 });
+
+/**
+ * Завершує вибір дати народження: рік і місяць уже лежать у сесії, лишився
+ * день. Неіснуючих дат тут бути не може — меню днів будується під конкретний
+ * місяць і рік, — але buildBirthDate перевіряє це ще раз, бо сесія могла
+ * застаріти між рендером клавіатури й натисканням.
+ */
+export async function handleBirthDateSelected(ctx: MyContext, day: number) {
+    const { birthYear, birthMonth } = ctx.session.candidateData;
+    const date = buildBirthDate(birthYear, birthMonth, day);
+
+    if (!date) {
+        await askBirthYearAgain(ctx);
+        return;
+    }
+
+    ctx.session.candidateData.birthDate = date.toISOString();
+    await persistCandidate(ctx, { birthDate: date });
+
+    if (shouldDeferCandidateAtBirthDate(date)) {
+        await persistCandidate(ctx, {
+            fullName: ctx.session.candidateData.fullName,
+            birthDate: date,
+            gender: ctx.session.candidateData.gender,
+            status: CandidateStatus.REJECTED,
+            isWaitlisted: false,
+            hrDecision: "REJECTED_SYSTEM_UNDERAGE"
+        });
+        ctx.session.step = "idle";
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+        return;
+    }
+
+    ctx.session.step = "screening_city";
+    await triggerPrompt(ctx, "screening_city");
+}
+
+async function askBirthYearAgain(ctx: MyContext) {
+    ctx.session.step = "screening_birth_year";
+    delete ctx.session.candidateData.birthYear;
+    delete ctx.session.candidateData.birthMonth;
+    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year");
+}
 
 export async function handleLocationSelected(ctx: MyContext, targetLoc: any, city: string) {
     const { fullName, birthDate: bdStr, gender } = ctx.session.candidateData;
@@ -452,9 +471,18 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance");
 }
 
-export async function finishScreening(ctx: MyContext, appearance: string, tattooPhotoId?: string) {
-    const { locationRepository, candidateRepository } = ctx.di;
+/**
+ * Крок-прапорець на час фіналізації анкети. Захищає від подвійного запуску:
+ * fingerprint на меню джерела відсікає повторний тап по кнопці, але це не
+ * єдиний вхід у finishScreening — є ще текст, фото і меню зовнішності.
+ *
+ * Анкета й так не задвоїлася б (persistCandidate — upsert), але другий прохід
+ * робив зайві запити в БД і клав другу відмальовку поверх результату. На
+ * повільній мережі — саме там, де людина найімовірніше тапне вдруге.
+ */
+const FINISHING_STEP = "screening_finishing";
 
+export async function finishScreening(ctx: MyContext, appearance: string, tattooPhotoId?: string) {
     ctx.session.candidateData.appearance = appearance;
     if (tattooPhotoId) ctx.session.candidateData.tattooPhotoId = tattooPhotoId;
     await persistCandidate(ctx, { appearance, ...(tattooPhotoId ? { tattooPhotoId } : {}) });
@@ -465,10 +493,30 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
         return;
     }
 
+    // Прапорець ставиться до першого await у фіналізації, тож два апдейти,
+    // що прийшли підряд, не пройдуть обидва.
+    if (ctx.session.step === FINISHING_STEP || ctx.session.step === "idle") return;
+    ctx.session.step = FINISHING_STEP;
+
+    try {
+        await finalizeScreening(ctx);
+    } catch (e) {
+        // Не лишаємо сесію замкненою на прапорці: інакше після збою людина
+        // вже нічим не могла б завершити анкету — усі входи впирались би в
+        // цю перевірку.
+        if (ctx.session.step === FINISHING_STEP) ctx.session.step = "screening_source";
+        throw e;
+    }
+}
+
+async function finalizeScreening(ctx: MyContext) {
+    const { locationRepository, candidateRepository } = ctx.di;
+
     // SMI: Update current message to processing instead of sending a new one
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-info-processing"]);
 
     const { fullName, birthDate: bdStr, gender, city, source, clickSource, tattooPhotoId: finalTattooId } = ctx.session.candidateData;
+    const appearance = ctx.session.candidateData.appearance || "Без особливостей";
     const locationIds = getLocationIds(ctx.session.candidateData);
     const birthDate = new Date(bdStr!);
     let status: CandidateStatus = CandidateStatus.SCREENING;
@@ -606,6 +654,6 @@ candidateHandlers.on("callback_query:data", async (ctx, next) => {
     } catch (e) {
         const { default: logger } = await import("../../../core/logger.js");
         logger.error({ err: e, candId }, "Candidate staging cancellation failed");
-        await ctx.reply("⚠️ Щось пішло не так. Спробуй ще раз або напиши адміну.");
+        await ctx.reply("Щось пішло не так. Спробуйте ще раз або напишіть нам.");
     }
 });

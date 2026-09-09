@@ -120,7 +120,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
         case CandidateStatus.INTERVIEW_COMPLETED:
         case CandidateStatus.DECISION_PENDING:
-            text = `🌸 <b>${firstName}</b>, приємно було познайомитися! 😊\n\nТвоя анкета на розгляді у HR. Очікуй на відповідь найближчим часом. ✨` + jobDetails;
+            text = `<b>${firstName}</b>, приємно було познайомитися!\n\nВаша анкета на розгляді у HR — відповідь надішлемо найближчим часом.` + jobDetails;
             if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
             break;
 
@@ -130,7 +130,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
                 const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
-            } else text = `🌸 <b>${firstName}</b>, ти записана на співбесіду!`;
+            } else text = `<b>${firstName}</b>, вас записано на співбесіду.`;
             kb.text("🗓️ Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
                 .text("✖️ Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).danger().row()
                 .text("🚫 Не планую продовжувати", buildSignedCallback("wi", candidate.interviewSlotId || "none")).danger();
@@ -160,21 +160,21 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         }
 
         case CandidateStatus.HIRED:
-            text = `✨ <b>Вітаємо, ${firstName}!</b>\n\nТи вже частина команди PlayPhoto. Натисни /start, щоб відкрити робочий кабінет! 📸`;
+            text = `<b>Вітаємо, ${firstName}!</b>\n\nВи вже частина команди PlayPhoto. Натисніть /start, щоб відкрити робочий кабінет.`;
             break;
 
         case CandidateStatus.REJECTED:
             text = CANDIDATE_TEXTS["candidate-rejected"];
             if (canUseRecovery) {
-                text += "\n\nРаніше ми не могли доставити тобі повідомлення в боті, тому цей кейс винесено в окремий recovery-розгляд. Якщо хочеш повернутись на зв'язок із командою, напиши нам.";
+                text += "\n\nРаніше наші повідомлення не доходили до вас у боті. Якщо хочете відновити зв’язок із командою — напишіть нам.";
                 kb.text("💌 Написати нам", "contact_recovery");
             }
             break;
 
         case CandidateStatus.BLOCKER:
-            text = `👋 <b>Зв'язок із ботом відновлено.</b>\n\nРаніше система зафіксувала, що повідомлення тобі не доставлялися, тому ми зупинили подальші сповіщення, щоб не турбувати тебе.`;
+            text = `<b>Зв’язок із ботом відновлено</b>\n\nРаніше наші повідомлення не доходили до вас, тому ми зупинили сповіщення, щоб не турбувати даремно.`;
             if (canUseRecovery) {
-                text += "\n\nЯкщо хочеш відновити контакт із командою або поставити запитання, натисни кнопку нижче.";
+                text += "\n\nЩоб відновити контакт із командою або поставити запитання — натисніть кнопку нижче.";
                 kb.text("💌 Написати нам", "contact_recovery");
             }
             break;
