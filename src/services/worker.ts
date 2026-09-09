@@ -1844,8 +1844,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
 
                 if (referenceDate <= cutoff7Days) {
                     // Day 7: Reject
-                    let rejectReason = "на стажування";
-                    if (cand.status === "KNOWLEDGE_TEST") rejectReason = "після тестування";
+                    const rejectReason = "на стажування";
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
@@ -1869,12 +1868,11 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     });
                 } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
                     // Day 5: Warning (We run this once a day, so it will hit exactly once)
-                    let contextStr = "на ваш наступний крок";
-                    switch (cand.status) {
-                        case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставником"; break;
-                        case "NDA": contextStr = "на ознайомлення з NDA (правилами команди)"; break;
-                        case "KNOWLEDGE_TEST": contextStr = "на проходження фінального тесту"; break;
-                    }
+                    // Етапи NDA й тесту прибрані з воронки — лишилися тільки
+                    // ті кроки, які людина справді може зробити зараз.
+                    const contextStr = cand.status === "ACCEPTED"
+                        ? "на вибір часу для зустрічі з наставником"
+                        : "на ваш наступний крок";
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
