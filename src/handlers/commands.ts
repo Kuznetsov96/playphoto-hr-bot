@@ -388,39 +388,6 @@ commandHandlers.command("ping_admin", async (ctx) => {
     await ctx.reply("Pong! 🏓 (Admin system online)");
 });
 
-commandHandlers.command("restore_access", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), async (ctx) => {
-    await ctx.reply("🛠 <b>Починаю відновлення доступу...</b>\n\nЦе може зайняти кілька хвилин. Я надішлю звіт по завершенню. ✨", { parse_mode: "HTML" });
-
-    try {
-        const { restoreAccessService } = await import("../services/restore-access.js");
-        const summary = await restoreAccessService.restoreAllStaffAccess(ctx.api);
-        logAuditEvent({
-            event: "admin.restore_access.executed",
-            telegramId: ctx.from?.id,
-            actorType: "admin",
-            actorRole: "admin",
-            result: "success",
-            module: "commands",
-            operation: "restore_access",
-            updateId: ctx.update.update_id,
-        });
-        await ctx.reply(summary, { parse_mode: "HTML" });
-    } catch (e: any) {
-        logger.error({ err: e, telegramId: ctx.from?.id }, "Restore access command failed");
-        logAuditEvent({
-            event: "admin.restore_access.executed",
-            telegramId: ctx.from?.id,
-            actorType: "admin",
-            actorRole: "admin",
-            result: "failed",
-            module: "commands",
-            operation: "restore_access",
-            updateId: ctx.update.update_id,
-            error: e,
-        });
-        await ctx.reply(`❌ Помилка: ${e.message}`);
-    }
-});
 
 commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'), async (ctx) => {
     if (ctx.chat?.type !== "private") return;
