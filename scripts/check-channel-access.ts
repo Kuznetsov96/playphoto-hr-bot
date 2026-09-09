@@ -10,7 +10,12 @@
  * CANDIDATE. Саме вони втратили б доступ помилково, і їх треба полагодити
  * ДО деплою.
  *
- * Запуск на проді:  npx tsx src/scripts/check-channel-access.ts
+ * Запуск з кореня репозиторію (де лежить .env):
+ *   npx tsx scripts/check-channel-access.ts
+ * Запуск усередині прод-контейнера (вихідників src там немає, лише dist;
+ * DATABASE_URL вказує на сусідній контейнер postgres, тож ззовні база
+ * недоступна — саме тому перевірку треба робити на сервері):
+ *   docker exec playphoto-bot-bot-1 npx tsx /app/scripts/check-channel-access.ts
  */
 import { PrismaClient, Role, CandidateStatus } from "@prisma/client";
 
