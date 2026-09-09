@@ -48,6 +48,30 @@ export type CandidateWithRelations = Candidate & {
     messages: Message[];
 };
 
+/**
+ * Стандартний набір зв'язків картки кандидатки.
+ *
+ * Був розписаний тринадцять разів однаковим рядком, і в кожному стояло
+ * `messages: true` — тобто вся історія листування підвантажувалася навіть
+ * там, де пишеться одне поле анкети. persistCandidate викликається на
+ * кожному кроці воронки, тож у балакучої кандидатки саме це ставало
+ * найдорожчою частиною кожного натискання.
+ *
+ * `take: 1` вистачає: єдине, що читають із цього поля, — останнє
+ * повідомлення (`messages[0]`). Тим, кому потрібне листування цілком
+ * (findUnreadByScope, countUnreadByScope), роблять власні запити з
+ * власними orderBy й take.
+ */
+const CANDIDATE_RELATIONS = {
+    user: true,
+    location: true,
+    firstShiftPartner: { include: { user: true } },
+    discoverySlot: true,
+    trainingSlot: true,
+    interviewSlot: true,
+    messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+} satisfies Prisma.CandidateInclude;
+
 export class CandidateRepository {
     private readScalarValue<T>(value: T | { set?: T } | undefined): T | undefined {
         if (value === undefined) return undefined;
@@ -214,21 +238,21 @@ export class CandidateRepository {
     async findByTelegramId(telegramId: number, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations | null> {
         return (tx || prisma).candidate.findFirst({
             where: { user: { telegramId: BigInt(telegramId) } },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as Promise<CandidateWithRelations | null>;
     }
 
     async findByUserId(userId: string): Promise<CandidateWithRelations | null> {
         return prisma.candidate.findUnique({
             where: { userId },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as Promise<CandidateWithRelations | null>;
     }
 
     async findById(id: string, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations | null> {
         return (tx || prisma).candidate.findUnique({
             where: { id },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as Promise<CandidateWithRelations | null>;
     }
 
@@ -239,7 +263,7 @@ export class CandidateRepository {
     async findByStatus(status: CandidateStatus, isWaitlisted: boolean = false): Promise<CandidateWithRelations[]> {
         return prisma.candidate.findMany({
             where: { status, isWaitlisted },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
 
@@ -457,7 +481,7 @@ export class CandidateRepository {
         const candidate = await client.candidate.update({
             where: { id },
             data: normalizedData,
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
 
         if (oldCandidate) {
@@ -540,7 +564,7 @@ export class CandidateRepository {
                 isWaitlisted: true,
                 statusChangedAt: new Date(),
             },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
 
         logger.info({
@@ -631,7 +655,7 @@ export class CandidateRepository {
                 isWaitlisted: true,
                 statusChangedAt: new Date(),
             },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
 
         logger.info({
@@ -694,7 +718,7 @@ export class CandidateRepository {
     async findByCityAndStatus(city: string, status: CandidateStatus, isWaitlisted: boolean = false, extraWhere: Prisma.CandidateWhereInput = {}): Promise<CandidateWithRelations[]> {
         return prisma.candidate.findMany({
             where: { city, status, isWaitlisted, ...extraWhere },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
 
@@ -706,7 +730,7 @@ export class CandidateRepository {
                     { user: { username: { contains: query } } }
                 ]
             },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
+            include: CANDIDATE_RELATIONS,
             take: 20
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
@@ -718,7 +742,7 @@ export class CandidateRepository {
                     status: Array.isArray(resolvedStatus) ? { in: resolvedStatus } : resolvedStatus,
                     ...whereExtra
                 },
-                include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
+                include: CANDIDATE_RELATIONS,
                 orderBy: { user: { createdAt: 'desc' } }
             }) as unknown as Promise<CandidateWithRelations[]>;
         };
@@ -868,7 +892,7 @@ export class CandidateRepository {
             ...args,
             create: createData,
             update: updateData,
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
 
         this.mirrorCandidate(candidate.id);
@@ -1010,7 +1034,7 @@ export class CandidateRepository {
                 currentStep: FunnelStep.FIRST_SHIFT,
                 firstShiftPartnerId: null
             },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
+            include: CANDIDATE_RELATIONS,
             orderBy: { user: { createdAt: 'asc' } }
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
@@ -1033,7 +1057,7 @@ export class CandidateRepository {
                 birthDate: { not: null },
                 user: { staffProfile: null } // Exclude those who are already staff
             },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
+            include: CANDIDATE_RELATIONS
         });
 
         return candidates.filter(c => {

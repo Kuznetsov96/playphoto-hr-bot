@@ -36,6 +36,15 @@ import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
  * Фоновий вокер для автоматизації воронки.
  * Перевіряє нагадування та фінальні опитування кожні 5 хвилин.
  */
+
+/**
+ * Скільки анкет полагодити за один тік. Обидві функції-ремонтники роблять по
+ * два записи на кандидатку, тож без межі накопичений завал перетворював тік
+ * на довгу серію записів. Залишок підбере наступний тік через п'ять хвилин —
+ * ці полагодження не термінові за визначенням.
+ */
+const WORKER_REPAIR_BATCH_SIZE = 50;
+
 export async function startWorker(bot: Bot<MyContext>) {
     let iteration = 0;
     let lastAutoCloseSweepAt = 0;
@@ -1024,7 +1033,12 @@ async function recoverStaleInterviewCandidates(bot: Bot<MyContext>) {
         include: {
             user: true,
             interviewSlot: true
-        }
+        },
+        // Полагодження робиться по два записи на кандидатку і крутиться раз на
+        // п'ять хвилин. Без межі один накопичений завал перетворював тік
+        // воркера на довгу серію записів; те, що не влізло, підбере
+        // наступний тік через п'ять хвилин.
+        take: WORKER_REPAIR_BATCH_SIZE
     });
 
     const recovered: Array<{ id: string; name: string; slotEndedAt: string }> = [];
@@ -1077,7 +1091,10 @@ async function repairRejectedInterviewCompletedStates() {
             status: CandidateStatus.INTERVIEW_COMPLETED,
             hrDecision: { in: ["REJECTED", "NOSHOW"] }
         },
-        include: { user: true }
+        include: { user: true },
+        // Та сама межа, що й у recoverStaleInterviewCandidates: залишок
+        // підбере наступний тік.
+        take: WORKER_REPAIR_BATCH_SIZE
     });
 
     const repaired: Array<{ id: string; name: string; decision: string | null }> = [];
