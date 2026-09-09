@@ -237,34 +237,11 @@ commandHandlers.command("start", async (ctx) => {
                 operation: "start",
                 updateId: ctx.update.update_id,
                 userId: user.id,
-                safeContext: { targetHub: "STAFF", bypassedFirstShiftOnboarding: true },
+                safeContext: { targetHub: "STAFF" },
             });
             await updateUserCommands(ctx, "STAFF");
             const { showStaffHub } = await import("../modules/staff/handlers/menu.js");
             await showStaffHub(ctx, true);
-            return;
-        }
-
-        const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
-        const onboardingCandidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
-        const resumedFirstShiftOnboarding = await firstShiftOnboardingService.resumeCandidateFlowFromStart(ctx.api, userId);
-
-        if (resumedFirstShiftOnboarding) {
-            await updateUserCommands(ctx, "CANDIDATE");
-            logBusinessEvent({
-                event: "user.start_routed",
-                telegramId: userId,
-                actorType: "candidate",
-                actorRole: "candidate",
-                result: "success",
-                module: "commands",
-                operation: "start",
-                updateId: ctx.update.update_id,
-                userId: user?.id,
-                candidateId: onboardingCandidate?.id,
-                stage: onboardingCandidate?.status,
-                safeContext: { targetHub: "FIRST_SHIFT_ONBOARDING" },
-            });
             return;
         }
 
@@ -297,7 +274,7 @@ commandHandlers.command("start", async (ctx) => {
 
         // 3. Candidate Logic
         await updateUserCommands(ctx, "CANDIDATE");
-        let candidate = onboardingCandidate;
+        let candidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
 
         if (candidate) {
             const { reactivateUnderageCandidateIfEligible } = await import("../services/underage-reactivation-service.js");

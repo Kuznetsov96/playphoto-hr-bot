@@ -23,7 +23,6 @@ import { taskProofService } from "../../../services/task-proof-service.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { getLocationShortcut } from "../../../utils/ticket-card.js";
 import { truncateText } from "../../../utils/task-helpers.js";
-import { firstShiftOnboardingService, type FirstShiftOnboardingCandidateMessage } from "../../../services/first-shift-onboarding-service.js";
 import { getRichMessagePlainText } from "../../../utils/rich-message.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { formatLocation } from "../../../utils/location-label.js";
@@ -36,32 +35,6 @@ const supportActionDedupe = new ActionDedupeWindow(SUPPORT_ACTION_DEBOUNCE_MS);
 export const staffSupportHandlers = new Composer<MyContext>();
 const adminSupportCallbacks = new Composer<MyContext>();
 
-function buildOnboardingPayloadFromSupportMessage(ctx: MyContext): FirstShiftOnboardingCandidateMessage {
-    const richText = getRichMessagePlainText(ctx.message?.rich_message) || undefined;
-    const text = ctx.message?.text || ctx.message?.caption || richText;
-    const photoId = ctx.message?.photo?.[ctx.message.photo.length - 1]?.file_id || null;
-    const hasMedia = Boolean(
-        photoId ||
-        ctx.message?.voice ||
-        ctx.message?.video_note ||
-        ctx.message?.video ||
-        ctx.message?.document ||
-        ctx.message?.audio ||
-        ctx.message?.animation ||
-        ctx.message?.sticker ||
-        ctx.message?.rich_message,
-    );
-    const hasFormattedText = Boolean(ctx.message?.entities?.length || ctx.message?.caption_entities?.length);
-
-    const payload: FirstShiftOnboardingCandidateMessage = {
-        photoId,
-        hasCopyableOriginal: hasMedia || hasFormattedText,
-    };
-    if (ctx.message?.message_id !== undefined) payload.messageId = ctx.message.message_id;
-    if (ctx.chat?.id !== undefined) payload.chatId = ctx.chat.id;
-    if (text !== undefined) payload.text = text;
-    return payload;
-}
 
 adminSupportCallbacks
     .filter((ctx) =>
@@ -165,18 +138,6 @@ function buildTaskProofTopicBaseTitle(submission: Awaited<ReturnType<typeof task
 staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
-
-    const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
-    if (activeOnboardingCase) {
-        await ctx.answerCallbackQuery("Під час онбордінгу питання йдуть у спеціальний topic.").catch(() => { });
-        await ScreenManager.renderScreen(
-            ctx,
-            "🚀 <b>Онбордінг першої зміни ще відкритий.</b>\n\nПросто напиши повідомлення сюди, і я передам його в onboarding-topic ментора.",
-            new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
-            { forceNew: true }
-        );
-        return;
-    }
 
     // Check if user has active ticket
     const user = await userRepository.findByTelegramId(BigInt(telegramId));
@@ -1171,16 +1132,6 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             ctx.session.step = "idle";
             // Allow this to fall through to forwarding logic below (Section C)
         } else {
-            const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
-            if (activeOnboardingCase) {
-                const forwardedToOnboarding = await firstShiftOnboardingService.handleCandidateMessage(ctx.api, telegramId, buildOnboardingPayloadFromSupportMessage(ctx));
-                if (forwardedToOnboarding) {
-                    ctx.session.step = "idle";
-                    delete ctx.session.clarificationTaskId;
-                    return true;
-                }
-            }
-
             try {
                 let text = ctx.message?.text || ctx.message?.caption || "[Медіа]";
 
