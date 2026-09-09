@@ -3,6 +3,7 @@ import type { MyContext } from "../types/context.js";
 import { menuRegistry } from "../utils/menu-registry.js";
 import { getStaffShiftToday } from "../modules/staff/services/staff-today-shift.js";
 import { BUSINESS_DATA_SOURCE } from "../config.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import logger from "../core/logger.js";
 
 /**
@@ -133,6 +134,38 @@ staffHubMenu.dynamic(async (ctx, range) => {
     range.text("🔁 Шукати підміну", async (ctx) => {
         const { showReplacementShiftPicker } = await import("../modules/staff/handlers/menu.js");
         await showReplacementShiftPicker(ctx);
+    }).row();
+
+    /**
+     * База знань — постійне місце в меню, а не лише на екрані новачка.
+     *
+     * Раніше кнопка жила тільки там, де показується співробітниці без графіка,
+     * тож людина, яка вже працює, до неї не діставалася: після виходу на зміни
+     * той екран більше не рендериться. Виходило, що запасний шлях доступний
+     * саме тим, кому він найменше потрібен — а той, хто загубив посилання чи
+     * вийшов з каналу, лишався без виходу.
+     *
+     * Стоїть поруч зі «Службою турботи»: обидва пункти — про довідку й
+     * допомогу, на відміну від графіка й підмін вище.
+     */
+    range.text(STAFF_TEXTS["channel-btn-get-link"], async (ctx) => {
+        const { accessService } = await import("../services/access-service.js");
+        const link = await accessService.createInviteLink(BigInt(ctx.from.id));
+
+        if (!link) {
+            await ctx.answerCallbackQuery({
+                text: STAFF_TEXTS["channel-invite-denied"],
+                show_alert: true,
+            });
+            return;
+        }
+
+        await ctx.answerCallbackQuery();
+        await ctx.reply(STAFF_TEXTS["channel-invite-link"], {
+            reply_markup: {
+                inline_keyboard: [[{ text: STAFF_TEXTS["channel-btn-join"], url: link }]],
+            },
+        });
     }).row();
 
     // 3. Support / Care Service
