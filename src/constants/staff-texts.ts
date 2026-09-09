@@ -264,7 +264,6 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
 Ти чудово впоралася на локації. Тепер залишився фінальний юридичний крок перед тим, як ми додамо тебе в офіційний графік:
 📝 <b>Заповнення даних для договору NDA.</b>
 Натисни кнопку нижче, щоб розпочати!`,
-  "hr-btn-start-nda": `📑 Почати NDA`,
   "hr-ans-status-updated-success": `Status updated: Success! 🎉`,
   "hr-btn-schedule-created": `✅ Schedule Ready`,
   "hr-info-cand-schedule-ready": `✨ <b>Твій графік готовий!</b>

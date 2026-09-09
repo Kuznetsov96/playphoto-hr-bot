@@ -109,7 +109,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     // Actions that are step-specific
     const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite"];
     const trainingActions = ["book_training_slot_", "reschedule_training_", "start_training_scheduling", "cancel_training_"];
-    const onboardingActions = ["send_nda_", "start_quiz", "confirm_nda_", "candidate_start_screening"];
+    // send_nda_/confirm_nda_/start_quiz прибрані разом з етапами NDA й тесту:
+    // обробників для них не було вже давно, гард стеріг неіснуючі кнопки.
+    const onboardingActions = ["candidate_start_screening"];
 
     if (![...interviewActions, ...trainingActions, ...onboardingActions].some(a => data.startsWith(a))) {
         return next();

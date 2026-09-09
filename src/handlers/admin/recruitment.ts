@@ -28,7 +28,6 @@ export const adminRecruitmentHandlers = new Composer<MyContext>();
 
 export const adminOpsMenu = new Menu<MyContext>("admin-ops");
 export const adminOfflineStagingMenu = new Menu<MyContext>("admin-offline-staging");
-export const adminNDAMenu = new Menu<MyContext>("admin-nda-tracking");
 export const adminCandidateMenu = new Menu<MyContext>("admin-candidate-details");
 export const adminFirstShiftStaffMenu = new Menu<MyContext>("admin-first-shift-staff");
 export const adminStagingSelectLocMenu = new Menu<MyContext>("admin-staging-select-loc");
@@ -527,32 +526,6 @@ adminFirstShiftStaffMenu.dynamic(async (ctx, range) => {
     });
 
     range.text(ADMIN_TEXTS["hr-menu-back"], (ctx) => ScreenManager.goBack(ctx, "👤 <b>Candidate Details</b>", "admin-candidate-details"));
-});
-
-adminNDAMenu.dynamic(async (ctx, range) => {
-    const candidates = await candidateRepository.findAwaitingNDA();
-
-    if (candidates.length === 0) {
-        range.text("All NDAs confirmed! ✅", (ctx) => { }).row();
-    } else {
-        const now = new Date();
-        for (const cand of candidates) {
-            const sentAt = cand.ndaSentAt || (cand as any).updatedAt;
-            const hoursWaiting = Math.floor((now.getTime() - new Date(sentAt).getTime()) / (1000 * 60 * 60));
-            const label = `📋 ${formatCompactName(cand.fullName)} • ${hoursWaiting}h`;
-
-            range.text(label, async (ctx) => {
-                ctx.session.selectedCandidateId = cand.id;
-                const text = await formatCandidateProfile(ctx as any, cand as any, {
-                    includeActionLabel: true,
-                    includeHistory: true,
-                    viewerRole: "HR"
-                });
-                await ScreenManager.renderScreen(ctx, text, "admin-candidate-details", { pushToStack: true });
-            }).row();
-        }
-    }
-    range.text(ADMIN_TEXTS["hr-menu-back"], (ctx) => ScreenManager.goBack(ctx, "🛠️ <b>HR Operations</b>", "admin-ops"));
 });
 
 adminRecruitmentHandlers.callbackQuery("admin_staging_ready_nda", async (ctx: MyContext) => {

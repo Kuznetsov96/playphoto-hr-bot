@@ -625,15 +625,8 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 11.3 Reliability guardrails for stuck or inconsistent pipeline states
             await processPipelineHealth(bot);
 
-            // 12. NDA Reminders (Every 24h until confirmed)
-
-            // 13. Test Reminders (Every 24h until passed)
-            await processTestReminders(bot);
-
-            // 14. Post-staging admin reminder (1h after staging ends)
+            // 12. Post-staging admin reminder (1h after staging ends)
             await processPostStagingReminder(bot);
-
-            // 15. Onboarding data reminders (every 24h until filled)
 
         } catch (error) {
             logger.error({ err: error }, "Candidate workflow worker iteration failed");
@@ -1157,47 +1150,6 @@ async function alertStaleTrainingScheduledCandidates(bot: Bot<MyContext>) {
     return staleCandidates;
 }
 
-/**
- * Test Reminder: Нагадування кандидаткам, які підтвердили NDA, але не пройшли тест.
- */
-async function processTestReminders(bot: Bot<MyContext>) {
-    try {
-        const { default: prisma } = await import("../db/core.js");
-        const now = new Date();
-        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-        // Find candidates who confirmed NDA > 24h ago but haven't passed the test
-        const pendingTest = await prisma.candidate.findMany({
-            where: {
-                ndaConfirmedAt: { lte: twentyFourHoursAgo, not: null },
-                testPassed: { not: true },
-                status: CandidateStatus.KNOWLEDGE_TEST
-            },
-            include: { user: true }
-        });
-
-        for (const cand of pendingTest) {
-            try {
-                // Check if we already poked them today using user.updatedAt or a dedicated check
-                // To keep it simple and Apple-style, we use user.updatedAt as a throttle
-                const userUpdate = new Date(cand.user.updatedAt);
-                if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
-
-                const kb = new InlineKeyboard().text("📝 Почати тест", `start_training_test_${cand.id}`);
-                await bot.api.sendMessage(Number(cand.user.telegramId),
-                    `<b>Продовжимо твій шлях? ✨</b>\n\nТи вже ознайомилась з NDA. Залишився останній крок перед виходом на локацію — короткий тест. Давай перевіримо твої знання! 📸`,
-                    { parse_mode: "HTML", reply_markup: kb }
-                );
-
-                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-            } catch (e: any) {
-                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-            }
-        }
-    } catch (e) {
-        logger.error({ err: e }, "Candidate test reminder job failed");
-    }
-}
 
 /**
  * Training & Discovery Reminder: Нагадування кандидаткам, які отримали доступ до навчання, але не обрали час (через 24 год).

@@ -33,10 +33,6 @@ menuRegistry.register(hrStagingConfirmMenu);
 // --- FINAL STEP PIPELINE ---
 export const hrFinalStepMenu = new Menu<MyContext>("hr-final-step-menu");
 menuRegistry.register(hrFinalStepMenu);
-export const hrFinalStepNDAMenu = new Menu<MyContext>("hr-final-step-nda");
-menuRegistry.register(hrFinalStepNDAMenu);
-export const hrFinalStepTestMenu = new Menu<MyContext>("hr-final-step-test");
-menuRegistry.register(hrFinalStepTestMenu);
 export const hrFinalStepSetupMenu = new Menu<MyContext>("hr-final-step-setup");
 menuRegistry.register(hrFinalStepSetupMenu);
 export const hrFinalStepActiveMenu = new Menu<MyContext>("hr-final-step-active");
@@ -62,11 +58,6 @@ const getTimeWaiting = (date: Date | null) => {
 hrFinalStepMenu.dynamic(async (ctx, range) => {
     const stats = await hrService.getFinalStepStats();
 
-    range.text(`📑 NDA (${stats.ndaPending})`, async (ctx) => {
-        ctx.session.candidatePage = 1;
-        await ScreenManager.renderScreen(ctx, "📑 <b>NDA Pending</b>", "hr-final-step-nda", { pushToStack: true });
-    }).row();
-
     range.text(`⌛ Active Staging Legacy (${stats.activeStaging})`, async (ctx) => {
         ctx.session.candidatePage = 1;
         await ScreenManager.renderScreen(ctx, "⌛ <b>Active Staging</b>\nLegacy candidates only.", "hr-final-step-active", { pushToStack: true });
@@ -84,38 +75,6 @@ hrFinalStepMenu.dynamic(async (ctx, range) => {
 
     range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
         await ScreenManager.goBack(ctx, "🎯 <b>Recruitment</b>", "admin-ops");
-    });
-});
-
-// NDA List
-hrFinalStepNDAMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getNDAPendingCandidates();
-    for (const cand of candidates) {
-        const waiting = getTimeWaiting(cand.ndaSentAt || cand.user.updatedAt);
-        range.text(`📑 ${formatCompactName(cand.fullName)}${waiting}`, async (ctx) => {
-            ctx.session.candidateData = { id: cand.id } as any;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
-            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-        }).row();
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
-    });
-});
-
-// Test List
-hrFinalStepTestMenu.dynamic(async (ctx, range) => {
-    const candidates = await hrService.getTestPendingCandidates();
-    for (const cand of candidates) {
-        const waiting = getTimeWaiting(cand.ndaConfirmedAt);
-        range.text(`📝 ${formatCompactName(cand.fullName)}${waiting}`, async (ctx) => {
-            ctx.session.candidateData = { id: cand.id } as any;
-            const text = await formatCandidateProfile(ctx as any, cand as any, { includeActionLabel: true });
-            await ScreenManager.renderScreen(ctx, text, "hr-candidate-unified", { pushToStack: true });
-        }).row();
-    }
-    range.text(STAFF_TEXTS["hr-menu-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🚀 <b>Final Step Pipeline</b>", "hr-final-step-menu");
     });
 });
 
@@ -317,15 +276,6 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
     const isSuperAdmin = uRole === 'SUPER_ADMIN';
 
     if (isSuperAdmin) {
-        // --- NDA & TEST REMINDERS ---
-
-        if (cStatus === "KNOWLEDGE_TEST") {
-            range.text("🔔 Ping Test", async (ctx) => {
-                await hrService.pingTest(ctx.api, cand.id);
-                await ctx.answerCallbackQuery("Ping sent! 🔔").catch(() => { });
-            }).row();
-        }
-
         // --- STAGING SETUP (Former OFFLINE_STAGING with notificationSent=false) ---
         if (cStatus === "STAGING_SETUP") {
             const hasDate = !!cand.firstShiftDate;
@@ -516,8 +466,6 @@ hrStagingConfirmMenu.dynamic(async (ctx, range) => {
 hrCandidateUnifiedMenu.register(hrChangeLocationUnifiedMenu);
 hrCandidateUnifiedMenu.register(hrStagingConfirmMenu);
 
-hrFinalStepMenu.register(hrFinalStepNDAMenu);
-hrFinalStepMenu.register(hrFinalStepTestMenu);
 hrFinalStepMenu.register(hrFinalStepSetupMenu);
 hrFinalStepMenu.register(hrFinalStepActiveMenu);
 hrFinalStepMenu.register(hrFinalStepFillingMenu);
