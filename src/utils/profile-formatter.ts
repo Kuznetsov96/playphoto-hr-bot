@@ -5,6 +5,7 @@ import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "./location-label.js";
+import { stripLegacyLocationSuffix } from "./appearance-value.js";
 
 export interface ProfileFormatOptions {
     locale?: string;
@@ -79,6 +80,34 @@ export async function formatCandidateProfile(
     }
     if (locationInfo) text += `📍 ${escapeHtml(locationInfo)}\n`;
 
+    // Решта локацій із множинного вибору. Раніше вони дописувалися в
+    // appearance і показувалися лише на екрані MANUAL_REVIEW — тобто
+    // рекрутер бачив їх тільки у кандидаток із татуюваннями, а в решти
+    // другий вибір мовчки зникав.
+    const extraLocationIds: string[] = Array.isArray(candidate.additionalLocationIds)
+        ? candidate.additionalLocationIds
+        : [];
+    if (extraLocationIds.length > 0) {
+        try {
+            const { locationRepository } = await import("../repositories/location-repository.js");
+            const extraNames = (
+                await Promise.all(
+                    extraLocationIds.map(async (id) => {
+                        const loc = await locationRepository.findById(id);
+                        return loc ? formatLocation(loc, "in-city") : null;
+                    }),
+                )
+            ).filter((name): name is string => Boolean(name));
+
+            if (extraNames.length > 0) {
+                text += `📍 Also open to: ${escapeHtml(extraNames.join(", "))}\n`;
+            }
+        } catch {
+            // Картка кандидатки важливіша за додатковий рядок: якщо назви не
+            // прочиталися, показуємо профіль без них.
+        }
+    }
+
     const username = candidate.user?.username;
     if (username && username.length < 32 && !username.includes('/') && !username.includes('\\')) {
         text += `📱 @${escapeHtml(username)}\n`;
@@ -87,7 +116,14 @@ export async function formatCandidateProfile(
     // ── SECTION 2: HR SELECTION STAGE ────────────────────────────────────
     if (!isPastHR) {
         if (candidate.status === "MANUAL_REVIEW" && candidate.appearance) {
-            text += `\n💍 ${candidate.appearance}\n`;
+            // escapeHtml обов’язковий: appearance — вільний текст кандидатки,
+            // без валідації й обмеження довжини, а картка малюється з
+            // parse_mode:"HTML". Незакритий тег ламає весь sendMessage, тобто
+            // кандидатка могла зробити власну картку невідмальовуваною для
+            // рекрутера — саме на статусі MANUAL_REVIEW, де її й дивляться.
+            // Стара дописка «(Обрані локації: …)» тут теж зайва: локації
+            // показані окремим рядком вище.
+            text += `\n💍 ${escapeHtml(stripLegacyLocationSuffix(candidate.appearance))}\n`;
         }
 
         if (candidate.hrDecision && candidate.status !== "WAITLIST" && candidate.status !== "WAITLIST_HR" && candidate.status !== "WAITLIST_MENTOR" && options.viewerRole !== "MENTOR") {

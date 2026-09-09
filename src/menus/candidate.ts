@@ -28,7 +28,13 @@ candidateGenderMenu
         await askBirthYear(ctx);
     })
     .row()
-    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
+    .text("Назад", async (ctx) => {
+        // Крок імені — вільний ввід без клавіатури, тож у стек він не
+        // потрапляє і goBack не має куди повернутись. Ставимо крок явно,
+        // інакше введене ім'я нікуди не запишеться.
+        ctx.session.step = "screening_name";
+        await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]);
+    });
 
 // --- ДАТА НАРОДЖЕННЯ: РІК → МІСЯЦЬ → ДЕНЬ ---
 // Три екрани кнопок замість ручного вводу ДД.ММ.РРРР. Обґрунтування вибору
@@ -111,7 +117,9 @@ candidateBirthMonthMenu.dynamic((ctx, range) => {
             ctx.session.step = "screening_birth_day";
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-day"](year, label), "candidate-birth-day", { pushToStack: true });
         });
-        if ((index + 1) % 3 === 0) range.row();
+        // По двоє в рядок: «Березень», «Листопад», «Вересень» — по вісім
+        // символів, і три такі кнопки поруч обрізаються на вузькому екрані.
+        if ((index + 1) % 2 === 0) range.row();
     });
     range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year"));
 });
@@ -163,9 +171,19 @@ candidateCityMenu.dynamic(async (ctx, range) => {
                 await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
             }
         });
-        if ((i + 1) % 2 === 0) range.row();
+        // Одне місто в рядок. По двоє назви на кшталт «Хмельницький» (12
+        // символів) обрізалися на вузькому екрані, а обрізана назва міста —
+        // це не косметика, а ризик обрати не те. Міст близько десятка, тож
+        // вертикальний список лишається оглядним.
+        range.row();
     });
-    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
+    range.row().text("Назад", async (ctx) => {
+        // Крок імені — вільний ввід без клавіатури, тож у стек він не
+        // потрапляє і goBack не має куди повернутись. Ставимо крок явно,
+        // інакше введене ім'я нікуди не запишеться.
+        ctx.session.step = "screening_name";
+        await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]);
+    });
 });
 
 export const candidateLocationMenu = new Menu<MyContext>("candidate-location");
@@ -190,7 +208,9 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
             ctx.session.candidateData.locationIds = Array.from(selectedIds);
             await ctx.menu.update();
         });
-        if ((i + 1) % 2 === 0) range.row();
+        // Одна локація в рядок: назви на кшталт «Smile Park (Даринок)» довгі,
+        // а позначка вибору «• » ще й зсуває хвіст за край кнопки.
+        range.row();
     });
 
     if (selectedIds.size > 0) {
@@ -229,7 +249,12 @@ candidateAppearanceMenu
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance-details"], "candidate-appearance-details", { pushToStack: true });
     })
     .row()
-    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-location-multiple"]));
+    .text("Назад", async (ctx) => {
+        // Міст назад до вибору локації. Якщо в місті одна локація, того
+        // екрана не було — тоді goBack по стеку веде до списку міст.
+        ctx.session.step = "screening_location";
+        await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-city"], "candidate-city");
+    });
 
 /**
  * Захист від подвійного тапу. Без fingerprint плагін звіряє лише позицію

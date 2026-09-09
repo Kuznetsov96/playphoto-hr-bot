@@ -14,9 +14,11 @@ describe("getSelectableBirthYears", () => {
         const today = new Date(2026, 8, 9);
         const years = getSelectableBirthYears(today);
 
-        // 16 — наймолодший вік (Volkland 2), 28 — найстарший.
-        expect(years[0]).toBe(2010);
-        expect(years.at(-1)).toBe(1997);
+        // Межі єдині для всіх локацій: 17 — наймолодший вік, 26 — найстарший.
+        // Список рівно збігається з правилом відбору, тож року, який
+        // гарантовано веде у відмову, у ньому немає.
+        expect(years[0]).toBe(2009);
+        expect(years.at(-1)).toBe(1999);
     });
 
     it("lists years from the youngest down to the oldest", () => {

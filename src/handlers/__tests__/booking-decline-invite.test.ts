@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 
 const cancelInterviewSlot = vi.fn().mockResolvedValue(undefined);
 const cancelTrainingSlot = vi.fn().mockResolvedValue(undefined);
@@ -49,6 +50,9 @@ vi.mock("grammy", () => {
     class MockInlineKeyboard {
         text() { return this; }
         row() { return this; }
+        // grammy 1.45 має .danger() — стиль червоної кнопки. Мок без нього
+        // падав би на будь-якому підтвердженні руйнівної дії.
+        danger() { return this; }
     }
 
     return {
@@ -126,11 +130,8 @@ vi.mock("../../utils/screen-manager.js", () => ({
     }
 }));
 
-vi.mock("../../constants/staff-texts.js", () => ({
-    STAFF_TEXTS: {
-        "hr-info-invite-declined": "declined",
-    }
-}));
+// staff-texts більше не мокається: підтвердження відмови переїхало до
+// CANDIDATE_TEXTS. Перевіряємо справжній рядок — саме він поїде людині.
 
 describe("booking decline invite", () => {
     let bookingHandlers: any;
@@ -145,13 +146,7 @@ describe("booking decline invite", () => {
         vi.clearAllMocks();
     });
 
-    it("cancels existing interview slot and clears candidate state", async () => {
-        findByTelegramId.mockResolvedValue({
-            id: "cand-1",
-            fullName: "Jane",
-            interviewSlotId: "slot-1",
-        });
-
+    it("asks for confirmation first instead of rejecting on the first tap", async () => {
         const ctx = {
             from: { id: 123456 },
             callbackQuery: { data: "decline_invite" },
@@ -162,6 +157,33 @@ describe("booking decline invite", () => {
 
         await bookingHandlers.__runCallback("decline_invite", ctx);
 
+        // Кнопка стоїть просто під «Обрати час», а дія незворотна — перший
+        // тап зобов'язаний лише питати.
+        expect(updateMany).not.toHaveBeenCalled();
+        expect(cancelInterviewSlot).not.toHaveBeenCalled();
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+            CANDIDATE_TEXTS["candidate-decline-invite-confirm"],
+            expect.objectContaining({ parse_mode: "HTML" }),
+        );
+    });
+
+    it("cancels existing interview slot and clears candidate state", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1",
+            fullName: "Jane",
+            interviewSlotId: "slot-1",
+        });
+
+        const ctx = {
+            from: { id: 123456 },
+            callbackQuery: { data: "decline_invite_confirm" },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback("decline_invite_confirm", ctx);
+
         expect(cancelInterviewSlot).toHaveBeenCalledWith("slot-1", 123456);
         expect(updateMany).toHaveBeenCalledWith(
             { user: { telegramId: BigInt(123456) } },
@@ -171,7 +193,13 @@ describe("booking decline invite", () => {
                 googleMeetLink: null,
             })
         );
-        expect(ctx.editMessageText).toHaveBeenCalledWith("declined");
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+            CANDIDATE_TEXTS["candidate-interview-invitation-declined"],
+        );
+        // Тон відмови: на «ви» і без емодзі — інваріант усієї воронки.
+        const declineText = ctx.editMessageText.mock.calls[0]![0] as string;
+        expect(declineText).not.toMatch(/\bти\b|\bтобі\b|\bтебе\b/i);
+        expect(declineText).not.toMatch(/\p{Extended_Pictographic}/u);
     });
 
     it("does not attempt slot cleanup when candidate has no interview slot", async () => {
@@ -183,13 +211,13 @@ describe("booking decline invite", () => {
 
         const ctx = {
             from: { id: 987654 },
-            callbackQuery: { data: "decline_invite" },
+            callbackQuery: { data: "decline_invite_confirm" },
             answerCallbackQuery: vi.fn(),
             editMessageText: vi.fn(),
             api: { sendMessage: vi.fn() },
         };
 
-        await bookingHandlers.__runCallback("decline_invite", ctx);
+        await bookingHandlers.__runCallback("decline_invite_confirm", ctx);
 
         expect(cancelInterviewSlot).not.toHaveBeenCalled();
         expect(updateMany).toHaveBeenCalledWith(

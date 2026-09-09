@@ -2,6 +2,7 @@ import { CandidateStatus, FunnelStep, Prisma } from "@prisma/client";
 import type { Location } from "@prisma/client";
 import { candidateRepository, type CandidateWithRelations } from "../repositories/candidate-repository.js";
 import { getBirthDateRejection, type CandidateAgeLocation } from "../utils/candidate-age.js";
+import { appearanceNeedsReview } from "../utils/appearance-value.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 
 type ReactivationLocation = (NonNullable<CandidateAgeLocation> & Partial<Pick<Location, "neededCount" | "isHidden" | "isHiddenFromCandidates">>) | null | undefined;
@@ -44,8 +45,10 @@ function hasCompletedScreening(candidate: UnderageReactivationCandidate): boolea
 
 function needsManualAppearanceReview(candidate: UnderageReactivationCandidate): boolean {
     if (candidate.tattooPhotoId) return true;
-    if (!candidate.appearance) return false;
-    return candidate.appearance.includes("[Фото]") || candidate.appearance !== "Без особливостей";
+    // appearanceNeedsReview зрізає стару дописку «(Обрані локації: …)»:
+    // без цього анкета, заповнена до 09.09.2026 з кількома локаціями,
+    // ішла на ручний огляд зовнішності лише через вибір локацій.
+    return appearanceNeedsReview(candidate.appearance);
 }
 
 function hasOpenCandidateLocation(candidate: UnderageReactivationCandidate): boolean {

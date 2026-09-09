@@ -1,6 +1,22 @@
 import { Prisma } from "@prisma/client";
 import type { Location } from "@prisma/client";
 import prisma from "../db/core.js";
+import { TtlCache } from "../utils/ttl-cache.js";
+
+/**
+ * Кеш довідника локацій для анкети кандидатки.
+ *
+ * Плагін @grammyjs/menu перебудовує динамічну клавіатуру не лише при
+ * рендері, а й при кожному натисканні — щоб зіставити кнопку з обробником.
+ * Без кешу список міст читався з бази двічі за один тап, а множинний вибір
+ * локацій робив запит на кожну поставлену галочку.
+ *
+ * Тридцять секунд: локації міняються раз на тиждень, тож найгірше, що може
+ * статися, — нова локація з'явиться у списку на пів хвилини пізніше.
+ */
+const LOCATION_CACHE_TTL_MS = 30_000;
+const citiesCache = new TtlCache<string[]>(LOCATION_CACHE_TTL_MS);
+const byCityCache = new TtlCache<Location[]>(LOCATION_CACHE_TTL_MS);
 
 export class LocationRepository {
     async findAll(): Promise<Location[]> {
@@ -49,13 +65,15 @@ export class LocationRepository {
     }
 
     async findAllCities(onlyVisible: boolean = true, candidateOnly: boolean = false): Promise<string[]> {
-        const locations = await prisma.location.findMany({
-            // candidateOnly means we filter for the candidate questionnaire
-            where: (onlyVisible && candidateOnly) ? { isHiddenFromCandidates: false } : {},
-            select: { city: true },
-            distinct: ['city']
+        return citiesCache.get(`${onlyVisible}:${candidateOnly}`, async () => {
+            const locations = await prisma.location.findMany({
+                // candidateOnly means we filter for the candidate questionnaire
+                where: (onlyVisible && candidateOnly) ? { isHiddenFromCandidates: false } : {},
+                select: { city: true },
+                distinct: ['city']
+            });
+            return locations.map(l => l.city);
         });
-        return locations.map(l => l.city);
     }
 
     async findActiveWithSheet(): Promise<Location[]> {
@@ -107,11 +125,13 @@ export class LocationRepository {
     }
 
     async findByCity(city: string, candidateOnly: boolean = false): Promise<Location[]> {
-        const where: any = { city };
-        if (candidateOnly) {
-            where.isHiddenFromCandidates = false;
-        }
-        return prisma.location.findMany({ where });
+        return byCityCache.get(`${city}:${candidateOnly}`, async () => {
+            const where: any = { city };
+            if (candidateOnly) {
+                where.isHiddenFromCandidates = false;
+            }
+            return prisma.location.findMany({ where });
+        });
     }
 
     async findByCityAdmin(city: string): Promise<Location[]> {
@@ -121,10 +141,15 @@ export class LocationRepository {
     }
 
     async update(id: string, data: Prisma.LocationUpdateInput): Promise<Location> {
-        return prisma.location.update({
+        const updated = await prisma.location.update({
             where: { id },
             data
         });
+        // Довідник змінився — кеш анкети скидаємо одразу, щоб приховану
+        // локацію не пропонували кандидаткам ще пів хвилини.
+        citiesCache.clear();
+        byCityCache.clear();
+        return updated;
     }
     async countCandidatesByCity(city: string, status: any, extraWhere: any = {}): Promise<number> {
         return prisma.candidate.count({

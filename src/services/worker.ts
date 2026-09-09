@@ -16,7 +16,7 @@ import { truncateText } from "../utils/task-helpers.js";
 import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
 
-import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { CANDIDATE_TEXTS, getTrainingTypeLabel } from "../constants/candidate-texts.js";
 import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
@@ -36,6 +36,15 @@ import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
  * Фоновий вокер для автоматизації воронки.
  * Перевіряє нагадування та фінальні опитування кожні 5 хвилин.
  */
+
+/**
+ * Скільки анкет полагодити за один тік. Обидві функції-ремонтники роблять по
+ * два записи на кандидатку, тож без межі накопичений завал перетворював тік
+ * на довгу серію записів. Залишок підбере наступний тік через п'ять хвилин —
+ * ці полагодження не термінові за визначенням.
+ */
+const WORKER_REPAIR_BATCH_SIZE = 50;
+
 export async function startWorker(bot: Bot<MyContext>) {
     let iteration = 0;
     let lastAutoCloseSweepAt = 0;
@@ -88,12 +97,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const decision = cand.hrDecision;
 
                     if (decision === "ACCEPTED") {
-                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `ваш наставник ${MENTOR_NAME}`;
-
                         try {
                             await bot.api.sendMessage(
                                 Number(cand.user.telegramId),
-                                CANDIDATE_TEXTS["worker-offer-accepted"](mentorDisplay),
+                                CANDIDATE_TEXTS["worker-offer-accepted"](),
                                 {
                                     parse_mode: "HTML",
                                     reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
@@ -328,12 +335,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const isDiscovery = !!slot.candidateDiscovery;
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
-                    const typeText = isDiscovery ? "discovery" : "training";
+                    const typeLabel = getTrainingTypeLabel(isDiscovery);
                     const msg = await bot.api.sendMessage(
                         Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["worker-training-reminder-6h"](typeText, timeStr, mentorDisplay),
+                        CANDIDATE_TEXTS["worker-training-reminder-6h"](typeLabel, timeStr),
                         {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
@@ -414,12 +420,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink; // Both use same field for now
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
-                    const typeText = isDiscovery ? "discovery" : "training";
+                    const typeLabel = getTrainingTypeLabel(isDiscovery);
                     await bot.api.sendMessage(
                         Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
+                        CANDIDATE_TEXTS["worker-training-reminder-10m"](typeLabel, timeStr, meetLink || undefined),
                         {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
@@ -485,9 +490,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const isDiscovery = !!slot.candidateDiscovery;
                     const typeText = isDiscovery ? "discovery" : "training";
 
-                    const name = cand.fullName || "Candidate";
+                    // Ім'я й місто йдуть у HTML-повідомлення менторові: без
+                    // екранування «<» в імені ламає sendMessage цілком.
+                    const name = escapeHtml(cand.fullName || "Candidate");
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink;
-                    const city = cand.city || "Not specified";
+                    const city = escapeHtml(cand.city || "Not specified");
 
                     const minsLeft = Math.max(1, Math.round((slot.startTime.getTime() - nowTime) / 60000));
                     let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in ${minsLeft} min!</b>\n\n` +
@@ -557,7 +564,12 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     ]
                 },
-                include: { candidate: true, candidateDiscovery: true }
+                // user потрібен, щоб написати кандидатці: telegramId лежить на
+                // ньому, а не на Candidate.
+                include: {
+                    candidate: { include: { user: true } },
+                    candidateDiscovery: { include: { user: true } },
+                }
             });
 
             for (const slot of pendingMentorNotifs) {
@@ -569,13 +581,35 @@ export async function startWorker(bot: Bot<MyContext>) {
                     if (MENTORS.length > 0) {
                         const isDiscovery = !!slot.candidateDiscovery;
                         const typeName = isDiscovery ? "Discovery" : "Training";
-                        const name = cand.fullName || "Candidate";
+                        const name = escapeHtml(cand.fullName || "Candidate");
 
                         const text = `🏁 <b>${typeName} Completed: ${name}</b>\n\n` +
                             `Slot time is up. Please mark the result (Passed/Failed) in the candidate's profile so they can proceed to the next stage! 🎓🌸`;
                         const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand.id}`);
 
                         await bot.api.sendMessage(MENTORS[0]!, text, { parse_mode: "HTML", reply_markup: kb });
+                    }
+
+                    // Кандидатці теж треба сказати, що зустріч завершилася.
+                    // Раніше повідомлення йшло тільки менторові, і далі
+                    // починався найдовший мовчазний відрізок воронки: людина
+                    // не знала, чи її ще розглядають. Доставка best-effort —
+                    // заблокований бот не має зривати позначку слота.
+                    try {
+                        await bot.api.sendMessage(
+                            Number(cand.user?.telegramId ?? (cand as any).telegramId),
+                            CANDIDATE_TEXTS["worker-meeting-completed"](getTrainingTypeLabel(!!slot.candidateDiscovery)),
+                            {
+                                parse_mode: "HTML",
+                                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr"),
+                            },
+                        );
+                    } catch (e: any) {
+                        if (isBotBlocked(e)) {
+                            await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                        } else {
+                            logger.warn({ err: e, candidateId: cand.id }, "Meeting-completed notice to candidate failed");
+                        }
                     }
 
                     await trainingRepository.updateSlot(slot.id, { remindedCompletion: true });
@@ -1001,7 +1035,12 @@ async function recoverStaleInterviewCandidates(bot: Bot<MyContext>) {
         include: {
             user: true,
             interviewSlot: true
-        }
+        },
+        // Полагодження робиться по два записи на кандидатку і крутиться раз на
+        // п'ять хвилин. Без межі один накопичений завал перетворював тік
+        // воркера на довгу серію записів; те, що не влізло, підбере
+        // наступний тік через п'ять хвилин.
+        take: WORKER_REPAIR_BATCH_SIZE
     });
 
     const recovered: Array<{ id: string; name: string; slotEndedAt: string }> = [];
@@ -1054,7 +1093,10 @@ async function repairRejectedInterviewCompletedStates() {
             status: CandidateStatus.INTERVIEW_COMPLETED,
             hrDecision: { in: ["REJECTED", "NOSHOW"] }
         },
-        include: { user: true }
+        include: { user: true },
+        // Та сама межа, що й у recoverStaleInterviewCandidates: залишок
+        // підбере наступний тік.
+        take: WORKER_REPAIR_BATCH_SIZE
     });
 
     const repaired: Array<{ id: string; name: string; decision: string | null }> = [];
@@ -1871,7 +1913,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     // Етапи NDA й тесту прибрані з воронки — лишилися тільки
                     // ті кроки, які людина справді може зробити зараз.
                     const contextStr = cand.status === "ACCEPTED"
-                        ? "на вибір часу для зустрічі з наставником"
+                        ? "на вибір часу для зустрічі"
                         : "на ваш наступний крок";
 
                     try {

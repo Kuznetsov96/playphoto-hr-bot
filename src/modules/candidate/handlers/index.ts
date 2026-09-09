@@ -2,7 +2,7 @@ import type { MyContext } from "../../../types/context.js";
 import { formatLocation } from "../../../utils/location-label.js";
 import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { CANDIDATE_TEXTS } from "../../../constants/candidate-texts.js";
-import { Composer } from "grammy";
+import { Composer, InlineKeyboard } from "grammy";
 import { z } from "zod";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import logger from "../../../core/logger.js";
@@ -10,12 +10,13 @@ import { getCityCode, getShortLocationName } from "../../../utils/location-helpe
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
 import {
-    MIN_VOLKLAND_2_ZP_CANDIDATE_AGE,
+    MIN_CANDIDATE_AGE,
     getAgeRejection,
     getCandidateAge,
     type CandidateAgeLocation,
 } from "../../../utils/candidate-age.js";
 import { buildBirthDate } from "../../../utils/birth-date-picker.js";
+import { appearanceNeedsReview } from "../../../utils/appearance-value.js";
 
 // --- HELPERS ---
 /**
@@ -64,12 +65,24 @@ function getAgeRejectionMeta(age: number, location?: CandidateAgeLocation) {
 
 // --- VALIDATION SCHEMAS ---
 export const CandidateSchema = z.object({
+    /**
+     * Тексти помилок — те, що людина читає замість наступного питання, тож
+     * вони кажуть, що зробити, а не яке правило порушено. «ПІБ» прибрано:
+     * це канцелярит, а питання й так просить ім'я та прізвище.
+     *
+     * min(5) прибрано: воно нічого не ловило понад вимогу двох слів, зате
+     * відхиляло справжні короткі імена («Ян Ко» — рівно 5, «Ян Ів» — уже ні).
+     *
+     * Кутові дужки заборонені: ім'я підставляється в повідомлення менторам з
+     * parse_mode:"HTML", і «<b>Іван Петров</b>» проходило всі попередні
+     * перевірки. Це другий рубіж — екранування в booking.ts лишається.
+     */
     fullName: z.string()
-        .min(5, "ПІБ має бути не менше 5 символів")
-        .max(100, "ПІБ занадто довге")
-        .refine(val => val.trim().split(/\s+/).length >= 2, "Введіть Ім'я та Прізвище (через пробіл)")
-        .refine(val => !val.startsWith("/"), "Це схоже на команду, введіть ім'я")
-        .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
+        .max(100, "Занадто довго — до 100 символів.")
+        .refine(val => val.trim().split(/\s+/).length >= 2, "Напишіть, будь ласка, і ім'я, і прізвище — через пробіл.")
+        .refine(val => !val.startsWith("/"), "Це схоже на команду. Напишіть, будь ласка, ім'я.")
+        .refine(val => !/\d/.test(val), "В імені не може бути цифр.")
+        .refine(val => !/[<>]/.test(val), "Приберіть, будь ласка, символи < і >."),
     birthDate: z.date()
         .refine(date => date > new Date(1950, 0, 1) && date <= new Date(), "Введіть реальну дату народження"),
 });
@@ -87,13 +100,21 @@ export function resolveScreeningStatus(input: {
     hasVacancy: boolean;
     appearance: string;
 }): "SCREENING" | "WAITLIST_HR" | "MANUAL_REVIEW" {
-    const needsReview = input.appearance.includes("[Фото]") || input.appearance !== "Без особливостей";
-    if (needsReview) return "MANUAL_REVIEW";
+    // appearanceNeedsReview зрізає стару дописку «(Обрані локації: …)», яка
+    // до 09.09.2026 потрапляла сюди разом зі значенням поля і сама по собі
+    // відправляла кандидатку на ручний огляд зовнішності.
+    if (appearanceNeedsReview(input.appearance)) return "MANUAL_REVIEW";
     return input.hasVacancy ? "SCREENING" : "WAITLIST_HR";
 }
 
+/**
+ * Відсікання за віком одразу на кроці дати народження, ще до вибору локації.
+ * Межа єдина для всіх локацій (див. candidate-age.ts), тож рішення тут
+ * остаточне: раніше поріг був нижчий за реальний (16 проти 17), і
+ * шістнадцятирічна проходила ще два кроки, щоб отримати відмову згодом.
+ */
 export function shouldDeferCandidateAtBirthDate(birthDate: Date | string): boolean {
-    return getCandidateAge(birthDate) < MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
+    return getCandidateAge(birthDate) < MIN_CANDIDATE_AGE;
 }
 
 // --- CORE LOGIC ---
@@ -123,6 +144,17 @@ export async function persistCandidate(ctx: MyContext, data: any) {
     });
 }
 
+/**
+ * Знімає одноразове пояснення й дописує його згори тексту питання.
+ * Повертає текст без змін, якщо пояснення немає.
+ */
+function withPendingNotice(ctx: MyContext, text: string): string {
+    const notice = ctx.session.pendingScreeningNotice;
+    if (!notice) return text;
+    delete ctx.session.pendingScreeningNotice;
+    return `${notice}\n\n${text}`;
+}
+
 export async function startScreening(ctx: MyContext) {
     const candidateData = ctx.session.candidateData;
     logger.info({
@@ -136,16 +168,16 @@ export async function startScreening(ctx: MyContext) {
 
     if (!candidateData.fullName) {
         ctx.session.step = "screening_name";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["welcome-message"] + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["welcome-message"] + "\n\n" + CANDIDATE_TEXTS["ask-name"]));
     } else if (!candidateData.gender) {
         ctx.session.step = "screening_gender";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender");
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"]()), "candidate-gender");
     } else if (!candidateData.birthDate) {
         ctx.session.step = "screening_birth_year";
         delete candidateData.birthYear;
         delete candidateData.birthMonth;
         delete candidateData.birthDecade;
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year");
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"]), "candidate-birth-year");
     } else if (!candidateData.city) {
         ctx.session.step = "screening_city";
         await triggerPrompt(ctx, "screening_city");
@@ -154,7 +186,7 @@ export async function startScreening(ctx: MyContext) {
         await triggerPrompt(ctx, "screening_location");
     } else if (!candidateData.appearance) {
         ctx.session.step = "screening_appearance_prompt";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance");
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"]), "candidate-appearance");
     } else {
         ctx.session.step = "screening_source";
         await triggerPrompt(ctx, "screening_source");
@@ -183,7 +215,15 @@ async function renderLocationSelection(ctx: MyContext) {
         await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
     } catch (e: any) {
         logger.error({ err: e }, "Candidate location selection rendering failed");
-        await ScreenManager.renderScreen(ctx, "Не вдалося завантажити список локацій. Спробуйте ще раз через /start.");
+        // Це збій на нашому боці — саме тут кнопка потрібна найбільше, а
+        // раніше екран пропонував набрати команду вручну.
+        await ScreenManager.renderScreen(
+            ctx,
+            "Не вдалося завантажити список локацій.\n\nСпробуйте ще раз — або напишіть нам, і ми допоможемо.",
+            new InlineKeyboard()
+                .text("Спробувати ще раз", "resume_screening").row()
+                .text("Написати нам", "contact_hr"),
+        );
     }
 }
 
@@ -229,20 +269,30 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
     }, "Candidate screening completed with no vacancies");
 
     if (ageMeta.status === CandidateStatus.REJECTED) {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS[ageMeta.finalKey],
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status, ageMeta.hrDecision),
+        );
     } else {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-info-no-vacancies"](city));
+        // Немає вакансій — це очікування, а не відмова: анкета збережена, і
+        // питання про неї доречні. Тому екран лишається з виходом на людину.
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS["candidate-info-no-vacancies"](city),
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status),
+        );
     }
     ctx.session.step = "idle";
 }
 
 async function triggerPrompt(ctx: MyContext, step: string) {
     if (step === "screening_city") {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-city"], "candidate-city", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-city"]), "candidate-city", { pushToStack: true });
     } else if (step === "screening_location") {
         await renderLocationSelection(ctx);
     } else if (step === "screening_source") {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-source"], "candidate-source", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-source"]), "candidate-source", { pushToStack: true });
     }
 }
 
@@ -275,7 +325,25 @@ candidateHandlers.callbackQuery("resume_screening", async (ctx) => {
     await startScreening(ctx);
 });
 
+/**
+ * Крок 1: підтвердження. «Почати спочатку» стирає всі відповіді, а кнопка
+ * стоїть просто під «Продовжити анкету» — промах коштує всієї анкети.
+ * Решта руйнівних дій у боті (скасування запису, відмова від вакансії) вже
+ * питають підтвердження; ця лишалася єдиною без нього.
+ */
 candidateHandlers.callbackQuery("restart_screening", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ScreenManager.renderScreen(
+        ctx,
+        CANDIDATE_TEXTS["candidate-restart-confirm"],
+        new InlineKeyboard()
+            .text(CANDIDATE_TEXTS["candidate-btn-restart-confirm"], "restart_screening_confirm").danger().row()
+            .text(CANDIDATE_TEXTS["candidate-btn-restart-cancel"], "restart_screening_cancel"),
+    );
+});
+
+/** Крок 2: підтверджено — стираємо відповіді й починаємо спочатку. */
+candidateHandlers.callbackQuery("restart_screening_confirm", async (ctx) => {
     const { userRepository, candidateRepository } = ctx.di;
     const userId = ctx.from?.id;
     if (!userId) return;
@@ -300,6 +368,21 @@ candidateHandlers.callbackQuery("restart_screening", async (ctx) => {
     await ctx.answerCallbackQuery("Починаємо спочатку");
     ctx.session.candidateData = {};
     await startScreening(ctx);
+});
+
+/** Крок 2: передумала — повертаємо картку статусу, нічого не стираючи. */
+candidateHandlers.callbackQuery("restart_screening_cancel", async (ctx) => {
+    const { userRepository } = ctx.di;
+    const userId = ctx.from?.id;
+    if (!userId) return;
+
+    await ctx.answerCallbackQuery();
+
+    const user = await userRepository.findWithCandidateProfileByTelegramId(BigInt(userId));
+    if (!user?.candidate) return;
+
+    const { showCandidateStatus } = await import("../../../utils/candidate-ui.js");
+    await showCandidateStatus(ctx, user.candidate);
 });
 
 candidateHandlers.callbackQuery("candidate_start_screening", async (ctx) => {
@@ -359,8 +442,14 @@ candidateHandlers.on("message:text", async (ctx, next) => {
             await persistCandidate(ctx, { fullName: val.data, currentStep: FunnelStep.INITIAL_TEST });
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender", { pushToStack: true });
         } else {
-            const errorText = CANDIDATE_TEXTS["error-name-format"](val.error.issues[0]?.message || "Помилка");
-            await ScreenManager.renderScreen(ctx, errorText + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
+            // Повідомлення людини вже видалено (SMI), тож без цитати вона не
+            // бачить, що саме написала, — і не може знайти в цьому символ,
+            // на який лається бот.
+            const errorText = CANDIDATE_TEXTS["error-name-format"](
+                val.error.issues[0]?.message || "Помилка",
+                ctx.message.text,
+            );
+            await ScreenManager.renderScreen(ctx, errorText);
         }
         return;
     } else if (step === "screening_appearance") {
@@ -389,7 +478,12 @@ candidateHandlers.on("message:photo", async (ctx) => {
         return;
     }
 
-    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-photo-unexpected"]);
+    // Фото вже видалено, а екран помилки раніше затирав ще й саме питання:
+    // людина лишалася без знімка, без запитання і без клавіатури. Тепер
+    // startScreening перемальовує поточний крок разом з кнопками, а причина
+    // дописується згори — один екран, як і всюди в анкеті.
+    ctx.session.pendingScreeningNotice = CANDIDATE_TEXTS["candidate-error-photo-unexpected"];
+    await startScreening(ctx);
 });
 
 /**
@@ -420,7 +514,11 @@ export async function handleBirthDateSelected(ctx: MyContext, day: number) {
             hrDecision: "REJECTED_SYSTEM_UNDERAGE"
         });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS["candidate-reject-underage"],
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, CandidateStatus.REJECTED, "REJECTED_SYSTEM_UNDERAGE"),
+        );
         return;
     }
 
@@ -461,7 +559,11 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
             hrDecision: ageMeta.hrDecision
         });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
+        await ScreenManager.renderScreen(
+            ctx,
+            CANDIDATE_TEXTS[ageMeta.finalKey],
+            buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status, ageMeta.hrDecision),
+        );
         return;
     }
 
@@ -552,10 +654,12 @@ async function finalizeScreening(ctx: MyContext) {
         isWaitlisted = status === CandidateStatus.WAITLIST_HR;
     }
 
-    const locNames = (await Promise.all((locationIds || []).map(async (id: string) => {
-        const l = await locationRepository.findById(id);
-        return l?.name;
-    }))).filter(Boolean).join(', ');
+    // Додаткові локації зберігаються окремим полем, а не дописуються в
+    // appearance. Раніше рядок «(Обрані локації: …)» потрапляв саме туди, і
+    // resolveScreeningStatus разом з underage-reactivation-service читали
+    // його як «щось із зовнішністю» — кандидатка без татуювань ішла на
+    // ручний огляд лише через те, що обрала дві локації.
+    const additionalLocationIds = (locationIds || []).filter((id: string) => id !== finalLocationId);
 
     if (gender === "male") {
         await persistCandidate(ctx, {
@@ -566,7 +670,8 @@ async function finalizeScreening(ctx: MyContext) {
             locationId: finalLocationId,
             source,
             clickSource,
-            appearance: appearance + (locationIds && locationIds.length > 1 ? `\n(Обрані локації: ${locNames})` : ""),
+            appearance,
+            additionalLocationIds,
             tattooPhotoId: finalTattooId,
             status: CandidateStatus.REJECTED,
             isWaitlisted: false,
@@ -591,7 +696,8 @@ async function finalizeScreening(ctx: MyContext) {
         locationId: finalLocationId,
         source,
         clickSource,
-        appearance: appearance + (locationIds && locationIds.length > 1 ? `\n(Обрані локації: ${locNames})` : ""),
+        appearance,
+        additionalLocationIds,
         tattooPhotoId: finalTattooId,
         status,
         isWaitlisted,
@@ -627,7 +733,36 @@ async function finalizeScreening(ctx: MyContext) {
             status === CandidateStatus.WAITLIST_HR ? "candidate-success-waitlist" :
                 "candidate-success-screening";
 
-    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[finalKey]);
+    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[finalKey], buildFinalScreenKeyboard(gender, status, hrDecision));
+}
+
+/**
+ * Клавіатура фінального екрана анкети.
+ *
+ * Раніше кожен фінал — і успіх, і лист очікування, і ручний огляд —
+ * малювався зовсім без кнопок: вийти можна було тільки через /start, про що
+ * екран не казав. Тепер там, де розмова триває, лишається вихід на живу
+ * людину.
+ *
+ * Відмова кнопки не отримує навмисно: пропонувати «Написати нам» одразу
+ * після «ми не зможемо запропонувати місце» означає натякати, що рішення
+ * можна обговорити. Так само нічого не отримує кандидат-хлопець — це та
+ * сама межа, що діє в showCandidateStatus.
+ */
+function buildFinalScreenKeyboard(
+    gender: string | undefined,
+    status: CandidateStatus,
+    hrDecision?: string | null,
+) {
+    if (gender === "male") return undefined;
+
+    // Виняток серед відмов — надто юний вік: текст обіцяє, що бот нагадає в
+    // день повноліття, тобто стосунки тривають. Людині, яка хоче спитати
+    // «коли саме?», має бути куди написати.
+    const isUnderage = status === CandidateStatus.REJECTED && hrDecision === "REJECTED_SYSTEM_UNDERAGE";
+    if (status === CandidateStatus.REJECTED && !isUnderage) return undefined;
+
+    return new InlineKeyboard().text("Написати нам", "contact_hr");
 }
 
 candidateHandlers.on("callback_query:data", async (ctx, next) => {

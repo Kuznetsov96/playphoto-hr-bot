@@ -198,6 +198,13 @@ export class ScreenManager {
             
             if (fallbackMenuOrId) {
                 await navigateTo(fallbackMenuOrId, fallbackText);
+            } else if (ctx.session.step?.startsWith("screening_")) {
+                // Кандидатка в анкеті. Стек порожній — сесія в Redis живе
+                // добу, тож «почала ввечері, натиснула Назад вранці» це
+                // звичайний сценарій, а не край. Раніше вона потрапляла на
+                // екран «🤖 PlayPhoto Admin» з чужими кнопками; тепер бачить
+                // свій же крок анкети з підписом, куди він веде.
+                await this.renderScreen(ctx, fallbackText);
             } else {
                 // Absolute fallback to main admin menu. (The recruiter's own HR hub
                 // was removed 2026-09-03; candidate-detail screens like

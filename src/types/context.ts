@@ -36,6 +36,16 @@ export interface SessionData {
     navStack: StackEntry[]; // Smart navigation history with state preservation
     messagesToDelete: number[]; // Initialized as array via middleware/session default
 
+    /**
+     * Пояснення, яке треба показати згори наступного екрана анкети —
+     * наприклад, чому надіслане фото не підійшло. Живе один рендер:
+     * startScreening читає його і одразу стирає.
+     *
+     * Потрібне, бо анкета тримається на одному повідомленні: окремий екран
+     * помилки затирав саме питання разом з клавіатурою.
+     */
+    pendingScreeningNotice?: string;
+
     candidateData: {
         id?: string;
         fullName?: string;

@@ -2,7 +2,7 @@ import { PrismaClient, CandidateStatus } from "@prisma/client";
 import { InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 
@@ -86,8 +86,8 @@ export async function processInviteReminders(bot: any) {
                         await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_24H_PING, {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard()
-                                .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
-                                .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite").danger()
+                                .text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row()
+                                .text(CANDIDATE_TEXTS["candidate-btn-invite-decline"], "decline_invite").danger()
                         });
                     } catch (e: any) {
                         if (isBotBlocked(e)) {

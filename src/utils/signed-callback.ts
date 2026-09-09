@@ -1,6 +1,6 @@
 import crypto from "crypto";
+import { CALLBACK_SECRET } from "../config/callback-secret.js";
 
-const CALLBACK_SECRET = process.env.APP_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY || process.env.BOT_TOKEN || "dev-callback-secret";
 const SIGNATURE_LENGTH = 10;
 
 function sign(code: string, payload: string): string {

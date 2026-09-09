@@ -50,14 +50,18 @@ describe("candidate screening birth date validation", () => {
         expect(result.success).toBe(true);
     });
 
-    it("marks candidates under 16 for deferred underage handling at the birth date step", async () => {
+    it("marks candidates under 17 for deferred underage handling at the birth date step", async () => {
         const { shouldDeferCandidateAtBirthDate } = await import("../index.js");
         const now = new Date();
         const fifteenYearsOld = new Date(now.getFullYear() - 15, now.getMonth(), now.getDate());
         const sixteenYearsOld = new Date(now.getFullYear() - 16, now.getMonth(), now.getDate());
+        const seventeenYearsOld = new Date(now.getFullYear() - 17, now.getMonth(), now.getDate());
 
         expect(shouldDeferCandidateAtBirthDate(fifteenYearsOld)).toBe(true);
-        expect(shouldDeferCandidateAtBirthDate(sixteenYearsOld)).toBe(false);
+        // 16 більше не проходить: поріг єдиний для всіх локацій (17), тож
+        // відмова приходить одразу, а не через два кроки після вибору локації.
+        expect(shouldDeferCandidateAtBirthDate(sixteenYearsOld)).toBe(true);
+        expect(shouldDeferCandidateAtBirthDate(seventeenYearsOld)).toBe(false);
     });
 
     it("rejects impossible birth dates", async () => {
@@ -87,6 +91,26 @@ describe("resolveScreeningStatus", () => {
         const { resolveScreeningStatus } = await import("../index.js");
 
         expect(resolveScreeningStatus({ hasVacancy: true, appearance: "Без особливостей" })).toBe("SCREENING");
+    });
+
+    it("не отправляет на ревью из-за старой дописки о нескольких локациях", async () => {
+        const { resolveScreeningStatus } = await import("../index.js");
+
+        // Анкеты до 09.09.2026 хранят выбор локаций прямо в appearance.
+        // Ревью внешности к нему отношения не имеет.
+        expect(
+            resolveScreeningStatus({
+                hasVacancy: true,
+                appearance: "Без особливостей\n(Обрані локації: Volkland, Smile Park)",
+            }),
+        ).toBe("SCREENING");
+
+        expect(
+            resolveScreeningStatus({
+                hasVacancy: false,
+                appearance: "Без особливостей\n(Обрані локації: Volkland, Smile Park)",
+            }),
+        ).toBe("WAITLIST_HR");
     });
 
     it("особенности есть и место есть — MANUAL_REVIEW", async () => {
