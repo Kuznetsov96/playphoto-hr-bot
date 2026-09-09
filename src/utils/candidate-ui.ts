@@ -189,7 +189,6 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
         case CandidateStatus.KNOWLEDGE_TEST:
             text = CANDIDATE_TEXTS["candidate-training-completed-quiz"](firstName) + jobDetails;
-            kb.text("🚀 Перейти до тесту", "start_quiz").row();
             kb.text("👨‍🏫 Написати наставнику", "contact_mentor");
             break;
 
@@ -210,11 +209,9 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["status-card-staging-confirmed"](candidate.location?.name || candidate.city || "нашій локації", dateStr, timeStr || "15:00-17:00");
                 if (candidate.location?.googleMapsLink) text += `\n🗺️ <a href="${candidate.location.googleMapsLink}">На мапі</a>`;
                 if (candidate.firstShiftPartner?.user?.username) kb.url("💬 Написати напарнику", `https://t.me/${candidate.firstShiftPartner.user.username}`).row();
-                kb.text("🗓️ Змінити дату", "start_staging_selection").row();
                 kb.text("❌ Не зможу прийти", buildSignedCallback("cstg", candidate.id)).row();
             } else {
                 text = CANDIDATE_TEXTS["status-card-staging-pending"] + jobDetails;
-                kb.text("🗓️ Обрати дату", "start_staging_selection").row();
             }
             kb.text("👨‍💼 Написати Адміну", "contact_hr");
             break;

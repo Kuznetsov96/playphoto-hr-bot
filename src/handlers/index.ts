@@ -4,7 +4,6 @@ import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { hrHandlers } from "./hr.js";
 import { adminMenu, adminHandlers } from "./admin/index.js";
-import { mentorHandlers } from "./mentor.js";
 import { commandHandlers } from "./commands.js";
 import { bookingHandlers } from "./booking.js";
 import { staffModule } from "../modules/staff/index.js";
@@ -18,7 +17,6 @@ import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
 import { shouldRouteMessageToPrivateRoleFlows } from "../utils/message-routing.js";
-import { quizHandlers } from "./quiz-handler.js";
 import { onboardingHandlers } from "./onboarding-handler.js";
 import { accessHandlers } from "./access.js";
 import { broadcastService } from "../services/broadcast.js";
@@ -127,7 +125,6 @@ handlers.use(leadsHandlers);
 
 // 1. Core System Handlers (High Priority: Support, HR, Admin, Mentor, Commands)
 handlers.use(commandHandlers);
-handlers.use(quizHandlers);
 // onboardingHandlers moved to guest context for better support routing priority
 handlers.use(accessHandlers); // ✅ NEW: Handle join requests & membership sync
 
@@ -674,8 +671,6 @@ handlers.use(staffSupportHandlers); // ✅ NEW: Allow Admins to use ticket butto
 // Replaced global registration with conditional one in routing below
 // handlers.use(hrHandlers);
 // handlers.use(adminHandlers); 
-// handlers.use(mentorHandlers);
-// handlers.use(testingHandlers);
 
 // 2. Global Group Message Handler (Admin answering in Support Chat)
 handlers.on("message", async (ctx, next) => {
@@ -710,11 +705,9 @@ const adminApp = new Composer<MyContext>();
 adminApp.use(slotBuilderHandlers);
 adminApp.use(hrHandlers);
 adminApp.use(adminHandlers);
-adminApp.use(mentorHandlers);
 const adminMiddleware = adminApp.middleware();
 
 const staffApp = new Composer<MyContext>();
-staffApp.use(mentorHandlers);
 staffApp.use(staffLogisticsHandlers);
 staffApp.use(staffModule);
 const staffMiddleware = staffApp.middleware();

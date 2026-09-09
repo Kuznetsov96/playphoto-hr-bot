@@ -1,7 +1,6 @@
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { ADMIN_IDS, MENTOR_IDS, CO_FOUNDER_IDS, ALLOW_DEV_COMMANDS } from "../config.js";
-import { mentorHubMenu } from "../menus/mentor.js";
 import { adminMenu } from "./admin/index.js";
 import { cleanupMessages, trackMessage } from "../utils/cleanup.js";
 import { checkBirthdays } from "../services/birthday-service.js";
