@@ -40,18 +40,17 @@ export const restoreAccessService = {
                     const inviteLink = await accessService.createInviteLink(user.telegramId);
                     
                     if (inviteLink) {
-                        const message = `👋 <b>Поновлення доступу!</b>
+                        const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
+                        const message = STAFF_TEXTS["channel-invite-restored"];
 
-` +
-                            `Ми оновили систему безпеки каналу. Будь ласка, повернись до нашої спільноти за цим посиланням:
-
-` +
-                            `🔗 <a href="${inviteLink}">Приєднатися до каналу PlayPhoto</a>
-
-` +
-                            `Це посилання одноразове та діє тільки для тебе. ✨`;
-                        
-                        await bot.api.sendMessage(Number(user.telegramId), message, { parse_mode: "HTML" });
+                        await bot.api.sendMessage(Number(user.telegramId), message, {
+                            parse_mode: "HTML",
+                            reply_markup: {
+                                inline_keyboard: [[
+                                    { text: STAFF_TEXTS["channel-btn-join"], url: inviteLink },
+                                ]],
+                            },
+                        });
                         invited++;
                         logBusinessEvent({
                             event: "staff.access_restore_invite_sent",
