@@ -6,7 +6,6 @@ import { Composer } from "grammy";
 import { z } from "zod";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import logger from "../../../core/logger.js";
-import { extractFirstName } from "../../../utils/string-utils.js";
 import { getCityCode, getShortLocationName } from "../../../utils/location-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
@@ -140,8 +139,7 @@ export async function startScreening(ctx: MyContext) {
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["welcome-message"] + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
     } else if (!candidateData.gender) {
         ctx.session.step = "screening_gender";
-        const firstName = extractFirstName(candidateData.fullName || "");
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](firstName), "candidate-gender");
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender");
     } else if (!candidateData.birthDate) {
         ctx.session.step = "screening_birth_year";
         delete candidateData.birthYear;
@@ -172,7 +170,7 @@ export async function renderLocationSelectionContent(ctx: MyContext) {
         const street = (l.address?.split(',')[1]?.trim() || l.address || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const nameEscaped = escapeHtml(formatLocation(l, "in-city"));
         const maps = l.googleMapsLink ? ` (<a href="${l.googleMapsLink}">на мапі</a>)` : "";
-        text += `${i + 1}. <b>${nameEscaped}</b>\n📍 <i>${street}</i>${maps}\n\n`;
+        text += `${i + 1}. <b>${nameEscaped}</b>\n<i>${street}</i>${maps}\n\n`;
     });
 
     return { text, kb: "candidate-location" };
@@ -358,8 +356,7 @@ candidateHandlers.on("message:text", async (ctx, next) => {
             ctx.session.candidateData.fullName = val.data;
             ctx.session.step = "screening_gender";
             await persistCandidate(ctx, { fullName: val.data, currentStep: FunnelStep.INITIAL_TEST });
-            const firstName = extractFirstName(val.data);
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](firstName), "candidate-gender", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender", { pushToStack: true });
         } else {
             const errorText = CANDIDATE_TEXTS["error-name-format"](val.error.issues[0]?.message || "Помилка");
             await ScreenManager.renderScreen(ctx, errorText + "\n\n" + CANDIDATE_TEXTS["ask-name"]);

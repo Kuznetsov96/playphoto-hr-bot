@@ -146,8 +146,6 @@ commandHandlers.command("start", async (ctx) => {
             if (!isNaN(broadcastId)) {
                 await broadcastService.confirmDeclineByUser(broadcastId, userId);
 
-                await ctx.reply("🐾 Зрозуміла! Ти вказала, що маєш запитання щодо останнього повідомлення — зараз у всьому розберемось.");
-
                 const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
                 let isStaff = false;
                 if (user) {
@@ -161,9 +159,11 @@ commandHandlers.command("start", async (ctx) => {
                 }
 
                 const callback = isStaff ? "staff_help" : "contact_hr";
-                const kb = new InlineKeyboard().text("💌 Написати нам", callback);
-                await ctx.reply("😟 **Бачу, що у тебе виникли запитання або зауваження.**\n\nНе хвилюйся, це нормально! Будь ласка, напиши детальніше прямо сюди (або натисни кнопку ниже), і служба турботи допоможе тобі розібратися. ✨", {
-                    parse_mode: "Markdown",
+                const kb = new InlineKeyboard().text("Написати нам", callback);
+                // HTML, а не Markdown: у Markdown-режимі Telegram робить жирним
+                // *текст*, тож подвійні зірочки лишалися видимими в чаті.
+                await ctx.reply("<b>Маєте запитання щодо останнього повідомлення?</b>\n\nНапишіть детальніше просто сюди або натисніть кнопку нижче — ми розберемося.", {
+                    parse_mode: "HTML",
                     reply_markup: kb
                 });
                 return;

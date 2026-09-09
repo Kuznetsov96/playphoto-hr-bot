@@ -299,7 +299,7 @@ describe("candidate recovery support routing", () => {
 
         expect(await handleSupportMessage(ctx)).toBe(true);
         expect(reply).toHaveBeenCalledOnce();
-        expect(reply).toHaveBeenCalledWith(expect.stringContaining("Сталася помилка"));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining("Не вдалося надіслати повідомлення"));
         expect(ctx.session.step).toBe("support_chat");
         expect(createTimelineEvent).not.toHaveBeenCalled();
         expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({ result: "failure" }));

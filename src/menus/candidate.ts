@@ -54,7 +54,7 @@ candidateBirthYearMenu.dynamic((_ctx, range) => {
         });
         if ((i + 1) % 3 === 0) range.row();
     });
-    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](""), "candidate-gender"));
+    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender"));
 });
 
 export const candidateBirthMonthMenu = new Menu<MyContext>("candidate-birth-month");

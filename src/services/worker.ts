@@ -15,7 +15,7 @@ import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
-import { extractFirstName } from "../utils/string-utils.js";
+
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
@@ -88,13 +88,12 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const decision = cand.hrDecision;
 
                     if (decision === "ACCEPTED") {
-                        const firstName = extractFirstName(cand.fullName || "Кандидатко");
-                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `твій наставник ${MENTOR_NAME}`;
+                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `ваш наставник ${MENTOR_NAME}`;
 
                         try {
                             await bot.api.sendMessage(
                                 Number(cand.user.telegramId),
-                                CANDIDATE_TEXTS["worker-offer-accepted"](firstName, mentorDisplay),
+                                CANDIDATE_TEXTS["worker-offer-accepted"](mentorDisplay),
                                 {
                                     parse_mode: "HTML",
                                     reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
@@ -207,12 +206,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                 if (!slot.candidate) continue;
                 try {
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const firstName = extractFirstName(slot.candidate.fullName || "Кандидатко");
                     const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `наша HR ${HR_NAME}`;
 
                     const msg = await bot.api.sendMessage(
                         Number(slot.candidate.user.telegramId),
-                        CANDIDATE_TEXTS["worker-interview-reminder-6h"](firstName, timeStr, hrDisplay),
+                        CANDIDATE_TEXTS["worker-interview-reminder-6h"](timeStr, hrDisplay),
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -330,13 +328,12 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const isDiscovery = !!slot.candidateDiscovery;
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const firstName = extractFirstName(cand.fullName || "Candidate");
                     const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
                     const typeText = isDiscovery ? "discovery" : "training";
                     const msg = await bot.api.sendMessage(
                         Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["worker-training-reminder-6h"](firstName, typeText, timeStr, mentorDisplay),
+                        CANDIDATE_TEXTS["worker-training-reminder-6h"](typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
@@ -1900,7 +1897,8 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
-                            `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
+                            `<b>Заявку скасовано</b>\n\nМи тривалий час не отримували відповіді, тому скасували вашу заявку ${rejectReason}. Бажаємо успіхів — і будемо раді, якщо колись захочете спробувати ще раз.`,
+                            { parse_mode: "HTML" });
                     } catch (e: any) {
                         if (!isBotBlocked(e)) logger.warn({ err: e, candidateId: cand.id }, "Candidate inactivity rejection message delivery failed");
                     }
@@ -1919,7 +1917,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     });
                 } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
                     // Day 5: Warning (We run this once a day, so it will hit exactly once)
-                    let contextStr = "на твій наступний крок";
+                    let contextStr = "на ваш наступний крок";
                     switch (cand.status) {
                         case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставником"; break;
                         case "NDA": contextStr = "на ознайомлення з NDA (правилами команди)"; break;
@@ -1928,7 +1926,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
-                            `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
+                            `Ми все ще чекаємо ${contextStr}.\n\nЯкщо ви передумали — просто напишіть нам. Якщо відповіді не буде до завтра, ми скасуємо заявку, щоб не турбувати вас далі.`);
                         logBusinessEvent({
                             event: "candidate.inactivity.warning_sent",
                             candidateId: cand.id,

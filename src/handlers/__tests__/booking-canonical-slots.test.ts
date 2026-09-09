@@ -306,6 +306,6 @@ describe("interview booking over canonical slots", () => {
         await bookingHandlers.__runCallback(buildSignedCallback("ccb", "local-slot-1"), ctx);
 
         expect(cancelInterviewSlot).not.toHaveBeenCalled();
-        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Сталася помилка.");
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Сталася помилка");
     });
 });
