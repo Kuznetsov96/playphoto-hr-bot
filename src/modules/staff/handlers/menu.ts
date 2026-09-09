@@ -166,15 +166,13 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     let kb = new InlineKeyboard();
 
     if (isNewHireWithoutSchedule) {
-        // Apple Style Waiting Screen
-        const KNOWLEDGE_BASE_LINK = "https://t.me/+hC9UDoSZb3hiZjFi";
+        shiftLine = `⏳ <b>Ваш графік готується</b>\n\n` +
+            `Ми вже створюємо для вас перші робочі зміни.\n` +
+            `Щойно графік буде готовий, ви отримаєте сповіщення тут.`;
 
-        shiftLine = `⏳ <b>Твій графік готується</b>\n\n` +
-            `Ми вже створюємо для тебе перші робочі зміни! ✨\n` +
-            `Як тільки графік буде готовий, ти отримаєш сповіщення тут.\n\n` +
-            `📖 Поки що можеш ознайомитися з нашою <b>Базою знань</b>, щоб підготуватися до першого дня.`;
-
-        kb.url("📖 База знань", KNOWLEDGE_BASE_LINK).row()
+        // Посилання на канал більше не зашите в код: воно персональне й
+        // одноразове, тож видається через accessService під конкретну людину.
+        kb.text("🔗 Посилання на канал команди", "staff_channel_link").row()
             .text("💬 Підтримка", "open_support_dialog");
 
         text = `💫 <b>Вітаємо в команді PlayPhoto!</b>\n\n${shiftLine}`;
@@ -691,6 +689,38 @@ export async function startSupportFlow(ctx: MyContext) {
 staffHandlers.command("support", async (ctx) => {
     await ctx.deleteMessage().catch(() => { });
     await startSupportFlow(ctx);
+});
+
+/**
+ * Запасний шлях до каналу команди. Основний — автоматичний: запрошення
+ * приходить саме при найм і (див. staff-repository). Ця кнопка потрібна, коли
+ * посилання загубилося, людина змінила телефон або вийшла з каналу.
+ *
+ * Посилання щоразу нове й одноразове: createInviteLink сам перевіряє право і
+ * знімає бан, тож поділитися ним з кимось стороннім не вийде.
+ */
+staffHandlers.callbackQuery("staff_channel_link", async (ctx) => {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const { accessService } = await import("../../../services/access-service.js");
+    const link = await accessService.createInviteLink(BigInt(telegramId));
+
+    if (!link) {
+        await ctx.answerCallbackQuery({
+            text: "Доступ до каналу відкривається після оформлення. Напишіть нам, якщо це помилка.",
+            show_alert: true,
+        });
+        return;
+    }
+
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+        "Ось ваше персональне посилання на канал команди — воно одноразове й лише для вас.",
+        {
+            reply_markup: { inline_keyboard: [[{ text: "Приєднатися до каналу", url: link }]] },
+        },
+    );
 });
 
 staffHandlers.callbackQuery("open_support_dialog", async (ctx) => {

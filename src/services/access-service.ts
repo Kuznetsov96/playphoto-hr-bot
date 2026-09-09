@@ -350,6 +350,37 @@ export class AccessService {
             return null;
         }
     }
+
+    /**
+     * Надсилає персональне запрошення до каналу тому, хто щойно отримав право.
+     *
+     * Викликається при активації профілю співробітниці: людина нічого не
+     * натискає — доступ приходить сам у момент найму. Раніше посилання
+     * діставалося лише тим, хто вчасно натиснув кнопку в потрібному екрані, а
+     * решта лишалася без каналу й мусила просити адміна.
+     *
+     * Мовчазний: якщо права немає, бот заблокований або канал недоступний —
+     * просто нічого не шле. Найм не має падати через сповіщення.
+     */
+    async sendChannelInvite(telegramId: bigint, greeting?: string): Promise<boolean> {
+        try {
+            const link = await this.createInviteLink(telegramId);
+            if (!link) return false;
+
+            const api = this.getSafeApi();
+            const text = (greeting ?? "<b>Ласкаво просимо в команду</b>") +
+                `\n\nОсь ваше персональне посилання на канал команди — воно одноразове й лише для вас.`;
+
+            await api.sendMessage(Number(telegramId), text, {
+                parse_mode: "HTML",
+                reply_markup: { inline_keyboard: [[{ text: "Приєднатися до каналу", url: link }]] },
+            });
+            return true;
+        } catch (e) {
+            logger.error({ err: e, telegramId }, "Failed to send channel invite");
+            return false;
+        }
+    }
 }
 
 export const accessService = new AccessService();

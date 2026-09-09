@@ -122,6 +122,8 @@ export class StaffRepository {
             try {
                 const { accessService } = await import("../services/access-service.js");
                 await accessService.syncUserAccess(profile.user.telegramId);
+                // Запрошення приходить саме — людина нічого не натискає.
+                await accessService.sendChannelInvite(profile.user.telegramId);
             } catch (e) {}
         }
 
@@ -150,6 +152,13 @@ export class StaffRepository {
             try {
                 const { accessService } = await import("../services/access-service.js");
                 await accessService.syncUserAccess(profile.user.telegramId);
+                // Повернення до роботи — запрошення теж приходить саме.
+                if (profile.isActive) {
+                    await accessService.sendChannelInvite(
+                        profile.user.telegramId,
+                        "<b>З поверненням</b>",
+                    );
+                }
             } catch (e) {}
         }
 
