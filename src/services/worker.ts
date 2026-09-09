@@ -16,7 +16,7 @@ import { truncateText } from "../utils/task-helpers.js";
 import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
 
-import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
+import { CANDIDATE_TEXTS, getTrainingTypeLabel } from "../constants/candidate-texts.js";
 import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
@@ -88,12 +88,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const decision = cand.hrDecision;
 
                     if (decision === "ACCEPTED") {
-                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `ваш наставник ${MENTOR_NAME}`;
-
                         try {
                             await bot.api.sendMessage(
                                 Number(cand.user.telegramId),
-                                CANDIDATE_TEXTS["worker-offer-accepted"](mentorDisplay),
+                                CANDIDATE_TEXTS["worker-offer-accepted"](),
                                 {
                                     parse_mode: "HTML",
                                     reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
@@ -328,12 +326,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const isDiscovery = !!slot.candidateDiscovery;
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
-                    const typeText = isDiscovery ? "discovery" : "training";
+                    const typeLabel = getTrainingTypeLabel(isDiscovery);
                     const msg = await bot.api.sendMessage(
                         Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["worker-training-reminder-6h"](typeText, timeStr, mentorDisplay),
+                        CANDIDATE_TEXTS["worker-training-reminder-6h"](typeLabel, timeStr),
                         {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
@@ -414,12 +411,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink; // Both use same field for now
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
-                    const typeText = isDiscovery ? "discovery" : "training";
+                    const typeLabel = getTrainingTypeLabel(isDiscovery);
                     await bot.api.sendMessage(
                         Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
+                        CANDIDATE_TEXTS["worker-training-reminder-10m"](typeLabel, timeStr, meetLink || undefined),
                         {
                             parse_mode: "HTML",
                             reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
@@ -1871,7 +1867,7 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     // Етапи NDA й тесту прибрані з воронки — лишилися тільки
                     // ті кроки, які людина справді може зробити зараз.
                     const contextStr = cand.status === "ACCEPTED"
-                        ? "на вибір часу для зустрічі з наставником"
+                        ? "на вибір часу для зустрічі"
                         : "на ваш наступний крок";
 
                     try {

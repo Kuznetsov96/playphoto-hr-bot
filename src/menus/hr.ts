@@ -187,7 +187,7 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 await hrService.markNoShow(cand.id);
                 const tid = Number(cand.user.telegramId);
                 try {
-                    const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-rejection-noshow"]);
+                    const msg = await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["candidate-rejected-noshow"]);
                     await trackUserMessage(tid, msg.message_id);
                 } catch (e) { logger.warn({ err: e, tid }, "Could not send no-show rejection to candidate"); }
                 await ctx.answerCallbackQuery("Status: NO-SHOW").catch(() => { });
@@ -197,8 +197,9 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
                 await hrService.rescheduleCandidate(cand.id);
                 const tid = Number(cand.user.telegramId);
                 try {
-                    const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-msg-reschedule"], {
-                        reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
+                    const msg = await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["candidate-reschedule-after-missed"], {
+                        parse_mode: "HTML",
+                        reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-other-time"], "start_scheduling")
                     });
                     await trackUserMessage(tid, msg.message_id);
                 } catch (e) { logger.warn({ err: e, tid }, "Could not send reschedule msg to candidate"); }
@@ -261,8 +262,9 @@ hrCandidateUnifiedMenu.dynamic(async (ctx, range) => {
             await hrService.rescheduleCandidate(cand.id);
             const tid = Number(cand.user.telegramId);
             try {
-                const msg = await ctx.api.sendMessage(tid, (STAFF_TEXTS as any)["hr-msg-reschedule"], {
-                    reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling")
+                const msg = await ctx.api.sendMessage(tid, CANDIDATE_TEXTS["candidate-reschedule-after-missed"], {
+                    parse_mode: "HTML",
+                    reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-other-time"], "start_scheduling")
                 });
                 await trackUserMessage(tid, msg.message_id);
             } catch (e) { logger.warn({ err: e, tid }, "Could not send reschedule msg to candidate"); }

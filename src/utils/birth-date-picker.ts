@@ -1,4 +1,4 @@
-import { MAX_VOLKLAND_2_ZP_CANDIDATE_AGE, MIN_VOLKLAND_2_ZP_CANDIDATE_AGE } from "./candidate-age.js";
+import { MAX_CANDIDATE_AGE, MIN_CANDIDATE_AGE } from "../constants/candidate-age-limits.js";
 
 /**
  * Вибір дати народження кнопками замість тексту.
@@ -11,7 +11,8 @@ import { MAX_VOLKLAND_2_ZP_CANDIDATE_AGE, MIN_VOLKLAND_2_ZP_CANDIDATE_AGE } from
  * Чому саме повна дата, а не лише рік. Точний день потрібен двом живим
  * механізмам: birthday-service вітає кандидаток за збігом дня й місяця
  * (candidate-repository.findBirthdaysToday), а underage-reactivation-service
- * розблоковує анкету рівно на 16-річчя (getBirthDateRejection). Якби ми
+ * розблоковує анкету рівно в день повноліття за нашими межами
+ * (getBirthDateRejection). Якби ми
  * зберігали лише рік, дата лягла б на 1 січня: масова розсилка привітань
  * щосічня і розблокування «грудневих» анкет на дев'ять місяців раніше.
  */
@@ -19,12 +20,12 @@ import { MAX_VOLKLAND_2_ZP_CANDIDATE_AGE, MIN_VOLKLAND_2_ZP_CANDIDATE_AGE } from
 /** Скільки років показувати у списку. */
 export function getSelectableBirthYears(today: Date = new Date()): number[] {
     const currentYear = today.getFullYear();
-    // Верхня межа списку — наймолодший вік, з яким узагалі беруть (16 на
-    // Volkland 2), нижня — найстарший (28). Список навмисно ширший за межі
-    // конкретної локації: вона ще невідома, локацію обирають пізніше, а
-    // відмову за віком видає getAgeRejection уже зі знанням локації.
-    const youngestYear = currentYear - MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
-    const oldestYear = currentYear - MAX_VOLKLAND_2_ZP_CANDIDATE_AGE - 1;
+    // Межі списку — наймолодший і найстарший вік, з яким беруть у команду.
+    // Вони єдині для всіх локацій (див. candidate-age.ts), тому список
+    // збігається з реальним правилом відбору, а не ширший за нього: кнопки
+    // року, що гарантовано веде у відмову, тут більше немає.
+    const youngestYear = currentYear - MIN_CANDIDATE_AGE;
+    const oldestYear = currentYear - MAX_CANDIDATE_AGE - 1;
 
     const years: number[] = [];
     for (let year = youngestYear; year >= oldestYear; year--) {

@@ -3,7 +3,7 @@ import { CandidateStatus } from "@prisma/client";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
-import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client.js";
 import { hrService } from "./hr-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
@@ -313,7 +313,7 @@ export class RecruitingCommandDispatcher {
                 try {
                     const { trackUserMessage } = await import("../utils/cleanup.js");
                     const tid = Number(candidate.user.telegramId);
-                    const msg = await api.sendMessage(tid, STAFF_TEXTS["hr-rejection-noshow"]);
+                    const msg = await api.sendMessage(tid, CANDIDATE_TEXTS["candidate-rejected-noshow"]);
                     if (msg) await trackUserMessage(tid, msg.message_id);
                 } catch {
                     // Кандидатка могла заблокировать бота — команда всё равно применена.

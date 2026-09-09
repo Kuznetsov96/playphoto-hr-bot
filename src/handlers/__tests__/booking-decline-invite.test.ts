@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 
 const cancelInterviewSlot = vi.fn().mockResolvedValue(undefined);
 const cancelTrainingSlot = vi.fn().mockResolvedValue(undefined);
@@ -126,11 +127,8 @@ vi.mock("../../utils/screen-manager.js", () => ({
     }
 }));
 
-vi.mock("../../constants/staff-texts.js", () => ({
-    STAFF_TEXTS: {
-        "hr-info-invite-declined": "declined",
-    }
-}));
+// staff-texts більше не мокається: підтвердження відмови переїхало до
+// CANDIDATE_TEXTS. Перевіряємо справжній рядок — саме він поїде людині.
 
 describe("booking decline invite", () => {
     let bookingHandlers: any;
@@ -171,7 +169,13 @@ describe("booking decline invite", () => {
                 googleMeetLink: null,
             })
         );
-        expect(ctx.editMessageText).toHaveBeenCalledWith("declined");
+        expect(ctx.editMessageText).toHaveBeenCalledWith(
+            CANDIDATE_TEXTS["candidate-interview-invitation-declined"],
+        );
+        // Тон відмови: на «ви» і без емодзі — інваріант усієї воронки.
+        const declineText = ctx.editMessageText.mock.calls[0]![0] as string;
+        expect(declineText).not.toMatch(/\bти\b|\bтобі\b|\bтебе\b/i);
+        expect(declineText).not.toMatch(/\p{Extended_Pictographic}/u);
     });
 
     it("does not attempt slot cleanup when candidate has no interview slot", async () => {

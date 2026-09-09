@@ -10,7 +10,7 @@ import { getCityCode, getShortLocationName } from "../../../utils/location-helpe
 import { ScreenManager } from "../../../utils/screen-manager.js";
 import { readCallbackPayload } from "../../../utils/signed-callback.js";
 import {
-    MIN_VOLKLAND_2_ZP_CANDIDATE_AGE,
+    MIN_CANDIDATE_AGE,
     getAgeRejection,
     getCandidateAge,
     type CandidateAgeLocation,
@@ -92,8 +92,14 @@ export function resolveScreeningStatus(input: {
     return input.hasVacancy ? "SCREENING" : "WAITLIST_HR";
 }
 
+/**
+ * Відсікання за віком одразу на кроці дати народження, ще до вибору локації.
+ * Межа єдина для всіх локацій (див. candidate-age.ts), тож рішення тут
+ * остаточне: раніше поріг був нижчий за реальний (16 проти 17), і
+ * шістнадцятирічна проходила ще два кроки, щоб отримати відмову згодом.
+ */
 export function shouldDeferCandidateAtBirthDate(birthDate: Date | string): boolean {
-    return getCandidateAge(birthDate) < MIN_VOLKLAND_2_ZP_CANDIDATE_AGE;
+    return getCandidateAge(birthDate) < MIN_CANDIDATE_AGE;
 }
 
 // --- CORE LOGIC ---

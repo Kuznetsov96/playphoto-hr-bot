@@ -464,15 +464,19 @@ export const hrService = {
             context: { reason, fromStatus: cand.status, toStatus: CandidateStatus.REJECTED }
         });
 
-        const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
         const tid = Number(cand.user.telegramId);
 
-        let text = (STAFF_TEXTS as any)["hr-rejection-general"] || "На жаль, ми не можемо запропонувати тобі співпрацю на даний момент. Дякуємо за інтерес!";
-        if (reason === "APPEARANCE") text = (STAFF_TEXTS as any)["hr-rejection-appearance"];
-
+        // Тексти відмови беруться з CANDIDATE_TEXTS. Раніше вони приходили зі
+        // STAFF_TEXTS — на «ти» і з емодзі (🌸, ✨) на поганій новині, — тоді
+        // як вичищені версії тих самих ключів лежали тут без жодного виклику.
+        const text = reason === "APPEARANCE"
+            ? CANDIDATE_TEXTS["hr-rejection-appearance"]
+            : CANDIDATE_TEXTS["candidate-rejected"];
 
         try {
-            await api.sendMessage(tid, text);
+            // parse_mode обов’язковий: candidate-rejected містить <b>, і без
+            // нього кандидатка побачила б теги як текст.
+            await api.sendMessage(tid, text, { parse_mode: "HTML" });
         } catch (e) { }
 
         await accessService.syncUserAccess(cand.user.telegramId, `HR Rejected: ${reason}`);
@@ -541,7 +545,6 @@ export const hrService = {
 
         const { extractFirstName } = await import("../utils/string-utils.js");
         const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
-        const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
 
         const tid = Number(cand.user.telegramId);
 
@@ -554,12 +557,12 @@ export const hrService = {
             await cleanupUserSessionMessages(api, tid);
             const locName = cand.location?.name || cand.city || 'вашого міста';
             msg = await api.sendMessage(tid,
-                STAFF_TEXTS["hr-info-broadcast-item"]({ locationName: locName } as any),
+                CANDIDATE_TEXTS["candidate-interview-invitation"](locName),
                 {
                     parse_mode: "HTML",
                     reply_markup: new InlineKeyboard()
-                        .text(STAFF_TEXTS["hr-btn-choose-time"], "start_scheduling").row()
-                        .text(STAFF_TEXTS["hr-btn-invite-decline"], "decline_invite").danger()
+                        .text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row()
+                        .text(CANDIDATE_TEXTS["candidate-btn-invite-decline"], "decline_invite").danger()
                 }
             );
         } catch (e: any) {
@@ -1133,10 +1136,10 @@ export const hrService = {
         let successCount = 0;
         for (const cand of candidates) {
             try {
-                const text = `Привіт! ✨\n\nЗ'явилися нові вільні вікна для співбесіди. Тисни кнопку нижче, щоб обрати зручний час для здзвону! 👇`;
-                const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_scheduling");
+                const text = CANDIDATE_TEXTS["candidate-slots-opened"];
+                const kb = new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling");
 
-                await api.sendMessage(Number(cand.user.telegramId), text, { reply_markup: kb });
+                await api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
 
                 await candidateRepository.update(cand.id, {
                     status: CandidateStatus.SCREENING,
@@ -1155,10 +1158,14 @@ export const hrService = {
     }
 };
 
+/**
+ * Текст прийняття — той самий, що шле воркер (worker-offer-accepted).
+ * Раніше тут лежала власна копія: на «ти», з чотирма емодзі й обіцянкою
+ * наставника, тобто рівно те, що вичищено з решти воронки. Копія
+ * викликається лише зі sendOffer, і поки цей шлях не використовується —
+ * але дубль тексту рано чи пізно розходиться з оригіналом, тому джерело
+ * має бути одне.
+ */
 function getOfferWelcomeText(_candidate: any) {
-    return `<b>Вітаємо! Ти успішно пройшла співбесіду. 📸✨</b>\n\n` +
-        `Ми з радістю запрошуємо тебе пройти навчання та познайомитися з нашою командою ближче.\n\n` +
-        `<b>Що далі?</b>\n` +
-        `Найближчим часом тобі напише наставник. Він допоможе зорієнтуватися та надішле все необхідне для старту.\n\n` +
-        `До зустрічі в PlayPhoto! 🤍🕊️`;
+    return CANDIDATE_TEXTS["worker-offer-accepted"]();
 }

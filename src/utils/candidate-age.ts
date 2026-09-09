@@ -1,29 +1,29 @@
 import type { Location } from "@prisma/client";
+import { MAX_CANDIDATE_AGE, MIN_CANDIDATE_AGE } from "../constants/candidate-age-limits.js";
 
-export const MIN_CANDIDATE_AGE = 17;
-export const MAX_CANDIDATE_AGE = 26;
-export const MIN_VOLKLAND_2_ZP_CANDIDATE_AGE = 16;
-export const MAX_VOLKLAND_2_ZP_CANDIDATE_AGE = 28;
+/**
+ * Вікові межі кандидатки. Єдині для всіх локацій.
+ *
+ * До 09.09.2026 Volkland 2 (Запоріжжя) був винятком — 16–28 замість 17–26.
+ * Виняток прибрано рішенням власника: межі однакові скрізь. Разом з ним
+ * пішла й функція розпізнавання локації за назвою: вона звіряла
+ * name/legacyName/sheet регуляркою `/volkland\s*2/i`, тобто правило мовчки
+ * ламалося при перейменуванні локації.
+ *
+ * Самі числа живуть у constants/candidate-age-limits.js — модулі без
+ * залежностей, який читає ще й текст відмови. Реекспорт тут лишений, щоб не
+ * правити наявні імпорти.
+ *
+ * Параметр `location` у функціях нижче лишився навмисно: сьогодні він ні на
+ * що не впливає, але тримає сигнатуру готовою до наступного винятку — без
+ * нього довелося б правити десяток викликів у трьох модулях.
+ */
+export { MAX_CANDIDATE_AGE, MIN_CANDIDATE_AGE };
 
 export type CandidateAgeRejection = "UNDERAGE" | "AGE_LIMIT";
 export type CandidateAgeLocation = Pick<Location, "city" | "name" | "legacyName" | "sheet"> | null | undefined;
 
-export function isVolkland2Zaporizhzhia(location: CandidateAgeLocation): boolean {
-    if (!location || location.city !== "Запоріжжя") return false;
-
-    return [location.name, location.legacyName, location.sheet]
-        .filter((value): value is string => typeof value === "string")
-        .some(value => /volkland\s*2/i.test(value));
-}
-
-export function getCandidateAgeRange(location?: CandidateAgeLocation): { min: number; max: number } {
-    if (isVolkland2Zaporizhzhia(location)) {
-        return {
-            min: MIN_VOLKLAND_2_ZP_CANDIDATE_AGE,
-            max: MAX_VOLKLAND_2_ZP_CANDIDATE_AGE,
-        };
-    }
-
+export function getCandidateAgeRange(_location?: CandidateAgeLocation): { min: number; max: number } {
     return {
         min: MIN_CANDIDATE_AGE,
         max: MAX_CANDIDATE_AGE,

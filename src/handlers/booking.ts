@@ -619,8 +619,7 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
         }
     );
 
-    const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
-    await ctx.editMessageText(STAFF_TEXTS["hr-info-invite-declined"] as string);
+    await ctx.editMessageText(CANDIDATE_TEXTS["candidate-interview-invitation-declined"]);
 });
 
 // 7. Початок запису НА НАВЧАННЯ / ЗНАЙОМСТВО
