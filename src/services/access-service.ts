@@ -104,25 +104,24 @@ export class AccessService {
             return user.staffProfile?.isActive === true;
         }
 
-        // 3. Candidates (ONLY if they passed HR stage and are now in Training/Staging)
+        /**
+         * 3. Кандидатки: доступ лише після найму.
+         *
+         * Раніше сюди входило 13 статусів, з яких 12 — ще не працевлаштовані:
+         * ACCEPTED, MENTOR_MANUAL, усі DISCOVERY/TRAINING, NDA, KNOWLEDGE_TEST,
+         * STAGING, READY_FOR_HIRE, AWAITING_FIRST_SHIFT. Доступ видавався на
+         * початку навчання, а якщо людина просто зависала в MENTOR_MANUAL і
+         * ніхто не змінював статус — він лишався назавжди. Так у каналі
+         * накопичувалися ті, хто до команди так і не дійшов.
+         *
+         * Тепер межа одна: HIRED. Працевлаштовані цим списком не захищені й не
+         * можуть його втратити — вони проходять пунктом 2 вище як Role.STAFF з
+         * активним профілем (роль ставиться при синхронізації з вебзастосунком,
+         * див. aws-business-sync). HIRED тут лишається тільки для проміжку між
+         * наймом і появою staffProfile.
+         */
         if (user.role === Role.CANDIDATE && user.candidate) {
-            const status = user.candidate.status;
-            const allowedStatuses: CandidateStatus[] = [
-                CandidateStatus.ACCEPTED,
-                CandidateStatus.MENTOR_MANUAL,
-                CandidateStatus.DISCOVERY_SCHEDULED,
-                CandidateStatus.DISCOVERY_COMPLETED,
-                CandidateStatus.TRAINING_SCHEDULED,
-                CandidateStatus.TRAINING_COMPLETED,
-                CandidateStatus.NDA,
-                CandidateStatus.KNOWLEDGE_TEST,
-                CandidateStatus.STAGING_SETUP,
-                CandidateStatus.STAGING_ACTIVE,
-                CandidateStatus.READY_FOR_HIRE,
-                CandidateStatus.AWAITING_FIRST_SHIFT,
-                CandidateStatus.HIRED,
-            ];
-            return allowedStatuses.includes(status);
+            return user.candidate.status === CandidateStatus.HIRED;
         }
 
         return false;
