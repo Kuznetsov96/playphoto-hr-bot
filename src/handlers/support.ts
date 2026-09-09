@@ -416,7 +416,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     module: "support",
                     safeContext: { routing: "admin_dm", status: candidate.status }
                 });
-                await ctx.reply("Не вдалося доставити повідомлення адміністратору. Спробуйте ще раз трохи пізніше.");
+                await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
                 return true;
             }
 
@@ -485,7 +485,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     module: "support",
                     safeContext: { routing: "recovery_topic", topicId: topic.topicId, chatId: String(topic.chatId) }
                 });
-                await ctx.reply("Не вдалося доставити повідомлення. Спробуйте ще раз трохи пізніше.");
+                await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
                 return true;
             }
 
@@ -526,7 +526,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("Повідомлення надіслано. Ми відповімо тут найближчим часом.");
+            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
             return true;
         }
 
@@ -733,7 +733,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 module: "support",
                 safeContext: { routing: "admin_dm", status: candidate.status }
             });
-            await ctx.reply("Не вдалося доставити повідомлення. Спробуйте ще раз трохи пізніше.");
+            await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
             return true;
         }
 
