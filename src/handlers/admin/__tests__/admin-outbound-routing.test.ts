@@ -45,6 +45,11 @@ describe("shouldUseDirectCandidateMessage", () => {
         // Це і є регрес: найм лишає рядок Candidate, і якщо він завис на
         // онбординговому статусі, повідомлення штатному фотографу йшло повз
         // підтримку — без гілки, куди він міг би відповісти.
+        //
+        // READY_FOR_HIRE — саме той статус, на якому 09.09.2026 зависла
+        // анкета діючої співробітниці: гілка не створювалася, а екран
+        // рапортував «Message sent and logged».
+        expect(shouldUseDirectCandidateMessage({ status: "READY_FOR_HIRE" }, ACTIVE_STAFF)).toBe(false);
         expect(shouldUseDirectCandidateMessage({ status: "AWAITING_FIRST_SHIFT" }, ACTIVE_STAFF)).toBe(false);
         expect(shouldUseDirectCandidateMessage({ status: "STAGING_ACTIVE" }, ACTIVE_STAFF)).toBe(false);
         expect(shouldUseDirectCandidateMessage({ status: "OFFLINE_STAGING" }, ACTIVE_STAFF)).toBe(false);
