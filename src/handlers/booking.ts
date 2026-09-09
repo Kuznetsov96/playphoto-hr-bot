@@ -25,6 +25,12 @@ import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
+// Ім'я кандидатки їде в сповіщення менторам з parse_mode:"HTML", а
+// CandidateSchema не забороняє «<» і «>»: «<b>Іван Петров</b>» проходить усі
+// перевірки. Незакритий тег ламає sendMessage, і .catch(() => {}) навколо цих
+// відправок ковтає помилку — тобто кандидатка могла тихо вимкнути власні
+// сповіщення менторам. Екрануємо в місці, де ім'я береться.
+import { escapeHtml } from "./admin/utils.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
@@ -39,7 +45,21 @@ type SlotButton = {
     startTime: Date;
 };
 
+/**
+ * Підпис кнопки слота: «пт 12.09 · 14:00».
+ *
+ * День тижня — не прикраса. Раніше кнопка казала «12.09 14:00», і щоб
+ * зрозуміти, чи це робочий день, людині доводилося йти в календар. Місяць
+ * лишається: за два тижні наперед «12» без місяця вже неоднозначне.
+ *
+ * Скорочення дня тижня в uk-UA виходить як «пт», без крапки. Підпис росте
+ * до ~16 символів — саме тому кнопки стоять по одній у рядок.
+ */
 function formatSlotButton(slot: SlotButton) {
+    const weekday = slot.startTime.toLocaleDateString("uk-UA", {
+        weekday: "short",
+        timeZone: KYIV_TIME_ZONE
+    });
     const dateStr = slot.startTime.toLocaleDateString("uk-UA", {
         day: "2-digit",
         month: "2-digit",
@@ -51,24 +71,58 @@ function formatSlotButton(slot: SlotButton) {
         timeZone: KYIV_TIME_ZONE
     });
 
-    return `${dateStr} ${timeStr}`;
+    return `${weekday} ${dateStr} · ${timeStr}`;
 }
+
+/**
+ * Ліміт слотів на екрані. Був 40: у два стовпці це двадцять рядів, а в один
+ * стовпець стало б сорок — стіна, яку неможливо охопити оком, і кнопка «Не
+ * бачу зручного часу» під нею недосяжна без довгого скролу. Дванадцять
+ * найближчих слотів покривають вибір на кілька днів уперед; кому не
+ * підходить жоден, тому потрібна не довша сторінка, а інші дати.
+ */
+const SLOT_KEYBOARD_LIMIT = 12;
 
 function buildSlotSelectionKeyboard(
     slots: SlotButton[],
     bookCallbackPrefix: string,
     noFitCallback: string,
-    limit = 40
+    limit = SLOT_KEYBOARD_LIMIT
 ) {
     const keyboard = new InlineKeyboard();
 
-    slots.slice(0, limit).forEach((slot, index) => {
-        keyboard.text(formatSlotButton(slot), `${bookCallbackPrefix}${slot.id}`);
-        if ((index + 1) % 2 === 0) keyboard.row();
+    // Один слот у рядок. З днем тижня підпис виріс до ~16 символів, а
+    // Telegram ділить ширину рядка порівну: дві такі кнопки поруч на
+    // вузькому екрані обрізаються рівно там, де стоїть час. Вертикальний
+    // список читається як розклад і не змушує звіряти дати по діагоналі.
+    slots.slice(0, limit).forEach((slot) => {
+        keyboard.text(formatSlotButton(slot), `${bookCallbackPrefix}${slot.id}`).row();
     });
 
-    keyboard.row().text("Не бачу зручного часу", noFitCallback).row();
+    keyboard.text("Не бачу зручного часу", noFitCallback).row();
     return keyboard;
+}
+
+/**
+ * Замінює екран текстом, лишаючи вихід на живу людину.
+ *
+ * Ці екрани («жоден час не підходить», «графік оновлюється») раніше
+ * малювалися зовсім без клавіатури — саме там, де ймовірність втратити
+ * кандидатку найвища. Спільний хелпер, бо два близнюки — співбесіда й
+ * навчання — уже одного разу розійшлися: виправили лише один.
+ *
+ * Кандидат-хлопець кнопки не отримує — та сама межа, що в showCandidateStatus.
+ */
+async function editWithContactButton(ctx: MyContext, telegramId: number, text: string) {
+    const candidate = await candidateRepository.findByTelegramId(telegramId);
+    const showContact = candidate?.gender !== "male";
+
+    await ctx.editMessageText(
+        text,
+        showContact
+            ? { reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr") }
+            : undefined,
+    );
 }
 
 export function buildMentorReschedulePatch(status: CandidateStatus) {
@@ -501,11 +555,15 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                     interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
                 });
             }
-            await ctx.editMessageText(`Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`);
+            await editWithContactButton(
+                ctx,
+                ctx.from.id,
+                `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`,
+            );
             return;
         }
 
-        const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit", 20);
+        const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit");
 
         await ctx.editMessageText(
             "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
@@ -591,19 +649,7 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
     );
 
-    // Екран не лишається без кнопок. Людина щойно сказала «жоден час не
-    // підходить» — це момент найбільшої ймовірності втратити її, і раніше
-    // саме тут вона втрачала і список слотів, і вихід на живу людину.
-    const kb = new InlineKeyboard();
-    const candidate = await candidateRepository.findByTelegramId(telegramId);
-    if (candidate?.gender !== "male") {
-        kb.text("Написати нам", "contact_hr");
-    }
-
-    await ctx.editMessageText(
-        `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`,
-        kb.inline_keyboard.length > 0 ? { reply_markup: kb } : undefined,
-    );
+    await editWithContactButton(ctx, telegramId, `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 });
 
 // 6.5 Відмова кандидата від співбесіди
@@ -691,7 +737,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         const { MENTOR_IDS } = await import("../config.js");
         if (MENTOR_IDS && MENTOR_IDS.length > 0) {
             const cand = await candidateRepository.findByTelegramId(telegramId);
-            const name = cand?.fullName || ctx.from.first_name || "Candidate";
+            const name = escapeHtml(cand?.fullName || ctx.from.first_name || "Candidate");
             const alertMsg = `📥 <b>INBOX: No discovery slots available!</b>\n\n` +
                 `👤 <b>${name}</b>\n\n` +
                 `This candidate tried to book a discovery but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
@@ -759,7 +805,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 
         const startTime = (result as any).startTime;
         const candData = isTrainingPhase ? (result as any).candidate : (result as any).candidateDiscovery;
-        const fullName = candData?.fullName || ctx.from.first_name || "Кандидатко";
+        const fullName = escapeHtml(candData?.fullName || ctx.from.first_name || "Кандидатко");
 
         let confirmationText = "";
         if (isTrainingPhase) {
@@ -834,11 +880,11 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
         }
     );
 
-    await ctx.editMessageText(`Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
+    await editWithContactButton(ctx, telegramId, `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 
     const { MENTOR_IDS } = await import("../config.js");
     if (MENTOR_IDS && MENTOR_IDS.length > 0) {
-        const name = (await candidateRepository.findByTelegramId(telegramId))?.fullName || ctx.from.first_name || "Candidate";
+        const name = escapeHtml((await candidateRepository.findByTelegramId(telegramId))?.fullName || ctx.from.first_name || "Candidate");
         const alertMsg = `📥 <b>INBOX: Candidate cannot find training slot!</b>\n\n` +
             `👤 <b>${name}</b>\n\n` +
             `This candidate clicked "No date fits" for training. She is now in the WAITLIST. Please contact her! 💬`;
@@ -902,7 +948,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         if (candidate) {
             const { MENTOR_IDS } = await import("../config.js");
             const typeText = wasDiscovery ? "discovery" : "training";
-            const name = candidate.fullName || "Candidate";
+            const name = escapeHtml(candidate.fullName || "Candidate");
             const alertText = `🗓 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Booking Cancelled</b>\n\n` +
                 `👤 <b>${name}</b> cancelled her ${typeText} slot and can choose another time.`;
             const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
@@ -976,7 +1022,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         if (candidate) {
             const { MENTOR_IDS } = await import("../config.js");
             const typeText = wasDiscovery ? "discovery" : "training";
-            const name = candidate.fullName || "Candidate";
+            const name = escapeHtml(candidate.fullName || "Candidate");
             const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
                 `👤 <b>${name}</b> declined the vacancy during ${typeText}.`;
             const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
@@ -1027,7 +1073,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             const { MENTOR_IDS } = await import("../config.js");
             const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
             const typeText = isDiscovery ? "discovery" : "training";
-            const name = candidate.fullName || "Candidate";
+            const name = escapeHtml(candidate.fullName || "Candidate");
             const alertText = `🗓 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Rescheduled</b>\n\n` +
                 `👤 <b>${name}</b> is rescheduling her ${typeText} appointment.\n` +
                 `She is choosing a new time now.`;
@@ -1043,7 +1089,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             // Notify Mentor
             if (candidate) {
                 const { MENTOR_IDS: mentorIds } = await import("../config.js");
-                const name = candidate.fullName || "Candidate";
+                const name = escapeHtml(candidate.fullName || "Candidate");
                 const alertText = `⚠️ <b>No Slots Available</b>\n\n` +
                     `👤 <b>${name}</b> tried to reschedule but found no available slots.\n` +
                     `She is back in Inbox — please assign a time manually.`;
@@ -1058,7 +1104,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             });
         }
 
-        const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit", 20);
+        const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit");
 
         await ctx.editMessageText(
             "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",

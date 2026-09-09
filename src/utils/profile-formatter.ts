@@ -5,6 +5,7 @@ import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "./location-label.js";
+import { stripLegacyLocationSuffix } from "./appearance-value.js";
 
 export interface ProfileFormatOptions {
     locale?: string;
@@ -115,7 +116,14 @@ export async function formatCandidateProfile(
     // ── SECTION 2: HR SELECTION STAGE ────────────────────────────────────
     if (!isPastHR) {
         if (candidate.status === "MANUAL_REVIEW" && candidate.appearance) {
-            text += `\n💍 ${candidate.appearance}\n`;
+            // escapeHtml обов’язковий: appearance — вільний текст кандидатки,
+            // без валідації й обмеження довжини, а картка малюється з
+            // parse_mode:"HTML". Незакритий тег ламає весь sendMessage, тобто
+            // кандидатка могла зробити власну картку невідмальовуваною для
+            // рекрутера — саме на статусі MANUAL_REVIEW, де її й дивляться.
+            // Стара дописка «(Обрані локації: …)» тут теж зайва: локації
+            // показані окремим рядком вище.
+            text += `\n💍 ${escapeHtml(stripLegacyLocationSuffix(candidate.appearance))}\n`;
         }
 
         if (candidate.hrDecision && candidate.status !== "WAITLIST" && candidate.status !== "WAITLIST_HR" && candidate.status !== "WAITLIST_MENTOR" && options.viewerRole !== "MENTOR") {

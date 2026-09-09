@@ -553,7 +553,12 @@ export async function startWorker(bot: Bot<MyContext>) {
                         }
                     ]
                 },
-                include: { candidate: true, candidateDiscovery: true }
+                // user потрібен, щоб написати кандидатці: telegramId лежить на
+                // ньому, а не на Candidate.
+                include: {
+                    candidate: { include: { user: true } },
+                    candidateDiscovery: { include: { user: true } },
+                }
             });
 
             for (const slot of pendingMentorNotifs) {
@@ -572,6 +577,28 @@ export async function startWorker(bot: Bot<MyContext>) {
                         const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand.id}`);
 
                         await bot.api.sendMessage(MENTORS[0]!, text, { parse_mode: "HTML", reply_markup: kb });
+                    }
+
+                    // Кандидатці теж треба сказати, що зустріч завершилася.
+                    // Раніше повідомлення йшло тільки менторові, і далі
+                    // починався найдовший мовчазний відрізок воронки: людина
+                    // не знала, чи її ще розглядають. Доставка best-effort —
+                    // заблокований бот не має зривати позначку слота.
+                    try {
+                        await bot.api.sendMessage(
+                            Number(cand.user?.telegramId ?? (cand as any).telegramId),
+                            CANDIDATE_TEXTS["worker-meeting-completed"](getTrainingTypeLabel(!!slot.candidateDiscovery)),
+                            {
+                                parse_mode: "HTML",
+                                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr"),
+                            },
+                        );
+                    } catch (e: any) {
+                        if (isBotBlocked(e)) {
+                            await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                        } else {
+                            logger.warn({ err: e, candidateId: cand.id }, "Meeting-completed notice to candidate failed");
+                        }
                     }
 
                     await trainingRepository.updateSlot(slot.id, { remindedCompletion: true });

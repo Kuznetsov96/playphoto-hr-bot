@@ -65,12 +65,24 @@ function getAgeRejectionMeta(age: number, location?: CandidateAgeLocation) {
 
 // --- VALIDATION SCHEMAS ---
 export const CandidateSchema = z.object({
+    /**
+     * Тексти помилок — те, що людина читає замість наступного питання, тож
+     * вони кажуть, що зробити, а не яке правило порушено. «ПІБ» прибрано:
+     * це канцелярит, а питання й так просить ім'я та прізвище.
+     *
+     * min(5) прибрано: воно нічого не ловило понад вимогу двох слів, зате
+     * відхиляло справжні короткі імена («Ян Ко» — рівно 5, «Ян Ів» — уже ні).
+     *
+     * Кутові дужки заборонені: ім'я підставляється в повідомлення менторам з
+     * parse_mode:"HTML", і «<b>Іван Петров</b>» проходило всі попередні
+     * перевірки. Це другий рубіж — екранування в booking.ts лишається.
+     */
     fullName: z.string()
-        .min(5, "ПІБ має бути не менше 5 символів")
-        .max(100, "ПІБ занадто довге")
-        .refine(val => val.trim().split(/\s+/).length >= 2, "Введіть Ім'я та Прізвище (через пробіл)")
-        .refine(val => !val.startsWith("/"), "Це схоже на команду, введіть ім'я")
-        .refine(val => !/\d/.test(val), "Ім'я не може містити цифри"),
+        .max(100, "Занадто довго — до 100 символів.")
+        .refine(val => val.trim().split(/\s+/).length >= 2, "Напишіть, будь ласка, і ім'я, і прізвище — через пробіл.")
+        .refine(val => !val.startsWith("/"), "Це схоже на команду. Напишіть, будь ласка, ім'я.")
+        .refine(val => !/\d/.test(val), "В імені не може бути цифр.")
+        .refine(val => !/[<>]/.test(val), "Приберіть, будь ласка, символи < і >."),
     birthDate: z.date()
         .refine(date => date > new Date(1950, 0, 1) && date <= new Date(), "Введіть реальну дату народження"),
 });
@@ -132,6 +144,17 @@ export async function persistCandidate(ctx: MyContext, data: any) {
     });
 }
 
+/**
+ * Знімає одноразове пояснення й дописує його згори тексту питання.
+ * Повертає текст без змін, якщо пояснення немає.
+ */
+function withPendingNotice(ctx: MyContext, text: string): string {
+    const notice = ctx.session.pendingScreeningNotice;
+    if (!notice) return text;
+    delete ctx.session.pendingScreeningNotice;
+    return `${notice}\n\n${text}`;
+}
+
 export async function startScreening(ctx: MyContext) {
     const candidateData = ctx.session.candidateData;
     logger.info({
@@ -145,16 +168,16 @@ export async function startScreening(ctx: MyContext) {
 
     if (!candidateData.fullName) {
         ctx.session.step = "screening_name";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["welcome-message"] + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["welcome-message"] + "\n\n" + CANDIDATE_TEXTS["ask-name"]));
     } else if (!candidateData.gender) {
         ctx.session.step = "screening_gender";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender");
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"]()), "candidate-gender");
     } else if (!candidateData.birthDate) {
         ctx.session.step = "screening_birth_year";
         delete candidateData.birthYear;
         delete candidateData.birthMonth;
         delete candidateData.birthDecade;
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year");
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"]), "candidate-birth-year");
     } else if (!candidateData.city) {
         ctx.session.step = "screening_city";
         await triggerPrompt(ctx, "screening_city");
@@ -163,7 +186,7 @@ export async function startScreening(ctx: MyContext) {
         await triggerPrompt(ctx, "screening_location");
     } else if (!candidateData.appearance) {
         ctx.session.step = "screening_appearance_prompt";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance");
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"]), "candidate-appearance");
     } else {
         ctx.session.step = "screening_source";
         await triggerPrompt(ctx, "screening_source");
@@ -192,7 +215,15 @@ async function renderLocationSelection(ctx: MyContext) {
         await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
     } catch (e: any) {
         logger.error({ err: e }, "Candidate location selection rendering failed");
-        await ScreenManager.renderScreen(ctx, "Не вдалося завантажити список локацій. Спробуйте ще раз через /start.");
+        // Це збій на нашому боці — саме тут кнопка потрібна найбільше, а
+        // раніше екран пропонував набрати команду вручну.
+        await ScreenManager.renderScreen(
+            ctx,
+            "Не вдалося завантажити список локацій.\n\nСпробуйте ще раз — або напишіть нам, і ми допоможемо.",
+            new InlineKeyboard()
+                .text("Спробувати ще раз", "resume_screening").row()
+                .text("Написати нам", "contact_hr"),
+        );
     }
 }
 
@@ -253,11 +284,11 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
 
 async function triggerPrompt(ctx: MyContext, step: string) {
     if (step === "screening_city") {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-city"], "candidate-city", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-city"]), "candidate-city", { pushToStack: true });
     } else if (step === "screening_location") {
         await renderLocationSelection(ctx);
     } else if (step === "screening_source") {
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-source"], "candidate-source", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, withPendingNotice(ctx, CANDIDATE_TEXTS["candidate-ask-source"]), "candidate-source", { pushToStack: true });
     }
 }
 
@@ -407,8 +438,14 @@ candidateHandlers.on("message:text", async (ctx, next) => {
             await persistCandidate(ctx, { fullName: val.data, currentStep: FunnelStep.INITIAL_TEST });
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender", { pushToStack: true });
         } else {
-            const errorText = CANDIDATE_TEXTS["error-name-format"](val.error.issues[0]?.message || "Помилка");
-            await ScreenManager.renderScreen(ctx, errorText + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
+            // Повідомлення людини вже видалено (SMI), тож без цитати вона не
+            // бачить, що саме написала, — і не може знайти в цьому символ,
+            // на який лається бот.
+            const errorText = CANDIDATE_TEXTS["error-name-format"](
+                val.error.issues[0]?.message || "Помилка",
+                ctx.message.text,
+            );
+            await ScreenManager.renderScreen(ctx, errorText);
         }
         return;
     } else if (step === "screening_appearance") {
@@ -437,7 +474,12 @@ candidateHandlers.on("message:photo", async (ctx) => {
         return;
     }
 
-    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-photo-unexpected"]);
+    // Фото вже видалено, а екран помилки раніше затирав ще й саме питання:
+    // людина лишалася без знімка, без запитання і без клавіатури. Тепер
+    // startScreening перемальовує поточний крок разом з кнопками, а причина
+    // дописується згори — один екран, як і всюди в анкеті.
+    ctx.session.pendingScreeningNotice = CANDIDATE_TEXTS["candidate-error-photo-unexpected"];
+    await startScreening(ctx);
 });
 
 /**
