@@ -36,20 +36,18 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
     const candidates = await candidateRepository.findBirthdaysToday(day, month);
     const { default: prisma } = await import("../db/core.js");
 
-    const standardGreeting = `<b>Сьогодні — чудовий привід почати нову главу!</b> ✨\n\n` +
+    const standardGreeting = `<b>З днем народження!</b>\n\n` +
         `Нехай цей рік буде наповнений цікавими відкриттями, творчим натхненням та людьми, які дарують радість. ` +
-        `Бажаємо, щоб кожен наступний кадр твого життя був наповнений лише світлими емоціями.\n\n` +
-        `З днем народження! 🎈\n` +
+        `Бажаємо, щоб кожен наступний кадр вашого життя був наповнений лише світлими емоціями.\n\n` +
         `Команда PlayPhoto`;
 
-    const activationGreeting = `🎂 <b>З днем народження!</b> ✨\n\n` +
-        `Нехай цей рік буде наповнений цікавими відкриттями, творчим натхненням та людьми, які дарують радість. ` +
-        `Бажаємо, щоб кожен наступний кадр твого життя був наповнений лише світлими емоціями. 🎈\n\n` +
-        `Ми повернули твою анкету до списку актуальних. Як тільки на твоїй локації з'являться вільні місця — ти отримаєш запрошення на співбесіду. Раді, що ти з нами! 📸✨`;
+    const activationGreeting = `<b>З днем народження!</b>\n\n` +
+        `Нехай цей рік буде наповнений цікавими відкриттями, творчим натхненням та людьми, які дарують радість.\n\n` +
+        `Ми повернули вашу анкету до списку актуальних. Щойно на вашій локації з'являться вільні місця — надішлемо запрошення на співбесіду.`;
 
-    const continueScreeningGreeting = `🎂 <b>З днем народження!</b> ✨\n\n` +
-        `Ми зберегли твою анкету і готові оновити її, щоб продовжити знайомство з PlayPhoto 📸\n\n` +
-        `Натисни кнопку нижче, щоб обрати актуальне місто та локацію.`;
+    const continueScreeningGreeting = `<b>З днем народження!</b>\n\n` +
+        `Ми зберегли вашу анкету і готові оновити її, щоб продовжити знайомство з PlayPhoto.\n\n` +
+        `Натисніть кнопку нижче, щоб обрати актуальне місто та локацію.`;
 
     let successCount = 0;
     for (const c of candidates) {
@@ -78,7 +76,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
                 await bot.api.sendMessage(tid, reactivation.mode === "RESUME_SCREENING" ? continueScreeningGreeting : activationGreeting, {
                     parse_mode: "HTML",
                     ...(reactivation.mode === "RESUME_SCREENING" ? {
-                        reply_markup: new InlineKeyboard().text("Продовжити анкету ✨", "resume_screening")
+                        reply_markup: new InlineKeyboard().text("Продовжити анкету", "resume_screening")
                     } : {}),
                 });
             } else {

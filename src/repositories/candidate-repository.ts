@@ -33,11 +33,6 @@ const LEGACY_READABLE_CANDIDATE_STATUSES: CandidateStatus[] = [
     CandidateStatus.BLOCKER
 ];
 
-const NDA_PENDING_STATUSES: CandidateStatus[] = [
-    CandidateStatus.TRAINING_COMPLETED,
-    CandidateStatus.NDA,
-];
-
 function isUnknownCandidateStatusError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return message.includes("not found in enum 'CandidateStatus'");
@@ -1017,31 +1012,6 @@ export class CandidateRepository {
             },
             include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
             orderBy: { user: { createdAt: 'asc' } }
-        }) as unknown as Promise<CandidateWithRelations[]>;
-    }
-
-    async findAwaitingNDA(): Promise<CandidateWithRelations[]> {
-        return prisma.candidate.findMany({
-            where: {
-                status: { in: NDA_PENDING_STATUSES },
-                ndaConfirmedAt: null,
-            },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true },
-            orderBy: [{ ndaSentAt: 'asc' }, { statusChangedAt: 'asc' }]
-        }) as unknown as Promise<CandidateWithRelations[]>;
-    }
-
-    async findAwaitingNDAReminder(delayHours: number): Promise<CandidateWithRelations[]> {
-        const delayDate = new Date();
-        delayDate.setHours(delayDate.getHours() - delayHours);
-
-        return prisma.candidate.findMany({
-            where: {
-                status: { in: NDA_PENDING_STATUSES },
-                ndaConfirmedAt: null,
-                ndaSentAt: { lte: delayDate }
-            } as any,
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } }, discoverySlot: true, trainingSlot: true, interviewSlot: true, messages: true }
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
 

@@ -102,7 +102,7 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
 
     const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
     if (!candidate) {
-        await ctx.answerCallbackQuery("Error: Candidate profile not found.");
+        await ctx.answerCallbackQuery("Не знайшли вашу анкету");
         return;
     }
 
@@ -136,10 +136,10 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
         safeContext: { preferredTarget, status: candidate.status }
     });
 
-    const kb = new InlineKeyboard().text("✖️ Скасувати", "end_support_chat").danger();
+    const kb = new InlineKeyboard().text("Скасувати", "end_support_chat").danger();
     await ctx.reply(
-        `<b>Напишіть ваше питання або повідомлення нижче ⤵️</b>\n` +
-        `Ми одразу передамо його відповідальній особі, і ви отримаєте відповідь прямо тут. ✨`,
+        `<b>Напишіть ваше питання нижче</b>\n` +
+        `Ми передамо його відповідальній особі, і ви отримаєте відповідь тут.`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 }
@@ -157,7 +157,7 @@ supportHandlers.callbackQuery("contact_recovery", async (ctx) => {
 supportHandlers.callbackQuery("end_support_chat", async (ctx) => {
     ctx.session.step = "idle";
     clearSupportRouteData(ctx);
-    await ctx.editMessageText("Діалог завершено. Якщо захочете написати знову — натисніть кнопку 'Написати нам'. 🌸");
+    await ctx.editMessageText("Діалог завершено. Щоб написати знову — натисніть «Написати нам».");
     await ctx.answerCallbackQuery();
 });
 
@@ -326,7 +326,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     module: "support",
                     safeContext: { routing: "admin_dm", status: candidate.status }
                 });
-                await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
+                await ctx.reply("Зараз нікого немає на зв’язку. Спробуйте, будь ласка, трохи пізніше.");
                 return true;
             }
 
@@ -361,7 +361,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("✅ Повідомлення надіслано адміністратору! Він відповість найближчим часом. ✨");
+            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
             return true;
         }
 
@@ -376,7 +376,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             let targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
 
             if (targetAdminIds.length === 0) {
-                await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
+                await ctx.reply("Зараз нікого немає на зв’язку. Спробуйте, будь ласка, трохи пізніше.");
                 return true;
             }
 
@@ -416,7 +416,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     module: "support",
                     safeContext: { routing: "admin_dm", status: candidate.status }
                 });
-                await ctx.reply("Не вдалося доставити повідомлення адміністратору. Спробуйте ще раз трохи пізніше.");
+                await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
                 return true;
             }
 
@@ -453,7 +453,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("✅ Повідомлення надіслано адміністратору! Він відповість найближчим часом. ✨");
+            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
             return true;
         }
 
@@ -485,7 +485,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     module: "support",
                     safeContext: { routing: "recovery_topic", topicId: topic.topicId, chatId: String(topic.chatId) }
                 });
-                await ctx.reply("Не вдалося доставити повідомлення в recovery-чергу. Спробуйте ще раз трохи пізніше.");
+                await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
                 return true;
             }
 
@@ -526,7 +526,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("✅ Повідомлення надіслано в recovery-чергу. Ми відповімо тут найближчим часом. ✨");
+            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
             return true;
         }
 
@@ -575,12 +575,12 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                     module: "support",
                     safeContext: { routing: activeTicket ? "support_ticket_topic" : "outgoing_topic", ticketId: activeTicket?.id, topicId }
                 });
-                await ctx.reply("Сталася помилка при відправці повідомлення. Спробуйте пізніше.");
+                await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
                 return true;
             }
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
+            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
             return true;
         }
 
@@ -657,14 +657,14 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
             ctx.session.step = "idle";
             clearSupportRouteData(ctx);
-            await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
+            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
             return true;
         }
 
         if (targetAdminIds.length === 0) targetAdminIds = ADMIN_IDS;
 
         if (targetAdminIds.length === 0) {
-            await ctx.reply("Вибачте, зараз немає активного адміністратора. Спробуйте пізніше.");
+            await ctx.reply("Зараз нікого немає на зв’язку. Спробуйте, будь ласка, трохи пізніше.");
             return true;
         }
 
@@ -733,7 +733,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 module: "support",
                 safeContext: { routing: "admin_dm", status: candidate.status }
             });
-            await ctx.reply("Не вдалося доставити повідомлення. Спробуйте ще раз трохи пізніше.");
+            await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
             return true;
         }
 
@@ -773,14 +773,14 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
 
         ctx.session.step = "idle";
         clearSupportRouteData(ctx);
-        await ctx.reply("✅ Повідомлення надіслано! Ми відповімо найближчим часом. ✨");
+        await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
 
         return true;
 
     } catch (e) {
         logger.error({ err: e }, "Error in handleSupportMessage");
         if (step === "support_chat") {
-            await ctx.reply("Не вдалося обробити повідомлення через технічну помилку. Спробуйте ще раз трохи пізніше.").catch(replyError => {
+            await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.").catch(replyError => {
                 logger.error({ err: replyError, telegramId }, "Failed to notify candidate about support error");
             });
             return true;

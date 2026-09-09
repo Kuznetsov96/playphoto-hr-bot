@@ -9,7 +9,7 @@ import {
     candidateSourceMenu 
 } from "../../menus/candidate.js";
 import { shouldRouteMessageToPrivateRoleFlows } from "../../utils/message-routing.js";
-import { escapeHtml } from "../../handlers/admin/utils.js";
+import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 
 export const candidateModule = new Composer<MyContext>();
 
@@ -36,10 +36,8 @@ candidateModule.on("message", async (ctx, next) => {
     
     if (candidate) {
         const { showCandidateStatus } = await import("../../utils/candidate-ui.js");
-        const fullName = candidate.fullName || ctx.from?.first_name || "Кандидатко";
-        const firstName = fullName.split(" ")[0] || "Кандидатко";
-        
-        await ctx.reply(`🤔 <b>${escapeHtml(firstName)}, я не зовсім зрозумів твоє повідомлення.</b>\n\nОсь твій поточний статус: 👇`, { parse_mode: "HTML" });
+
+        await ctx.reply(CANDIDATE_TEXTS["candidate-error-unknown-message"], { parse_mode: "HTML" });
         await showCandidateStatus(ctx, candidate);
         return;
     }

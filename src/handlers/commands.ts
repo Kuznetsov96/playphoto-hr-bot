@@ -146,8 +146,6 @@ commandHandlers.command("start", async (ctx) => {
             if (!isNaN(broadcastId)) {
                 await broadcastService.confirmDeclineByUser(broadcastId, userId);
 
-                await ctx.reply("🐾 Зрозуміла! Ти вказала, що маєш запитання щодо останнього повідомлення — зараз у всьому розберемось.");
-
                 const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
                 let isStaff = false;
                 if (user) {
@@ -161,9 +159,11 @@ commandHandlers.command("start", async (ctx) => {
                 }
 
                 const callback = isStaff ? "staff_help" : "contact_hr";
-                const kb = new InlineKeyboard().text("💌 Написати нам", callback);
-                await ctx.reply("😟 **Бачу, що у тебе виникли запитання або зауваження.**\n\nНе хвилюйся, це нормально! Будь ласка, напиши детальніше прямо сюди (або натисни кнопку ниже), і служба турботи допоможе тобі розібратися. ✨", {
-                    parse_mode: "Markdown",
+                const kb = new InlineKeyboard().text("Написати нам", callback);
+                // HTML, а не Markdown: у Markdown-режимі Telegram робить жирним
+                // *текст*, тож подвійні зірочки лишалися видимими в чаті.
+                await ctx.reply("<b>Маєте запитання щодо останнього повідомлення?</b>\n\nНапишіть детальніше просто сюди або натисніть кнопку нижче — ми розберемося.", {
+                    parse_mode: "HTML",
                     reply_markup: kb
                 });
                 return;
@@ -237,34 +237,11 @@ commandHandlers.command("start", async (ctx) => {
                 operation: "start",
                 updateId: ctx.update.update_id,
                 userId: user.id,
-                safeContext: { targetHub: "STAFF", bypassedFirstShiftOnboarding: true },
+                safeContext: { targetHub: "STAFF" },
             });
             await updateUserCommands(ctx, "STAFF");
             const { showStaffHub } = await import("../modules/staff/handlers/menu.js");
             await showStaffHub(ctx, true);
-            return;
-        }
-
-        const { firstShiftOnboardingService } = await import("../services/first-shift-onboarding-service.js");
-        const onboardingCandidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
-        const resumedFirstShiftOnboarding = await firstShiftOnboardingService.resumeCandidateFlowFromStart(ctx.api, userId);
-
-        if (resumedFirstShiftOnboarding) {
-            await updateUserCommands(ctx, "CANDIDATE");
-            logBusinessEvent({
-                event: "user.start_routed",
-                telegramId: userId,
-                actorType: "candidate",
-                actorRole: "candidate",
-                result: "success",
-                module: "commands",
-                operation: "start",
-                updateId: ctx.update.update_id,
-                userId: user?.id,
-                candidateId: onboardingCandidate?.id,
-                stage: onboardingCandidate?.status,
-                safeContext: { targetHub: "FIRST_SHIFT_ONBOARDING" },
-            });
             return;
         }
 
@@ -297,7 +274,7 @@ commandHandlers.command("start", async (ctx) => {
 
         // 3. Candidate Logic
         await updateUserCommands(ctx, "CANDIDATE");
-        let candidate = onboardingCandidate;
+        let candidate = user?.candidate || await candidateRepository.findByTelegramId(userId);
 
         if (candidate) {
             const { reactivateUnderageCandidateIfEligible } = await import("../services/underage-reactivation-service.js");
@@ -371,9 +348,9 @@ commandHandlers.command("start", async (ctx) => {
     } catch (e: any) {
         logger.error({ err: e, userId }, "Start command failed");
         const kb = new InlineKeyboard()
-            .text("🤍 Написати в підтримку", "staff_help");
+            .text("Написати нам", "staff_help");
         await ctx.reply(
-            "🐾 Ой! Виникла тимчасова помилка.\n\nСпробуй /start ще раз за хвилину або звернись в підтримку — ми завжди на зв'язку! ✨",
+            "Сталася тимчасова помилка.\n\nСпробуйте /start ще раз за хвилину або напишіть нам.",
             { reply_markup: kb }
         );
         return;
@@ -647,53 +624,3 @@ commandHandlers.command("set_step", async (ctx) => {
     await ctx.reply(`✅ Step set to: <b>${target.session}</b>\n\nNow send any message or press /start to trigger the handler.`, { parse_mode: "HTML" });
 });
 
-commandHandlers.command("pass_test", async (ctx) => {
-    try { await ctx.deleteMessage(); } catch (e) { }
-    if (!ALLOW_DEV_COMMANDS) return;
-    const userId = ctx.from?.id;
-    if (!userId) return;
-
-    const isAdmin = ADMIN_IDS.includes(userId);
-    const isMentor = MENTOR_IDS.includes(userId);
-    const isCoFounder = CO_FOUNDER_IDS.includes(userId);
-    const isTester = userId === 7096140693;
-
-    if (!isAdmin && !isMentor && !isCoFounder && !isTester) {
-        return;
-    }
-
-    const candidate = await candidateRepository.findByTelegramId(userId);
-    if (!candidate) {
-        return await ctx.reply("❌ Помилка: Твій акаунт не має профілю кандидата.");
-    }
-
-    const candId = candidate.id;
-
-    await candidateRepository.update(candId, {
-        testPassed: true,
-        status: CandidateStatus.OFFLINE_STAGING,
-        currentStep: FunnelStep.FIRST_SHIFT,
-        notificationSent: false
-    });
-
-    ctx.session.candidateData = { id: candId, step: 'SELECT_STAGING_DATES' };
-
-    const successText = `⚡️ <b>Режим розробника: Тест пропущено</b>\n\n` +
-        `Наступний крок — <b>офлайн-стажування</b> на локації.\n\n` +
-        `Обери зручний день, щоб завітати до нас: 👇`;
-
-    const kb = new InlineKeyboard();
-    const today = new Date();
-    const weekdays = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-
-    for (let i = 1; i <= 7; i++) {
-        const d = new Date(today);
-        d.setDate(today.getDate() + i);
-        const dayName = weekdays[d.getDay()];
-        const dateStr = `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}`;
-        kb.text(`${dayName}, ${dateStr}`, `staging_date_${dateStr}`).row();
-    }
-    kb.text("Інші дати", "staging_no_date").row();
-
-    await ctx.reply(successText, { parse_mode: "HTML", reply_markup: kb });
-});

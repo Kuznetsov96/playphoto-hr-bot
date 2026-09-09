@@ -279,9 +279,7 @@ export const hrService = {
     },
 
     async getFinalStepStats() {
-        const [ndaPending, testPending, stagingSetup, activeStaging, fillingData, readyForSchedule] = await Promise.all([
-            safeCountByStatus(CandidateStatus.NDA),
-            safeCountByStatus(CandidateStatus.KNOWLEDGE_TEST),
+        const [stagingSetup, activeStaging, fillingData, readyForSchedule] = await Promise.all([
             safeCountByStatus(CandidateStatus.STAGING_SETUP),
             safeCountByStatus(CandidateStatus.STAGING_ACTIVE),
             safeCountByStatus(CandidateStatus.READY_FOR_HIRE),
@@ -289,22 +287,12 @@ export const hrService = {
         ]);
 
         return {
-            total: ndaPending + testPending + stagingSetup + activeStaging + fillingData + readyForSchedule,
-            ndaPending,
-            testPending,
+            total: stagingSetup + activeStaging + fillingData + readyForSchedule,
             stagingSetup,
             activeStaging,
             fillingData,
             readyForSchedule
         };
-    },
-
-    async getNDAPendingCandidates() {
-        return safeFindCandidatesByStatus(CandidateStatus.NDA, { user: true, location: true }, { ndaSentAt: 'asc' });
-    },
-
-    async getTestPendingCandidates() {
-        return safeFindCandidatesByStatus(CandidateStatus.KNOWLEDGE_TEST, { user: true, location: true }, { ndaConfirmedAt: 'asc' });
     },
 
     async getStagingSetupCandidates() {
@@ -327,18 +315,6 @@ export const hrService = {
         return safeFindCandidatesByStatus(CandidateStatus.AWAITING_FIRST_SHIFT, { user: true, location: true }, { statusChangedAt: 'asc' });
     },
 
-
-    async pingTest(api: any, candId: string) {
-        const cand = await candidateRepository.findById(candId);
-        if (!cand) return;
-        const kb = new InlineKeyboard().text("📝 Почати тест", `start_training_test_${cand.id}`);
-        try {
-            await api.sendMessage(Number(cand.user.telegramId), `<b>Продовжимо твій шлях? ✨</b>\n\nТи вже ознайомилась з NDA. Залишився останній крок перед виходом на локацію — короткий тест. Давай перевіримо твої знання! 📸`, { parse_mode: "HTML", reply_markup: kb });
-        } catch (e: any) {
-            if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
-            else throw e;
-        }
-    },
 
     async getHubText(stats?: any) {
         if (!stats) stats = await this.getHubStats();

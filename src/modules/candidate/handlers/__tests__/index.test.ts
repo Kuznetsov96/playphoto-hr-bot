@@ -95,3 +95,61 @@ describe("resolveScreeningStatus", () => {
         expect(resolveScreeningStatus({ hasVacancy: true, appearance: "пірсинг у носі" })).toBe("MANUAL_REVIEW");
     });
 });
+
+describe("finishScreening: защита от двойного тапа", () => {
+    function makeCtx(overrides: Record<string, any> = {}) {
+        return {
+            session: {
+                step: "screening_source",
+                candidateData: { source: "Instagram", ...overrides },
+            },
+            from: { id: 1 },
+            update: { update_id: 1 },
+            di: {
+                locationRepository: { findById: vi.fn() },
+                candidateRepository: { upsert: vi.fn(async () => ({})) },
+                userRepository: { upsert: vi.fn(async () => ({ id: "u1" })) },
+            },
+        } as any;
+    }
+
+    it("второй вызов на том же шаге не доходит до финализации", async () => {
+        const { finishScreening } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const ctx = makeCtx();
+
+        // Прогоняем финализацию до конца первого вызова: шаг уже помечен
+        // как «финализируется», и повторный тап должен выйти сразу.
+        ctx.session.step = "screening_finishing";
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await finishScreening(ctx, "Без особливостей");
+
+        expect(ScreenManager.renderScreen).not.toHaveBeenCalled();
+    });
+
+    it("после завершения анкеты (idle) повторный тап тоже игнорируется", async () => {
+        const { finishScreening } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const ctx = makeCtx();
+
+        ctx.session.step = "idle";
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await finishScreening(ctx, "Без особливостей");
+
+        expect(ScreenManager.renderScreen).not.toHaveBeenCalled();
+    });
+
+    it("без выбранного источника ведёт на вопрос об источнике, а не финализирует", async () => {
+        const { finishScreening } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const ctx = makeCtx();
+        ctx.session.candidateData.source = undefined;
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await finishScreening(ctx, "Без особливостей");
+
+        expect(ctx.session.step).toBe("screening_source");
+    });
+});

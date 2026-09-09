@@ -15,7 +15,6 @@ import { TEAM_CHATS } from "../../../config.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
 import { formatShiftLocationLabel } from "../../../utils/logistics-formatters.js";
-import { firstShiftOnboardingService } from "../../../services/first-shift-onboarding-service.js";
 import { replacementService } from "../../../services/replacement-service.js";
 import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../utils/location-opening-hours.js";
@@ -617,20 +616,6 @@ async function presentSupportEntry(
 export async function startSupportFlow(ctx: MyContext) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
-
-    const activeOnboardingCase = await firstShiftOnboardingService.findActiveCaseByTelegramId(telegramId);
-    if (activeOnboardingCase) {
-        if (ctx.callbackQuery) {
-            await ctx.answerCallbackQuery("Під час онбордінгу питання йдуть у спеціальний topic.").catch(() => { });
-        }
-        await presentSupportEntry(
-            ctx,
-            "🚀 <b>Онбордінг першої зміни ще відкритий.</b>\n\nПросто напиши повідомлення сюди, і я передам його в onboarding-topic ментора.",
-            new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
-            { forceNew: true }
-        );
-        return;
-    }
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
 

@@ -3,7 +3,6 @@ import type { MyContext } from "../types/context.js";
 import { CandidateStatus } from "@prisma/client";
 import { ScreenManager } from "./screen-manager.js";
 import { HR_NAME, MENTOR_NAME } from "../config.js";
-import { extractFirstName } from "./string-utils.js";
 import { getLocationDetails } from "./location-data-helper.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
@@ -48,10 +47,10 @@ function getJobDetailsText(candidate: any) {
     const schedule = staticInfo?.schedule || loc?.schedule || "Гнучкий";
     const salary = staticInfo?.salary || loc?.salary || "20-30%";
 
-    return `\n📍 <b>${locationName}</b>\n` +
-        `🏠 ${address}\n` +
-        `📅 ${schedule}\n` +
-        `💰 ${salary}`;
+    return `\n<b>${locationName}</b>\n` +
+        `Адреса: ${address}\n` +
+        `Графік: ${schedule}\n` +
+        `Оплата: ${salary}`;
 }
 
 export async function showCandidateStatus(ctx: MyContext, candidate: any) {
@@ -60,9 +59,6 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
     const kb = new InlineKeyboard();
     const canContactStaff = candidate.gender !== "male";
     const canUseRecovery = isRecoveryEligibleCandidate(candidate);
-
-    const fullName = candidate.fullName || ctx.from?.first_name || "Кандидатко";
-    const firstName = extractFirstName(fullName);
 
     // Dashboard logic: Show info for Accepted and beyond
     const isAcceptedOrBeyond = [
@@ -76,7 +72,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         CandidateStatus.READY_FOR_HIRE
     ].includes(status);
 
-    const jobDetails = isAcceptedOrBeyond ? `\n\n<b>Твоя майбутня робота:</b>${getJobDetailsText(candidate)}` : "";
+    const jobDetails = isAcceptedOrBeyond ? `\n\n<b>Ваша майбутня робота:</b>${getJobDetailsText(candidate)}` : "";
 
     switch (status) {
         case CandidateStatus.SCREENING: {
@@ -88,11 +84,11 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
             if (isFinished) {
                 text = CANDIDATE_TEXTS["candidate-success-screening"];
-                if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
+                if (canContactStaff) kb.text("Написати нам", "contact_hr");
             } else {
-                text = CANDIDATE_TEXTS["candidate-screening-unfinished"](firstName);
-                kb.text("📝 Продовжити анкету", "resume_screening").row();
-                kb.text("🔄 Почати спочатку", "restart_screening");
+                text = CANDIDATE_TEXTS["candidate-screening-unfinished"]();
+                kb.text("Продовжити анкету", "resume_screening").row();
+                kb.text("Почати спочатку", "restart_screening");
             }
             break;
         }
@@ -105,23 +101,23 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             const typeText = candidate.currentStep === FunnelStep.TRAINING ? "знайомства та навчання" : "співбесіди";
 
             text = isWaitingForSlots
-                ? CANDIDATE_TEXTS["candidate-waitlist-slots"](firstName, typeText)
+                ? CANDIDATE_TEXTS["candidate-waitlist-slots"](typeText)
                 : CANDIDATE_TEXTS["candidate-success-waitlist"];
 
-            if (isWaitingForSlots) kb.text("🗓️ Перевірити вільний час", candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
-            if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
+            if (isWaitingForSlots) kb.text("Перевірити вільний час", candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
+            if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
         }
 
         case CandidateStatus.MANUAL_REVIEW:
             text = CANDIDATE_TEXTS["candidate-success-manual-review"];
-            if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
+            if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
 
         case CandidateStatus.INTERVIEW_COMPLETED:
         case CandidateStatus.DECISION_PENDING:
-            text = `🌸 <b>${firstName}</b>, приємно було познайомитися! 😊\n\nТвоя анкета на розгляді у HR. Очікуй на відповідь найближчим часом. ✨` + jobDetails;
-            if (canContactStaff) kb.text("👩‍💼 Написати HR", "contact_hr");
+            text = `Приємно було познайомитися!\n\nВаша анкета на розгляді у HR — відповідь надішлемо найближчим часом.` + jobDetails;
+            if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
 
         case CandidateStatus.INTERVIEW_SCHEDULED: {
@@ -130,11 +126,11 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
                 const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
-            } else text = `🌸 <b>${firstName}</b>, ти записана на співбесіду!`;
-            kb.text("🗓️ Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
-                .text("✖️ Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).danger().row()
-                .text("🚫 Не планую продовжувати", buildSignedCallback("wi", candidate.interviewSlotId || "none")).danger();
-            if (canContactStaff) kb.row().text("👩‍💼 Написати HR", "contact_hr");
+            } else text = "Вас записано на співбесіду.";
+            kb.text("Перенести", buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
+                .text("Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).danger().row()
+                .text("Не планую продовжувати", buildSignedCallback("wi", candidate.interviewSlotId || "none")).danger();
+            if (canContactStaff) kb.row().text("Написати нам", "contact_hr");
             break;
         }
 
@@ -154,33 +150,33 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         case CandidateStatus.STAGING_ACTIVE:
         case CandidateStatus.OFFLINE_STAGING:
         case CandidateStatus.AWAITING_FIRST_SHIFT: {
-            text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
-            kb.text("💬 Написати нам", "contact_hr");
+            text = CANDIDATE_TEXTS["candidate-accepted-welcome"]() + jobDetails;
+            kb.text("Написати нам", "contact_hr");
             break;
         }
 
         case CandidateStatus.HIRED:
-            text = `✨ <b>Вітаємо, ${firstName}!</b>\n\nТи вже частина команди PlayPhoto. Натисни /start, щоб відкрити робочий кабінет! 📸`;
+            text = "<b>Вітаємо!</b>\n\nВи вже частина команди PlayPhoto. Натисніть /start, щоб відкрити робочий кабінет.";
             break;
 
         case CandidateStatus.REJECTED:
             text = CANDIDATE_TEXTS["candidate-rejected"];
             if (canUseRecovery) {
-                text += "\n\nРаніше ми не могли доставити тобі повідомлення в боті, тому цей кейс винесено в окремий recovery-розгляд. Якщо хочеш повернутись на зв'язок із командою, напиши нам.";
-                kb.text("💌 Написати нам", "contact_recovery");
+                text += "\n\nРаніше наші повідомлення не доходили до вас у боті. Якщо хочете відновити зв’язок із командою — напишіть нам.";
+                kb.text("Написати нам", "contact_recovery");
             }
             break;
 
         case CandidateStatus.BLOCKER:
-            text = `👋 <b>Зв'язок із ботом відновлено.</b>\n\nРаніше система зафіксувала, що повідомлення тобі не доставлялися, тому ми зупинили подальші сповіщення, щоб не турбувати тебе.`;
+            text = `<b>Зв’язок із ботом відновлено</b>\n\nРаніше наші повідомлення не доходили до вас, тому ми зупинили сповіщення, щоб не турбувати даремно.`;
             if (canUseRecovery) {
-                text += "\n\nЯкщо хочеш відновити контакт із командою або поставити запитання, натисни кнопку нижче.";
-                kb.text("💌 Написати нам", "contact_recovery");
+                text += "\n\nЩоб відновити контакт із командою або поставити запитання — натисніть кнопку нижче.";
+                kb.text("Написати нам", "contact_recovery");
             }
             break;
 
         default:
-            text = CANDIDATE_TEXTS["candidate-default-status"](firstName);
+            text = CANDIDATE_TEXTS["candidate-default-status"]();
             break;
     }
 

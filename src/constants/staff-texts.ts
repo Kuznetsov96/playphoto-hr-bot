@@ -23,56 +23,6 @@ export const STAFF_TEXTS = {
   "error-name-format": (p: { error: string | number }) => `⚠️ ${p.error}
 Як тебе звати? 😊
 (Напиши, будь ласка, своє ім'я та прізвище)`,
-  "candidate-error-name-min": `ПІБ має бути не менше 5 символів`,
-  "candidate-error-name-max": `ПІБ занадто довге`,
-  "candidate-error-name-parts": `Введіть Ім'я та Прізвище`,
-  "candidate-error-name-cmd": `Це схоже на команду, введіть ім'я`,
-  "candidate-error-name-digits": `Ім'я не може містити цифри`,
-  "candidate-error-age-min": `Мінімальний вік — 14 років`,
-  "candidate-error-age-real": `Введіть реальну дату народження`,
-  "candidate-error-retry": `Будь ласка, спробуй ще раз.`,
-  "candidate-greeting-nicetomeet": (p: { fullName: string | number }) => `${p.fullName}, приємно познайомитись! 🌸✨
-Щоб я міг правильно підібрати локацію для тебе, підкажи, будь ласка:`,
-  "candidate-btn-gender-female": `Я дівчина 👗`,
-  "candidate-btn-gender-male": `Я хлопець 👔`,
-  "candidate-ask-birthday": `Коли твій день народження? 🎂\n(Напиши у форматі ДД.ММ.РРРР, наприклад <code>15.05.2005</code>)`,
-  "candidate-error-birthday-format": (p: { error: string | number }) => `⚠️ ${p.error}`,
-  "candidate-error-birthday-invalid": `Здається, такої дати не існує або вона введена невірно. Напиши, будь ласка, як у прикладі: 15.05.2005 😊`,
-  "candidate-ask-city": `Обери місто, в якому ти бажаєш працювати:`,
-  "candidate-label-your-city": `Твоє місто:`,
-  "candidate-ask-location-multiple": (p: { locList: string | number }) => `У цьому місті у нас кілька локацій. Обери ту, яка тобі найзручніша: 🏢\n${p.locList}`,
-  "candidate-status-available": `є вільні місця`,
-  "candidate-status-full": `команда повна`,
-  "candidate-label-address-unknown": `Адреса уточнюється`,
-  "candidate-info-no-vacancies": (p: { city: string | number }) => `На жаль, наразі у місті ${p.city} немає відкритих вакансій, доступних для вибору 🌸
-Ми збережемо твої контакти і напишемо, як тільки з'явиться місце! ✨`,
-  "candidate-info-location-full-alt": (p: { locationName: string | number }) => `На локації "${p.locationName}" наразі команда повністю укомптована 🌸
-Але ми дуже хочемо тебе в PlayPhoto! Можливо, тобі буде зручно працювати на одній з цих локацій, де ми зараз шукаємо фотографів? ✨`,
-  "candidate-btn-wait-own-location": `Чекати саме на свою ⏳`,
-  "candidate-ask-source": `Майже все! Підкажи, звідки ти дізналась про нашу вакансію? 🕵️‍♀️`,
-  "candidate-btn-source-instagram": `Instagram 📸`,
-  "candidate-btn-source-workua": `Work.ua 💼`,
-  "candidate-btn-source-olx": `OLX 🛒`,
-  "candidate-btn-source-other": `Інше 🤷‍♀️`,
-  "candidate-val-appearance-none": `Без особливостей`,
-  "candidate-ask-appearance": `В нас є певні вимоги до зовнішності, оскільки ми працюємо з дітками. Скажи, чи маєш ти видимі татуювання (зокрема на шиї чи руках) або пірсинг на обличчі? 🎀`,
-  "candidate-btn-appr-no": `Ні, нічого такого ✨`,
-  "candidate-btn-appr-yes": `Так, маю 💍`,
-  "candidate-ask-appearance-details": `Зрозуміла! Напиши, будь ласка, детальніше: що саме і де знаходиться? Або просто <b>надішли фото</b> (так буде навіть краще!) 📸✨`,
-  "candidate-val-appearance-photo": (p: { caption: string | number }) => `[Фото надіслано] ${p.caption}`,
-  "candidate-info-processing": `Дякую за відповіді! Обробляю твою анкету... ⏳`,
-  "candidate-reject-male": `Дякуємо за інтерес до PlayPhoto! ✨ Наразі на цій локації вже знайдено фотографів, але ми обов'язково зв'яжемось з тобою за потреби. Успіхів! 👋`,
-  "candidate-reject-male-location": (p: { locationName: string | number, city: string | number }) => `На жаль, на локації <b>${p.locationName}</b> у місті <b>${p.city}</b> наша команда фотографів вже укомплектована 🌸
-Дякуємо за інтерес до PlayPhoto! Ми зберегли твої дані і, можливо, зв'яжемось у майбутньому. Успіхів! 👋`,
-  "candidate-reject-underage": `Дякуємо, ми зберегли твою анкету 🌸
-
-Зараз для твоєї анкети ще не відкритий наступний етап, але ми не губимо контакт. Щойно з'явиться відповідна можливість, бот сам нагадає про PlayPhoto, і ти зможеш продовжити шлях до команди 📸✨`,
-  "candidate-success-manual-review": `Вітаємо! 🎉
-Ти успішно пройшла первинний відбір! Твоя анкета вже у нашої HR. Оскільки ти вказала наявність татуювань, ми розглянемо це індивідуально та скоро напишемо тобі сюди! 🌸✨📸🤍`,
-  "candidate-success-waitlist": `Дякуємо! Хоча зараз команда на цій локації повна, ми зберегли твою анкету в пріоритетний список очікування ⏳
-Як тільки з'явиться місце — мені прийде сигнал, і я одразу тобі напишу! 🌸✨`,
-  "candidate-success-screening": `Вітаємо! 🎉
-Ти успішно пройшла первинний відбір! Твоя анкета вже у нашої HR. Очікуй, скоро вона надішле тобі пропозицію з датою та часом співбесіди прямо сюди! 🌸✨📸🤍🕊️`,
   "hr-error-format-session": `⚠️ Invalid format. Try again:
 DD.MM HH:MM-HH:MM
 Example: 05.02 10:00-14:00`,
@@ -314,7 +264,6 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
 Ти чудово впоралася на локації. Тепер залишився фінальний юридичний крок перед тим, як ми додамо тебе в офіційний графік:
 📝 <b>Заповнення даних для договору NDA.</b>
 Натисни кнопку нижче, щоб розпочати!`,
-  "hr-btn-start-nda": `📑 Почати NDA`,
   "hr-ans-status-updated-success": `Status updated: Success! 🎉`,
   "hr-btn-schedule-created": `✅ Schedule Ready`,
   "hr-info-cand-schedule-ready": `✨ <b>Твій графік готовий!</b>

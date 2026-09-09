@@ -53,11 +53,25 @@ export class ScreenManager {
         }
 
         // 1. Manage Navigation Stack
-        if (pushToStack && (reply_markup || manualMenuId)) {
+        //
+        // В стек кладётся menuId, и goBack умеет вернуться только на экран с
+        // клавиатурой. Экран без reply_markup положить туда нечем — попадать
+        // назад будет некуда. Раньше такой вызов молча не делал ничего: три
+        // шага анкеты передавали pushToStack: true без клавиатуры и просто не
+        // попадали в историю, а кнопки «Назад» на них не было. Теперь
+        // несостоявшийся push виден в логах — это ошибка вызывающего кода, а
+        // не штатная ситуация.
+        if (pushToStack) {
             const menuId = manualMenuId || (typeof reply_markup === 'string' ? reply_markup : (reply_markup as any)?.id);
-            if (typeof menuId === 'string') {
+
+            if (typeof menuId !== 'string') {
+                logger.warn(
+                    { step: ctx.session?.step },
+                    "renderScreen: pushToStack ignored — screen has no keyboard to navigate back to"
+                );
+            } else {
                 const lastEntry = ctx.session.navStack[ctx.session.navStack.length - 1];
-                
+
                 if (!lastEntry || lastEntry.menuId !== menuId) {
                     // Create a snapshot of the CURRENT state
                     const stateSnapshot: any = {};
@@ -213,7 +227,7 @@ export class ScreenManager {
     }
 
     static async showUnknownCommand(ctx: MyContext) {
-        const text = "🐾 <b>Ой! Я не зовсім зрозумів цю команду.</b>\n\nБудь ласка, використовуйте кнопки меню або натисніть /start, щоб повернутися в головне меню. ✨";
+        const text = "<b>Не розпізнав цю команду</b>\n\nСкористайтеся кнопками меню або натисніть /start, щоб повернутися в головне меню.";
         const kb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
         await this.renderScreen(ctx, text, kb);
     }

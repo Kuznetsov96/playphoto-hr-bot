@@ -19,7 +19,6 @@ import { trainingRepository } from "../repositories/training-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 
-import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
@@ -68,7 +67,7 @@ function buildSlotSelectionKeyboard(
         if ((index + 1) % 2 === 0) keyboard.row();
     });
 
-    keyboard.row().text("🙋‍♀️ Не бачу зручного часу", noFitCallback).row();
+    keyboard.row().text("Не бачу зручного часу", noFitCallback).row();
     return keyboard;
 }
 
@@ -110,7 +109,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     // Actions that are step-specific
     const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite"];
     const trainingActions = ["book_training_slot_", "reschedule_training_", "start_training_scheduling", "cancel_training_"];
-    const onboardingActions = ["send_nda_", "start_quiz", "confirm_nda_", "candidate_start_screening"];
+    // send_nda_/confirm_nda_/start_quiz прибрані разом з етапами NDA й тесту:
+    // обробників для них не було вже давно, гард стеріг неіснуючі кнопки.
+    const onboardingActions = ["candidate_start_screening"];
 
     if (![...interviewActions, ...trainingActions, ...onboardingActions].some(a => data.startsWith(a))) {
         return next();
@@ -131,7 +132,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 hasUnreadMessage: false,
             });
 
-            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
             await ScreenManager.renderScreen(
                 ctx,
                 CANDIDATE_TEXTS["candidate-reject-male-location"](
@@ -157,7 +158,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 });
             }
 
-            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
             await ScreenManager.renderScreen(
                 ctx,
                 ageRejection === "AGE_LIMIT"
@@ -184,7 +185,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             CandidateStatus.READY_FOR_HIRE
         ];
         if (forbiddenStatuses.includes(candidate.status)) {
-            await ctx.answerCallbackQuery("⚠️ Ти вже пройшла цей етап! Оновлюю меню... ✨");
+            await ctx.answerCallbackQuery("Цей етап уже пройдено");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
@@ -207,7 +208,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             CandidateStatus.REJECTED
         ];
         if (forbiddenStatuses.includes(candidate.status)) {
-            await ctx.answerCallbackQuery("⚠️ Твоє навчання вже завершене! Оновлюю меню... ✨");
+            await ctx.answerCallbackQuery("Навчання вже завершено");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
@@ -215,7 +216,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         // Block HR-waitlist candidates (no HR approval yet)
         if (candidate.status === CandidateStatus.WAITLIST_HR ||
             (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep !== FunnelStep.TRAINING)) {
-            await ctx.answerCallbackQuery("⏳ Твоя заявка ще на розгляді у HR.");
+            await ctx.answerCallbackQuery("Заявка ще на розгляді у HR");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
@@ -225,7 +226,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     // 3. Screening reset guard (already handled in candidate.ts but good to have here too)
     if (data === "candidate_start_screening") {
         if (candidate.status !== CandidateStatus.SCREENING && candidate.status !== CandidateStatus.REJECTED) {
-            await ctx.answerCallbackQuery("⚠️ Ти вже в команді або на етапі відбору! ✨");
+            await ctx.answerCallbackQuery("Анкету вже взято в роботу");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
@@ -245,43 +246,41 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     const telegramId = ctx.from.id;
 
     if (bookingLocks.has(telegramId)) {
-        return await ctx.answerCallbackQuery("⏳ Зачекай, бронювання вже в процесі...");
+        return await ctx.answerCallbackQuery("Бронювання вже в процесі");
     }
 
     // Idempotency: check if candidate already has a booked interview
     const existingCand = await candidateRepository.findByTelegramId(telegramId);
     if (existingCand?.interviewSlotId) {
-        return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньовану співбесіду!");
+        return await ctx.answerCallbackQuery("Ви вже записані на співбесіду");
     }
 
     bookingLocks.add(telegramId);
 
     try {
-        await ctx.answerCallbackQuery("Бронюємо... ⏳");
+        await ctx.answerCallbackQuery("Бронюємо…");
         logger.debug({ telegramId, slotId }, "Interview booking started");
         const result = await bookInterviewSlotFlow(telegramId, slotId, ctx.from.username);
 
         const startTime = (result.slot as any).startTime;
-        const fullName = (result.slot as any).candidate?.fullName || ctx.from.first_name || "Кандидатко";
-        const firstName = extractFirstName(fullName);
 
         // Дата — в той же киевской зоне, что и время: без timeZone сервер в UTC
         // показал бы соседний день для слота у полуночи.
-        let confirmationText = `✅ Вітаємо, <b>${firstName}</b>! Твій час для співбесіди заброньовано.\n\n📅 Дата: <b>${startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' })}</b>\n⏰ Час: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
+        let confirmationText = `<b>Час заброньовано</b>\n\nДата: <b>${startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' })}</b>\nЧас: <b>${startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n`;
 
         if (result.googleEvent.meetLink) {
-            confirmationText += `📹 Google Meet: <a href="${result.googleEvent.meetLink}">Приєднатися до зустрічі</a>\n\nМожеш зберегти це посилання собі! ✨`;
+            confirmationText += `\n<a href="${result.googleEvent.meetLink}">Приєднатися до зустрічі</a>\n\nЗбережіть це посилання — воно знадобиться в день співбесіди.`;
         } else {
             const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `HR ${HR_NAME}`;
-            confirmationText += `\nТвій запис з'явився у нашому графіку. ${hrDisplay} надішле тобі посилання на відеозустріч ближче до часу проведення. До зустрічі! 🌸✨`;
+            confirmationText += `\nЗапис з’явився у нашому графіку. ${hrDisplay} надішле посилання на відеозустріч ближче до початку.`;
         }
 
         const kb = new InlineKeyboard()
-            .text("🗓️ Змінити час", buildSignedCallback("rb", result.slot.id)).row()
-            .text("✖️ Скасувати запис", buildSignedCallback("cb", result.slot.id)).danger().row()
-            .text("🚫 Не планую продовжувати", buildSignedCallback("wi", result.slot.id)).danger();
+            .text("Змінити час", buildSignedCallback("rb", result.slot.id)).row()
+            .text("Скасувати запис", buildSignedCallback("cb", result.slot.id)).danger().row()
+            .text("Не планую продовжувати", buildSignedCallback("wi", result.slot.id)).danger();
         if ((result as any).candidate?.gender !== "male") {
-            kb.row().text("👩‍💼 Написати HR", "contact_hr");
+            kb.row().text("Написати нам", "contact_hr");
         }
 
         await cleanupMessages(ctx);
@@ -305,10 +304,10 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         if (e instanceof AwsBusinessApiError && e.code === RECRUITING_SLOT_TAKEN_CODE) {
             // Гонка за канонический слот: пока кандидатка думала, его забрала
             // другая. Локально ничего не записано — просто обновляем список.
-            await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔").catch(() => {});
+            await ctx.answerCallbackQuery("Цей час уже зайнятий").catch(() => {});
             const freshSlots = await findAvailableInterviewSlots().catch(() => []);
             if (freshSlots.length === 0) {
-                await ctx.editMessageText(`Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`).catch(() => {});
+                await ctx.editMessageText(`Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`).catch(() => {});
             } else {
                 const freshKeyboard = buildSlotSelectionKeyboard(freshSlots, "book_slot_", "no_slots_fit");
                 await ctx.editMessageText(
@@ -317,25 +316,25 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
                 ).catch(() => {});
             }
         } else if (e.message === "ALREADY_BOOKED") {
-            await ctx.answerCallbackQuery("Вибач, цей слот вже зайнятий. 😔");
+            await ctx.answerCallbackQuery("Цей час уже зайнятий");
         } else if (e.message === "UNDERAGE_CANDIDATE") {
-            await ctx.answerCallbackQuery("Цей етап поки недоступний для твоєї анкети.");
+            await ctx.answerCallbackQuery("Цей етап поки недоступний для вашої анкети");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
         } else if (e.message === "AGE_LIMIT_CANDIDATE") {
-            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-age-limit"]);
         } else if (e.message === "SCREENING_INCOMPLETE") {
-            await ctx.answerCallbackQuery("Спершу потрібно оновити анкету.");
+            await ctx.answerCallbackQuery("Спершу потрібно оновити анкету");
             await ScreenManager.renderScreen(
                 ctx,
-                "Анкету потрібно оновити перед записом на співбесіду 🌸\n\nНатисни кнопку нижче, щоб продовжити з того місця, де ми зупинилися.",
-                new InlineKeyboard().text("Продовжити анкету ✨", "resume_screening")
+                "Перед записом на співбесіду потрібно оновити анкету.\n\nНатисніть кнопку нижче, щоб продовжити з того місця, де зупинилися.",
+                new InlineKeyboard().text("Продовжити анкету", "resume_screening")
             );
         } else if (e.message === "MALE_CANDIDATE") {
-            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний.");
+            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]("цій локації", "вашому місті"));
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     } finally {
         bookingLocks.delete(telegramId);
@@ -349,12 +348,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("✖️ Так, скасувати запис", buildSignedCallback("ccb", slotId)).danger().row()
-        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+        .text("Так, скасувати запис", buildSignedCallback("ccb", slotId)).danger().row()
+        .text("Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що хочеш скасувати запис?</b>\n\n` +
-        `Ми звільнимо цей час, а ти зможеш обрати інший слот для співбесіди, коли буде зручно. 🌸`,
+        `<b>Скасувати запис?</b>\n\n` +
+        `Ми звільнимо цей час, і ви зможете обрати інший, коли буде зручно.`,
         { parse_mode: "HTML", reply_markup: kb }
     );
     return;
@@ -365,7 +364,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb" });
     if (!slotId) return next();
     if (isDuplicateBookingAction(`cancel-interview:${ctx.from.id}:${slotId}`)) {
-        await ctx.answerCallbackQuery("✅ Скасування вже обробляється.");
+        await ctx.answerCallbackQuery("Скасування вже обробляється");
         return;
     }
 
@@ -389,19 +388,19 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             });
         }
 
-        await ctx.answerCallbackQuery("Запис скасовано.");
+        await ctx.answerCallbackQuery("Запис скасовано");
         await ctx.editMessageText(
-            "Готово, цей запис скасовано. 🌸\n\n" +
-            "Коли будеш готова, обери інший зручний час для співбесіди.",
-            { reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_scheduling") }
+            "<b>Запис скасовано</b>\n\n" +
+            "Оберіть інший зручний час, коли буде зручно.",
+            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Обрати інший час", "start_scheduling") }
         );
 
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview cancellation failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     }
 });
@@ -413,12 +412,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, завершити заявку", buildSignedCallback("cwi", slotId)).danger().row()
-        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+        .text("Так, завершити заявку", buildSignedCallback("cwi", slotId)).danger().row()
+        .text("Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що не плануєш продовжувати?</b>\n\n` +
-        `Ми закриємо твою заявку та скасуємо запис на співбесіду. Якщо тобі просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        `<b>Завершити заявку?</b>\n\n` +
+        `Ми закриємо заявку та скасуємо запис на співбесіду. Якщо просто не підходить час — поверніться й оберіть «Скасувати запис» або «Змінити час».`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
@@ -428,7 +427,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cwi" });
     if (!slotId) return next();
     if (isDuplicateBookingAction(`withdraw-interview:${ctx.from.id}:${slotId}`)) {
-        await ctx.answerCallbackQuery("✅ Відмову вже зафіксовано.");
+        await ctx.answerCallbackQuery("Відмову вже зафіксовано");
         return;
     }
 
@@ -451,17 +450,18 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             });
         }
 
-        await ctx.answerCallbackQuery("Відмову зафіксовано.");
+        await ctx.answerCallbackQuery("Відмову зафіксовано");
         await ctx.editMessageText(
-            "Дякуємо, що повідомила. 🌸\n\n" +
-            "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
+            "<b>Заявку закрито</b>\n\n" +
+            "Дякуємо, що повідомили. Бажаємо успіхів — і будемо раді, якщо колись захочете повернутися.",
+            { parse_mode: "HTML" }
         );
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Interview vacancy withdrawal failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     }
 });
@@ -471,7 +471,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rb" });
     if (!slotId) return next();
     try {
-        await ctx.answerCallbackQuery("Обирай новий час!");
+        await ctx.answerCallbackQuery("Оберіть новий час");
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
 
@@ -501,23 +501,23 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                     interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
                 });
             }
-            await ctx.editMessageText(`Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`);
+            await ctx.editMessageText(`Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`);
             return;
         }
 
         const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit", 20);
 
         await ctx.editMessageText(
-            "Добре, давай оберемо інший зручний час: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+            "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
             { reply_markup: keyboard }
         );
 
     } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Interview reschedule failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     }
 });
@@ -539,11 +539,11 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
             { ...buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_SLOTS), noSlotsAt: new Date() }
         );
 
-        const text = `Зараз графік співбесід оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису. ✨`;
-        const kb = new InlineKeyboard().text("🔔 Повідомити мене", "no_slots_available_ack");
+        const text = `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`;
+        const kb = new InlineKeyboard().text("Повідомити мене", "no_slots_available_ack");
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (candidate?.gender !== "male") {
-            kb.text("👩‍💼 Написати HR", "contact_hr");
+            kb.text("Написати нам", "contact_hr");
         }
 
         const msg = await ctx.reply(text, { reply_markup: kb });
@@ -556,20 +556,20 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
 
     await cleanupMessages(ctx);
     const msg = await ctx.reply(
-        "Обери зручний час для співбесіди: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+        "Оберіть зручний час для співбесіди:\n\nНатисніть кнопку з потрібною датою та часом.",
         { reply_markup: keyboard }
     );
     trackMessage(ctx, msg.message_id);
 });
 
 bookingHandlers.callbackQuery("no_slots_available_ack", async (ctx) => {
-    await ctx.answerCallbackQuery("Домовились, повідомимо, щойно з'являться нові вікна ✨");
+    await ctx.answerCallbackQuery("Повідомимо, щойно з’являться нові вікна");
 });
 
 // 6. Немає вільних слотів / не підходять
 bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     if (isDuplicateBookingAction(`no-slots-fit:${ctx.from.id}`)) {
-        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що зручного часу немає.");
+        await ctx.answerCallbackQuery("Ми вже зафіксували, що зручного часу немає");
         return;
     }
     await ctx.answerCallbackQuery();
@@ -582,13 +582,13 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
     );
 
-    await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
+    await ctx.editMessageText(`Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 });
 
 // 6.5 Відмова кандидата від співбесіди
 bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
     if (isDuplicateBookingAction(`decline-invite:${ctx.from.id}`)) {
-        await ctx.answerCallbackQuery("✅ Відмову вже зафіксовано.");
+        await ctx.answerCallbackQuery("Відмову вже зафіксовано");
         return;
     }
     await ctx.answerCallbackQuery();
@@ -660,10 +660,10 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
             { status: CandidateStatus.WAITLIST_MENTOR, isWaitlisted: true, currentStep: FunnelStep.TRAINING }
         );
 
-        const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на коротку зустріч-знайомство. ✨`;
+        const text = `Графік зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться вікна для зустрічі-знайомства.`;
         const kb = new InlineKeyboard()
-            .text("🔔 Повідомити мене", "training_no_slots_fit")
-            .text("💬 Написати нам", "contact_hr");
+            .text("Повідомити мене", "training_no_slots_fit")
+            .text("Написати нам", "contact_hr");
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
 
@@ -690,7 +690,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
 
     await cleanupMessages(ctx);
     const msg = await ctx.reply(
-        `Обери зручний час для зустрічі-знайомства: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.`,
+        `Оберіть зручний час для зустрічі-знайомства:\n\nНатисніть кнопку з потрібною датою та часом.`,
         { reply_markup: keyboard }
     );
     trackMessage(ctx, msg.message_id);
@@ -705,12 +705,12 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
     const telegramId = ctx.from.id;
 
     if (bookingLocks.has(telegramId)) {
-        return await ctx.answerCallbackQuery("⏳ Зачекай, бронювання вже в процесі...");
+        return await ctx.answerCallbackQuery("Бронювання вже в процесі");
     }
 
     const existingCand = await candidateRepository.findByTelegramId(telegramId);
     if (!existingCand) {
-        return await ctx.answerCallbackQuery("Кандидата не знайдено!");
+        return await ctx.answerCallbackQuery("Не знайшли вашу анкету");
     }
 
     const isTrainingPhase = existingCand.status === CandidateStatus.DISCOVERY_COMPLETED || 
@@ -719,18 +719,18 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
     // Idempotency check appropriate for phase
     if (isTrainingPhase) {
         if (existingCand.trainingSlotId) {
-            return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис на навчання!");
+            return await ctx.answerCallbackQuery("Ви вже записані на навчання");
         }
     } else {
         if (existingCand.discoverySlotId) {
-            return await ctx.answerCallbackQuery("✅ Ти вже маєш заброньований запис на знайомство!");
+            return await ctx.answerCallbackQuery("Ви вже записані на знайомство");
         }
     }
 
     bookingLocks.add(telegramId);
 
     try {
-        await ctx.answerCallbackQuery(isTrainingPhase ? "Бронюємо навчання... ⏳" : "Бронюємо знайомство... ⏳");
+        await ctx.answerCallbackQuery(isTrainingPhase ? "Бронюємо навчання…" : "Бронюємо знайомство…");
         logger.debug({ telegramId, slotId, phase: isTrainingPhase ? "training" : "discovery" }, "Training or discovery booking started");
 
         const result = isTrainingPhase 
@@ -754,10 +754,10 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
         }
 
         const kb = new InlineKeyboard()
-            .text("🗓️ Змінити час", buildSignedCallback("rt", slotId)).row()
-            .text("✖️ Скасувати запис", buildSignedCallback("ct", slotId)).danger().row()
-            .text("🚫 Не планую продовжувати", buildSignedCallback("wm", slotId)).danger().row()
-            .text("💬 Написати нам", "contact_hr");
+            .text("Змінити час", buildSignedCallback("rt", slotId)).row()
+            .text("Скасувати запис", buildSignedCallback("ct", slotId)).danger().row()
+            .text("Не планую продовжувати", buildSignedCallback("wm", slotId)).danger().row()
+            .text("Написати нам", "contact_hr");
 
         await cleanupMessages(ctx);
         const msg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
@@ -785,9 +785,9 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId }, "Training or discovery booking failed");
         if (e.message === "ALREADY_BOOKED") {
-            await ctx.answerCallbackQuery("Цей час вже зайнятий, обери інший.");
+            await ctx.answerCallbackQuery("Цей час уже зайнятий — оберіть інший");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка. Спробуй ще раз. 😔");
+            await ctx.answerCallbackQuery("Сталася помилка. Спробуйте ще раз");
         }
     } finally {
         bookingLocks.delete(telegramId);
@@ -797,7 +797,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
 // 9. Training No Slots Fit
 bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
     if (isDuplicateBookingAction(`training-no-slots-fit:${ctx.from.id}`)) {
-        await ctx.answerCallbackQuery("✅ Я вже зафіксувала, що зручного часу немає.");
+        await ctx.answerCallbackQuery("Ми вже зафіксували, що зручного часу немає");
         return;
     }
     await ctx.answerCallbackQuery();
@@ -814,7 +814,7 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
         }
     );
 
-    await ctx.editMessageText(`Домовились! Якщо з'являться інші вікна — ти дізнаєшся про це першою. ✨`);
+    await ctx.editMessageText(`Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 
     const { MENTOR_IDS } = await import("../config.js");
     if (MENTOR_IDS && MENTOR_IDS.length > 0) {
@@ -840,12 +840,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("✖️ Так, скасувати запис", buildSignedCallback("cct", slotId)).danger().row()
-        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+        .text("Так, скасувати запис", buildSignedCallback("cct", slotId)).danger().row()
+        .text("Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що хочеш скасувати запис?</b>\n\n` +
-        `Ми звільнимо цей час, а ти зможеш обрати інший слот для зустрічі, коли буде зручно. 🌸`,
+        `<b>Скасувати запис?</b>\n\n` +
+        `Ми звільнимо цей час, і ви зможете обрати інший, коли буде зручно.`,
         { parse_mode: "HTML", reply_markup: kb }
     );
     return;
@@ -856,7 +856,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct" });
     if (!slotId) return next();
     if (isDuplicateBookingAction(`cancel-training:${ctx.from.id}:${slotId}`)) {
-        await ctx.answerCallbackQuery("✅ Скасування вже обробляється.");
+        await ctx.answerCallbackQuery("Скасування вже обробляється");
         return;
     }
 
@@ -871,11 +871,11 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
         }
 
-        await ctx.answerCallbackQuery("Запис скасовано.");
+        await ctx.answerCallbackQuery("Запис скасовано");
         await ctx.editMessageText(
-            "Готово, цей запис скасовано. 🌸\n\n" +
-            "Коли будеш готова, обери інший зручний час для зустрічі.",
-            { reply_markup: new InlineKeyboard().text("🗓️ Обрати інший час", "start_training_scheduling") }
+            "<b>Запис скасовано</b>\n\n" +
+            "Оберіть інший зручний час, коли буде зручно.",
+            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Обрати інший час", "start_training_scheduling") }
         );
 
         // Notify Mentor
@@ -894,9 +894,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Training cancellation failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     }
 });
@@ -908,12 +908,12 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
-        .text("🚫 Так, завершити заявку", buildSignedCallback("cwm", slotId)).danger().row()
-        .text("⬅️ Ні, повернутись", "cancel_dismiss");
+        .text("Так, завершити заявку", buildSignedCallback("cwm", slotId)).danger().row()
+        .text("Ні, повернутись", "cancel_dismiss");
 
     await ctx.editMessageText(
-        `⚠️ <b>Ти впевнена, що не плануєш продовжувати?</b>\n\n` +
-        `Ми закриємо твою заявку та скасуємо запис. Якщо тобі просто не підходить час — повернись і обери «Скасувати запис» або «Змінити час».`,
+        `<b>Завершити заявку?</b>\n\n` +
+        `Ми закриємо заявку та скасуємо запис. Якщо просто не підходить час — поверніться й оберіть «Скасувати запис» або «Змінити час».`,
         { parse_mode: "HTML", reply_markup: kb }
     );
 });
@@ -923,7 +923,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cwm" });
     if (!slotId) return next();
     if (isDuplicateBookingAction(`withdraw-mentor:${ctx.from.id}:${slotId}`)) {
-        await ctx.answerCallbackQuery("✅ Відмову вже зафіксовано.");
+        await ctx.answerCallbackQuery("Відмову вже зафіксовано");
         return;
     }
 
@@ -946,10 +946,11 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             });
         }
 
-        await ctx.answerCallbackQuery("Відмову зафіксовано.");
+        await ctx.answerCallbackQuery("Відмову зафіксовано");
         await ctx.editMessageText(
-            "Дякуємо, що повідомила. 🌸\n\n" +
-            "Ми закрили твою заявку. Бажаємо успіхів, і якщо в майбутньому захочеш повернутися — будемо раді бачити тебе знову. ✨"
+            "<b>Заявку закрито</b>\n\n" +
+            "Дякуємо, що повідомили. Бажаємо успіхів — і будемо раді, якщо колись захочете повернутися.",
+            { parse_mode: "HTML" }
         );
 
         if (candidate) {
@@ -966,9 +967,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Mentor-stage vacancy withdrawal failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     }
 });
@@ -988,7 +989,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rt" });
     if (!slotId) return next();
     try {
-        await ctx.answerCallbackQuery("Обирай новий час!");
+        await ctx.answerCallbackQuery("Оберіть новий час");
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
 
@@ -1032,24 +1033,24 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 }
             }
 
-            return ctx.editMessageText("Зараз вільних слотів немає. Наставник скоро запропонує тобі зручний час! 🌸✨", {
-                reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+            return ctx.editMessageText("Зараз вільного часу немає. Ми запропонуємо його найближчим часом.", {
+                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
             });
         }
 
         const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit", 20);
 
         await ctx.editMessageText(
-            "Добре, давай оберемо інший зручний час: 🗓️✨\n\nНатисни на кнопку з конкретною датою та часом.",
+            "Оберіть інший зручний час:\n\nНатисніть кнопку з потрібною датою та часом.",
             { reply_markup: keyboard }
         );
 
     } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Training reschedule failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису.");
+            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка.");
+            await ctx.answerCallbackQuery("Сталася помилка");
         }
     }
 });

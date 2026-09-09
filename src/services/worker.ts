@@ -15,7 +15,7 @@ import { taskService } from "./task-service.js";
 import { truncateText } from "../utils/task-helpers.js";
 import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
-import { extractFirstName } from "../utils/string-utils.js";
+
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { notifyMentors } from "./hr-service.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
@@ -88,16 +88,15 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const decision = cand.hrDecision;
 
                     if (decision === "ACCEPTED") {
-                        const firstName = extractFirstName(cand.fullName || "Кандидатко");
-                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `твій наставник ${MENTOR_NAME}`;
+                        const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `ваш наставник ${MENTOR_NAME}`;
 
                         try {
                             await bot.api.sendMessage(
                                 Number(cand.user.telegramId),
-                                CANDIDATE_TEXTS["worker-offer-accepted"](firstName, mentorDisplay),
+                                CANDIDATE_TEXTS["worker-offer-accepted"](mentorDisplay),
                                 {
                                     parse_mode: "HTML",
-                                    reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+                                    reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
                                 }
                             );
                             await candidateRepository.update(cand.id, {
@@ -207,12 +206,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                 if (!slot.candidate) continue;
                 try {
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const firstName = extractFirstName(slot.candidate.fullName || "Кандидатко");
                     const hrDisplay = HR_NAME.startsWith("HR") ? HR_NAME : `наша HR ${HR_NAME}`;
 
                     const msg = await bot.api.sendMessage(
                         Number(slot.candidate.user.telegramId),
-                        CANDIDATE_TEXTS["worker-interview-reminder-6h"](firstName, timeStr, hrDisplay),
+                        CANDIDATE_TEXTS["worker-interview-reminder-6h"](timeStr, hrDisplay),
                         { parse_mode: "HTML" }
                     );
                     await interviewRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -330,16 +328,15 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const isDiscovery = !!slot.candidateDiscovery;
 
                     const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                    const firstName = extractFirstName(cand.fullName || "Candidate");
                     const mentorDisplay = MENTOR_NAME.toLowerCase().includes("наставник") ? MENTOR_NAME : `наставник ${MENTOR_NAME}`;
 
                     const typeText = isDiscovery ? "discovery" : "training";
                     const msg = await bot.api.sendMessage(
                         Number(cand.user.telegramId),
-                        CANDIDATE_TEXTS["worker-training-reminder-6h"](firstName, typeText, timeStr, mentorDisplay),
+                        CANDIDATE_TEXTS["worker-training-reminder-6h"](typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+                            reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -425,7 +422,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+                            reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });
@@ -628,15 +625,8 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 11.3 Reliability guardrails for stuck or inconsistent pipeline states
             await processPipelineHealth(bot);
 
-            // 12. NDA Reminders (Every 24h until confirmed)
-
-            // 13. Test Reminders (Every 24h until passed)
-            await processTestReminders(bot);
-
-            // 14. Post-staging admin reminder (1h after staging ends)
+            // 12. Post-staging admin reminder (1h after staging ends)
             await processPostStagingReminder(bot);
-
-            // 15. Onboarding data reminders (every 24h until filled)
 
         } catch (error) {
             logger.error({ err: error }, "Candidate workflow worker iteration failed");
@@ -1160,47 +1150,6 @@ async function alertStaleTrainingScheduledCandidates(bot: Bot<MyContext>) {
     return staleCandidates;
 }
 
-/**
- * Test Reminder: Нагадування кандидаткам, які підтвердили NDA, але не пройшли тест.
- */
-async function processTestReminders(bot: Bot<MyContext>) {
-    try {
-        const { default: prisma } = await import("../db/core.js");
-        const now = new Date();
-        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-        // Find candidates who confirmed NDA > 24h ago but haven't passed the test
-        const pendingTest = await prisma.candidate.findMany({
-            where: {
-                ndaConfirmedAt: { lte: twentyFourHoursAgo, not: null },
-                testPassed: { not: true },
-                status: CandidateStatus.KNOWLEDGE_TEST
-            },
-            include: { user: true }
-        });
-
-        for (const cand of pendingTest) {
-            try {
-                // Check if we already poked them today using user.updatedAt or a dedicated check
-                // To keep it simple and Apple-style, we use user.updatedAt as a throttle
-                const userUpdate = new Date(cand.user.updatedAt);
-                if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
-
-                const kb = new InlineKeyboard().text("📝 Почати тест", `start_training_test_${cand.id}`);
-                await bot.api.sendMessage(Number(cand.user.telegramId),
-                    `<b>Продовжимо твій шлях? ✨</b>\n\nТи вже ознайомилась з NDA. Залишився останній крок перед виходом на локацію — короткий тест. Давай перевіримо твої знання! 📸`,
-                    { parse_mode: "HTML", reply_markup: kb }
-                );
-
-                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-            } catch (e: any) {
-                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-            }
-        }
-    } catch (e) {
-        logger.error({ err: e }, "Candidate test reminder job failed");
-    }
-}
 
 /**
  * Training & Discovery Reminder: Нагадування кандидаткам, які отримали доступ до навчання, але не обрали час (через 24 год).
@@ -1235,9 +1184,9 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
 
         for (const cand of pendingTraining) {
             try {
-                const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
+                const kb = new InlineKeyboard().text("Обрати час", "start_training_scheduling");
 
-                const text = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
+                const text = `<b>Нагадування про зустріч-знайомство</b>\n\nОберіть зручний час за кнопкою нижче.`;
 
                 await bot.api.sendMessage(Number((cand as any).user.telegramId), text, {
                     parse_mode: "HTML",
@@ -1644,7 +1593,7 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
             try {
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], {
                     parse_mode: "HTML",
-                    reply_markup: new InlineKeyboard().text("📝 Продовжити анкету", "resume_screening"),
+                    reply_markup: new InlineKeyboard().text("Продовжити анкету", "resume_screening"),
                 });
                 // Отметка держит напоминание однократным: вокер крутится каждые
                 // 5 минут, окна по времени для этого мало.
@@ -1895,12 +1844,12 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
 
                 if (referenceDate <= cutoff7Days) {
                     // Day 7: Reject
-                    let rejectReason = "на стажування";
-                    if (cand.status === "KNOWLEDGE_TEST") rejectReason = "після тестування";
+                    const rejectReason = "на стажування";
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
-                            `Привіт! ✨ Оскільки ми тривалий час не отримали відповіді, ми змушені скасувати твою заявку ${rejectReason}. Бажаємо успіхів! Якщо в майбутньому ти знову захочеш спробувати свої сили в PlayPhoto — ми будемо раді бачити тебе. 🌸`);
+                            `<b>Заявку скасовано</b>\n\nМи тривалий час не отримували відповіді, тому скасували вашу заявку ${rejectReason}. Бажаємо успіхів — і будемо раді, якщо колись захочете спробувати ще раз.`,
+                            { parse_mode: "HTML" });
                     } catch (e: any) {
                         if (!isBotBlocked(e)) logger.warn({ err: e, candidateId: cand.id }, "Candidate inactivity rejection message delivery failed");
                     }
@@ -1919,16 +1868,15 @@ async function processAutoRejectInactiveCandidates(bot: Bot<MyContext>) {
                     });
                 } else if (referenceDate <= cutoff5Days && referenceDate > cutoff6Days) {
                     // Day 5: Warning (We run this once a day, so it will hit exactly once)
-                    let contextStr = "на твій наступний крок";
-                    switch (cand.status) {
-                        case "ACCEPTED": contextStr = "на вибір часу для зустрічі з наставником"; break;
-                        case "NDA": contextStr = "на ознайомлення з NDA (правилами команди)"; break;
-                        case "KNOWLEDGE_TEST": contextStr = "на проходження фінального тесту"; break;
-                    }
+                    // Етапи NDA й тесту прибрані з воронки — лишилися тільки
+                    // ті кроки, які людина справді може зробити зараз.
+                    const contextStr = cand.status === "ACCEPTED"
+                        ? "на вибір часу для зустрічі з наставником"
+                        : "на ваш наступний крок";
 
                     try {
                         await bot.api.sendMessage(Number(cand.user.telegramId),
-                            `Привіт! ✨ Ми все ще чекаємо ${contextStr}. Якщо ти передумала або знайшла щось інше — це абсолютно нормально! Дай нам знати. Якщо ми не отримаємо відповіді до завтра, ми автоматично скасуємо твою заявку, щоб не турбувати тебе повідомленнями. 🌸`);
+                            `Ми все ще чекаємо ${contextStr}.\n\nЯкщо ви передумали — просто напишіть нам. Якщо відповіді не буде до завтра, ми скасуємо заявку, щоб не турбувати вас далі.`);
                         logBusinessEvent({
                             event: "candidate.inactivity.warning_sent",
                             candidateId: cand.id,
