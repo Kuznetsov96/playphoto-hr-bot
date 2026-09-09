@@ -29,7 +29,24 @@ const DIRECT_CANDIDATE_MESSAGE_STATUSES = new Set([
     "AWAITING_FIRST_SHIFT"
 ]);
 
-function shouldUseDirectCandidateMessage(candidate: { status?: string } | null | undefined) {
+/**
+ * Чи писати напряму, як кандидатці на онбордингу, замість гілки підтримки.
+ *
+ * Діючий співробітник — ніколи. Найм створює StaffProfile, але рядок
+ * Candidate лишає (candidateRepository.deleteRelatedData не викликається
+ * ніде, крім дебажної /reset_me), тож у людини можуть одночасно існувати
+ * і профіль співробітника, і стара анкета. Якщо та анкета зупинилася на
+ * онбординговому статусі, повідомлення штатному фотографу тихо йшло повз
+ * підтримку — без гілки, куди він міг би відповісти.
+ *
+ * Тому активний StaffProfile має пріоритет над анкетою: людина, яка вже
+ * працює, спілкується через підтримку, а не через воронку.
+ */
+export function shouldUseDirectCandidateMessage(
+    candidate: { status?: string } | null | undefined,
+    staff?: { isActive?: boolean } | null | undefined,
+) {
+    if (staff?.isActive) return false;
     return !!candidate?.status && DIRECT_CANDIDATE_MESSAGE_STATUSES.has(candidate.status);
 }
 
@@ -73,7 +90,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
-    const canCreateTopic = !shouldUseDirectCandidateMessage(candidate)
+    const canCreateTopic = !shouldUseDirectCandidateMessage(candidate, staff)
         && (hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING'));
 
     ctx.session.step = `admin_msg_${userId}`;
@@ -295,11 +312,42 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
     let createdTopicId: number | undefined;
 
+    /**
+     * Куди насправді поїхало повідомлення.
+     *
+     * Раніше цієї змінної не було, і екран однаково рапортував «✅ Message
+     * sent and logged» у трьох різних випадках: створено нову гілку,
+     * дописано в наявну і не створено взагалі. Через це збій створення теми
+     * (немає прав Manage Topics, зайнятий лок) виглядав як успіх, і про
+     * нього дізнавалися випадково — через тижні.
+     */
+    type OutboundRoute =
+        | { kind: "created" }
+        | { kind: "reused" }
+        | { kind: "skipped-direct-candidate"; status: string }
+        | { kind: "skipped-no-permission" }
+        | { kind: "skipped-no-support-chat" }
+        | { kind: "failed"; error: string };
+
+    let route: OutboundRoute;
+
     const { getUserAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
-    const canCreateTopic = !shouldUseDirectCandidateMessage(candidate)
-        && (hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING'));
+    const directCandidate = shouldUseDirectCandidateMessage(candidate, staff);
+    const hasTopicPermission = hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING');
+    const canCreateTopic = !directCandidate && hasTopicPermission;
+
+    if (!SUPPORT_CHAT_ID) {
+        route = { kind: "skipped-no-support-chat" };
+    } else if (directCandidate) {
+        route = { kind: "skipped-direct-candidate", status: candidate?.status ?? "" };
+    } else if (!hasTopicPermission) {
+        route = { kind: "skipped-no-permission" };
+    } else {
+        // Перезапишеться нижче за фактом: created / reused / failed.
+        route = { kind: "failed", error: "not attempted" };
+    }
 
     if (SUPPORT_CHAT_ID && canCreateTopic) {
         try {
@@ -350,10 +398,12 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
             });
 
             createdTopicId = conversation.topicId ?? undefined;
+            route = conversation.created ? { kind: "created" } : { kind: "reused" };
             logger.info({
                 event: "support.admin_outbound_route_selected",
                 user_id: user.id,
                 route_kind: conversation.kind,
+                route_created: conversation.created,
                 route_id: conversation.id,
                 topic_id: conversation.topicId,
                 result: "success"
@@ -375,6 +425,11 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
                 }, "Admin outbound support topic copy skipped");
             }
         } catch (e: any) {
+            // Помилку більше не ковтаємо мовчки: вона доїжджає до екрана
+            // адміністратора разом із причиною. Доставку самому користувачеві
+            // це не скасовує — повідомлення важливіше за гілку, — але й
+            // рапортувати успіх, якого не було, більше не можна.
+            route = { kind: "failed", error: e?.message ? String(e.message) : String(e) };
             logger.error({ err: e, topicId: createdTopicId, supportChatId: SUPPORT_CHAT_ID }, "Admin conversation topic bootstrap failed");
         }
     }
@@ -398,7 +453,19 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
             directMessage: true
         });
 
-        let replyText = ADMIN_TEXTS["admin-msg-success"];
+        // Екран каже, куди саме поїхало повідомлення. «Доставлено» і «гілку
+        // створено» — різні факти, і плутати їх не можна: доставка могла
+        // пройти, а гілка — ні.
+        const replyText = ADMIN_TEXTS["admin-msg-delivered"] + "\n\n" + (
+            route.kind === "created" ? ADMIN_TEXTS["admin-msg-route-created"] :
+            route.kind === "reused" ? ADMIN_TEXTS["admin-msg-route-reused"] :
+            route.kind === "skipped-direct-candidate" ? ADMIN_TEXTS["admin-msg-route-skipped-onboarding"](route.status) :
+            route.kind === "skipped-no-permission" ? ADMIN_TEXTS["admin-msg-route-skipped-permission"] :
+            route.kind === "skipped-no-support-chat" ? ADMIN_TEXTS["admin-msg-route-skipped-no-chat"] :
+            // Текст помилки приходить від Telegram і може містити «<»:
+            // без екранування він поламав би весь HTML-екран.
+            ADMIN_TEXTS["admin-msg-route-failed"](escapeHtml(route.error))
+        );
         const replyMarkup = new InlineKeyboard();
 
         if (SUPPORT_CHAT_ID && createdTopicId) {
