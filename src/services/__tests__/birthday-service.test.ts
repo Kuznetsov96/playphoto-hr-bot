@@ -138,7 +138,7 @@ describe("greetCandidateBirthdays", () => {
         }), undefined);
         expect(sendMessage).toHaveBeenCalledWith(
             1003,
-            expect.stringContaining("Ми повернули твою анкету до списку актуальних"),
+            expect.stringContaining("Ми повернули вашу анкету до списку актуальних"),
             expect.objectContaining({ parse_mode: "HTML" })
         );
     });
@@ -159,7 +159,7 @@ describe("greetCandidateBirthdays", () => {
         }), undefined);
         expect(sendMessage).toHaveBeenCalledWith(
             1004,
-            expect.stringContaining("Натисни кнопку нижче"),
+            expect.stringContaining("Натисніть кнопку нижче"),
             expect.objectContaining({
                 parse_mode: "HTML",
                 reply_markup: expect.any(Object),
