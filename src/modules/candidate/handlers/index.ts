@@ -144,6 +144,7 @@ export async function startScreening(ctx: MyContext) {
         ctx.session.step = "screening_birth_year";
         delete candidateData.birthYear;
         delete candidateData.birthMonth;
+        delete candidateData.birthDecade;
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year");
     } else if (!candidateData.city) {
         ctx.session.step = "screening_city";
@@ -431,6 +432,7 @@ async function askBirthYearAgain(ctx: MyContext) {
     ctx.session.step = "screening_birth_year";
     delete ctx.session.candidateData.birthYear;
     delete ctx.session.candidateData.birthMonth;
+    delete ctx.session.candidateData.birthDecade;
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year");
 }
 

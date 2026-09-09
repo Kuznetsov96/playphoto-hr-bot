@@ -3,7 +3,9 @@ import {
     BIRTH_MONTH_LABELS,
     buildBirthDate,
     getDaysInMonth,
+    getSelectableBirthDecades,
     getSelectableBirthYears,
+    getYearsInDecade,
 } from "../birth-date-picker.js";
 import { getCandidateAge } from "../candidate-age.js";
 
@@ -28,6 +30,65 @@ describe("getSelectableBirthYears", () => {
         const years = getSelectableBirthYears(new Date(2026, 8, 9));
 
         expect(years.length).toBeLessThanOrEqual(15);
+    });
+});
+
+describe("повний вибір року — «Інший рік»", () => {
+    const TODAY = new Date(2026, 8, 9);
+
+    it("covers ages the short list leaves out, in both directions", () => {
+        const short = getSelectableBirthYears(TODAY);
+        const full = getSelectableBirthDecades(TODAY).flatMap(d => getYearsInDecade(d, TODAY));
+
+        // Коротший список — підмножина повного: жоден рік не зник.
+        for (const year of short) {
+            expect(full).toContain(year);
+        }
+        // І молодші, і старші за межі короткого списку тепер доступні.
+        expect(Math.max(...full)).toBeGreaterThan(Math.max(...short));
+        expect(Math.min(...full)).toBeLessThan(Math.min(...short));
+    });
+
+    it("lists decades from the newest down", () => {
+        const decades = getSelectableBirthDecades(TODAY);
+
+        expect(decades).toEqual([...decades].sort((a, b) => b - a));
+        expect(decades.every(d => d % 10 === 0)).toBe(true);
+    });
+
+    it("trims the newest decade at the youngest allowed year", () => {
+        const years = getYearsInDecade(2010, TODAY);
+
+        // 2026 - 14 = 2012, тож 2013+ не показуємо.
+        expect(years[0]).toBe(2012);
+        expect(years).not.toContain(2013);
+    });
+
+    it("trims the oldest decade at the oldest allowed year", () => {
+        const years = getYearsInDecade(1960, TODAY);
+
+        // 2026 - 60 = 1966.
+        expect(years.at(-1)).toBe(1966);
+        expect(years).not.toContain(1965);
+    });
+
+    it("gives full ten years for a decade inside the range", () => {
+        expect(getYearsInDecade(1990, TODAY)).toHaveLength(10);
+    });
+
+    it("returns years newest-first, like every other picker screen", () => {
+        const years = getYearsInDecade(1990, TODAY);
+
+        expect(years).toEqual([...years].sort((a, b) => b - a));
+    });
+
+    it("builds a usable date from an out-of-range year", () => {
+        // Молодша за 16: анкета має зберегтися, щоб underage-reactivation
+        // розблокувала її в день 16-річчя.
+        const date = buildBirthDate(2012, 6, 15);
+
+        expect(date).not.toBeNull();
+        expect(getCandidateAge(date!)).toBeLessThan(16);
     });
 });
 

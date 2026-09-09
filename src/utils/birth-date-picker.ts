@@ -33,6 +33,46 @@ export function getSelectableBirthYears(today: Date = new Date()): number[] {
     return years;
 }
 
+/**
+ * Межі повного вибору року — для тих, кого немає у скороченому списку.
+ *
+ * Короткий список покриває лише вік, з яким беруть у команду, і людина поза
+ * ним не могла вказати свій рік узагалі: кнопки просто не існувало. Тепер
+ * за кнопкою «Інший рік» відкривається повний діапазон.
+ *
+ * Це не робить нікого прийнятним — вік перевіряється далі, як і раніше. Але
+ * молодшій за 16 це дає єдиний шлях лишити анкету: underage-reactivation
+ * розблокує її в день 16-річчя, а без збереженої дати цього не станеться.
+ */
+export const MIN_BIRTH_YEAR_AGE = 14;
+export const MAX_BIRTH_YEAR_AGE = 60;
+
+/** Десятиріччя для першого екрана повного вибору: [2010, 2000, 1990…]. */
+export function getSelectableBirthDecades(today: Date = new Date()): number[] {
+    const currentYear = today.getFullYear();
+    const newest = Math.floor((currentYear - MIN_BIRTH_YEAR_AGE) / 10) * 10;
+    const oldest = Math.floor((currentYear - MAX_BIRTH_YEAR_AGE) / 10) * 10;
+
+    const decades: number[] = [];
+    for (let d = newest; d >= oldest; d -= 10) {
+        decades.push(d);
+    }
+    return decades;
+}
+
+/** Роки всередині десятиріччя, обрізані по загальних межах. */
+export function getYearsInDecade(decade: number, today: Date = new Date()): number[] {
+    const currentYear = today.getFullYear();
+    const newestAllowed = currentYear - MIN_BIRTH_YEAR_AGE;
+    const oldestAllowed = currentYear - MAX_BIRTH_YEAR_AGE;
+
+    const years: number[] = [];
+    for (let year = Math.min(decade + 9, newestAllowed); year >= Math.max(decade, oldestAllowed); year--) {
+        years.push(year);
+    }
+    return years;
+}
+
 export const BIRTH_MONTH_LABELS = [
     "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
     "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень",

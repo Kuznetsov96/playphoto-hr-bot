@@ -15,6 +15,9 @@ export const CANDIDATE_TEXTS = {
      * анкети рівно на 16-річчя. Деталі — в utils/birth-date-picker.ts.
      */
     "candidate-ask-birth-year": "Якого року ви народилися?",
+    "candidate-btn-birth-year-other": "Інший рік",
+    "candidate-ask-birth-decade": "Оберіть десятиріччя.",
+    "candidate-ask-birth-year-in-decade": (decade: number) => `Роки ${decade}-х. Оберіть свій.`,
     "candidate-ask-birth-month": (year: number) => `Рік: <b>${year}</b>\n\nОберіть місяць.`,
     "candidate-ask-birth-day": (year: number, monthLabel: string) => `Рік: <b>${year}</b> · Місяць: <b>${monthLabel}</b>\n\nОберіть день.`,
 

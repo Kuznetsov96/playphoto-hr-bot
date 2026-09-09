@@ -7,7 +7,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { CandidateStatus } from "@prisma/client";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { menuRegistry } from "../utils/menu-registry.js";
-import { BIRTH_MONTH_LABELS, getDaysInMonth, getSelectableBirthYears } from "../utils/birth-date-picker.js";
+import { BIRTH_MONTH_LABELS, getDaysInMonth, getSelectableBirthDecades, getSelectableBirthYears, getYearsInDecade } from "../utils/birth-date-picker.js";
 
 // --- CANDIDATE FUNNEL MENUS ---
 
@@ -38,23 +38,63 @@ async function askBirthYear(ctx: MyContext) {
     ctx.session.step = "screening_birth_year";
     delete ctx.session.candidateData.birthYear;
     delete ctx.session.candidateData.birthMonth;
+    delete ctx.session.candidateData.birthDecade;
     await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year", { pushToStack: true });
 }
 
 export const candidateBirthYearMenu = new Menu<MyContext>("candidate-birth-year");
 menuRegistry.register(candidateBirthYearMenu);
 
+async function selectBirthYear(ctx: MyContext, year: number) {
+    ctx.session.candidateData.birthYear = year;
+    ctx.session.step = "screening_birth_month";
+    await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-month"](year), "candidate-birth-month", { pushToStack: true });
+}
+
 candidateBirthYearMenu.dynamic((_ctx, range) => {
     const years = getSelectableBirthYears();
     years.forEach((year, i) => {
-        range.text(String(year), async (ctx) => {
-            ctx.session.candidateData.birthYear = year;
-            ctx.session.step = "screening_birth_month";
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-month"](year), "candidate-birth-month", { pushToStack: true });
+        range.text(String(year), (ctx) => selectBirthYear(ctx, year));
+        if ((i + 1) % 3 === 0) range.row();
+    });
+
+    // Короткий список покриває лише вік, з яким беруть у команду. Людина поза
+    // ним раніше не могла вказати свій рік узагалі — кнопки не існувало.
+    range.row().text(CANDIDATE_TEXTS["candidate-btn-birth-year-other"], async (ctx) => {
+        ctx.session.step = "screening_birth_decade";
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-decade"], "candidate-birth-decade", { pushToStack: true });
+    });
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender"));
+});
+
+export const candidateBirthDecadeMenu = new Menu<MyContext>("candidate-birth-decade");
+menuRegistry.register(candidateBirthDecadeMenu);
+
+candidateBirthDecadeMenu.dynamic((_ctx, range) => {
+    const decades = getSelectableBirthDecades();
+    decades.forEach((decade, i) => {
+        range.text(`${decade}-ті`, async (ctx) => {
+            ctx.session.candidateData.birthDecade = decade;
+            ctx.session.step = "screening_birth_year_in_decade";
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year-in-decade"](decade), "candidate-birth-year-in-decade", { pushToStack: true });
         });
         if ((i + 1) % 3 === 0) range.row();
     });
-    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender"));
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year"));
+});
+
+export const candidateBirthYearInDecadeMenu = new Menu<MyContext>("candidate-birth-year-in-decade");
+menuRegistry.register(candidateBirthYearInDecadeMenu);
+
+candidateBirthYearInDecadeMenu.dynamic((ctx, range) => {
+    const decade = ctx.session.candidateData.birthDecade;
+    if (!decade) return;
+
+    getYearsInDecade(decade).forEach((year, i) => {
+        range.text(String(year), (ctx) => selectBirthYear(ctx, year));
+        if ((i + 1) % 3 === 0) range.row();
+    });
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-decade"], "candidate-birth-decade"));
 });
 
 export const candidateBirthMonthMenu = new Menu<MyContext>("candidate-birth-month");
@@ -240,6 +280,8 @@ export const candidateRootMenu = new Menu<MyContext>("candidate-root");
 menuRegistry.register(candidateRootMenu);
 candidateRootMenu.register(candidateGenderMenu);
 candidateRootMenu.register(candidateBirthYearMenu);
+candidateRootMenu.register(candidateBirthDecadeMenu);
+candidateRootMenu.register(candidateBirthYearInDecadeMenu);
 candidateRootMenu.register(candidateBirthMonthMenu);
 candidateRootMenu.register(candidateBirthDayMenu);
 candidateRootMenu.register(candidateCityMenu);
