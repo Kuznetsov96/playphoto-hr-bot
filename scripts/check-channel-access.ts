@@ -15,7 +15,9 @@
  * Запуск усередині прод-контейнера (вихідників src там немає, лише dist;
  * DATABASE_URL вказує на сусідній контейнер postgres, тож ззовні база
  * недоступна — саме тому перевірку треба робити на сервері):
- *   docker exec playphoto-bot-bot-1 npx tsx /app/scripts/check-channel-access.ts
+ *   docker exec -w /app playphoto-bot-bot-1 npx tsx /app/scripts/check-channel-access.ts
+ *
+ * Прапорець -w /app обов'язковий: без нього tsx не знаходить node_modules.
  */
 import { PrismaClient, Role, CandidateStatus } from "@prisma/client";
 
