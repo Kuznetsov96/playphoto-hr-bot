@@ -42,11 +42,6 @@ async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaite
         return;
     }
 
-    if (adminRole === 'MENTOR_LEAD') {
-        const { mentorService } = await import("../services/mentor-service.js");
-        const text = await mentorService.getHubText();
-        await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", { forceNew: true });
-    }
 }
 
 // --- GLOBAL CALLBACKS ---
@@ -222,12 +217,6 @@ commandHandlers.command("start", async (ctx) => {
                     return;
                 }
 
-                if (userAdminRole === 'MENTOR_LEAD') {
-                    const { mentorService } = await import("../services/mentor-service.js");
-                    const text = await mentorService.getHubText();
-                    await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", true);
-                    return;
-                }
             }
         } catch (adminErr) {
             logger.error({ err: adminErr, userId }, "Failed to load admin header in /start");
@@ -538,21 +527,6 @@ commandHandlers.command("debug_user", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), 
     }
 });
 
-commandHandlers.command("mentor", requireRole('SUPER_ADMIN', 'MENTOR_LEAD'), async (ctx) => {
-    if (ctx.chat?.type !== "private") return;
-    try { await ctx.deleteMessage(); } catch (e) { }
-    try {
-        const userAdminRole = await getUserAdminRole(BigInt(ctx.from!.id));
-        await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
-
-        const { mentorService } = await import("../services/mentor-service.js");
-        const text = await mentorService.getHubText();
-        await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", { forceNew: true, pushToStack: true });
-    } catch (error) {
-        logger.error({ err: error, telegramId: ctx.from?.id }, "Mentor command failed");
-        await ctx.reply(`💥 Сталася помилка: <code>${(error as Error).message}</code>`, { parse_mode: "HTML" });
-    }
-});
 
 commandHandlers.command("reset_me", async (ctx) => {
     try { await ctx.deleteMessage(); } catch (e) { }
