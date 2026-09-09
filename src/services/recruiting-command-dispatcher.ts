@@ -6,7 +6,6 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client.js";
 import { hrService } from "./hr-service.js";
-import { teamRegistrationService } from "./team-registration-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
 import { runPendingRecruitingBroadcasts } from "./recruiting-broadcast-delivery.js";
@@ -371,24 +370,18 @@ export class RecruitingCommandDispatcher {
             }
             case "CONFIRM_HIRE": {
                 // Тот же пост-найм, что и кнопка admin_hire_final, МИНУС вся
-                // переписка с кандидаткой. Сначала Employee в вебаппе
-                // (upsert, идемпотентно) — если локация не смаплена, команда
-                // падает ДО перевода статуса и честно ретраится; затем
-                // confirmFinalSchedule: HIRED + accessService.syncUserAccess
-                // + таймлайн (сообщений кандидатке он не шлёт).
-                await teamRegistrationService.registerNewHire({
-                    fullName: candidate.fullName || "—",
-                    phone: candidate.phone || "—",
-                    email: candidate.email || "—",
-                    telegramId: String(candidate.user.telegramId),
-                    username: candidate.user.username || "—",
-                    instagram: candidate.instagram || "—",
-                    iban: candidate.iban || "—",
-                    city: candidate.city || "—",
-                    locationName: candidate.location?.name || "—",
-                    ...(candidate.location?.canonicalCode ? { locationCode: candidate.location.canonicalCode } : {}),
-                    birthDate: candidate.birthDate,
-                });
+                // переписка с кандидаткой: confirmFinalSchedule — HIRED +
+                // accessService.syncUserAccess + таймлайн (сообщений
+                // кандидатке он не шлёт).
+                //
+                // registerNewHire отсюда убран 08.09.2026. Сотрудника теперь
+                // заводит форма найма в вебаппе, где владелец правит ФИО, дату
+                // найма и локацию руками. Вызов делал upsert по telegramId,
+                // то есть попадал в ту же запись и перетирал введённое формой
+                // данными анкеты: ФИО, разрезанное здешней эвристикой, телефон
+                // из анкеты, hiredAt = сегодня, — плюс перевешивал assignment
+                // на локацию анкеты. Дубля не возникало, но результат ручного
+                // ввода пропадал через полминуты после сохранения.
                 const hired = await hrService.confirmFinalSchedule(candidate.id);
                 if (!hired) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
