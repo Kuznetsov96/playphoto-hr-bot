@@ -1,5 +1,15 @@
 # Centralized Logging Stack
 
+> **Read this first (checked 09.09.2026).** Everything below describes the stack as set up
+> on the legacy Hetzner host reachable via `ssh playphoto`. The bot no longer runs there:
+> production is AWS EC2 `i-0285c36d4f870dc30` (`eu-north-1`), reached with SSM, and its
+> log files live at `/app/logs` **inside** the `playphoto-bot-bot-1` container. Loki did
+> not answer on the production host when last checked. So the `ssh playphoto` commands and
+> the `/home/playphoto-mgr/...` paths in this file **do not apply to production today** —
+> use [docs/logging-ops-runbook.md](./logging-ops-runbook.md) for incident work. This file
+> is kept because the Alloy/Loki design and the label scheme are still what we want if the
+> stack is rebuilt on AWS.
+
 This project uses a local centralized logging stack on the production host:
 
 - `Loki` for searchable log storage
