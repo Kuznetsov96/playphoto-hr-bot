@@ -539,8 +539,11 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
             { ...buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_SLOTS), noSlotsAt: new Date() }
         );
 
+        // Кнопки «Повідомити мене» тут більше немає: кандидатка вже в черзі,
+        // і натискання нічого не змінювало — тост і порожня дія. Обіцянку
+        // сповістити тримає текст, а єдина кнопка веде до живої людини.
         const text = `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`;
-        const kb = new InlineKeyboard().text("Повідомити мене", "no_slots_available_ack");
+        const kb = new InlineKeyboard();
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (candidate?.gender !== "male") {
             kb.text("Написати нам", "contact_hr");
@@ -562,6 +565,12 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
     trackMessage(ctx, msg.message_id);
 });
 
+/**
+ * Кнопку «Повідомити мене» більше не малюємо: вона нічого не робила, бо
+ * кандидатка вже стояла в черзі. Обробник лишається для повідомлень, які
+ * висять у чатах з такою кнопкою, — без нього тап давав би «годинник»
+ * замість відповіді.
+ */
 bookingHandlers.callbackQuery("no_slots_available_ack", async (ctx) => {
     await ctx.answerCallbackQuery("Повідомимо, щойно з’являться нові вікна");
 });
@@ -582,7 +591,19 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
         buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
     );
 
-    await ctx.editMessageText(`Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
+    // Екран не лишається без кнопок. Людина щойно сказала «жоден час не
+    // підходить» — це момент найбільшої ймовірності втратити її, і раніше
+    // саме тут вона втрачала і список слотів, і вихід на живу людину.
+    const kb = new InlineKeyboard();
+    const candidate = await candidateRepository.findByTelegramId(telegramId);
+    if (candidate?.gender !== "male") {
+        kb.text("Написати нам", "contact_hr");
+    }
+
+    await ctx.editMessageText(
+        `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`,
+        kb.inline_keyboard.length > 0 ? { reply_markup: kb } : undefined,
+    );
 });
 
 // 6.5 Відмова кандидата від співбесіди

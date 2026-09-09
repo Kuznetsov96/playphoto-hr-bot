@@ -93,6 +93,26 @@ describe("resolveScreeningStatus", () => {
         expect(resolveScreeningStatus({ hasVacancy: true, appearance: "Без особливостей" })).toBe("SCREENING");
     });
 
+    it("не отправляет на ревью из-за старой дописки о нескольких локациях", async () => {
+        const { resolveScreeningStatus } = await import("../index.js");
+
+        // Анкеты до 09.09.2026 хранят выбор локаций прямо в appearance.
+        // Ревью внешности к нему отношения не имеет.
+        expect(
+            resolveScreeningStatus({
+                hasVacancy: true,
+                appearance: "Без особливостей\n(Обрані локації: Volkland, Smile Park)",
+            }),
+        ).toBe("SCREENING");
+
+        expect(
+            resolveScreeningStatus({
+                hasVacancy: false,
+                appearance: "Без особливостей\n(Обрані локації: Volkland, Smile Park)",
+            }),
+        ).toBe("WAITLIST_HR");
+    });
+
     it("особенности есть и место есть — MANUAL_REVIEW", async () => {
         const { resolveScreeningStatus } = await import("../index.js");
 

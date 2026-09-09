@@ -79,6 +79,34 @@ export async function formatCandidateProfile(
     }
     if (locationInfo) text += `📍 ${escapeHtml(locationInfo)}\n`;
 
+    // Решта локацій із множинного вибору. Раніше вони дописувалися в
+    // appearance і показувалися лише на екрані MANUAL_REVIEW — тобто
+    // рекрутер бачив їх тільки у кандидаток із татуюваннями, а в решти
+    // другий вибір мовчки зникав.
+    const extraLocationIds: string[] = Array.isArray(candidate.additionalLocationIds)
+        ? candidate.additionalLocationIds
+        : [];
+    if (extraLocationIds.length > 0) {
+        try {
+            const { locationRepository } = await import("../repositories/location-repository.js");
+            const extraNames = (
+                await Promise.all(
+                    extraLocationIds.map(async (id) => {
+                        const loc = await locationRepository.findById(id);
+                        return loc ? formatLocation(loc, "in-city") : null;
+                    }),
+                )
+            ).filter((name): name is string => Boolean(name));
+
+            if (extraNames.length > 0) {
+                text += `📍 Also open to: ${escapeHtml(extraNames.join(", "))}\n`;
+            }
+        } catch {
+            // Картка кандидатки важливіша за додатковий рядок: якщо назви не
+            // прочиталися, показуємо профіль без них.
+        }
+    }
+
     const username = candidate.user?.username;
     if (username && username.length < 32 && !username.includes('/') && !username.includes('\\')) {
         text += `📱 @${escapeHtml(username)}\n`;

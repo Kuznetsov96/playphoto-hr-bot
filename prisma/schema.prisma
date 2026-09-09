@@ -108,6 +108,12 @@ model Candidate {
   clickSource             String? // Технічне джерело з deep-link (start=source_...)
   status                  CandidateStatus @default(SCREENING)
   locationId              String?
+  // Решта локацій із множинного вибору; основна лежить у locationId.
+  // Раніше додаткові дописувалися текстом у appearance — те саме поле, за
+  // яким resolveScreeningStatus і underage-reactivation-service вирішують,
+  // чи потрібен ручний огляд зовнішності. Через це кандидатка без
+  // татуювань, яка обрала дві локації, потрапляла на MANUAL_REVIEW.
+  additionalLocationIds   String[]        @default([])
   interviewSlotId         String?         @unique
   discoverySlotId         String?         @unique
   trainingSlotId          String?         @unique

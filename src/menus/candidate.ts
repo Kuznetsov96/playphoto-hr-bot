@@ -28,7 +28,13 @@ candidateGenderMenu
         await askBirthYear(ctx);
     })
     .row()
-    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
+    .text("Назад", async (ctx) => {
+        // Крок імені — вільний ввід без клавіатури, тож у стек він не
+        // потрапляє і goBack не має куди повернутись. Ставимо крок явно,
+        // інакше введене ім'я нікуди не запишеться.
+        ctx.session.step = "screening_name";
+        await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]);
+    });
 
 // --- ДАТА НАРОДЖЕННЯ: РІК → МІСЯЦЬ → ДЕНЬ ---
 // Три екрани кнопок замість ручного вводу ДД.ММ.РРРР. Обґрунтування вибору
@@ -165,7 +171,13 @@ candidateCityMenu.dynamic(async (ctx, range) => {
         });
         if ((i + 1) % 2 === 0) range.row();
     });
-    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
+    range.row().text("Назад", async (ctx) => {
+        // Крок імені — вільний ввід без клавіатури, тож у стек він не
+        // потрапляє і goBack не має куди повернутись. Ставимо крок явно,
+        // інакше введене ім'я нікуди не запишеться.
+        ctx.session.step = "screening_name";
+        await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]);
+    });
 });
 
 export const candidateLocationMenu = new Menu<MyContext>("candidate-location");
@@ -229,7 +241,12 @@ candidateAppearanceMenu
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance-details"], "candidate-appearance-details", { pushToStack: true });
     })
     .row()
-    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-location-multiple"]));
+    .text("Назад", async (ctx) => {
+        // Міст назад до вибору локації. Якщо в місті одна локація, того
+        // екрана не було — тоді goBack по стеку веде до списку міст.
+        ctx.session.step = "screening_location";
+        await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-city"], "candidate-city");
+    });
 
 /**
  * Захист від подвійного тапу. Без fingerprint плагін звіряє лише позицію
