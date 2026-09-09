@@ -96,7 +96,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 CANDIDATE_TEXTS["worker-offer-accepted"](mentorDisplay),
                                 {
                                     parse_mode: "HTML",
-                                    reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+                                    reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
                                 }
                             );
                             await candidateRepository.update(cand.id, {
@@ -336,7 +336,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-6h"](typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+                            reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -422,7 +422,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
+                            reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });
@@ -1184,9 +1184,9 @@ async function processTrainingReminders(bot: Bot<MyContext>) {
 
         for (const cand of pendingTraining) {
             try {
-                const kb = new InlineKeyboard().text("🗓️ Обрати час", "start_training_scheduling");
+                const kb = new InlineKeyboard().text("Обрати час", "start_training_scheduling");
 
-                const text = `Привіт! ✨\n\nНагадую про запис на відеозустріч-знайомство. Чи вдалося ознайомитись з матеріалами? 📚\n\nОбери зручний час за кнопкою нижче! 👇`;
+                const text = `<b>Нагадування про зустріч-знайомство</b>\n\nОберіть зручний час за кнопкою нижче.`;
 
                 await bot.api.sendMessage(Number((cand as any).user.telegramId), text, {
                     parse_mode: "HTML",
@@ -1593,7 +1593,7 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
             try {
                 await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["worker-abandoned-screening"], {
                     parse_mode: "HTML",
-                    reply_markup: new InlineKeyboard().text("📝 Продовжити анкету", "resume_screening"),
+                    reply_markup: new InlineKeyboard().text("Продовжити анкету", "resume_screening"),
                 });
                 // Отметка держит напоминание однократным: вокер крутится каждые
                 // 5 минут, окна по времени для этого мало.

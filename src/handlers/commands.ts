@@ -371,9 +371,9 @@ commandHandlers.command("start", async (ctx) => {
     } catch (e: any) {
         logger.error({ err: e, userId }, "Start command failed");
         const kb = new InlineKeyboard()
-            .text("🤍 Написати в підтримку", "staff_help");
+            .text("Написати нам", "staff_help");
         await ctx.reply(
-            "🐾 Ой! Виникла тимчасова помилка.\n\nСпробуй /start ще раз за хвилину або звернись в підтримку — ми завжди на зв'язку! ✨",
+            "Сталася тимчасова помилка.\n\nСпробуйте /start ще раз за хвилину або напишіть нам.",
             { reply_markup: kb }
         );
         return;

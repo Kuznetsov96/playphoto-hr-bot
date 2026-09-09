@@ -28,7 +28,7 @@ candidateGenderMenu
         await askBirthYear(ctx);
     })
     .row()
-    .text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
+    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
 
 // --- ДАТА НАРОДЖЕННЯ: РІК → МІСЯЦЬ → ДЕНЬ ---
 // Три екрани кнопок замість ручного вводу ДД.ММ.РРРР. Обґрунтування вибору
@@ -54,7 +54,7 @@ candidateBirthYearMenu.dynamic((_ctx, range) => {
         });
         if ((i + 1) % 3 === 0) range.row();
     });
-    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender"));
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-greeting-nicetomeet"](), "candidate-gender"));
 });
 
 export const candidateBirthMonthMenu = new Menu<MyContext>("candidate-birth-month");
@@ -73,7 +73,7 @@ candidateBirthMonthMenu.dynamic((ctx, range) => {
         });
         if ((index + 1) % 3 === 0) range.row();
     });
-    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year"));
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-year"], "candidate-birth-year"));
 });
 
 export const candidateBirthDayMenu = new Menu<MyContext>("candidate-birth-day");
@@ -92,7 +92,7 @@ candidateBirthDayMenu.dynamic((ctx, range) => {
         });
         if (day % 7 === 0) range.row();
     }
-    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-month"](year), "candidate-birth-month"));
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-birth-month"](year), "candidate-birth-month"));
 });
 
 export const candidateCityMenu = new Menu<MyContext>("candidate-city");
@@ -125,7 +125,7 @@ candidateCityMenu.dynamic(async (ctx, range) => {
         });
         if ((i + 1) % 2 === 0) range.row();
     });
-    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
 });
 
 export const candidateLocationMenu = new Menu<MyContext>("candidate-location");
@@ -140,7 +140,9 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
 
     locations.forEach((l, i) => {
         const isSelected = selectedIds.has(l.id);
-        const label = `${isSelected ? '✅ ' : ''}${formatLocation(l, "in-city")}`;
+        // Позначка вибору — єдиний спосіб показати стан у множинному виборі.
+        // Символ, а не емодзі: тримається однорідно з рештою кнопок.
+        const label = `${isSelected ? '• ' : ''}${formatLocation(l, "in-city")}`;
         
         range.text(label, async (ctx) => {
             if (selectedIds.has(l.id)) selectedIds.delete(l.id);
@@ -159,13 +161,13 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
             await handleLocationSelected(ctx, targetLoc, city);
         });
     }
-    range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-city"], "candidate-city"));
+    range.row().text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-city"], "candidate-city"));
 });
 
 export const candidateAppearanceDetailsMenu = new Menu<MyContext>("candidate-appearance-details");
 menuRegistry.register(candidateAppearanceDetailsMenu);
 
-candidateAppearanceDetailsMenu.text("⬅️ Назад", async (ctx) => {
+candidateAppearanceDetailsMenu.text("Назад", async (ctx) => {
     ctx.session.step = "screening_appearance_prompt";
     await ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance");
 });
@@ -187,7 +189,7 @@ candidateAppearanceMenu
         await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-appearance-details"], "candidate-appearance-details", { pushToStack: true });
     })
     .row()
-    .text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-location-multiple"]));
+    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-location-multiple"]));
 
 /**
  * Захист від подвійного тапу. Без fingerprint плагін звіряє лише позицію
@@ -229,7 +231,7 @@ candidateSourceMenu
         await finishScreening(ctx, ctx.session.candidateData.appearance || "Без особливостей");
     })
     .row()
-    .text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance"));
+    .text("Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["candidate-ask-appearance"], "candidate-appearance"));
 
 // --- REGISTRATION ---
 // We use a hierarchical structure to allow ctx.menu.nav() to work correctly
