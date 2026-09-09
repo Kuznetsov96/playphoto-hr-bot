@@ -362,61 +362,6 @@ candidateHandlers.on("message:text", async (ctx, next) => {
             await ScreenManager.renderScreen(ctx, errorText + "\n\n" + CANDIDATE_TEXTS["ask-name"]);
         }
         return;
-    } else if (step === "screening_other_city") {
-        const text = ctx.message.text.trim();
-        if (!/^[a-zA-Zа-яА-ЯіїєІЇЄ\s-]+$/.test(text) || text.length < 2) {
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-city-invalid"] + "\n\n" + CANDIDATE_TEXTS["candidate-ask-other-city-name"]);
-            return;
-        }
-
-        const { locationRepository } = ctx.di;
-        const activeCities = await locationRepository.findAllCities(true, true);
-        const existing = activeCities.find((c: string) => c.toLowerCase() === text.toLowerCase());
-        if (existing) {
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-error-city-already-exists"](existing) + "\n\n" + CANDIDATE_TEXTS["candidate-ask-other-city-name"]);
-            return;
-        }
-
-        const normalizedCity = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
-
-        const bdStr = ctx.session.candidateData.birthDate;
-        const birthDate = bdStr ? new Date(bdStr) : new Date();
-
-        if (ctx.session.candidateData.gender === "male") {
-            await persistCandidate(ctx, {
-                fullName: ctx.session.candidateData.fullName,
-                birthDate,
-                gender: ctx.session.candidateData.gender,
-                city: normalizedCity,
-                status: CandidateStatus.REJECTED,
-                isWaitlisted: false,
-                isOtherCity: true
-            });
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](normalizedCity, normalizedCity));
-            ctx.session.step = "idle";
-            return;
-        }
-
-        const ageMeta = getAgeRejectionMeta(getCandidateAge(birthDate));
-
-        await persistCandidate(ctx, {
-            fullName: ctx.session.candidateData.fullName,
-            birthDate,
-            gender: ctx.session.candidateData.gender,
-            city: normalizedCity,
-            status: ageMeta.status,
-            isWaitlisted: ageMeta.isWaitlisted,
-            hrDecision: ageMeta.hrDecision,
-            isOtherCity: true
-        });
-
-        if (ageMeta.status === CandidateStatus.REJECTED) {
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS[ageMeta.finalKey]);
-        } else {
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-success-other-city"](normalizedCity));
-        }
-        ctx.session.step = "idle";
-        return;
     } else if (step === "screening_birthdate") {
         const text = ctx.message.text;
         if (/^\d{2}\.\d{2}\.\d{4}$/.test(text)) {

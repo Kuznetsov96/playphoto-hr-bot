@@ -52,11 +52,6 @@ describe("Bot Bootstrap & Menu Integrity", () => {
         expect(hrFinalStepMenu).toBeDefined();
     });
 
-    it("should load Mentor menus without errors", async (ctx) => {
-        const { mentorRootMenu } = await import("../menus/mentor.js");
-        expect(mentorRootMenu).toBeDefined();
-    });
-
     it("should load Candidate menus without errors", async () => {
         const { candidateRootMenu } = await import("../menus/candidate.js");
         expect(candidateRootMenu).toBeDefined();

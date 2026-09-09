@@ -12,7 +12,6 @@ import { CandidateStatus, Role } from "@prisma/client";
 import { InlineKeyboard } from "grammy";
 import { candidateRepository } from "../../../repositories/candidate-repository.js";
 import { userRepository } from "../../../repositories/user-repository.js";
-import { TEAM_CHANNEL_LINK } from "../../../config.js";
 
 import { ADMIN_TEXTS } from "../../../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../../../constants/staff-texts.js";
@@ -147,9 +146,11 @@ export class StaffService {
             `💬 <b>Підтримка</b> — якщо виникають питання — пиши сюди.\n\n` +
             `Бажаємо тобі класного старту! 🚀`;
 
+        // Спільний інвайт сюди не зашивається: посилання персональне, його
+        // видає accessService під конкретну людину.
         const kb = new InlineKeyboard()
             .text("🚀 Відкрити Хаб", "staff_hub_nav").row()
-            .url("📖 База знань", TEAM_CHANNEL_LINK);
+            .text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link");
 
         // Always mark as processed to prevent repeated attempts on every sync
         await staffRepository.update(staff.id, { isWelcomeSent: true });

@@ -97,7 +97,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 CANDIDATE_TEXTS["worker-offer-accepted"](firstName, mentorDisplay),
                                 {
                                     parse_mode: "HTML",
-                                    reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                                    reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
                                 }
                             );
                             await candidateRepository.update(cand.id, {
@@ -339,7 +339,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-6h"](firstName, typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -425,7 +425,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });
@@ -629,7 +629,6 @@ export async function startWorker(bot: Bot<MyContext>) {
             await processPipelineHealth(bot);
 
             // 12. NDA Reminders (Every 24h until confirmed)
-            await processNDAReminders(bot);
 
             // 13. Test Reminders (Every 24h until passed)
             await processTestReminders(bot);
@@ -638,7 +637,6 @@ export async function startWorker(bot: Bot<MyContext>) {
             await processPostStagingReminder(bot);
 
             // 15. Onboarding data reminders (every 24h until filled)
-            await processOnboardingReminders(bot);
 
         } catch (error) {
             logger.error({ err: error }, "Candidate workflow worker iteration failed");
@@ -1696,77 +1694,6 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
 /**
  * Smart Reminder: Надсилає нагадування кандидаткам, які не ознайомились з NDA протягом 6 годин (та кожні 24 години після цього).
  */
-async function processNDAReminders(bot: Bot<MyContext>) {
-    try {
-        const { default: prisma } = await import("../db/core.js");
-        const now = new Date();
-        const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
-
-        // Find candidates who received NDA > 6 hours ago but haven't confirmed it
-        const pendingNDA = await prisma.candidate.findMany({
-            where: {
-                status: CandidateStatus.NDA,
-                ndaConfirmedAt: null,
-                ndaSentAt: { lte: sixHoursAgo, not: null }
-            },
-            include: { user: true }
-        });
-
-        for (const cand of pendingNDA) {
-            try {
-                // Throttle: only remind once every 23 hours
-                const userUpdate = new Date(cand.user.updatedAt);
-                if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
-
-                const firstName = extractFirstName(cand.fullName || "Кандидатко");
-                const { NDA_LINK } = await import("../config.js");
-                const kb = new InlineKeyboard();
-                if (NDA_LINK) kb.url("📋 Прочитати NDA", NDA_LINK).row();
-                kb.text("✅ Я все прочитала та згодна", buildSignedCallback("cnda", cand.id));
-
-                await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), {
-                    parse_mode: "HTML",
-                    reply_markup: kb
-                });
-
-                // Update user to reset throttle
-                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logBusinessEvent({
-                    event: "candidate.nda.reminder_sent",
-                    candidateId: cand.id,
-                    telegramId: cand.user.telegramId,
-                    actorType: "system",
-                    actorRole: "system",
-                    stage: "NDA",
-                    result: "success",
-                    module: "worker",
-                    operation: "processNDAReminders",
-                });
-            } catch (e: any) {
-                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                else {
-                    logger.warn({ err: e, telegramId: cand.user.telegramId }, "Candidate NDA reminder delivery failed");
-                    logBusinessEvent({
-                        event: "candidate.nda.reminder_sent",
-                        level: "warn",
-                        candidateId: cand.id,
-                        telegramId: cand.user.telegramId,
-                        actorType: "system",
-                        actorRole: "system",
-                        stage: "NDA",
-                        result: "failed",
-                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
-                        module: "worker",
-                        operation: "processNDAReminders",
-                        error: e,
-                    });
-                }
-            }
-        }
-    } catch (e) {
-        logger.error({ err: e }, "Candidate NDA reminder job failed");
-    }
-}
 
 function getPostStagingReminderAt(firstShiftDate: Date | null, firstShiftTime?: string | null): Date | null {
     if (!firstShiftDate) return null;
@@ -1913,81 +1840,6 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
  * Onboarding Reminders: Every 24h, nudge READY_FOR_HIRE candidates who haven't filled data.
  * Replaces the old one-shot 24-48h window from processAbandonedApplications.
  */
-async function processOnboardingReminders(bot: Bot<MyContext>) {
-    try {
-        const now = new Date();
-        const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-        const candidates = await prisma.candidate.findMany({
-            where: {
-                status: CandidateStatus.READY_FOR_HIRE,
-                user: { updatedAt: { lte: twentyFourHoursAgo } }
-            },
-            include: { user: true }
-        });
-
-        const { getMissingFieldLabels } = await import("../handlers/onboarding-handler.js");
-
-        for (const cand of candidates) {
-            const userUpdate = new Date(cand.user.updatedAt);
-            if (now.getTime() - userUpdate.getTime() < 23 * 60 * 60 * 1000) continue;
-            const missing = getMissingFieldLabels(cand);
-
-            try {
-                const kb = new InlineKeyboard().text("📝 Продовжити", "start_onboarding_data");
-
-                let text: string;
-                if (missing.length === 0) {
-                    text = "Привіт! 👋 Схоже, всі дані вже заповнені — натисни кнопку нижче, щоб завершити оформлення! ✨";
-                } else {
-                    text = `Привіт! 👋\n\nЗалишилось заповнити: <b>${missing.join(", ")}</b>.\nЦе займе буквально пару хвилин! ✨`;
-                }
-
-                await bot.api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
-
-                await prisma.user.update({ where: { id: cand.userId }, data: { updatedAt: new Date() } });
-                logBusinessEvent({
-                    event: "candidate.onboarding.reminder_sent",
-                    candidateId: cand.id,
-                    telegramId: cand.user.telegramId,
-                    actorType: "system",
-                    actorRole: "system",
-                    stage: "READY_FOR_HIRE",
-                    result: "success",
-                    module: "worker",
-                    operation: "processOnboardingReminders",
-                    safeContext: {
-                        missingFieldsCount: missing.length,
-                    },
-                });
-            } catch (e: any) {
-                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                else {
-                    logger.warn({ err: e, telegramId: cand.user.telegramId }, "Candidate onboarding reminder delivery failed");
-                    logBusinessEvent({
-                        event: "candidate.onboarding.reminder_sent",
-                        level: "warn",
-                        candidateId: cand.id,
-                        telegramId: cand.user.telegramId,
-                        actorType: "system",
-                        actorRole: "system",
-                        stage: "READY_FOR_HIRE",
-                        result: "failed",
-                        reasonCode: "TELEGRAM_DELIVERY_FAILED",
-                        module: "worker",
-                        operation: "processOnboardingReminders",
-                        safeContext: {
-                            missingFieldsCount: missing.length,
-                        },
-                        error: e,
-                    });
-                }
-            }
-        }
-    } catch (e) {
-        logger.error({ err: e }, "Candidate onboarding reminder job failed");
-    }
-}
 
 /**
  * Auto-archive workflow: 

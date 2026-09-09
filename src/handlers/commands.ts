@@ -1,7 +1,6 @@
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { ADMIN_IDS, MENTOR_IDS, CO_FOUNDER_IDS, ALLOW_DEV_COMMANDS } from "../config.js";
-import { mentorHubMenu } from "../menus/mentor.js";
 import { adminMenu } from "./admin/index.js";
 import { cleanupMessages, trackMessage } from "../utils/cleanup.js";
 import { checkBirthdays } from "../services/birthday-service.js";
@@ -43,11 +42,6 @@ async function showAdminCancelHome(ctx: MyContext, adminRole: NonNullable<Awaite
         return;
     }
 
-    if (adminRole === 'MENTOR_LEAD') {
-        const { mentorService } = await import("../services/mentor-service.js");
-        const text = await mentorService.getHubText();
-        await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", { forceNew: true });
-    }
 }
 
 // --- GLOBAL CALLBACKS ---
@@ -223,12 +217,6 @@ commandHandlers.command("start", async (ctx) => {
                     return;
                 }
 
-                if (userAdminRole === 'MENTOR_LEAD') {
-                    const { mentorService } = await import("../services/mentor-service.js");
-                    const text = await mentorService.getHubText();
-                    await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", true);
-                    return;
-                }
             }
         } catch (adminErr) {
             logger.error({ err: adminErr, userId }, "Failed to load admin header in /start");
@@ -400,39 +388,6 @@ commandHandlers.command("ping_admin", async (ctx) => {
     await ctx.reply("Pong! 🏓 (Admin system online)");
 });
 
-commandHandlers.command("restore_access", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), async (ctx) => {
-    await ctx.reply("🛠 <b>Починаю відновлення доступу...</b>\n\nЦе може зайняти кілька хвилин. Я надішлю звіт по завершенню. ✨", { parse_mode: "HTML" });
-
-    try {
-        const { restoreAccessService } = await import("../services/restore-access.js");
-        const summary = await restoreAccessService.restoreAllStaffAccess(ctx.api);
-        logAuditEvent({
-            event: "admin.restore_access.executed",
-            telegramId: ctx.from?.id,
-            actorType: "admin",
-            actorRole: "admin",
-            result: "success",
-            module: "commands",
-            operation: "restore_access",
-            updateId: ctx.update.update_id,
-        });
-        await ctx.reply(summary, { parse_mode: "HTML" });
-    } catch (e: any) {
-        logger.error({ err: e, telegramId: ctx.from?.id }, "Restore access command failed");
-        logAuditEvent({
-            event: "admin.restore_access.executed",
-            telegramId: ctx.from?.id,
-            actorType: "admin",
-            actorRole: "admin",
-            result: "failed",
-            module: "commands",
-            operation: "restore_access",
-            updateId: ctx.update.update_id,
-            error: e,
-        });
-        await ctx.reply(`❌ Помилка: ${e.message}`);
-    }
-});
 
 commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'), async (ctx) => {
     if (ctx.chat?.type !== "private") return;
@@ -539,21 +494,6 @@ commandHandlers.command("debug_user", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), 
     }
 });
 
-commandHandlers.command("mentor", requireRole('SUPER_ADMIN', 'MENTOR_LEAD'), async (ctx) => {
-    if (ctx.chat?.type !== "private") return;
-    try { await ctx.deleteMessage(); } catch (e) { }
-    try {
-        const userAdminRole = await getUserAdminRole(BigInt(ctx.from!.id));
-        await updateUserCommands(ctx, "ADMIN", userAdminRole as any);
-
-        const { mentorService } = await import("../services/mentor-service.js");
-        const text = await mentorService.getHubText();
-        await ScreenManager.renderScreen(ctx, text, "mentor-hub-menu", { forceNew: true, pushToStack: true });
-    } catch (error) {
-        logger.error({ err: error, telegramId: ctx.from?.id }, "Mentor command failed");
-        await ctx.reply(`💥 Сталася помилка: <code>${(error as Error).message}</code>`, { parse_mode: "HTML" });
-    }
-});
 
 commandHandlers.command("reset_me", async (ctx) => {
     try { await ctx.deleteMessage(); } catch (e) { }

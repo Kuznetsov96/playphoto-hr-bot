@@ -2,7 +2,6 @@ import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { createDatePickerKb, createTimePickerKb, createDurationPickerKb } from "../utils/slot-builder.js";
 import { interviewService } from "../services/interview-service.js";
-import { mentorService } from "../services/mentor-service.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { createKyivDate } from "../utils/bot-utils.js";
 
@@ -180,35 +179,6 @@ async function executeSlotCreation(ctx: MyContext, role: 'hr' | 'mentor', durati
                 const resp = `✅ <b>Success!</b>\n\nSlots created for ${start.toLocaleDateString('uk-UA')} starting at ${timeLabel}.`;
                 if (ctx.callbackQuery) await ctx.editMessageText(resp, { parse_mode: "HTML", reply_markup: kb });
                 else await ctx.reply(resp, { parse_mode: "HTML", reply_markup: kb });
-            }
-        } else {
-            const [y, m, d] = sb.date.split('-').map(Number);
-            const dateFmt = `${d! < 10 ? '0' + d! : d!}.${m! < 10 ? '0' + m! : m!}.${y}`;
-            
-            // Apple Style: Explicitly format in Kyiv time to avoid server timezone issues
-            const formatTime = (date: Date) => {
-                return new Intl.DateTimeFormat('uk-UA', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    timeZone: 'Europe/Kyiv'
-                }).format(date).replace(':', ':');
-            };
-
-            const startTimeStr = `${sb.startHour}:${(sb.startMinute || 0).toString().padStart(2, '0')}`;
-            const endTimeStr = formatTime(end);
-            
-            const result = await mentorService.createTrainingSlotFromText(`${dateFmt} ${startTimeStr}-${endTimeStr}`, candId);
-            
-            if (result.success) {
-                const count = (result as any).createdCount || 0;
-                const resp = `✅ <b>Training Slots Created!</b>\n\nCreated ${count} slots for discovery meetings. ✨`;
-                const kb = new InlineKeyboard().text("⬅️ Back to Training", "mentor_train_calendar");
-                if (ctx.callbackQuery) await ctx.editMessageText(resp, { parse_mode: "HTML", reply_markup: kb });
-                else await ctx.reply(resp, { parse_mode: "HTML", reply_markup: kb });
-            } else {
-                const errorMsg = (result as any).error || "Unknown error";
-                if (ctx.callbackQuery) await ctx.editMessageText(errorMsg, { reply_markup: new InlineKeyboard().text("⬅️ Back", "mentor_sb_back_dur") });
-                else await ctx.reply(errorMsg);
             }
         }
         delete ctx.session.slotBuilder;

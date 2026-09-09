@@ -104,25 +104,24 @@ export class AccessService {
             return user.staffProfile?.isActive === true;
         }
 
-        // 3. Candidates (ONLY if they passed HR stage and are now in Training/Staging)
+        /**
+         * 3. Кандидатки: доступ лише після найму.
+         *
+         * Раніше сюди входило 13 статусів, з яких 12 — ще не працевлаштовані:
+         * ACCEPTED, MENTOR_MANUAL, усі DISCOVERY/TRAINING, NDA, KNOWLEDGE_TEST,
+         * STAGING, READY_FOR_HIRE, AWAITING_FIRST_SHIFT. Доступ видавався на
+         * початку навчання, а якщо людина просто зависала в MENTOR_MANUAL і
+         * ніхто не змінював статус — він лишався назавжди. Так у каналі
+         * накопичувалися ті, хто до команди так і не дійшов.
+         *
+         * Тепер межа одна: HIRED. Працевлаштовані цим списком не захищені й не
+         * можуть його втратити — вони проходять пунктом 2 вище як Role.STAFF з
+         * активним профілем (роль ставиться при синхронізації з вебзастосунком,
+         * див. aws-business-sync). HIRED тут лишається тільки для проміжку між
+         * наймом і появою staffProfile.
+         */
         if (user.role === Role.CANDIDATE && user.candidate) {
-            const status = user.candidate.status;
-            const allowedStatuses: CandidateStatus[] = [
-                CandidateStatus.ACCEPTED,
-                CandidateStatus.MENTOR_MANUAL,
-                CandidateStatus.DISCOVERY_SCHEDULED,
-                CandidateStatus.DISCOVERY_COMPLETED,
-                CandidateStatus.TRAINING_SCHEDULED,
-                CandidateStatus.TRAINING_COMPLETED,
-                CandidateStatus.NDA,
-                CandidateStatus.KNOWLEDGE_TEST,
-                CandidateStatus.STAGING_SETUP,
-                CandidateStatus.STAGING_ACTIVE,
-                CandidateStatus.READY_FOR_HIRE,
-                CandidateStatus.AWAITING_FIRST_SHIFT,
-                CandidateStatus.HIRED,
-            ];
-            return allowedStatuses.includes(status);
+            return user.candidate.status === CandidateStatus.HIRED;
         }
 
         return false;
@@ -349,6 +348,41 @@ export class AccessService {
             // RESTORE упала и вернулась на повтор.
             if (e instanceof UnknownChatScopeError) throw e;
             return null;
+        }
+    }
+
+    /**
+     * Надсилає персональне запрошення до каналу тому, хто щойно отримав право.
+     *
+     * Викликається при активації профілю співробітниці: людина нічого не
+     * натискає — доступ приходить сам у момент найму. Раніше посилання
+     * діставалося лише тим, хто вчасно натиснув кнопку в потрібному екрані, а
+     * решта лишалася без каналу й мусила просити адміна.
+     *
+     * Мовчазний: якщо права немає, бот заблокований або канал недоступний —
+     * просто нічого не шле. Найм не має падати через сповіщення.
+     */
+    async sendChannelInvite(telegramId: bigint, kind: "welcome" | "back" = "welcome"): Promise<boolean> {
+        try {
+            const link = await this.createInviteLink(telegramId);
+            if (!link) return false;
+
+            const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
+            const api = this.getSafeApi();
+            const text = kind === "back"
+                ? STAFF_TEXTS["channel-invite-back"]
+                : STAFF_TEXTS["channel-invite-welcome"];
+
+            await api.sendMessage(Number(telegramId), text, {
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [[{ text: STAFF_TEXTS["channel-btn-join"], url: link }]],
+                },
+            });
+            return true;
+        } catch (e) {
+            logger.error({ err: e, telegramId }, "Failed to send channel invite");
+            return false;
         }
     }
 }

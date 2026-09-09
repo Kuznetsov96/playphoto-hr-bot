@@ -391,52 +391,9 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
 
     const userRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
     const isHr = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER' || userRole === 'HR_LEAD';
-    const isMentor = userRole === 'SUPER_ADMIN' || userRole === 'MENTOR_LEAD';
     const isSuper = userRole === 'SUPER_ADMIN' || userRole === 'CO_FOUNDER';
 
     // 1. PRIMARY ACTION
-    if (isMentor && cand.status === "DISCOVERY_SCHEDULED") {
-        range.text("✅ Discovery Passed", async (ctx) => {
-            delete ctx.session.adminFlow;
-            await ctx.answerCallbackQuery().catch(() => { });
-            const { mentorService } = await import("../../services/mentor-service.js");
-            const res = await mentorService.completeDiscovery(ctx.api, cand.id, 'passed');
-            audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "discovery_passed", from: cand.status } });
-            if (res) {
-                await ScreenManager.renderScreen(ctx, `✨ <b>Discovery Passed!</b>\n\nNow please select the <b>Online Internship Date</b> for ${res.candidate.fullName}:`, "mentor-manual-date", { pushToStack: true });
-            }
-        }).text(ADMIN_TEXTS["admin-btn-fail"], async (ctx) => {
-            await ctx.answerCallbackQuery().catch(() => { });
-            const { mentorService } = await import("../../services/mentor-service.js");
-            await mentorService.completeDiscovery(ctx.api, cand.id, 'failed');
-            audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "discovery_failed", from: cand.status } });
-            await ctx.menu.update();
-        }).row();
-    }
-
-    if (isMentor && cand.status === "DISCOVERY_COMPLETED") {
-        range.text("🗓 Assign Online Internship", async (ctx) => {
-            delete ctx.session.adminFlow;
-            await ScreenManager.renderScreen(ctx, `🗓 <b>Assign Online Internship</b>\n\nPlease select the date for ${cand.fullName}:`, "mentor-manual-date", { pushToStack: true });
-        }).row();
-    }
-
-    if (isMentor && cand.status === "TRAINING_SCHEDULED") {
-        range.text("✅ Training Completed", async (ctx) => {
-            await ctx.answerCallbackQuery().catch(() => { });
-            const { mentorService } = await import("../../services/mentor-service.js");
-            await mentorService.completeTraining(ctx.api, cand.id, 'passed');
-            audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "training_passed", from: cand.status } });
-            await ctx.menu.update();
-        }).text(ADMIN_TEXTS["admin-btn-fail"], async (ctx) => {
-            await ctx.answerCallbackQuery().catch(() => { });
-            const { mentorService } = await import("../../services/mentor-service.js");
-            await mentorService.completeTraining(ctx.api, cand.id, 'failed');
-            audit({ event: "candidate_status_change", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { action: "training_failed", from: cand.status } });
-            await ctx.menu.update();
-        }).row();
-    }
-
     if (isHr && ["SCREENING", "WAITLIST", "WAITLIST_HR"].includes(cand.status)) {
         range.text("🗓️ Re-invite to Interview", async (ctx) => {
             const { hrService } = await import("../../services/hr-service.js");
@@ -451,82 +408,19 @@ adminCandidateMenu.dynamic(async (ctx, range) => {
         }).row();
     }
 
-    if (isMentor && ["TRAINING_COMPLETED", "WAITLIST", "WAITLIST_MENTOR"].includes(cand.status) && cand.quizScore !== null) {
-        range.text("🎓 Re-invite to Training", async (ctx) => {
-            await ctx.answerCallbackQuery("Sending training slots...").catch(() => { });
-            await ctx.api.sendMessage(Number(cand.user.telegramId),
-                CANDIDATE_TEXTS["admin-re-invite-training"],
-                { reply_markup: new InlineKeyboard().text("🎓 Обрати час", "start_training_scheduling") }
-            );
-        }).row();
-    }
 
     const isReadyForStaging = !!(cand.firstShiftDate && cand.locationId && cand.firstShiftPartnerId);
     const isStagingStatus = cand.status === CandidateStatus.OFFLINE_STAGING || cand.status === CandidateStatus.AWAITING_FIRST_SHIFT;
 
-    if (isSuper && isReadyForStaging && (cand.status === CandidateStatus.TRAINING_COMPLETED || cand.status === CandidateStatus.OFFLINE_STAGING) && !cand.stagingNotifiedAt) {
-        range.text("🚀 Confirm & Notify Staging", async (ctx) => {
-            const { hrService } = await import("../../services/hr-service.js");
-            const result = await hrService.sendStagingNotifications(ctx.api, cand.id);
-            if (result && 'error' in result) {
-                audit({ event: "candidate_staging_notify", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, error: result.error });
-                await ctx.answerCallbackQuery(`❌ ${result.error}`).catch(() => { });
-            } else if (result) {
-                audit({ event: "candidate_staging_notify", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id });
-                await ctx.answerCallbackQuery("Success! Candidate and partner notified. ✅").catch(() => { });
-                await ctx.menu.update();
-            } else {
-                audit({ event: "candidate_staging_notify", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, error: "null result" });
-                await ctx.answerCallbackQuery("Error sending notifications ❌").catch(() => { });
-            }
-        }).row();
-    }
 
-    if (isMentor && cand.status === CandidateStatus.OFFLINE_STAGING && cand.stagingNotifiedAt) {
-        range.text("✅ Pass Staging", async (ctx) => {
-            const { hrService } = await import("../../services/hr-service.js");
-            const res = await hrService.completeOfflineStaging(cand.id, true);
-            if (res) {
-                audit({ event: "candidate_staging_complete", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { outcome: "passed" } });
-                const firstName = extractFirstName(res.candidate.fullName || "");
-                await ctx.api.sendMessage(Number(res.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
-                await ctx.answerCallbackQuery("Passed! ✅").catch(() => { });
-                await ctx.menu.update();
-            }
-        });
-        range.text("❌ Fail", async (ctx) => {
-            const { hrService } = await import("../../services/hr-service.js");
-            await hrService.completeOfflineStaging(cand.id, false);
-            audit({ event: "candidate_staging_complete", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: cand.id, updateId: ctx.update.update_id, context: { outcome: "failed" } });
-            await ctx.answerCallbackQuery("Failed. ❌").catch(() => { });
-            await ctx.menu.update();
-        }).row();
-    }
 
-    if (isSuper && (cand.status === CandidateStatus.TRAINING_COMPLETED || (cand.status as string) === "NDA") && !cand.ndaConfirmedAt) {
-        range.text("🔔 Ping NDA", async (ctx) => {
-            const { NDA_LINK } = await import("../../config.js");
-            const firstName = extractFirstName(cand.fullName || "");
-            const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
-
-            try {
-                await ctx.api.sendMessage(Number(cand.user.telegramId),
-                    CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK),
-                    { parse_mode: "HTML", reply_markup: kb }
-                );
-                await ctx.answerCallbackQuery("Ping sent! 🔔").catch(() => { });
-            } catch (e) {
-                await ctx.answerCallbackQuery("Error sending ping ❌").catch(() => { });
-            }
-        }).row();
-    }
 
     range.text("✉️ Write Message", async (ctx) => {
         const { startAdminMessageFlow } = await import("./search.js");
         await startAdminMessageFlow(ctx, cand.user.id);
     }).row();
 
-    const canEditStaging = isMentor && (cand.status === "OFFLINE_STAGING" || cand.status === "AWAITING_FIRST_SHIFT");
+    const canEditStaging = isSuper && (cand.status === "OFFLINE_STAGING" || cand.status === "AWAITING_FIRST_SHIFT");
     if (canEditStaging || isSuper) {
         range.text(canEditStaging ? "🛠 Edit Staging..." : "🛠 More Actions...", async (ctx) => {
             await ctx.answerCallbackQuery().catch(() => { });
@@ -740,7 +634,6 @@ adminRecruitmentHandlers.callbackQuery(/^admin_staging_pass_(.+)$/, async (ctx: 
     if (result && result.passed) {
         audit({ event: "candidate_staging_complete", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "candidate", entityId: candId, updateId: ctx.update.update_id, context: { outcome: "passed", source: "standalone" } });
         const firstName = extractFirstName(result.candidate.fullName || "");
-        await ctx.api.sendMessage(Number(result.candidate.user.telegramId), CANDIDATE_TEXTS["admin-staging-passed-activation"](firstName), { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("✨ Активувати профіль", `start_onboarding_data`) });
         await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-ans-success-notified"]).catch(() => { });
         await ScreenManager.renderScreen(ctx, `✅ <b>Success!</b>\n\n<b>${shortenName(result.candidate.fullName || "Candidate")}</b> passed!`, new InlineKeyboard().text("📋 Ready for Schedule", "admin_staging_ready"));
     }

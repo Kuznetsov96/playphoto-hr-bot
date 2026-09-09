@@ -61,10 +61,6 @@ candidateCityMenu.dynamic(async (ctx, range) => {
         });
         if ((i + 1) % 2 === 0) range.row();
     });
-    range.row().text(CANDIDATE_TEXTS["candidate-btn-city-other"], async (ctx) => {
-        ctx.session.step = "screening_other_city";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-ask-other-city-name"], undefined, { pushToStack: true });
-    });
     range.row().text("⬅️ Назад", (ctx) => ScreenManager.goBack(ctx, CANDIDATE_TEXTS["ask-name"]));
 });
 
@@ -92,7 +88,7 @@ candidateLocationMenu.dynamic(async (ctx, range) => {
     });
 
     if (selectedIds.size > 0) {
-        range.row().text("✨ Готово", async (ctx) => {
+        range.row().text("Готово", async (ctx) => {
             const primaryLocId = Array.from(selectedIds)[0];
             const targetLoc = await locationRepository.findById(primaryLocId!);
             const { handleLocationSelected } = await import("../modules/candidate/handlers/index.js");

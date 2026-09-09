@@ -21,7 +21,6 @@ import { staffService } from '../modules/staff/services/index.js';
 import { candidateService } from '../modules/candidate/services/index.js';
 import { broadcastService } from '../services/broadcast.js';
 import { hrService } from '../services/hr-service.js';
-import { mentorService } from '../services/mentor-service.js';
 import { audit } from './audit-logger.js';
 import type { Cradle } from '../types/di.js';
 
@@ -54,8 +53,7 @@ export function configureContainer() {
         staffService: asValue(staffService),
         candidateService: asValue(candidateService),
         broadcastService: asValue(broadcastService),
-        hrService: asValue(hrService),
-        mentorService: asValue(mentorService)
+        hrService: asValue(hrService)
     });
 
     return container;

@@ -663,7 +663,7 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         const text = `Зараз графік оновлюється. ⏳\n\nЯ надішлю тобі сповіщення, як тільки з'являться нові вікна для запису на коротку зустріч-знайомство. ✨`;
         const kb = new InlineKeyboard()
             .text("🔔 Повідомити мене", "training_no_slots_fit")
-            .text("👨‍🏫 Написати наставнику", "contact_mentor");
+            .text("💬 Написати нам", "contact_hr");
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
 
@@ -750,18 +750,14 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
                 result.googleMeetLink
             );
         } else {
-            confirmationText = CANDIDATE_TEXTS["discovery-confirm"](
-                MENTOR_NAME,
-                startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }),
-                startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
-            );
+            confirmationText = CANDIDATE_TEXTS["candidate-training-scheduled"]("знайомство", startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }), startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }), result.googleMeetLink);
         }
 
         const kb = new InlineKeyboard()
             .text("🗓️ Змінити час", buildSignedCallback("rt", slotId)).row()
             .text("✖️ Скасувати запис", buildSignedCallback("ct", slotId)).danger().row()
             .text("🚫 Не планую продовжувати", buildSignedCallback("wm", slotId)).danger().row()
-            .text("👨‍🏫 Написати наставнику", "contact_mentor");
+            .text("💬 Написати нам", "contact_hr");
 
         await cleanupMessages(ctx);
         const msg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
@@ -1037,7 +1033,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             }
 
             return ctx.editMessageText("Зараз вільних слотів немає. Наставник скоро запропонує тобі зручний час! 🌸✨", {
-                reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
             });
         }
 

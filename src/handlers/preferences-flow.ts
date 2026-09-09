@@ -693,14 +693,14 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                 }
 
                 // Always show "schedule is being prepared" screen
-                const KNOWLEDGE_BASE_LINK = "https://t.me/+hC9UDoSZb3hiZjFi";
-                const welcomeText = `💫 <b>Вітаємо в команді PlayPhoto!</b>\n\n` +
-                    `⏳ <b>Твій графік готується</b>\n\n` +
-                    `Ми вже створюємо для тебе перші робочі зміни! ✨\n` +
-                    `Як тільки графік буде готовий, ти отримаєш сповіщення тут.\n\n` +
-                    `📖 Поки що можеш ознайомитися з нашою <a href="${KNOWLEDGE_BASE_LINK}">Базою знань</a>, щоб підготуватися до першого дня.`;
+                const welcomeText = `<b>Вітаємо в команді PlayPhoto</b>\n\n` +
+                    `⏳ <b>Ваш графік готується</b>\n\n` +
+                    `Ми вже створюємо для вас перші робочі зміни.\n` +
+                    `Щойно графік буде готовий, ви отримаєте сповіщення тут.`;
+                // Персональне посилання приходить окремим повідомленням від
+                // accessService — зашивати спільний інвайт сюди не можна.
                 const welcomeKb = new InlineKeyboard()
-                    .url("📖 База знань", KNOWLEDGE_BASE_LINK).row()
+                    .text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link").row()
                     .text("🚀 Відкрити Хаб", "staff_hub_nav");
                 await ScreenManager.renderScreen(ctx, welcomeText, welcomeKb, { forceNew: true });
             } else {

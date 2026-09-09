@@ -72,49 +72,69 @@ describe("AccessService", () => {
         }));
     });
 
-    it("allows candidates throughout discovery and training access window", async () => {
+    /**
+     * Доступ до закритого каналу — тільки після найму. Раніше сюди входило 13
+     * статусів, і людина, що зависла в навчанні, лишалася в каналі назавжди.
+     */
+    it("не пускає кандидаток до найму — на жодному етапі навчання", async () => {
         const service = new AccessService();
 
         for (const status of [
             CandidateStatus.ACCEPTED,
+            CandidateStatus.MENTOR_MANUAL,
             CandidateStatus.DISCOVERY_SCHEDULED,
             CandidateStatus.DISCOVERY_COMPLETED,
             CandidateStatus.TRAINING_SCHEDULED,
             CandidateStatus.TRAINING_COMPLETED,
-        ]) {
-            mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
-                role: Role.CANDIDATE,
-                candidate: { status },
-            });
-
-            await expect(service.isAuthorized(123n)).resolves.toBe(true);
-        }
-    });
-
-    it("allows candidates awaiting first shift or already hired before staff promotion catches up", async () => {
-        const service = new AccessService();
-
-        for (const status of [
+            CandidateStatus.NDA,
+            CandidateStatus.KNOWLEDGE_TEST,
+            CandidateStatus.STAGING_SETUP,
+            CandidateStatus.STAGING_ACTIVE,
+            CandidateStatus.READY_FOR_HIRE,
             CandidateStatus.AWAITING_FIRST_SHIFT,
-            CandidateStatus.HIRED,
         ]) {
             mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
                 role: Role.CANDIDATE,
                 candidate: { status },
             });
 
-            await expect(service.isAuthorized(123n)).resolves.toBe(true);
+            await expect(service.isAuthorized(123n)).resolves.toBe(false);
         }
     });
 
-    it("authorizes candidates in the manual mentor track", async () => {
+    /**
+     * Проміжок між наймом і появою staffProfile: роль ще CANDIDATE, але людину
+     * вже найняли. Без цього вона втратила б доступ саме в момент виходу.
+     */
+    it("пускає HIRED, поки роль ще не встигла стати STAFF", async () => {
         const service = new AccessService();
         mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
             role: Role.CANDIDATE,
-            candidate: { status: CandidateStatus.MENTOR_MANUAL },
+            candidate: { status: CandidateStatus.HIRED },
         });
 
         await expect(service.isAuthorized(123n)).resolves.toBe(true);
+    });
+
+    /** Працевлаштовані захищені роллю, а не списком статусів кандидатки. */
+    it("пускає активну співробітницю незалежно від статусів кандидатки", async () => {
+        const service = new AccessService();
+        mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
+            role: Role.STAFF,
+            staffProfile: { isActive: true },
+        });
+
+        await expect(service.isAuthorized(123n)).resolves.toBe(true);
+    });
+
+    it("не пускає звільнену співробітницю", async () => {
+        const service = new AccessService();
+        mocks.findWithProfilesByTelegramId.mockResolvedValueOnce({
+            role: Role.STAFF,
+            staffProfile: { isActive: false },
+        });
+
+        await expect(service.isAuthorized(123n)).resolves.toBe(false);
     });
 
     it("clears existing protected chat bans before creating a valid one-time invite", async () => {

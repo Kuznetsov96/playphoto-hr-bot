@@ -327,19 +327,6 @@ export const hrService = {
         return safeFindCandidatesByStatus(CandidateStatus.AWAITING_FIRST_SHIFT, { user: true, location: true }, { statusChangedAt: 'asc' });
     },
 
-    async pingNDA(api: any, candId: string) {
-        const cand = await candidateRepository.findById(candId);
-        if (!cand) return;
-        const { NDA_LINK } = await import("../config.js");
-        const firstName = extractFirstName(cand.fullName || "");
-        const kb = new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id));
-        try {
-            await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["nda-reminder"](firstName, NDA_LINK), { parse_mode: "HTML", reply_markup: kb });
-        } catch (e: any) {
-            if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
-            else throw e;
-        }
-    },
 
     async pingTest(api: any, candId: string) {
         const cand = await candidateRepository.findById(candId);
@@ -1154,91 +1141,6 @@ export const hrService = {
         return interviewRepository.deleteSession(sessionId);
     },
 
-    async sendStagingNotifications(api: any, candId: string) {
-        const { shortenName, extractFirstName } = await import("../utils/string-utils.js");
-        const candRecord = await prisma.candidate.findUnique({
-            where: { id: candId },
-            include: { user: true, location: true, firstShiftPartner: { include: { user: true } } }
-        });
-
-        if (!candRecord || !candRecord.location || !candRecord.firstShiftDate) {
-            logger.error({ candId }, "Cannot send staging notifications: missing base data");
-            return { error: "Missing location or shift date" };
-        }
-
-        // --- SMART PARTNER LOOKUP ---
-        let member = candRecord.firstShiftPartner as any;
-        if (!member) {
-            logger.warn({ candId }, "Cannot send staging notifications: partner missing");
-            return { error: "Partner not assigned" };
-        }
-
-        const dateStr = new Date(candRecord.firstShiftDate).toLocaleDateString('uk-UA');
-        const stagingTime = candRecord.firstShiftTime || "15:00-17:00";
-        const stagingLoc = candRecord.location;
-
-        let candidateNotified = false;
-        let partnerNotified = false;
-        const candName = shortenName(candRecord.fullName || "Кандидатка");
-        const partnerName = shortenName(member.fullName);
-
-        // Notify candidate (UA, Apple Style)
-        try {
-            let locText = `📍 <b>${stagingLoc?.name || '—'}</b>`;
-            if (stagingLoc?.address) locText += `\n🏠 Адреса: <b>${stagingLoc.address}</b>`;
-            if (stagingLoc?.googleMapsLink) locText += `\n🗺️ <a href="${stagingLoc.googleMapsLink}">Переглянути на картах</a>`;
-
-            const firstName = extractFirstName(candRecord.fullName || "");
-            const partnerShortName = shortenName(member.fullName);
-            const partnerUser = (member as any).user;
-            const partnerUsername = partnerUser?.username;
-
-            const candMsg = CANDIDATE_TEXTS["admin-staging-confirmation"](firstName, locText, dateStr, stagingTime, partnerShortName);
-
-            const kb = new InlineKeyboard();
-            if (partnerUsername) kb.url("💬 Написати напарнику", `https://t.me/${partnerUsername}`).row();
-            else if (partnerUser?.telegramId) kb.url("💬 Написати напарнику", `tg://user?id=${partnerUser.telegramId}`).row();
-
-            kb.text("❌ Не зможу прийти", buildSignedCallback("cstg", candId)).row();
-            kb.text("👨‍💼 Написати Адміну", "contact_hr");
-
-            await api.sendMessage(Number(candRecord.user.telegramId), candMsg, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
-            candidateNotified = true;
-        } catch (e) { logger.error({ err: e }, "Failed to notify candidate about staging"); }
-
-        // Notify partner photographer (UA, Apple Style)
-        try {
-            const partnerUser = (member as any).user;
-            if (partnerUser?.telegramId) {
-                const candShortName = shortenName(candRecord.fullName || "Кандидатка");
-                const candUsername = candRecord.user.username;
-
-                const partnerMsg = `🤝 <b>Довіряємо тобі роль наставника!</b>\n\n` +
-                    `Ти — серце нашої команди для нової дівчини. Твій досвід допоможе їй закохатися в роботу так само, як ми. 🤍\n\n` +
-                    `👤 <b>${candShortName}</b>\n` +
-                    `📍 <b>${stagingLoc?.name || '—'}</b>\n` +
-                    `🗓 <b>${dateStr} • ${stagingTime}</b>\n\n` +
-                    `Зустрінь її на локації, покажи техніку та наші фішки. Твій приклад — найкраще навчання! 📸`;
-
-                const partnerKb = new InlineKeyboard();
-                if (candUsername) partnerKb.url("💬 Написати стажерці", `https://t.me/${candUsername}`);
-                else partnerKb.url("💬 Написати стажерці", `tg://user?id=${candRecord.user.telegramId}`);
-
-                await api.sendMessage(Number(partnerUser.telegramId), partnerMsg, { parse_mode: "HTML", reply_markup: partnerKb });
-                partnerNotified = true;
-            }
-        } catch (e) { logger.error({ err: e }, "Failed to notify partner about staging"); }
-
-        // Update candidate status
-        await candidateRepository.update(candId, {
-            status: CandidateStatus.STAGING_ACTIVE,
-            currentStep: FunnelStep.FIRST_SHIFT,
-            notificationSent: true,
-            stagingNotifiedAt: new Date(),
-        });
-
-        return { candidateNotified, partnerNotified, candName, partnerName };
-    },
 
     async notifyWaitlist(api: any, city?: string) {
         const candidates = await candidateRepository.findByStatusWithUser(
