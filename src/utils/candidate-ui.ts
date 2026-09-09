@@ -147,7 +147,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
                 text += "\n\n⏳ Наставник скоро надішле тобі матеріали для підготовки.";
             }
-            kb.text("👨‍🏫 Написати наставнику", "contact_mentor");
+            kb.text("💬 Написати нам", "contact_hr");
             break;
         }
 
@@ -165,14 +165,14 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             kb.text("🗓️ Перенести", buildSignedCallback("rt", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
                 .text("✖️ Скасувати запис", buildSignedCallback("ct", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).danger().row()
                 .text("🚫 Не планую продовжувати", buildSignedCallback("wm", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).danger().row()
-                .text("👨‍🏫 Написати наставнику", "contact_mentor");
+                .text("💬 Написати нам", "contact_hr");
             break;
         }
 
         case CandidateStatus.DISCOVERY_COMPLETED:
             text = CANDIDATE_TEXTS["candidate-discovery-completed"](firstName) + jobDetails;
             text += "\n\n⏳ Наступний крок готує наставник. Ми скоро надішлемо тобі доступні варіанти навчання.";
-            kb.text("👨‍🏫 Написати наставнику", "contact_mentor");
+            kb.text("💬 Написати нам", "contact_hr");
             break;
 
         case CandidateStatus.TRAINING_COMPLETED:
@@ -184,18 +184,18 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 text = CANDIDATE_TEXTS["nda-confirmed-start-onboarding"] + jobDetails;
                 kb.text("📝 Почати оформлення", "start_onboarding_data").row();
             }
-            kb.text("👨‍🏫 Написати наставнику", "contact_mentor");
+            kb.text("💬 Написати нам", "contact_hr");
             break;
 
         case CandidateStatus.KNOWLEDGE_TEST:
             text = CANDIDATE_TEXTS["candidate-training-completed-quiz"](firstName) + jobDetails;
-            kb.text("👨‍🏫 Написати наставнику", "contact_mentor");
+            kb.text("💬 Написати нам", "contact_hr");
             break;
 
         case CandidateStatus.READY_FOR_HIRE: {
             text = CANDIDATE_TEXTS["status-card-onboarding-pending"] + jobDetails;
             kb.text("📝 Почати оформлення", "start_onboarding_data").row();
-            kb.text("👨‍💼 Написати Адміну", "contact_hr");
+            kb.text("💬 Написати нам", "contact_hr");
             break;
         }
 
@@ -213,7 +213,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             } else {
                 text = CANDIDATE_TEXTS["status-card-staging-pending"] + jobDetails;
             }
-            kb.text("👨‍💼 Написати Адміну", "contact_hr");
+            kb.text("💬 Написати нам", "contact_hr");
             break;
         }
 

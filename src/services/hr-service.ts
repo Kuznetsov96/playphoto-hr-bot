@@ -1200,7 +1200,7 @@ export const hrService = {
             else if (partnerUser?.telegramId) kb.url("💬 Написати напарнику", `tg://user?id=${partnerUser.telegramId}`).row();
 
             kb.text("❌ Не зможу прийти", buildSignedCallback("cstg", candId)).row();
-            kb.text("👨‍💼 Написати Адміну", "contact_hr");
+            kb.text("💬 Написати нам", "contact_hr");
 
             await api.sendMessage(Number(candRecord.user.telegramId), candMsg, { parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true } });
             candidateNotified = true;

@@ -97,7 +97,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 CANDIDATE_TEXTS["worker-offer-accepted"](firstName, mentorDisplay),
                                 {
                                     parse_mode: "HTML",
-                                    reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                                    reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
                                 }
                             );
                             await candidateRepository.update(cand.id, {
@@ -339,7 +339,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-6h"](firstName, typeText, timeStr, mentorDisplay),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded6h: true, lastReminderMsgId: msg.message_id });
@@ -425,7 +425,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                         CANDIDATE_TEXTS["worker-training-reminder-10m"](typeText, timeStr, mentorDisplay, meetLink || undefined),
                         {
                             parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard().text("👨‍🏫 Написати наставнику", "contact_mentor")
+                            reply_markup: new InlineKeyboard().text("💬 Написати нам", "contact_hr")
                         }
                     );
                     await trainingRepository.updateSlot(slot.id, { reminded10m: true });

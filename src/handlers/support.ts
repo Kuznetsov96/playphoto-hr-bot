@@ -149,10 +149,6 @@ supportHandlers.callbackQuery("contact_hr", async (ctx) => {
     await startSupportFlow(ctx, "HR");
 });
 
-supportHandlers.callbackQuery("contact_mentor", async (ctx) => {
-    await startSupportFlow(ctx, "MENTOR");
-});
-
 supportHandlers.callbackQuery("contact_recovery", async (ctx) => {
     await startSupportFlow(ctx, "RECOVERY");
 });
