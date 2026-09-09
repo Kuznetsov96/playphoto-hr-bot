@@ -52,6 +52,23 @@ export const ADMIN_TEXTS = {
   "admin-btn-main-menu": `🏠 Menu`,
   "admin-btn-back-to-cities": `⬅️ Back to Cities`,
   "admin-msg-success": `✅ Message sent and logged.`,
+  /**
+   * Доставка і маршрут — різні факти, і повідомляються окремо.
+   *
+   * Раніше екран показував одне «✅ Message sent and logged» у трьох різних
+   * випадках: створено нову гілку, дописано в наявну і не створено взагалі.
+   * Тому збій створення теми виглядав як успіх, і про нього дізнавалися
+   * випадково — через тижні.
+   */
+  "admin-msg-delivered": `✅ Delivered to the user.`,
+  "admin-msg-route-created": `🧵 New support topic created.`,
+  "admin-msg-route-reused": `🧵 Added to the <b>existing</b> support topic — no new one was created. If you expected a fresh thread, close the old one first.`,
+  "admin-msg-route-skipped-onboarding": (status: string) =>
+    `⚠️ <b>No support topic.</b> This person still has a candidate record in <code>${status}</code>, so the bot treats them as an onboarding candidate and writes directly. If they are already staff, that candidate record is stale.`,
+  "admin-msg-route-skipped-permission": `⚠️ <b>No support topic:</b> your role cannot open support topics. Delivered directly.`,
+  "admin-msg-route-skipped-no-chat": `⚠️ <b>No support topic:</b> SUPPORT_CHAT_ID is not configured. Delivered directly.`,
+  "admin-msg-route-failed": (error: string) =>
+    `❌ <b>Support topic was NOT created.</b>\nReason: <code>${error}</code>\n\nThe message reached the user, but there is no thread for the reply. Check that the bot is an admin in the support chat with the “Manage Topics” right.`,
   "admin-msg-err-delivery": `❌ Send Error: bot blocked or invalid ID.`,
   "admin-msg-route-active-conversation": `<i>The message will use the active support conversation, or create a new topic if none exists.</i>`,
   "admin-msg-route-direct": `<i>Message will be delivered directly to the user.</i>`,
