@@ -5,11 +5,18 @@ import logger from "../core/logger.js";
 
 /**
  * Command sets for different roles (Apple Style: Precise and Relevant)
+ *
+ * «/mentor · 🎓 Mentor Hub» прибрано 09.09.2026. Роль ментора вилучена з
+ * бота разом із меню й сервісом, а обробника саме цієї команди не існувало
+ * вже давно — у списку лишався пункт, тап по якому не робив нічого взагалі.
+ *
+ * MENTOR_LEAD лишається в enum AdminRole і в config/roles.ts (права
+ * MENTOR_MENU, MENTOR_TRAINING), тож набір для нього теж лишається — але
+ * веде туди ж, куди й у решти адмінів: у /start.
  */
 const COMMAND_SETS: Record<string, BotCommand[]> = {
     SUPER_ADMIN: [
         { command: "start", description: "🏠 Admin Panel" },
-        { command: "mentor", description: "🎓 Mentor Hub" },
     ],
     CO_FOUNDER: [
         { command: "start", description: "🏠 Admin Panel" },
@@ -18,7 +25,7 @@ const COMMAND_SETS: Record<string, BotCommand[]> = {
         { command: "start", description: "🏠 Admin Panel" },
     ],
     MENTOR_LEAD: [
-        { command: "start", description: "🎓 Mentor Hub" },
+        { command: "start", description: "🏠 Admin Panel" },
     ],
     STAFF: [
         { command: "start", description: "📸 Мій кабінет" },
