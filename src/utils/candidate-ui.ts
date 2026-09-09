@@ -2,7 +2,7 @@ import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { CandidateStatus } from "@prisma/client";
 import { ScreenManager } from "./screen-manager.js";
-import { HR_NAME, MENTOR_NAME, KNOWLEDGE_BASE_LINK } from "../config.js";
+import { HR_NAME, MENTOR_NAME } from "../config.js";
 import { extractFirstName } from "./string-utils.js";
 import { getLocationDetails } from "./location-data-helper.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -155,7 +155,6 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         case CandidateStatus.OFFLINE_STAGING:
         case CandidateStatus.AWAITING_FIRST_SHIFT: {
             text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
-            if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
             kb.text("💬 Написати нам", "contact_hr");
             break;
         }
