@@ -490,9 +490,11 @@ export async function startWorker(bot: Bot<MyContext>) {
                     const isDiscovery = !!slot.candidateDiscovery;
                     const typeText = isDiscovery ? "discovery" : "training";
 
-                    const name = cand.fullName || "Candidate";
+                    // Ім'я й місто йдуть у HTML-повідомлення менторові: без
+                    // екранування «<» в імені ламає sendMessage цілком.
+                    const name = escapeHtml(cand.fullName || "Candidate");
                     const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink;
-                    const city = cand.city || "Not specified";
+                    const city = escapeHtml(cand.city || "Not specified");
 
                     const minsLeft = Math.max(1, Math.round((slot.startTime.getTime() - nowTime) / 60000));
                     let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in ${minsLeft} min!</b>\n\n` +
@@ -579,7 +581,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                     if (MENTORS.length > 0) {
                         const isDiscovery = !!slot.candidateDiscovery;
                         const typeName = isDiscovery ? "Discovery" : "Training";
-                        const name = cand.fullName || "Candidate";
+                        const name = escapeHtml(cand.fullName || "Candidate");
 
                         const text = `🏁 <b>${typeName} Completed: ${name}</b>\n\n` +
                             `Slot time is up. Please mark the result (Passed/Failed) in the candidate's profile so they can proceed to the next stage! 🎓🌸`;
