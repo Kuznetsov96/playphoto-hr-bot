@@ -17,7 +17,6 @@ import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { bot } from "../core/bot.js";
 import { shouldRouteMessageToPrivateRoleFlows } from "../utils/message-routing.js";
-import { onboardingHandlers } from "./onboarding-handler.js";
 import { accessHandlers } from "./access.js";
 import { broadcastService } from "../services/broadcast.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -28,7 +27,6 @@ import { leadsHandlers } from "./leads.js";
 import { blockShield } from "../middleware/block-shield.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { ScreenManager } from "../utils/screen-manager.js";
-import { canConfirmNDA } from "../utils/final-step-flow.js";
 import { escapeHtml } from "./admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import prisma from "../db/core.js";
@@ -125,70 +123,9 @@ handlers.use(leadsHandlers);
 
 // 1. Core System Handlers (High Priority: Support, HR, Admin, Mentor, Commands)
 handlers.use(commandHandlers);
-// onboardingHandlers moved to guest context for better support routing priority
 handlers.use(accessHandlers); // ✅ NEW: Handle join requests & membership sync
 
 // Handle NDA resend from Status Card
-handlers.on("callback_query:data", async (ctx, next) => {
-    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "snda" });
-    if (!candId) return next();
-    await ctx.answerCallbackQuery("Відправляю NDA... 📋");
-
-    const { candidateRepository } = await import("../repositories/candidate-repository.js");
-    const cand = await candidateRepository.findById(candId);
-    if (!cand) return;
-    if (Number(cand.user.telegramId) !== ctx.from?.id) {
-        await ctx.answerCallbackQuery("Ця дія недоступна.");
-        return;
-    }
-
-    const firstName = escapeHtml(extractFirstName(cand.fullName || ""));
-    const { NDA_LINK } = await import("../config.js");
-    const { InlineKeyboard } = await import("grammy");
-
-    // Update ndaSentAt to reset reminder timer if they re-request
-    await candidateRepository.update(candId, { ndaSentAt: new Date() });
-
-    await ctx.reply(
-        `Ось твоє посилання на <b>Договір про нерозголошення (NDA)</b>, ${firstName}: 📋\n\n` +
-        `🔗 <a href="${NDA_LINK}">Договір NDA PlayPhoto</a>\n\n` +
-        `Прочитай його уважно і натисни кнопку нижче, коли будеш готова продовжувати! ✨`,
-        {
-            parse_mode: "HTML",
-            reply_markup: new InlineKeyboard().text("✅ Ознайомлена з NDA", buildSignedCallback("cnda", cand.id))
-        }
-    );
-});
-
-// Handle NDA confirmation
-handlers.on("callback_query:data", async (ctx, next) => {
-    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cnda" });
-    if (!candId) return next();
-    const { candidateRepository } = await import("../repositories/candidate-repository.js");
-    const { CandidateStatus } = await import("@prisma/client");
-    const cand = await candidateRepository.findById(candId);
-    if (!cand || Number(cand.user.telegramId) !== ctx.from?.id) {
-        await ctx.answerCallbackQuery("Ця дія недоступна.");
-        return;
-    }
-    if (!canConfirmNDA(cand)) {
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-        await ctx.answerCallbackQuery("Цей крок уже пройдено ✨");
-        return;
-    }
-    await candidateRepository.update(candId, {
-        ndaConfirmedAt: new Date(),
-        status: CandidateStatus.READY_FOR_HIRE
-    });
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-    await ctx.answerCallbackQuery("Дякуємо! NDA підтверджено. ✅");
-    await ScreenManager.renderScreen(
-        ctx,
-        CANDIDATE_TEXTS["nda-confirmed-start-onboarding"],
-        new InlineKeyboard().text("📝 Почати оформлення", "start_onboarding_data")
-    );
-});
-
 // Schedule change notification acknowledgement.
 // This records that the photographer saw the change and how they answered. It
 // never cancels or reassigns a shift: the backend owns the schedule, and a
@@ -721,7 +658,6 @@ guestApp.on("message", async (ctx, next) => {
     if (handled) return;
     await next();
 });
-guestApp.use(onboardingHandlers);
 guestApp.use(bookingHandlers);
 guestApp.use(candidateModule);
 const guestMiddleware = guestApp.middleware();

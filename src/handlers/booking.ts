@@ -750,11 +750,7 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
                 result.googleMeetLink
             );
         } else {
-            confirmationText = CANDIDATE_TEXTS["discovery-confirm"](
-                MENTOR_NAME,
-                startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }),
-                startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })
-            );
+            confirmationText = CANDIDATE_TEXTS["candidate-training-scheduled"]("знайомство", startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }), startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }), result.googleMeetLink);
         }
 
         const kb = new InlineKeyboard()

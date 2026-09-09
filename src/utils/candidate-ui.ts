@@ -138,81 +138,24 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             break;
         }
 
-        case CandidateStatus.ACCEPTED: {
-            if (candidate.materialsSent) {
-                text = CANDIDATE_TEXTS["candidate-accepted-materials"](firstName) + jobDetails;
-                kb.text("🗓️ Обрати час знайомства", "start_training_scheduling").row();
-                if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
-            } else {
-                text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
-                text += "\n\n⏳ Наставник скоро надішле тобі матеріали для підготовки.";
-            }
-            kb.text("💬 Написати нам", "contact_hr");
-            break;
-        }
-
+        // Після апруву співбесіди бот кандидатку більше нікуди не веде:
+        // знайомство, навчання, NDA й оформлення ведуться у вебзастосунку,
+        // а власник спілкується з нею особисто. Лишається один екран статусу
+        // й можливість написати — повідомлення дзеркалиться в її анкету.
+        case CandidateStatus.ACCEPTED:
         case CandidateStatus.DISCOVERY_SCHEDULED:
-        case CandidateStatus.TRAINING_SCHEDULED: {
-            const slot = status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlot : candidate.trainingSlot;
-            const typeLabel = status === CandidateStatus.DISCOVERY_SCHEDULED ? "знайомство" : "навчання";
-            if (slot) {
-                const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
-                const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
-                text = CANDIDATE_TEXTS["candidate-training-scheduled"](typeLabel, dateStr, timeStr, candidate.trainingMeetLink);
-            } else text = `🌸 <b>${firstName}</b>, ти записана на ${typeLabel}. Очікуй деталей! ✨`;
-            text += jobDetails;
-            if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
-            kb.text("🗓️ Перенести", buildSignedCallback("rt", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).row()
-                .text("✖️ Скасувати запис", buildSignedCallback("ct", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).danger().row()
-                .text("🚫 Не планую продовжувати", buildSignedCallback("wm", (status === CandidateStatus.DISCOVERY_SCHEDULED ? candidate.discoverySlotId : candidate.trainingSlotId) || "none")).danger().row()
-                .text("💬 Написати нам", "contact_hr");
-            break;
-        }
-
         case CandidateStatus.DISCOVERY_COMPLETED:
-            text = CANDIDATE_TEXTS["candidate-discovery-completed"](firstName) + jobDetails;
-            text += "\n\n⏳ Наступний крок готує наставник. Ми скоро надішлемо тобі доступні варіанти навчання.";
-            kb.text("💬 Написати нам", "contact_hr");
-            break;
-
+        case CandidateStatus.TRAINING_SCHEDULED:
         case CandidateStatus.TRAINING_COMPLETED:
         case CandidateStatus.NDA:
-            if (!candidate.ndaConfirmedAt) {
-                text = CANDIDATE_TEXTS["candidate-training-completed-nda"](firstName) + jobDetails;
-                kb.text("📝 Ознайомитись з NDA", buildSignedCallback("snda", candidate.id)).row();
-            } else {
-                text = CANDIDATE_TEXTS["nda-confirmed-start-onboarding"] + jobDetails;
-                kb.text("📝 Почати оформлення", "start_onboarding_data").row();
-            }
-            kb.text("💬 Написати нам", "contact_hr");
-            break;
-
         case CandidateStatus.KNOWLEDGE_TEST:
-            text = CANDIDATE_TEXTS["candidate-training-completed-quiz"](firstName) + jobDetails;
-            kb.text("💬 Написати нам", "contact_hr");
-            break;
-
-        case CandidateStatus.READY_FOR_HIRE: {
-            text = CANDIDATE_TEXTS["status-card-onboarding-pending"] + jobDetails;
-            kb.text("📝 Почати оформлення", "start_onboarding_data").row();
-            kb.text("💬 Написати нам", "contact_hr");
-            break;
-        }
-
+        case CandidateStatus.READY_FOR_HIRE:
         case CandidateStatus.STAGING_SETUP:
         case CandidateStatus.STAGING_ACTIVE:
         case CandidateStatus.OFFLINE_STAGING:
         case CandidateStatus.AWAITING_FIRST_SHIFT: {
-            const dateStr = candidate.firstShiftDate ? new Date(candidate.firstShiftDate).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' }) : "";
-            const timeStr = candidate.firstShiftTime || "";
-            if (dateStr && (timeStr || status === CandidateStatus.STAGING_ACTIVE)) {
-                text = CANDIDATE_TEXTS["status-card-staging-confirmed"](candidate.location?.name || candidate.city || "нашій локації", dateStr, timeStr || "15:00-17:00");
-                if (candidate.location?.googleMapsLink) text += `\n🗺️ <a href="${candidate.location.googleMapsLink}">На мапі</a>`;
-                if (candidate.firstShiftPartner?.user?.username) kb.url("💬 Написати напарнику", `https://t.me/${candidate.firstShiftPartner.user.username}`).row();
-                kb.text("❌ Не зможу прийти", buildSignedCallback("cstg", candidate.id)).row();
-            } else {
-                text = CANDIDATE_TEXTS["status-card-staging-pending"] + jobDetails;
-            }
+            text = CANDIDATE_TEXTS["candidate-accepted-welcome"](firstName) + jobDetails;
+            if (KNOWLEDGE_BASE_LINK) kb.url("📚 База знань", KNOWLEDGE_BASE_LINK).row();
             kb.text("💬 Написати нам", "contact_hr");
             break;
         }
