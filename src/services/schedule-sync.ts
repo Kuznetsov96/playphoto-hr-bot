@@ -1025,6 +1025,32 @@ export class ScheduleSyncService {
                     const hireReady = cand && (cand.status === "AWAITING_FIRST_SHIFT" || cand.status === "HIRED");
                     if (hireReady) {
                         await userRepository.update(user.id, { role: "STAFF" });
+
+                        // Анкета теж має дійти до HIRED. Раніше цей шлях
+                        // піднімав роль до STAFF і лишав анкету на
+                        // AWAITING_FIRST_SHIFT — у людини одночасно були
+                        // профіль співробітника і «кандидат на онбордингу».
+                        // Через це адмінське повідомлення такому фотографу
+                        // йшло напряму, без гілки в підтримці, куди він міг
+                        // би відповісти (див. shouldUseDirectCandidateMessage).
+                        if (cand.status !== "HIRED") {
+                            await candidateRepository.update(cand.id, {
+                                status: "HIRED",
+                                notificationSent: true,
+                            });
+                            logBusinessEvent({
+                                event: "candidate.hired_on_schedule_sync",
+                                userId: user.id,
+                                telegramId,
+                                actorType: "system",
+                                actorRole: "system",
+                                stage: cand.status,
+                                result: "success",
+                                module: "schedule-sync",
+                                operation: "syncTeam",
+                                safeContext: { fullName },
+                            });
+                        }
                     } else {
                         logger.warn({ fullName, status: cand?.status }, "Staff role promotion skipped because candidate is still in funnel");
                         logBusinessEvent({
