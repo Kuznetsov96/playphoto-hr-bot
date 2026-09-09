@@ -700,7 +700,7 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
                 // Персональне посилання приходить окремим повідомленням від
                 // accessService — зашивати спільний інвайт сюди не можна.
                 const welcomeKb = new InlineKeyboard()
-                    .text("🔗 Посилання на канал команди", "staff_channel_link").row()
+                    .text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link").row()
                     .text("🚀 Відкрити Хаб", "staff_hub_nav");
                 await ScreenManager.renderScreen(ctx, welcomeText, welcomeKb, { forceNew: true });
             } else {

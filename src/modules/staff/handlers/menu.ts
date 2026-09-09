@@ -172,7 +172,7 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
 
         // Посилання на канал більше не зашите в код: воно персональне й
         // одноразове, тож видається через accessService під конкретну людину.
-        kb.text("🔗 Посилання на канал команди", "staff_channel_link").row()
+        kb.text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link").row()
             .text("💬 Підтримка", "open_support_dialog");
 
         text = `💫 <b>Вітаємо в команді PlayPhoto!</b>\n\n${shiftLine}`;
@@ -708,19 +708,18 @@ staffHandlers.callbackQuery("staff_channel_link", async (ctx) => {
 
     if (!link) {
         await ctx.answerCallbackQuery({
-            text: "Доступ до каналу відкривається після оформлення. Напишіть нам, якщо це помилка.",
+            text: STAFF_TEXTS["channel-invite-denied"],
             show_alert: true,
         });
         return;
     }
 
     await ctx.answerCallbackQuery();
-    await ctx.reply(
-        "Ось ваше персональне посилання на канал команди — воно одноразове й лише для вас.",
-        {
-            reply_markup: { inline_keyboard: [[{ text: "Приєднатися до каналу", url: link }]] },
+    await ctx.reply(STAFF_TEXTS["channel-invite-link"], {
+        reply_markup: {
+            inline_keyboard: [[{ text: STAFF_TEXTS["channel-btn-join"], url: link }]],
         },
-    );
+    });
 });
 
 staffHandlers.callbackQuery("open_support_dialog", async (ctx) => {

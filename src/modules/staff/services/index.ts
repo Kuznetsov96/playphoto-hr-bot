@@ -150,7 +150,7 @@ export class StaffService {
         // видає accessService під конкретну людину.
         const kb = new InlineKeyboard()
             .text("🚀 Відкрити Хаб", "staff_hub_nav").row()
-            .text("🔗 Посилання на канал команди", "staff_channel_link");
+            .text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link");
 
         // Always mark as processed to prevent repeated attempts on every sync
         await staffRepository.update(staff.id, { isWelcomeSent: true });

@@ -154,10 +154,7 @@ export class StaffRepository {
                 await accessService.syncUserAccess(profile.user.telegramId);
                 // Повернення до роботи — запрошення теж приходить саме.
                 if (profile.isActive) {
-                    await accessService.sendChannelInvite(
-                        profile.user.telegramId,
-                        "<b>З поверненням</b>",
-                    );
+                    await accessService.sendChannelInvite(profile.user.telegramId, "back");
                 }
             } catch (e) {}
         }

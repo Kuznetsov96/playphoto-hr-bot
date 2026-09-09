@@ -362,18 +362,22 @@ export class AccessService {
      * Мовчазний: якщо права немає, бот заблокований або канал недоступний —
      * просто нічого не шле. Найм не має падати через сповіщення.
      */
-    async sendChannelInvite(telegramId: bigint, greeting?: string): Promise<boolean> {
+    async sendChannelInvite(telegramId: bigint, kind: "welcome" | "back" = "welcome"): Promise<boolean> {
         try {
             const link = await this.createInviteLink(telegramId);
             if (!link) return false;
 
+            const { STAFF_TEXTS } = await import("../constants/staff-texts.js");
             const api = this.getSafeApi();
-            const text = (greeting ?? "<b>Ласкаво просимо в команду</b>") +
-                `\n\nОсь ваше персональне посилання на канал команди — воно одноразове й лише для вас.`;
+            const text = kind === "back"
+                ? STAFF_TEXTS["channel-invite-back"]
+                : STAFF_TEXTS["channel-invite-welcome"];
 
             await api.sendMessage(Number(telegramId), text, {
                 parse_mode: "HTML",
-                reply_markup: { inline_keyboard: [[{ text: "Приєднатися до каналу", url: link }]] },
+                reply_markup: {
+                    inline_keyboard: [[{ text: STAFF_TEXTS["channel-btn-join"], url: link }]],
+                },
             });
             return true;
         } catch (e) {
