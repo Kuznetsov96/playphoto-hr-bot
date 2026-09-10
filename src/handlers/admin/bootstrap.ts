@@ -23,14 +23,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     } = await import("./system.js");
 
     const { 
-        adminOpsMenu: recruitmentOpsMenu, adminOfflineStagingMenu, adminCandidateMenu,
-        adminFirstShiftStaffMenu, adminStagingSelectLocMenu, adminHiringNeedsMenu, adminHiringNeedDetailsMenu,
-        adminHiringNeedCitiesMenu, adminHiringNeedLocationsMenu
-    } = await import("./recruitment.js");
-
-    const { hrFinalStepMenu, hrCandidateUnifiedMenu, hrChangeLocationUnifiedMenu, hrStagingConfirmMenu } = await import("../../menus/hr.js");
-
-    const { 
         adminBroadcastHubMenu, adminBroadcastListMenu, adminBroadcastArchiveMenu, adminBroadcastManageMenu 
     } = await import("./broadcast.js");
 
@@ -64,19 +56,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     bot.use(locationAdminMenu);
     bot.use(selectCityForLocMenu);
     
-    bot.use(recruitmentOpsMenu);
-    bot.use(adminOfflineStagingMenu);
-    bot.use(adminCandidateMenu);
-    bot.use(adminFirstShiftStaffMenu);
-    bot.use(adminStagingSelectLocMenu);
-    bot.use(adminHiringNeedsMenu);
-    bot.use(adminHiringNeedDetailsMenu);
-    bot.use(adminHiringNeedCitiesMenu);
-    bot.use(adminHiringNeedLocationsMenu);
-    bot.use(hrFinalStepMenu);
-    bot.use(hrCandidateUnifiedMenu);
-    bot.use(hrChangeLocationUnifiedMenu);
-    bot.use(hrStagingConfirmMenu);
 
     bot.use(adminBroadcastHubMenu);
     bot.use(adminBroadcastListMenu);
@@ -109,15 +88,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     menuRegistry.register(locationAdminMenu);
     menuRegistry.register(selectCityForLocMenu);
     
-    menuRegistry.register(recruitmentOpsMenu);
-    menuRegistry.register(adminOfflineStagingMenu);
-    menuRegistry.register(adminCandidateMenu);
-    menuRegistry.register(adminFirstShiftStaffMenu);
-    menuRegistry.register(adminStagingSelectLocMenu);
-    menuRegistry.register(adminHiringNeedsMenu);
-    menuRegistry.register(adminHiringNeedDetailsMenu);
-    menuRegistry.register(adminHiringNeedCitiesMenu);
-    menuRegistry.register(adminHiringNeedLocationsMenu);
     
     menuRegistry.register(adminBroadcastHubMenu);
     menuRegistry.register(adminBroadcastListMenu);
@@ -141,21 +111,9 @@ export async function registerAdminMenusHierarchy(bot: any) {
     adminTeamCityMenu.register(adminTeamLocMenu);
     adminTeamLocMenu.register(adminLocationStaffMenu);
 
-    adminMenu.register(recruitmentOpsMenu);
-    recruitmentOpsMenu.register(cityAdminMenu);
+    // HR-хаб прибрано 10.09.2026: підбір ведеться у вебзастосунку.
+    // cityAdminMenu лишається — його відкриває меню System.
     cityAdminMenu.register(locationAdminMenu);
-    recruitmentOpsMenu.register(adminCandidateMenu);
-    adminCandidateMenu.register(adminFirstShiftStaffMenu);
-    adminCandidateMenu.register(adminStagingSelectLocMenu);
-    recruitmentOpsMenu.register(adminOfflineStagingMenu);
-    recruitmentOpsMenu.register(adminHiringNeedsMenu);
-    adminHiringNeedsMenu.register(adminHiringNeedDetailsMenu);
-    adminHiringNeedsMenu.register(adminHiringNeedCitiesMenu);
-    adminHiringNeedCitiesMenu.register(adminHiringNeedLocationsMenu);
-    recruitmentOpsMenu.register(hrFinalStepMenu);
-    // hrCandidateUnifiedMenu already registers its own children
-    // (hrChangeLocationUnifiedMenu, hrStagingConfirmMenu) inside menus/hr.ts.
-    hrFinalStepMenu.register(hrCandidateUnifiedMenu);
 
     adminMenu.register(adminFinanceMenu);
     adminFinanceMenu.register(adminStatementFopMenu);

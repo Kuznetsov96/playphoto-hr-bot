@@ -2,7 +2,6 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { buildAnsweredOfferText } from "../services/replacement-offer-answered-text.js";
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
-import { hrHandlers } from "./hr.js";
 import { adminMenu, adminHandlers } from "./admin/index.js";
 import { commandHandlers } from "./commands.js";
 import { bookingHandlers } from "./booking.js";
@@ -604,7 +603,6 @@ handlers.use(supportHandlers);
 handlers.use(staffSupportHandlers); // ✅ NEW: Allow Admins to use ticket buttons (ticket_assign, etc.)
 
 // Replaced global registration with conditional one in routing below
-// handlers.use(hrHandlers);
 // handlers.use(adminHandlers); 
 
 // 2. Global Group Message Handler (Admin answering in Support Chat)
@@ -634,7 +632,6 @@ handlers.callbackQuery("staff_hub_nav", async (ctx) => {
 
 const adminApp = new Composer<MyContext>();
 adminApp.use(slotBuilderHandlers);
-adminApp.use(hrHandlers);
 adminApp.use(adminHandlers);
 const adminMiddleware = adminApp.middleware();
 

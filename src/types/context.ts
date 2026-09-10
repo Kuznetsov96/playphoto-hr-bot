@@ -10,7 +10,7 @@ export type CtxDbUser = User & {
 
 // CI Trigger Comment
 export type MenuId =
-    | "admin-main" | "admin-team-ops" | "admin-ops" | "admin-finance" | "admin-system" | "admin-stats"
+    | "admin-main" | "admin-team-ops" | "admin-finance" | "admin-system" | "admin-stats"
     | "mentor-hub-menu" | "candidate-root"
     | string;
 
