@@ -13,7 +13,6 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 
 // Import handlers only (Menus will be registered via bootstrap.ts)
 import { financeHandlers } from "./finance.js";
-import { adminRecruitmentHandlers } from "./recruitment.js";
 import { adminSystemHandlers } from "./system.js";
 import { adminBroadcastHandlers, handleBroadcastContent } from "./broadcast.js";
 import { adminSearchHandlers, startAdminStaffSearch, startAdminSearch, startAdminMessageFlow } from "./search.js";
@@ -43,11 +42,6 @@ adminMenu.dynamic(async (ctx, range) => {
         });
     }
 
-    if (hasPermission(userRole as any, 'HR_MENU')) {
-        range.text(ADMIN_TEXTS["admin-main-hr"], async (ctx) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-hr"], "admin-ops", { pushToStack: true });
-        });
-    }
     range.row();
 
     if (hasPermission(userRole as any, 'FINANCE_AUDIT')) {
@@ -82,7 +76,6 @@ adminHandlers.use(adminBroadcastHandlers);
 adminHandlers.use(taskFlowHandlers);
 adminHandlers.use(tasksHandlers);
 adminHandlers.use(taskCreationHandlers);
-adminHandlers.use(adminRecruitmentHandlers);
 adminHandlers.use(adminSystemHandlers);
 adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);

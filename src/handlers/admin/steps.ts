@@ -24,21 +24,13 @@ adminStepHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) 
         step.startsWith("set_needed_") ||
         step.startsWith("edit_city_") ||
         step === "sync_other_sheet" ||
-        step.startsWith("set_first_shift_date_") ||
-        step.startsWith("set_custom_staging_time_");
+        step === "sync_other_sheet";
 
     if (!isAdminStep || step === "idle") return next();
     if ((step.startsWith("set_needed_") || step.startsWith("edit_city_")) && ctx.session.adminFlow !== "LOCATIONS") {
         return next();
     }
     if (step === "sync_other_sheet" && ctx.session.adminFlow !== "SCHEDULE") {
-        return next();
-    }
-    if (
-        (step.startsWith("set_first_shift_date_") || step.startsWith("set_custom_staging_time_")) &&
-        ctx.session.adminFlow &&
-        ctx.session.adminFlow !== "RECRUITMENT"
-    ) {
         return next();
     }
 
@@ -62,12 +54,6 @@ adminStepHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) 
         if (step.startsWith("edit_city_")) {
             return await handleEditCity(ctx, step, text);
         }
-        if (step.startsWith("set_first_shift_date_")) {
-            return await handleSetFirstShiftDate(ctx, step, text);
-        }
-        if (step.startsWith("set_custom_staging_time_")) {
-            return await handleSetCustomStagingTime(ctx, step, text);
-        }
         if (step === "sync_other_sheet") {
             return await handleSyncOtherSheet(ctx, text);
         }
@@ -88,7 +74,8 @@ async function handleSetNeeded(ctx: MyContext, step: string, text: string) {
     if (isNaN(count)) return ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-prompt-number"], undefined);
 
     await locationRepository.update(locId, { neededCount: count });
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-need-updated"]({ count }), "admin-ops");
+    // HR-хаб прибрано, тож повертаємось у меню локацій — саме звідти цей крок і запускають.
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-need-updated"]({ count }), "admin-locations");
     ctx.session.step = "idle";
     if (ctx.session.adminFlow === "LOCATIONS") {
         delete ctx.session.adminFlow;
@@ -110,46 +97,7 @@ async function handleEditCity(ctx: MyContext, step: string, text: string) {
     await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-cities", { forceNew: true });
 }
 
-async function handleSetFirstShiftDate(ctx: MyContext, step: string, text: string) {
-    const candId = step.replace("set_first_shift_date_", "");
-    const parts = text.trim().split('.');
 
-    if (parts.length !== 3) {
-        return ScreenManager.renderScreen(ctx, "⚠️ Invalid format. Use DD.MM.YYYY (e.g. 25.02.2026)", undefined);
-    }
-
-    const [d, m, y] = parts.map(Number);
-    const shiftDate = createKyivDate(y!, m! - 1, d!, 12, 0);
-
-    if (isNaN(shiftDate.getTime())) {
-        return ScreenManager.renderScreen(ctx, "⚠️ Failed to parse date.", undefined);
-    }
-
-    // Auto-set default time if not already set
-    const currentCand = await candidateRepository.findById(candId);
-    const updateData: any = { firstShiftDate: shiftDate };
-    if (!currentCand?.firstShiftTime) {
-        updateData.firstShiftTime = "15:00-17:00";
-    }
-    await candidateRepository.update(candId, updateData);
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-date-saved"]({ date: shiftDate.toLocaleDateString('uk-UA') }), "admin-ops");
-    ctx.session.step = "idle";
-    if (ctx.session.adminFlow === "RECRUITMENT") {
-        delete ctx.session.adminFlow;
-    }
-}
-
-async function handleSetCustomStagingTime(ctx: MyContext, step: string, text: string) {
-    const candId = step.replace("set_custom_staging_time_", "");
-    const stagingTime = text.trim();
-
-    ctx.session.stagingTime = stagingTime;
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-time-updated"]({ time: stagingTime }), "admin-candidate");
-    ctx.session.step = "idle";
-    if (ctx.session.adminFlow === "RECRUITMENT") {
-        delete ctx.session.adminFlow;
-    }
-}
 
 async function handleSyncOtherSheet(ctx: MyContext, text: string) {
     const sheetName = text.trim();

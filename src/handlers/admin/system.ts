@@ -86,7 +86,8 @@ cityAdminMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-ops-back"], async (ctx: MyContext) => {
-        await ScreenManager.goBack(ctx, "🛠️ HR Operations", "admin-ops");
+        // HR-хаб прибрано — повертаємось у меню System, звідки список міст і відкривають.
+        await ScreenManager.goBack(ctx, "⚙️ <b>System</b>", "admin-system");
     });
 });
 
