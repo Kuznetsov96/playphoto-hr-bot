@@ -5,7 +5,7 @@ import logger from '../core/logger.js';
 import { broadcastService } from '../services/broadcast.js';
 import { Bot } from 'grammy';
 import process from 'process';
-import { sendDailyIncomeReport, sendMorningAuditReport } from '../services/finance-report.js';
+import { sendDailyIncomeReport } from '../services/finance-report.js';
 import { preferencesService } from '../services/preferences-service.js';
 import { logBusinessEvent } from '../core/log-events.js';
 
@@ -59,8 +59,6 @@ export const startWorkers = () => {
         try {
             if (job.name === 'send-daily-income') {
                 await sendDailyIncomeReport(bot as any, job.data.chatId);
-            } else if (job.name === 'send-morning-audit') {
-                await sendMorningAuditReport(bot as any, new Date(job.data.dateIso));
             }
             logger.info({ jobId: job.id }, '✅ Report job done');
         } catch (e) {

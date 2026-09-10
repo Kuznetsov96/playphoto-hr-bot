@@ -1,11 +1,10 @@
 import { techCashService } from "./finance/tech-cash.js";
 import { ddsService } from "./finance/dds.js";
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { FINANCE_IDS, FOP_DISPLAY_NAMES, FOP_WALLET_CODES } from "../config.js";
 import { ddsArticleCode, writeDdsEntry } from "./finance/dds-writer.js";
 import { locationRepository } from "../repositories/location-repository.js";
-import { monobankService } from "./finance/monobank.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { getReportableCashAmount, shouldExcludeTerminalFromFopAccounting } from "./finance/location-rules.js";
@@ -331,110 +330,13 @@ export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolea
     }
 }
 
-
-export async function sendMorningAuditReport(bot: Bot<MyContext>, date: Date) {
-    try {
-        const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
-        logBusinessEvent({
-            event: "finance.morning_audit_report.started",
-            actorType: "system",
-            actorRole: "system",
-            result: "started",
-            module: "finance-report",
-            operation: "sendMorningAuditReport",
-            safeContext: {
-                reportDate: dateStr,
-            },
-        });
-        const incomes = await techCashService.getIncomeForDate(dateStr);
-
-        // 0. Pre-warm Monobank caches in parallel with DDS sync
-        const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
-            logger.warn({ err: e, reportDate: dateStr }, "Finance audit pre-warm failed; using on-demand fetch")
-        );
-
-        // 1. "Catch-up" Sync: Ensure late-night reports from yesterday are in DDS
-        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e, reportDate: dateStr }, "Finance catch-up DDS sync failed"));
-
-        // Wait for pre-warm to finish (likely already done while DDS sync was running)
-        await preWarmPromise;
-
-        // 2. Run Audit
-        const { reconciliationService } = await import("./finance/reconciliation-service.js");
-        const res = await reconciliationService.runReconciliation(dateStr, undefined, undefined, incomes);
-
-        if (!res.success) {
-            logger.error({ reportDate: dateStr, message: res.message }, "Finance morning audit reconciliation failed");
-            logBusinessEvent({
-                event: "finance.morning_audit_report.completed",
-                level: "error",
-                actorType: "system",
-                actorRole: "system",
-                result: "failed",
-                reasonCode: "RECONCILIATION_FAILED",
-                module: "finance-report",
-                operation: "sendMorningAuditReport",
-                safeContext: {
-                    reportDate: dateStr,
-                    message: res.message,
-                },
-            });
-            return;
-        }
-
-        const reports = reconciliationService.formatReconReport(dateStr, res);
-
-        // Morning audit → SUPER_ADMIN only
-        const SUPER_ADMIN_ID = FINANCE_IDS[0];
-        if (SUPER_ADMIN_ID) {
-            const keyboard = new InlineKeyboard();
-            if (reports.actions?.length) {
-                keyboard.text(`⚙️ Audit Actions (${reports.actions.length})`, `admin_audit_actions:${dateStr}`);
-                // Store actions in Redis (survives restarts, 24h TTL)
-                const { redis } = await import("../core/redis.js");
-                await redis.set(`audit:actions:${dateStr}`, JSON.stringify(reports.actions), 'EX', 86400);
-            }
-
-            const options: any = { parse_mode: "HTML" };
-            if (reports.actions?.length) options.reply_markup = keyboard;
-
-            await bot.api.sendMessage(SUPER_ADMIN_ID, reports.main, options);
-
-            for (const chunk of reports.unrecognized) {
-                await bot.api.sendMessage(SUPER_ADMIN_ID, chunk, { parse_mode: "HTML" });
-            }
-            for (const chunk of reports.expenses) {
-                await bot.api.sendMessage(SUPER_ADMIN_ID, chunk, { parse_mode: "HTML" });
-            }
-        }
-        logBusinessEvent({
-            event: "finance.morning_audit_report.completed",
-            actorType: "system",
-            actorRole: "system",
-            result: "success",
-            module: "finance-report",
-            operation: "sendMorningAuditReport",
-            safeContext: {
-                reportDate: dateStr,
-                hasActions: Boolean(reports.actions?.length),
-                unrecognizedChunks: reports.unrecognized.length,
-                expenseChunks: reports.expenses.length,
-            },
-        });
-    } catch (e) {
-        logger.error({ err: e }, "Finance morning audit report failed");
-        logBusinessEvent({
-            event: "finance.morning_audit_report.completed",
-            level: "error",
-            actorType: "system",
-            actorRole: "system",
-            result: "failed",
-            module: "finance-report",
-            operation: "sendMorningAuditReport",
-            error: e,
-        });
-    }
-}
+/**
+ * sendMorningAuditReport прибрано 10.09.2026 рішенням власника разом з усім
+ * модулем фінансової реконсиляції (звірка TechCash / Monobank / ДДС).
+ *
+ * Вечірній звіт про доходи (sendDailyIncomeReport) лишається — його прибирати
+ * не просили.
+ */
 
 import { reportsQueue } from "../core/queue.js";
 
@@ -462,17 +364,10 @@ export async function startDailyReportLoop(_bot: Bot<MyContext>) {
         try {
             // Stable BullMQ job IDs provide cross-process deduplication and allow a
             // delayed startup to catch up any time after the intended schedule.
-            if (minuteOfDay >= 8 * 60) {
-                const yesterday = new Date(localDate);
-                yesterday.setDate(yesterday.getDate() - 1);
-
-                await reportsQueue.add("send-morning-audit", { dateIso: yesterday.toISOString() }, {
-                    jobId: `finance-audit-${todayKey}`,
-                    attempts: 3,
-                    backoff: { type: "exponential", delay: 10_000 },
-                });
-            }
-
+            //
+            // Ранкова звірка (`send-morning-audit` о 08:00) прибрана 10.09.2026
+            // разом з усім модулем реконсиляції — лишився тільки вечірній звіт
+            // про доходи.
             if (minuteOfDay >= 21 * 60 + 40) {
                 await reportsQueue.add("send-daily-income", { chatId: null }, {
                     jobId: `finance-income-${todayKey}`,
