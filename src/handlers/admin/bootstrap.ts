@@ -15,7 +15,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
     } = await import("./team.js");
 
     const { 
-        adminFinanceMenu, adminStatementFopMenu, adminAuditMenu, adminDdsSyncMenu 
+        adminFinanceMenu, adminStatementFopMenu, adminDdsSyncMenu 
     } = await import("./finance.js");
 
     const { 
@@ -58,7 +58,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     
     bot.use(adminFinanceMenu);
     bot.use(adminStatementFopMenu);
-    bot.use(adminAuditMenu);
     bot.use(adminDdsSyncMenu);
     
     bot.use(adminSystemMenu);
@@ -105,7 +104,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
 
     menuRegistry.register(adminFinanceMenu);
     menuRegistry.register(adminStatementFopMenu);
-    menuRegistry.register(adminAuditMenu);
     menuRegistry.register(adminDdsSyncMenu);
     
     menuRegistry.register(adminSystemMenu);
@@ -164,7 +162,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     adminMenu.register(adminFinanceMenu);
     adminFinanceMenu.register(adminDdsSyncMenu);
     adminFinanceMenu.register(adminStatementFopMenu);
-    adminFinanceMenu.register(adminAuditMenu);
     
     adminMenu.register(adminSystemMenu);
     adminMenu.register(adminBroadcastHubMenu);

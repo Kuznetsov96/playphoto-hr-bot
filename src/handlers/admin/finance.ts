@@ -3,7 +3,6 @@ import { Menu } from "@grammyjs/menu";
 import type { MyContext } from "../../types/context.js";
 import { MONO_FOP_IBANS } from "../../config.js";
 import { hasFinanceAccess } from "./permissions.js";
-import { monobankService } from "../../services/finance/monobank.js";
 import { dashboardService } from "../../services/finance/dashboard-service.js";
 import { redis } from "../../core/redis.js";
 import { locationRepository } from "../../repositories/location-repository.js";
@@ -12,8 +11,6 @@ import { getUserAdminRole } from "../../middleware/role-check.js";
 import { startExpenseFlow } from "./finance-expense.js";
 import { staffService } from "../../modules/staff/services/index.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
-import { techCashService } from "../../services/finance/tech-cash.js";
-import { userRepository } from "../../repositories/user-repository.js";
 import logger from "../../core/logger.js";
 
 // --- 3. FINANCE MENU ---
@@ -74,9 +71,6 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
         range.row().text(ADMIN_TEXTS["admin-finance-sync-dds"], async (ctx) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-finance-sync-dds"], "admin-dds-sync", { pushToStack: true });
         });
-        range.row().text(ADMIN_TEXTS["admin-finance-audit"], async (ctx) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-finance-audit"], "admin-audit", { pushToStack: true });
-        });
         range.row().text(ADMIN_TEXTS["admin-finance-statement"], async (ctx) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-finance-statement"], "admin-statement-fop", { pushToStack: true });
         });
@@ -117,209 +111,8 @@ financeHandlers.callbackQuery("admin_finance_back", async (ctx) => {
     }
 });
 
-financeHandlers.callbackQuery(/^admin_audit_actions:(.+)$/, async (ctx) => {
-    const dateStr = ctx.match![1]!;
-    const raw = await redis.get(`audit:actions:${dateStr}`);
-    const actions = raw ? JSON.parse(raw) : null;
-
-    if (!actions?.length) return ctx.answerCallbackQuery("No pending actions. ✨").catch(() => { });
-
-    await ctx.answerCallbackQuery().catch(() => { });
-
-    let text = `⚙️ <b>AUDIT ACTION CENTER • ${dateStr}</b>\n\n`;
-    const keyboard = new InlineKeyboard();
-    actions.forEach((action: any, idx: number) => {
-        const askedIcon = action.asked ? ' 💬' : '';
-        const locName = action.location;
-        keyboard.text(`${idx + 1}. 📍 ${locName}${askedIcon}`, `audit_action_detail:${idx}:${dateStr}`).row();
-    });
-    keyboard.text(`⬅️ Back`, `admin_finance_back`);
-
-    try {
-        await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: keyboard });
-    } catch (e) {
-        await ctx.reply(text, { parse_mode: "HTML", reply_markup: keyboard });
-    }
-});
-
-financeHandlers.callbackQuery(/^audit_action_detail:(\d+):(.+)$/, async (ctx) => {
-    const idx = parseInt(ctx.match![1]!);
-    const dateStr = ctx.match![2]!;
-    const raw = await redis.get(`audit:actions:${dateStr}`);
-    const actions = raw ? JSON.parse(raw) : null;
-    const action = actions?.[idx];
-
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
-
-    await ctx.answerCallbackQuery().catch(() => { });
-
-    const typeIcon = action.type === 'Terminal' ? '💳' : '💵';
-    const diffStr = action.diff.toLocaleString('uk-UA');
-    const staffStr = action.staffNames?.length ? `\n👤 Staff: <b>${action.staffNames.join(', ')}</b>` : '';
-
-    let text = `⚙️ <b>ACTION DETAILS</b>\n\n`;
-    text += `📍 <b>${action.location}</b>\n`;
-    text += `${typeIcon} Mismatch: <b>${diffStr} UAH</b>${staffStr}\n\n`;
-
-    if (action.asked) {
-        const askedAt = action.askedAt ? new Date(action.askedAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }) : '';
-        text += `💬 <i>Already asked at ${askedAt}</i>\n\n`;
-    }
-
-    const keyboard = new InlineKeyboard();
-    const askLabel = action.asked ? `❓ Re-ask Staff` : `❓ Ask Staff`;
-    keyboard.text(askLabel, `audit_ask_select:${idx}:${dateStr}`);
-    keyboard.text(`✅ Resolve`, `audit_resolve:${idx}:${dateStr}`).row();
-    keyboard.text(`⬅️ Back`, `admin_audit_actions:${dateStr}`);
-
-    await ctx.editMessageText(text, { parse_mode: "HTML", reply_markup: keyboard });
-});
-
-financeHandlers.callbackQuery(/^audit_ask_select:(\d+):(.+)$/, async (ctx) => {
-    const idx = parseInt(ctx.match![1]!);
-    const dateStr = ctx.match![2]!;
-    const raw = await redis.get(`audit:actions:${dateStr}`);
-    const actions = raw ? JSON.parse(raw) : null;
-    const action = actions?.[idx];
-
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
-
-    if (action.staffIds.length === 1) {
-        // Direct send — inline the send logic instead of broken .execute()
-        return await sendAuditAsk(ctx, idx, dateStr, action.staffIds[0], action);
-    }
-
-    await ctx.answerCallbackQuery().catch(() => { });
-    const keyboard = new InlineKeyboard();
-    action.staffIds.forEach((sid: string, sIdx: number) => {
-        const name = action.staffNames?.[sIdx] || "Staff";
-        keyboard.text(name, `audit_ask_send:${idx}:${dateStr}:${sid}`);
-    });
-    keyboard.text("👥 All", `audit_ask_send:${idx}:${dateStr}:all`).row();
-    keyboard.text("⬅️ Back", `audit_action_detail:${idx}:${dateStr}`);
-
-    await ctx.editMessageText(`Whom to ask about 📍 <b>${action.location}</b>?`, {
-        parse_mode: "HTML",
-        reply_markup: keyboard
-    });
-});
-
-async function sendAuditAsk(ctx: MyContext, idx: number, dateStr: string, targetStaffId: string, action: any) {
-    const { staffIds, staffNames, location, type, diff } = action;
-    const typeIcon = type === 'Terminal' ? '💳' : '💵';
-    const message = ADMIN_TEXTS["admin-audit-ask-msg"]({
-        location,
-        date: dateStr,
-        type: `${typeIcon} ${type}`,
-        diff: Math.abs(diff).toLocaleString('uk-UA')
-    });
-
-    const sendIds = targetStaffId === 'all' ? staffIds : [targetStaffId];
-    let success = 0;
-
-    for (const sid of sendIds) {
-        try {
-            await ctx.api.sendMessage(Number(sid), message, { parse_mode: "HTML" });
-            
-            // --- NEW: Create Support Thread Immediately ---
-            const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(sid));
-            if (user) {
-                const { supportService } = await import("../../services/support-service.js");
-                const { supportRepository } = await import("../../repositories/support-repository.js");
-                const { TEAM_CHATS } = await import("../../config.js");
-                
-                const ticket = await supportService.createTicket(user.id, `Finance Audit Context: ${message}`);
-                
-                const topicTitle = `❓ Audit: ${location.split('(')[0]?.trim() || 'Unknown'}`;
-                const topic = await ctx.api.createForumTopic(TEAM_CHATS.SUPPORT, topicTitle);
-                
-                await supportRepository.updateTicket(ticket.id, { topicId: topic.message_thread_id });
-                
-                // Add first message to topic for context
-                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, 
-                    `💰 <b>Finance Audit Required</b>\n` +
-                    `👤 Staff: ${user.staffProfile?.fullName || 'Staff'}\n` +
-                    `📍 Location: ${location}\n` +
-                    `📅 Date: ${dateStr}\n\n` +
-                    `<i>Request sent to photographer. Awaiting reply...</i>`, 
-                    {
-                        message_thread_id: topic.message_thread_id,
-                        parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().text("🔒 Resolve & Close", `admin_close_ticket_${ticket.id}`).danger()
-                    }
-                );
-            }
-            // ----------------------------------------------
-            
-            success++;
-        } catch (e) { logger.error({ err: e, sid }, "Finance audit request delivery failed"); }
-    }
-
-    if (success > 0) {
-        const targetName = targetStaffId === 'all' ? 'Everyone' : (staffNames?.[staffIds.indexOf(targetStaffId)] || 'Staff');
-        await ctx.answerCallbackQuery(`✅ Sent to ${targetName}`).catch(() => { });
-
-        // Mark as asked in Redis
-        const currentActionsRaw = await redis.get(`audit:actions:${dateStr}`);
-        const currentActions = currentActionsRaw ? JSON.parse(currentActionsRaw) : [];
-        if (currentActions[idx]) {
-            currentActions[idx].asked = true;
-            currentActions[idx].askedAt = Date.now();
-            await redis.set(`audit:actions:${dateStr}`, JSON.stringify(currentActions), 'EX', 86400);
-        }
-
-        await ctx.reply(ADMIN_TEXTS["admin-audit-ask-success"]({
-            names: targetName,
-            location,
-            date: dateStr
-        }), {
-            parse_mode: "HTML",
-            reply_markup: new InlineKeyboard().text("⬅️ Back to Action", `audit_action_detail:${idx}:${dateStr}`)
-        });
-    } else {
-        await ctx.answerCallbackQuery("❌ Send failed.").catch(() => { });
-    }
-}
-
-financeHandlers.callbackQuery(/^audit_ask_send:(\d+):([^:]+):(.+)$/, async (ctx) => {
-    const idx = parseInt(ctx.match![1]!);
-    const dateStr = ctx.match![2]!;
-    const targetStaffId = ctx.match![3]!;
-
-    const raw = await redis.get(`audit:actions:${dateStr}`);
-    const actions = raw ? JSON.parse(raw) : null;
-    const action = actions?.[idx];
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
-
-    await sendAuditAsk(ctx, idx, dateStr, targetStaffId, action);
-});
-
-financeHandlers.callbackQuery(/^audit_resolve:(\d+):(.+)$/, async (ctx) => {
-    const idx = parseInt(ctx.match![1]!);
-    const dateStr = ctx.match![2]!;
-    const raw = await redis.get(`audit:actions:${dateStr}`);
-    const actions = raw ? JSON.parse(raw) : null;
-    const action = actions?.[idx];
-    if (!action) return ctx.answerCallbackQuery("❌ Action expired.").catch(() => { });
-
-    // Remove resolved action and update Redis
-    actions.splice(idx, 1);
-    if (actions.length > 0) {
-        await redis.set(`audit:actions:${dateStr}`, JSON.stringify(actions), 'EX', 86400);
-    } else {
-        await redis.del(`audit:actions:${dateStr}`);
-    }
-
-    await ctx.answerCallbackQuery("✅ Resolved.").catch(() => { });
-    const keyboard = actions.length > 0 
-        ? new InlineKeyboard().text("⬅️ Back to Action Center", `admin_audit_actions:${dateStr}`)
-        : undefined;
-
-    await ctx.editMessageText(`✅ <b>Resolved:</b> ${action.location} (${action.type})`, { 
-        parse_mode: "HTML",
-        ...(keyboard ? { reply_markup: keyboard } : {})
-    });
-});
+// Екрани «Audit Actions» (розбір розбіжностей звірки) прибрані 10.09.2026
+// разом з усім модулем реконсиляції: без неї цих дій нікому створювати.
 
 async function handleDailyStatus(ctx: MyContext) {
     if (!(await hasFinanceAccess(ctx))) return;
@@ -455,120 +248,9 @@ async function generateStatement(ctx: MyContext, fopKey: string) {
     }
 }
 
-// --- 5. AUDIT MENU (Date Selection) ---
-export const adminAuditMenu = new Menu<MyContext>("admin-audit")
-    .text("📅 Today", async (ctx) => {
-        await ctx.answerCallbackQuery().catch(() => { });
-        await runAuditForDate(ctx, new Date());
-    })
-    .text("📅 Yesterday", async (ctx) => {
-        await ctx.answerCallbackQuery().catch(() => { });
-        const d = new Date();
-        d.setDate(d.getDate() - 1);
-        await runAuditForDate(ctx, d);
-    })
-    .row()
-    .text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "💰 <b>Finance & Audit</b>", "admin-finance");
-    });
-
-async function runAuditForDate(ctx: MyContext, date: Date) {
-    if (!(await hasFinanceAccess(ctx))) return;
-
-    const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
-    const statusMsg = await ctx.reply(ADMIN_TEXTS["admin-finance-audit-running"]({ date: dateStr }));
-    let incomes: any[] | undefined;
-
-    // Warm Monobank caches in parallel with DDS catch-up to avoid cold-start waits in manual audits.
-    const preWarmPromise = monobankService.preWarmForAudit(date).catch(e =>
-        logger.warn({ err: e }, "Finance manual audit pre-warm failed; continuing with on-demand fetch")
-    );
-
-    // 1. "Catch-up" Sync: Ensure DDS is up to date before auditing
-    try {
-        const { syncToDDS } = await import("../../services/finance-report.js");
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🔄 Catching up DDS for ${dateStr}...`).catch(() => { });
-        incomes = await techCashService.getIncomeForDate(dateStr);
-        await syncToDDS(dateStr, incomes).catch(e => logger.error({ err: e }, "Finance audit catch-up DDS sync failed"));
-    } catch (e) {
-        logger.error({ err: e }, "Finance pre-audit sync failed");
-    }
-
-    await ctx.api.editMessageText(
-        ctx.chat!.id,
-        statusMsg.message_id,
-        `⏳ Preparing Monobank caches for ${dateStr}...`
-    ).catch(() => { });
-
-    // Ensure pre-warm is finished (likely already done while DDS sync ran).
-    await preWarmPromise;
-
-    await ctx.api.editMessageText(
-        ctx.chat!.id,
-        statusMsg.message_id,
-        `⏳ Running full FOP audit for ${dateStr}...`
-    ).catch(() => { });
-
-    const { reconciliationService } = await import("../../services/finance/reconciliation-service.js");
-
-    // Aggregate wait statuses to prevent flickering when multiple FOPs wait
-    const waitStatuses: Record<string, string> = { general: `⏳ Running full FOP audit for ${dateStr}...` };
-    let lastUpdate = 0;
-
-    const onProgress = async (msg: string) => {
-        const fopMatch = msg.match(/\[(.*?)\]/);
-        const key = (fopMatch && fopMatch[1]) ? fopMatch[1].toUpperCase() : 'general';
-        waitStatuses[key] = msg;
-
-        const combined = Object.entries(waitStatuses)
-            .sort(([keyA], [keyB]) => {
-                if (keyA === 'general') return -1;
-                if (keyB === 'general') return 1;
-                return keyA.localeCompare(keyB);
-            })
-            .map(([_, val]) => val)
-            .filter(Boolean)
-            .join('\n\n');
-
-        const now = Date.now();
-        if (now - lastUpdate > 1500) {
-            lastUpdate = now;
-            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, combined).catch(() => { });
-        }
-    };
-
-    const res = await reconciliationService.runReconciliation(dateStr, undefined, onProgress, incomes);
-
-    if (!res.success) {
-        await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => { });
-        return ctx.reply(`❌ Error: ${res.message}`);
-    }
-
-    const reports = reconciliationService.formatReconReport(dateStr, res);
-
-    try {
-        await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => { });
-
-        let options: any = { parse_mode: "HTML" };
-        if (reports.actions && reports.actions.length > 0) {
-            options.reply_markup = new InlineKeyboard().text(`⚙️ Audit Actions (${reports.actions.length})`, `admin_audit_actions:${dateStr}`);
-            await redis.set(`audit:actions:${dateStr}`, JSON.stringify(reports.actions), 'EX', 86400);
-        }
-
-        await ctx.reply(reports.main || `No data found for ${dateStr}.`, options);
-
-        for (const chunk of reports.unrecognized) {
-            await ctx.reply(chunk, { parse_mode: "HTML" });
-        }
-
-        for (const chunk of reports.expenses) {
-            await ctx.reply(chunk, { parse_mode: "HTML" });
-        }
-    } catch (error: any) {
-        logger.error({ err: error }, "Finance audit run failed");
-        await ctx.reply(`❌ Error: ${error.message}`);
-    }
-}
+// Меню ручної звірки і runAuditForDate прибрані 10.09.2026 разом з усім
+// модулем фінансової реконсиляції (рішення власника). Синхронізація ДДС і
+// виписки лишаються — їх прибирати не просили.
 
 // --- DDS SYNC MENU (Super Admin only) ---
 export const adminDdsSyncMenu = new Menu<MyContext>("admin-dds-sync")
