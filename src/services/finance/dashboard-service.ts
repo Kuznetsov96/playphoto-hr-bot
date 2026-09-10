@@ -1,16 +1,11 @@
 import { monobankService } from "./monobank.js";
 import { techCashService } from "./tech-cash.js";
-import { ddsService } from "./dds.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import logger from "../../core/logger.js";
 
 export interface DailyStatus {
     date: string;
     balances: { name: string; balance?: number; error?: string }[];
-    syncStatus: {
-        synced: boolean;
-        count: number;
-    };
     missingReports: string[];
     auditSummary?: {
         mismatches: number;
@@ -36,21 +31,12 @@ class DashboardService {
             .filter(l => !reportKeys.has(l.name.toLowerCase()))
             .map(l => `${l.name} (${l.city})`);
 
-        // 3. Check DDS Sync Status
-        const ddsTransactions = await ddsService.getTransactionsForDates([todayStr]);
-
-        // 4. Quick Reconciliation Summary
-        // Decision: Let's stick to status.missingReports and a placeholder for mismatches.
-        // For a real mismatch count, we'd need to run a full reconciliation which is slow.
-        // We can show "Ready" or "Check" as a prompt to run the Audit.
+        // Статус синхронізації ДДС прибрано разом з контуром ДДС
+        // (10.09.2026): поле syncStatus ніде не малювалося.
 
         return {
             date: todayStr,
             balances,
-            syncStatus: {
-                synced: ddsTransactions.length > 0,
-                count: ddsTransactions.length
-            },
             missingReports,
             auditSummary: {
                 mismatches: 0,

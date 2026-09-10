@@ -8,7 +8,6 @@ import { redis } from "../../core/redis.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { InputFile, InlineKeyboard, Composer } from "grammy";
 import { getUserAdminRole } from "../../middleware/role-check.js";
-import { startExpenseFlow } from "./finance-expense.js";
 import { staffService } from "../../modules/staff/services/index.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
@@ -24,14 +23,6 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
 
     const isSuperAdmin = userRole === 'SUPER_ADMIN';
     const isCoFounder = userRole === 'CO_FOUNDER';
-
-    // PRIMARY ACTION: Add Expense (Super Admin, Co-founder, Support)
-    if (isSuperAdmin || isCoFounder || userRole === 'SUPPORT') {
-        range.text("💸 Add Expense", async (ctx) => {
-            await ctx.deleteMessage();
-            await startExpenseFlow(ctx);
-        }).row();
-    }
 
     // Hide everything else from SUPPORT
     if (userRole === 'SUPPORT') {
@@ -68,9 +59,6 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
 
     // ONLY SUPER_ADMIN sees technical re-sync options (DDS, Audit, Statements)
     if (isSuperAdmin) {
-        range.row().text(ADMIN_TEXTS["admin-finance-sync-dds"], async (ctx) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-finance-sync-dds"], "admin-dds-sync", { pushToStack: true });
-        });
         range.row().text(ADMIN_TEXTS["admin-finance-statement"], async (ctx) => {
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-finance-statement"], "admin-statement-fop", { pushToStack: true });
         });
@@ -248,44 +236,7 @@ async function generateStatement(ctx: MyContext, fopKey: string) {
     }
 }
 
-// Меню ручної звірки і runAuditForDate прибрані 10.09.2026 разом з усім
-// модулем фінансової реконсиляції (рішення власника). Синхронізація ДДС і
-// виписки лишаються — їх прибирати не просили.
+// Меню ручної звірки, runAuditForDate і синхронізація ДДС прибрані 10.09.2026
+// (рішення власника). Лишилися Monobank-баланси і виписки ФОП — вони до ДДС
+// стосунку не мають.
 
-// --- DDS SYNC MENU (Super Admin only) ---
-export const adminDdsSyncMenu = new Menu<MyContext>("admin-dds-sync")
-    .text("📅 Today", async (ctx) => {
-        await ctx.answerCallbackQuery().catch(() => { });
-        await runDdsSyncForDate(ctx, new Date());
-    })
-    .text("📅 Yesterday", async (ctx) => {
-        await ctx.answerCallbackQuery().catch(() => { });
-        const d = new Date();
-        d.setDate(d.getDate() - 1);
-        await runDdsSyncForDate(ctx, d);
-    })
-    .row()
-    .text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "💰 <b>Finance & Audit</b>", "admin-finance");
-    });
-
-async function runDdsSyncForDate(ctx: MyContext, date: Date) {
-    const dateStr = date.toLocaleDateString("uk-UA", { timeZone: "Europe/Kyiv" });
-    const statusMsg = await ctx.reply(ADMIN_TEXTS["admin-finance-syncing-dds"]({ date: dateStr }));
-
-    try {
-        const { syncToDDS } = await import("../../services/finance-report.js");
-        const result = await syncToDDS(dateStr);
-
-        await ctx.api.editMessageText(
-            ctx.chat!.id,
-            statusMsg.message_id,
-            result.success
-                ? `✅ DDS sync for ${dateStr} complete.\n${result.message}`
-                : `❌ DDS sync failed: ${result.message}`
-        ).catch(() => { });
-    } catch (e: any) {
-        logger.error({ err: e }, "Finance DDS sync command failed");
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `❌ Error: ${e.message}`).catch(() => { });
-    }
-}
