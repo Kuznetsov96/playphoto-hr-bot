@@ -13,7 +13,6 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 
 // Import handlers only (Menus will be registered via bootstrap.ts)
 import { financeHandlers } from "./finance.js";
-import { expenseHandlers } from "./finance-expense.js";
 import { adminRecruitmentHandlers } from "./recruitment.js";
 import { adminSystemHandlers } from "./system.js";
 import { adminBroadcastHandlers, handleBroadcastContent } from "./broadcast.js";
@@ -78,7 +77,6 @@ adminHandlers.use(adminStepHandlers);
 
 // 2. Sub-module handlers
 adminHandlers.use(adminSearchHandlers);
-adminHandlers.use(expenseHandlers);
 adminHandlers.use(financeHandlers);
 adminHandlers.use(adminBroadcastHandlers);
 adminHandlers.use(taskFlowHandlers);

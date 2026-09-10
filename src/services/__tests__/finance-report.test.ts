@@ -6,13 +6,6 @@ vi.mock("../finance/tech-cash.js", () => ({
     }
 }));
 
-vi.mock("../finance/dds.js", () => ({
-    ddsService: {
-        addTransaction: vi.fn(),
-        getTransactionsForDates: vi.fn(),
-        matchTransaction: vi.fn()
-    }
-}));
 
 vi.mock("../../config.js", () => ({
     FINANCE_IDS: [],
@@ -67,77 +60,8 @@ vi.mock("../aws-business-client.js", () => ({
 
 import { locationRepository } from "../../repositories/location-repository.js";
 import { awsBusinessClient } from "../aws-business-client.js";
-import { ddsService } from "../finance/dds.js";
 import { techCashService } from "../finance/tech-cash.js";
-import { calculateCashSalaryDeduction, sendDailyIncomeReport, syncToDDS } from "../finance-report.js";
-
-describe("finance report DDS sync", () => {
-    it("deducts photographer salary per staff member from cash", async () => {
-        vi.mocked(locationRepository.findAllActive).mockResolvedValue([
-            {
-                id: "loc-leoland",
-                name: "Leolend",
-                city: "Львів",
-                fopId: "KUZNETSOV",
-                hasAcquiring: false,
-                cashInEnvelope: false
-            } as any
-        ]);
-
-        const result = await syncToDDS("30.05.2026", [
-            {
-                locationId: "loc-leoland",
-                locationName: "Leolend",
-                city: "Львів",
-                totalCash: 11400,
-                totalTerminal: 0,
-                totalSalary: 3850,
-                totalIncome: 11400,
-                date: "30.05.2026",
-                photographers: ["Photographer One", "Photographer Two"]
-            }
-        ], true);
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain("Add Cash: 3700");
-        expect(result.message).not.toContain("Add Cash: 7550");
-    });
-
-    it("keeps legacy single-person deduction when no photographer names are available", () => {
-        expect(calculateCashSalaryDeduction({ totalSalary: 3850 })).toBe(3850);
-    });
-
-    it("deducts salary from 70 percent of cash for Fly Kids Kyiv", async () => {
-        vi.mocked(locationRepository.findAllActive).mockResolvedValue([
-            {
-                id: "loc-fk-kyiv",
-                name: "Fly Kids (Київ)",
-                city: "Київ",
-                fopId: "KUZNETSOV",
-                hasAcquiring: false,
-                cashInEnvelope: false
-            } as any
-        ]);
-
-        const result = await syncToDDS("14.07.2026", [
-            {
-                locationId: "loc-fk-kyiv",
-                locationName: "Fly Kids (Київ)",
-                city: "Київ",
-                totalCash: 1000,
-                totalTerminal: 0,
-                totalSalary: 250,
-                totalIncome: 1000,
-                date: "14.07.2026",
-                photographers: ["Photographer One"]
-            }
-        ], true);
-
-        expect(result.success).toBe(true);
-        expect(result.message).toContain("Add Cash: 450");
-        expect(result.message).not.toContain("Add Cash: 750");
-    });
-});
+import { sendDailyIncomeReport } from "../finance-report.js";
 
 describe("daily finance report", () => {
     it("renders the summary the webapp returned and does not feed it to the DDS sync", async () => {
@@ -180,7 +104,6 @@ describe("daily finance report", () => {
             expect.anything(),
             expect.objectContaining({ locations: expect.anything() })
         );
-        expect(vi.mocked(ddsService.addTransaction)).not.toHaveBeenCalled();
     });
 
     it("still sends a message when the webapp summary cannot be fetched", async () => {

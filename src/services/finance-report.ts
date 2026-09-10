@@ -1,9 +1,7 @@
 import { techCashService } from "./finance/tech-cash.js";
-import { ddsService } from "./finance/dds.js";
 import { Bot } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { FINANCE_IDS, FOP_DISPLAY_NAMES, FOP_WALLET_CODES } from "../config.js";
-import { ddsArticleCode, writeDdsEntry } from "./finance/dds-writer.js";
 import { locationRepository } from "../repositories/location-repository.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
@@ -101,18 +99,6 @@ export async function sendDailyIncomeReport(bot: Bot<MyContext>, chatId?: number
             },
         });
 
-        /*
-         * Проводка в ДДС осталась на данных листа и НЕ получает сводку вебаппа.
-         *
-         * Выручка локации в приложении уже проведена при закрытии смены —
-         * второй приход поверх задвоил бы деньги. `syncToDDS` читает лист сам:
-         * для локаций вне контура он отработает как раньше, а раз лист больше
-         * не наполняется, просто не найдёт строк.
-         */
-        if (!chatId || forceSync) {
-            await syncToDDS(todayStr);
-        }
-
     } catch (e) {
         logger.error({ err: e }, "Finance daily income report generation failed");
         logBusinessEvent({
@@ -161,174 +147,13 @@ export function calculateCashSalaryDeduction(income: { totalSalary?: number; pho
     return perPersonSalary * staffCount;
 }
 
-export async function syncToDDS(dateStr: string, incomes?: any[], dryRun: boolean = false) {
-    try {
-        if (!incomes) {
-            incomes = await techCashService.getIncomeForDate(dateStr);
-        }
-        if (!incomes || incomes.length === 0) return { success: false, message: "No data" };
-
-        const allLocations = await locationRepository.findAllActive();
-        const locationMap = new Map(allLocations.map(l => [l.id, l]));
-
-        let addedCount = 0;
-        let log = "";
-        logBusinessEvent({
-            event: "finance.dds_sync.started",
-            actorType: "system",
-            actorRole: "system",
-            result: "started",
-            module: "finance-report",
-            operation: "syncToDDS",
-            safeContext: {
-                date: dateStr,
-                dryRun,
-                providedIncomeCount: incomes?.length || 0,
-            },
-        });
-
-        // Pre-fetch DDS sheet ONCE instead of per-location (was 36 reads → 1)
-        const existingDds = dryRun ? [] : await ddsService.getTransactionsForDates([dateStr]);
-
-        for (const inc of incomes) {
-            try {
-                let wroteThisIteration = false;
-                const loc = locationMap.get(inc.locationId);
-                // Fallback FOPs if location not found (should not happen usually)
-                const fopTerminalId = loc?.fopId || "KUZNETSOV";
-                const fopCashId = "KUZNETSOV"; // Always Kuznetsov for cash unless specific override needed
-
-                const fopTerminalName = FOP_DISPLAY_NAMES[fopTerminalId] || FOP_DISPLAY_NAMES["KUZNETSOV"] || "Счёт ФОП Кузнецов";
-                const fopCashName = FOP_DISPLAY_NAMES[fopCashId] || "Счёт ФОП Кузнецов";
-
-                const salary = calculateCashSalaryDeduction(inc);
-                const reportableCash = getReportableCashAmount(inc.totalCash, loc);
-                const netCash = Math.max(0, Number((reportableCash - salary).toFixed(2)));
-
-                // Article Name (Category/Comment)
-                const baseName = loc?.name || inc.locationName;
-                const cityName = loc?.city || "";
-                // Avoid double city if name already contains it (simple check)
-                const fullName = baseName.toLowerCase().includes(cityName.toLowerCase()) ? baseName : `${baseName} ${cityName}`;
-
-                // 📍 CUSTOM MAPPING for Column I
-                const articleName = (loc && DDS_ARTICLE_MAPPING[loc.id]) ||
-                    DDS_ARTICLE_MAPPING[inc.locationName] ||
-                    `Выручка от продаж ${fullName}`;
-
-                if (loc?.cashInEnvelope) {
-                    if (dryRun) log += `[SKIP] Cash for ${fullName} (CashInEnvelope)\n`;
-                    else logger.debug({ location: fullName }, "Finance DDS sync skipped cash-in-envelope location");
-                } else if (netCash > 0) {
-                    const locationLabel = `${fullName} (Готівка)`;
-                    const exists = dryRun ? false : ddsService.matchTransaction(existingDds, netCash, locationLabel, dateStr);
-
-                    if (exists) {
-                        if (dryRun) log += `[SKIP] Cash for ${fullName} - already in DDS\n`;
-                        else logger.debug(`[SKIP] Cash for ${fullName} - already in DDS`);
-                    } else if (dryRun) {
-                        log += `[DRY] Add Cash: ${netCash} | FOP: ${fopCashName} | ${locationLabel} | Cat: ${articleName}\n`;
-                    } else {
-                        logger.debug({ location: fullName, amount: netCash, flow: "cash" }, "Finance DDS sync inserting transaction");
-                        await writeDdsEntry({
-                            date: dateStr,
-                            amount: netCash,
-                            fop: fopCashName,
-                            category: articleName,
-                            comment: articleName,
-                            location: locationLabel,
-                            locationCode: loc?.canonicalCode ?? null,
-                            walletCode: FOP_WALLET_CODES[fopCashId] ?? null,
-                            articleCode: ddsArticleCode(articleName),
-                            paymentMethod: "CASH",
-                        });
-                        addedCount++;
-                        wroteThisIteration = true;
-                    }
-                }
-
-                // Add Terminal Transaction
-                const terminalExcluded = shouldExcludeTerminalFromFopAccounting(loc);
-                if (terminalExcluded) {
-                    if (dryRun) log += `[SKIP] Terminal for ${fullName} - excluded from FOP accounting\n`;
-                    else logger.debug({ location: fullName, amount: inc.totalTerminal }, "Finance DDS sync skipped terminal excluded from FOP accounting");
-                } else if (inc.totalTerminal > 0) {
-                    // Apply acquiring fee if enabled (1.3%)
-                    const feeRate = loc?.hasAcquiring ? 0.013 : 0;
-                    const netTerminal = Number((inc.totalTerminal * (1 - feeRate)).toFixed(2));
-
-                    if (netTerminal > 0) {
-                        const locationLabel = `${fullName} (Термінал)`;
-                        const exists = dryRun ? false : ddsService.matchTransaction(existingDds, netTerminal, locationLabel, dateStr);
-
-                        if (exists) {
-                            if (dryRun) log += `[SKIP] Terminal for ${fullName} - already in DDS\n`;
-                            else logger.debug(`[SKIP] Terminal for ${fullName} - already in DDS`);
-                        } else if (dryRun) {
-                            log += `[DRY] Add Terminal: ${netTerminal} (Origin: ${inc.totalTerminal}) | FOP: ${fopTerminalName} | ${locationLabel} | Cat: ${articleName}\n`;
-                        } else {
-                            logger.debug({ location: fullName, amount: netTerminal, flow: "terminal" }, "Finance DDS sync inserting transaction");
-                            await writeDdsEntry({
-                                date: dateStr,
-                                amount: netTerminal,
-                                fop: fopTerminalName,
-                                category: articleName,
-                                comment: articleName,
-                                location: locationLabel,
-                                locationCode: loc?.canonicalCode ?? null,
-                                walletCode: FOP_WALLET_CODES[fopTerminalId] ?? null,
-                                articleCode: ddsArticleCode(articleName),
-                                paymentMethod: "TERMINAL",
-                            });
-                            addedCount++;
-                            wroteThisIteration = true;
-                        }
-                    }
-                }
-
-                // Rate Limit Protection (Google Sheets: 60 writes/min)
-                // Only sleep after actual writes, skip for no-ops
-                if (!dryRun && wroteThisIteration) await new Promise(resolve => setTimeout(resolve, 1500));
-            } catch (e: any) {
-                logger.error({ err: e, location: inc.locationName }, "Finance DDS sync failed for location");
-                // Continue to next location
-            }
-        }
-
-        if (dryRun) return { success: true, message: log || "No movements" };
-        logBusinessEvent({
-            event: "finance.dds_sync.completed",
-            actorType: "system",
-            actorRole: "system",
-            result: "success",
-            module: "finance-report",
-            operation: "syncToDDS",
-            safeContext: {
-                date: dateStr,
-                addedCount,
-                dryRun,
-            },
-        });
-        return { success: true, message: `Added ${addedCount} records` };
-    } catch (e: any) {
-        logger.error({ err: e, date: dateStr, dryRun }, "Finance DDS sync failed");
-        logBusinessEvent({
-            event: "finance.dds_sync.completed",
-            level: "error",
-            actorType: "system",
-            actorRole: "system",
-            result: "failed",
-            module: "finance-report",
-            operation: "syncToDDS",
-            safeContext: {
-                date: dateStr,
-                dryRun,
-            },
-            error: e,
-        });
-        return { success: false, message: e.message };
-    }
-}
+/**
+ * syncToDDS (автопроводка виручки з таблиці TechCash у ДДС) прибрано
+ * 10.09.2026 разом з усім контуром ДДС — рішення власника.
+ *
+ * Вечірній звіт про доходи лишається: він читає зведення вебзастосунку
+ * і в жодні таблиці нічого не пише.
+ */
 
 /**
  * sendMorningAuditReport прибрано 10.09.2026 рішенням власника разом з усім
