@@ -166,9 +166,9 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     let kb = new InlineKeyboard();
 
     if (isNewHireWithoutSchedule) {
-        shiftLine = `⏳ <b>Ваш графік готується</b>\n\n` +
-            `Ми вже створюємо для вас перші робочі зміни.\n` +
-            `Щойно графік буде готовий, ви отримаєте сповіщення тут.`;
+        shiftLine = `⏳ <b>Твій графік готується</b>\n\n` +
+            `Ми вже створюємо твої перші робочі зміни.\n` +
+            `Щойно графік буде готовий — напишемо тут.`;
 
         // Посилання на канал більше не зашите в код: воно персональне й
         // одноразове, тож видається через accessService під конкретну людину.
@@ -418,7 +418,7 @@ export async function showStaffLogistics(ctx: MyContext) {
     });
 
     if (parcels.length === 0) {
-        const text = `📭 <b>На вашій локації (${escapeHtml(formatShiftLocationLabel(shift.location))}) зараз немає активних відправлень.</b>`;
+        const text = `📭 <b>На твоїй локації (${escapeHtml(formatShiftLocationLabel(shift.location))}) зараз немає активних відправлень.</b>`;
         return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
     }
 
@@ -448,7 +448,7 @@ export async function showStaffLogistics(ctx: MyContext) {
         }
     });
 
-    text += `<i>Оберіть посилку, щоб підтвердити отримання.</i> ✨`;
+    text += `<i>Обери посилку, щоб підтвердити отримання.</i>`;
     kb.text("🏠 Меню", "staff_hub_nav");
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
@@ -826,7 +826,7 @@ staffHandlers.callbackQuery(/^staff_repl_accept_(.+)$/, async (ctx) => {
             result: "failure"
         }, "Replacement acceptance failed");
         await ctx.answerCallbackQuery({
-            text: "Не вдалося зберегти відповідь. Спробуйте ще раз.",
+            text: "Не вдалося зберегти відповідь. Спробуй ще раз.",
             show_alert: true
         }).catch(() => { });
     }
@@ -861,7 +861,7 @@ staffHandlers.callbackQuery(/^staff_repl_decline_(.+)$/, async (ctx) => {
             result: "failure"
         }, "Replacement decline failed");
         await ctx.answerCallbackQuery({
-            text: "Не вдалося зберегти відповідь. Спробуйте ще раз.",
+            text: "Не вдалося зберегти відповідь. Спробуй ще раз.",
             show_alert: true
         }).catch(() => { });
     }

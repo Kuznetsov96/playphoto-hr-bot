@@ -12,7 +12,7 @@ describe("buildShiftPickerView", () => {
 
         expect(view.visible).toHaveLength(13);
         expect(view.hiddenCount).toBe(0);
-        expect(view.text).toBe("Оберіть дату і локацію.");
+        expect(view.text).toBe("Обери дату і локацію.");
     });
 
     it("показує рівно стелю без згадки про зріз, коли схована жодна", () => {
@@ -20,7 +20,7 @@ describe("buildShiftPickerView", () => {
 
         expect(view.visible).toHaveLength(SHIFT_PICKER_VISIBLE_LIMIT);
         expect(view.hiddenCount).toBe(0);
-        expect(view.text).toBe("Оберіть дату і локацію.");
+        expect(view.text).toBe("Обери дату і локацію.");
     });
 
     it("ніколи не ріже мовчки: називає, скільки показано з якої кількості", () => {

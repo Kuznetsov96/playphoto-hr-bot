@@ -234,7 +234,8 @@ export class ScreenManager {
     }
 
     static async showUnknownCommand(ctx: MyContext) {
-        const text = "<b>Не розпізнав цю команду</b>\n\nСкористайтеся кнопками меню або натисніть /start, щоб повернутися в головне меню.";
+        // Кнопка веде в staff_hub_nav — це екран команди, тому звертання на «ти».
+        const text = "<b>Не розпізнав цю команду</b>\n\nСкористайся кнопками меню або натисни /start, щоб повернутися в головне меню.";
         const kb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
         await this.renderScreen(ctx, text, kb);
     }

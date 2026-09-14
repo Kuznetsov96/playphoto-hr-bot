@@ -72,7 +72,19 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         CandidateStatus.READY_FOR_HIRE
     ].includes(status);
 
-    const jobDetails = isAcceptedOrBeyond ? `\n\n<b>Ваша майбутня робота:</b>${getJobDetailsText(candidate)}` : "";
+    /**
+     * Блок деталей показується з двох боків рішення, а звертання по різні боки
+     * різне: до рішення вона кандидатка й на «ви», після — вже своя.
+     * `isAcceptedOrBeyond` для цього не годиться — воно включає
+     * INTERVIEW_COMPLETED і DECISION_PENDING, тобто «анкета ще на розгляді».
+     */
+    const isInTeam = ![
+        CandidateStatus.INTERVIEW_COMPLETED,
+        CandidateStatus.DECISION_PENDING,
+    ].includes(status);
+    const jobDetails = isAcceptedOrBeyond
+        ? `\n\n<b>${isInTeam ? "Твоя робота" : "Ваша майбутня робота"}:</b>${getJobDetailsText(candidate)}`
+        : "";
 
     switch (status) {
         case CandidateStatus.SCREENING: {
@@ -156,7 +168,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         }
 
         case CandidateStatus.HIRED:
-            text = "<b>Вітаємо!</b>\n\nВи вже частина команди PlayPhoto. Натисніть /start, щоб відкрити робочий кабінет.";
+            text = "<b>Вітаємо!</b>\n\nТи вже частина команди PlayPhoto. Натисни /start, щоб відкрити робочий кабінет.";
             break;
 
         case CandidateStatus.REJECTED:
