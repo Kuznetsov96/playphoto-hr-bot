@@ -555,6 +555,10 @@ enum ReplacementAvailabilityKind {
 model ReplacementRequest {
   id                 String                   @id @default(cuid())
   workShiftId        String?
+  /// Канонічний ідентифікатор зміни. Заповнюється поряд із workShiftId, щоб
+  /// заявка перестала залежати від локального рядка дзеркала. Nullable, доки
+  /// живуть заявки, створені до переходу.
+  scheduledShiftPublicId String?
   requesterStaffId   String?
   replacementStaffId String?
   locationId         String
