@@ -63,6 +63,7 @@ function buildShift(overrides: Partial<Record<string, unknown>> = {}) {
         date: new Date("2030-05-11T00:00:00.000Z"),
         startTime: new Date("2030-05-11T11:00:00.000Z"),
         endTime: new Date("2030-05-11T18:00:00.000Z"),
+        awsScheduledShiftPublicId: "22222222-2222-4222-8222-222222222222",
         location: { id: "location-1", name: "Dragon Park", city: "Львів", schedule: null },
         staff: {
             id: "requester-1",
@@ -98,7 +99,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
         expect(created.id).toBe("request-1");
         expect(prismaMock.replacementRequest.create).toHaveBeenCalledWith({
             data: expect.objectContaining({
-                workShiftId: "shift-1",
+                scheduledShiftPublicId: "22222222-2222-4222-8222-222222222222",
                 requesterStaffId: "requester-1",
                 awsReplacementPublicId: null,
             }),
@@ -117,7 +118,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
         const created = await new ReplacementService().startRequest(api as any, "requester-1", "shift-1");
 
         expect(startCanonicalReplacement).toHaveBeenCalledWith({
-            workShiftId: "shift-1",
+            localShiftId: "shift-1",
             requesterStaffId: "requester-1",
             requesterTelegramId: "1164289764",
             locationId: "location-1",

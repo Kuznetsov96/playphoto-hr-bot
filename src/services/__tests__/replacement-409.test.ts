@@ -21,7 +21,7 @@ const { AwsBusinessApiError } = await import("../aws-business-client.js");
 const { startCanonicalReplacement } = await import("../replacement-canonical.js");
 
 const INPUT = {
-    workShiftId: "w1",
+    localShiftId: "w1",
     requesterStaffId: "s1",
     requesterTelegramId: "1",
     locationId: "l1",

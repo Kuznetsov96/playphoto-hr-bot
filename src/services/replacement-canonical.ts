@@ -21,14 +21,14 @@ export type CanonicalReplacementResult =
  * would recreate the split-brain state this migration removes.
  */
 export async function startCanonicalReplacement(input: {
-    workShiftId: string | null;
+    localShiftId: string | null;
     requesterStaffId: string | null;
     requesterTelegramId: string;
     locationId: string;
     shiftDate: Date;
 }): Promise<CanonicalReplacementResult> {
     const resolution = await resolveCanonicalShift({
-        workShiftId: input.workShiftId,
+        localShiftId: input.localShiftId,
         requesterStaffId: input.requesterStaffId,
         locationId: input.locationId,
         shiftDate: input.shiftDate,

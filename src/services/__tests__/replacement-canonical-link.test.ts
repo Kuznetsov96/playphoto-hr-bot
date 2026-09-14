@@ -63,7 +63,7 @@ describe("startRequest — канонічний ідентифікатор зм�
         prismaMock.workShift.findMany.mockResolvedValue([]);
     });
 
-    it("пише канонічний id зміни поряд із локальним", async () => {
+    it("пише канонічний id зміни як єдине посилання на неї", async () => {
         const shift = {
             id: "shift-1",
             staffId: "staff-1",
@@ -84,7 +84,6 @@ describe("startRequest — канонічний ідентифікатор зм�
         await replacementService.startRequest(api, "staff-1", "shift-1");
 
         const created = prismaMock.replacementRequest.create.mock.calls[0]![0]!.data;
-        expect(created.workShiftId).toBe("shift-1");
         expect(created.scheduledShiftPublicId).toBe("11111111-1111-4111-8111-111111111111");
     });
 
@@ -107,7 +106,6 @@ describe("startRequest — канонічний ідентифікатор зм�
         await replacementService.startRequest(api, "staff-1", "shift-2");
 
         const created = prismaMock.replacementRequest.create.mock.calls[0]![0]!.data;
-        expect(created.workShiftId).toBe("shift-2");
         expect(created.scheduledShiftPublicId).toBeNull();
     });
 });

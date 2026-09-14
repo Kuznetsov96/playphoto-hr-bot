@@ -741,15 +741,12 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
 
     try {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-        await replacementService.startRequest(ctx.api, user.staffProfile.id, shiftId);
+        // `startRequest` повертає щойно створену заявку — перечитувати її з
+        // бази нема потреби: місто заявка зберігає власним полем.
+        const activeRequest = await replacementService.startRequest(ctx.api, user.staffProfile.id, shiftId);
 
-        const activeRequest = await (await import("../../../db/core.js")).default.replacementRequest.findFirst({
-            where: { workShiftId: shiftId, requesterStaffId: user.staffProfile.id, status: "ACTIVE" },
-            include: { location: true },
-            orderBy: { createdAt: "desc" }
-        });
         const locations = activeRequest
-            ? await (await import("../../../repositories/location-repository.js")).locationRepository.findByCity(activeRequest.location.city)
+            ? await (await import("../../../repositories/location-repository.js")).locationRepository.findByCity(activeRequest.city)
             : [];
         const text = locations.length > 1
             ? "Пошук розпочато.\nСпочатку запитаємо фотографів цієї локації."

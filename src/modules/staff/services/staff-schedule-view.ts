@@ -25,7 +25,13 @@ export async function getVisibleStaffShifts(
     let legacyScheduledShifts: Awaited<ReturnType<typeof workShiftRepository.findWithLocationForStaff>> | undefined;
     const readLegacySchedule = async () => {
         legacyScheduledShifts = await workShiftRepository.findWithLocationForStaff(staffId, since, limit);
-        return legacyScheduledShifts;
+        // Дзеркало зберігає канонічний id під власним іменем; зіставлення із
+        // заявками йде саме по ньому, тож приводимо обидва джерела графіка до
+        // одного поля `scheduledShiftPublicId`.
+        return legacyScheduledShifts.map(shift => ({
+            ...shift,
+            scheduledShiftPublicId: shift.awsScheduledShiftPublicId
+        }));
     };
 
     let scheduledShifts;

@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 
 const input = {
-    workShiftId: "work-shift-1",
+    localShiftId: "work-shift-1",
     requesterStaffId: "staff-1",
     requesterTelegramId: "12345",
     locationId: "location-1",

@@ -12,7 +12,10 @@ export type CanonicalShiftResolution =
     | { ok: false; reasonCode: CanonicalShiftResolveReason };
 
 export interface CanonicalShiftResolveInput {
-    workShiftId: string | null;
+    /** Канонічний id зміни, якщо викликач його вже має — тоді шукати нічого. */
+    scheduledShiftPublicId?: string | null;
+    /** Локальний рядок дзеркала, з якого починають ті, хто канону ще не має. */
+    localShiftId?: string | null;
     requesterStaffId: string | null;
     locationId: string;
     shiftDate: Date;
@@ -30,9 +33,18 @@ export async function resolveCanonicalShift(
     if (!staff?.awsEmployeePublicId) return { ok: false, reasonCode: "EMPLOYEE_NOT_MAPPED" };
     const employeePublicId = staff.awsEmployeePublicId;
 
-    if (input.workShiftId) {
+    // Готовий канонічний id нічим не треба доуточнювати — це і є відповідь.
+    if (input.scheduledShiftPublicId) {
+        return {
+            ok: true,
+            scheduledShiftPublicId: input.scheduledShiftPublicId,
+            employeePublicId,
+        };
+    }
+
+    if (input.localShiftId) {
         const shift = await prisma.workShift.findUnique({
-            where: { id: input.workShiftId },
+            where: { id: input.localShiftId },
             select: { awsScheduledShiftPublicId: true },
         });
         if (shift?.awsScheduledShiftPublicId) {

@@ -76,10 +76,12 @@ describe("listSelectableShifts", () => {
 
     it("прибирає зміну, по якій пошук уже триває", async () => {
         canonicalRead.findForStaff.mockResolvedValue([
-            canonicalShift("s-1", "2026-09-20"),
-            canonicalShift("s-2", "2026-09-21")
+            canonicalShift("s-1", "2026-09-20", "canon-s-1"),
+            canonicalShift("s-2", "2026-09-21", "canon-s-2")
         ]);
-        prismaMock.replacementRequest.findMany.mockResolvedValue([{ workShiftId: "s-1" }]);
+        prismaMock.replacementRequest.findMany.mockResolvedValue([
+            { scheduledShiftPublicId: "canon-s-1" }
+        ]);
         const { replacementService } = await import("../replacement-service.js");
 
         const result = await replacementService.listSelectableShifts("staff-1");
@@ -87,7 +89,23 @@ describe("listSelectableShifts", () => {
         expect(result.map(row => row.id)).toEqual(["s-2"]);
     });
 
-    it("прибирає зміну, по якій пошук уже триває, знайдений лише за канонічним id", async () => {
+    it("не блокує зміни, коли в списку немає жодної з канонічним id", async () => {
+        // Усі зміни без канону — фільтрувати нема за чим, тож заявки навіть
+        // не читаються: `{ in: [] }` у Prisma не матчить нічого, а зайвий
+        // запит до бази тут був би марним.
+        canonicalRead.findForStaff.mockResolvedValue([
+            canonicalShift("s-1", "2026-09-20", null),
+            canonicalShift("s-2", "2026-09-21", null)
+        ]);
+        const { replacementService } = await import("../replacement-service.js");
+
+        const result = await replacementService.listSelectableShifts("staff-1");
+
+        expect(prismaMock.replacementRequest.findMany).not.toHaveBeenCalled();
+        expect(result.map(row => row.id)).toEqual(["s-1", "s-2"]);
+    });
+
+    it("прибирає зміну, по якій пошук уже триває, знайдений за канонічним id", async () => {
         canonicalRead.findForStaff.mockResolvedValue([
             canonicalShift("s-1", "2026-09-20", "canon-s-1"),
             canonicalShift("s-2", "2026-09-21", "canon-s-2"),
@@ -97,11 +115,10 @@ describe("listSelectableShifts", () => {
             // заявки з null-полем.
             canonicalShift("s-3", "2026-09-22", null)
         ]);
-        // Заявка створена (або дозаповнена бекфілом) з каноном, а локальний
-        // workShiftId відсутній — рівно випадок, який мав ловити старий
-        // фільтр, що дивився лише на workShiftId, і не ловив.
+        // Заявка тримається за зміну лише канонічним id — єдиним посиланням,
+        // яке в неї лишилось.
         prismaMock.replacementRequest.findMany.mockResolvedValue([
-            { workShiftId: null, scheduledShiftPublicId: "canon-s-1" }
+            { scheduledShiftPublicId: "canon-s-1" }
         ]);
         const { replacementService } = await import("../replacement-service.js");
 
@@ -110,14 +127,11 @@ describe("listSelectableShifts", () => {
         // Перевіряємо не лише постобробку результату (нижче), а й сам запит:
         // prismaMock — простий мок, що ігнорує `where` і завжди повертає
         // заданий масив, тож без цієї перевірки тест не відрізнить робочий
-        // фільтр від зламаного (де гілку по scheduledShiftPublicId прибрали).
+        // фільтр від зламаного. Зокрема, s-3 без канону у фільтр не потрапляє.
         expect(prismaMock.replacementRequest.findMany).toHaveBeenCalledWith(
             expect.objectContaining({
                 where: expect.objectContaining({
-                    OR: expect.arrayContaining([
-                        { workShiftId: { in: ["s-1", "s-2", "s-3"] } },
-                        { scheduledShiftPublicId: { in: ["canon-s-1", "canon-s-2"] } }
-                    ])
+                    scheduledShiftPublicId: { in: ["canon-s-1", "canon-s-2"] }
                 })
             })
         );
@@ -137,6 +151,44 @@ describe("listSelectableShifts", () => {
             (query.where.date.lte.getTime() - query.where.date.gte.getTime()) / 86_400_000
         );
         expect(spanDays).toBe(61);
+    });
+
+    it("прибирає на фолбеку до дзеркала зміну, по якій пошук уже триває, знайдену за канонічним id", async () => {
+        // Канон недоступний — читання йде через дзеркало (WorkShift), і
+        // відсів зміни з активною заявкою мусить спрацювати так само, як і
+        // на канонічному шляху: за awsScheduledShiftPublicId, спроєктованим
+        // у scheduledShiftPublicId (listSelectableShiftsFromMirror).
+        canonicalRead.findForStaff.mockRejectedValue(new Error("boom"));
+        prismaMock.workShift.findMany.mockResolvedValue([
+            {
+                id: "s-1",
+                awsScheduledShiftPublicId: "canon-s-1",
+                staffId: "staff-1",
+                locationId: "loc-1",
+                date: new Date("2026-09-20T00:00:00.000Z"),
+                startTime: new Date("2026-09-20T08:00:00.000Z"),
+                endTime: new Date("2026-09-20T17:00:00.000Z"),
+                location: { id: "loc-1", name: "Smile Park", city: "Київ", branch: null, schedule: null, openingHours: [] }
+            },
+            {
+                id: "s-2",
+                awsScheduledShiftPublicId: "canon-s-2",
+                staffId: "staff-1",
+                locationId: "loc-1",
+                date: new Date("2026-09-21T00:00:00.000Z"),
+                startTime: new Date("2026-09-21T08:00:00.000Z"),
+                endTime: new Date("2026-09-21T17:00:00.000Z"),
+                location: { id: "loc-1", name: "Smile Park", city: "Київ", branch: null, schedule: null, openingHours: [] }
+            }
+        ]);
+        prismaMock.replacementRequest.findMany.mockResolvedValue([
+            { scheduledShiftPublicId: "canon-s-1" }
+        ]);
+        const { replacementService } = await import("../replacement-service.js");
+
+        const result = await replacementService.listSelectableShifts("staff-1");
+
+        expect(result.map(row => row.id)).toEqual(["s-2"]);
     });
 
     it("відкидає рядок дзеркала без startTime, а не показує його з вигаданим часом", async () => {

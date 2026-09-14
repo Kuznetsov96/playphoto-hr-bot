@@ -57,8 +57,9 @@ export async function readSelectableShiftsSource(
  * бекенд їх не бачить.
  *
  * **Важливо**: множество повинне містити лише справжні ID (`shift.id`), без `null`.
- * Оскільки `ReplacementRequest.workShiftId` — nullable у схемі Prisma, викликальна
- * сторона зобов'язана відфільтрувати `null` перед побудовою цієї множини.
+ * Заявка вказує на зміну канонічним `scheduledShiftPublicId`, який nullable, тож
+ * викликальна сторона зобов'язана відфільтрувати `null` і змапити канонічний id
+ * на локальний `shift.id` перед побудовою цієї множини.
  */
 export function rejectShiftsWithActiveRequest(
     shifts: CanonicalScheduledShift[],
