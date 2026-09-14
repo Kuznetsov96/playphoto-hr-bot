@@ -11,7 +11,7 @@ export type CanonicalReplacementFailure =
     | "CANONICAL_BACKEND_UNAVAILABLE";
 
 export type CanonicalReplacementResult =
-    | { ok: true; replacementPublicId: string }
+    | { ok: true; replacementPublicId: string; scheduledShiftPublicId: string }
     | { ok: false; reasonCode: CanonicalReplacementFailure };
 
 /**
@@ -41,7 +41,15 @@ export async function startCanonicalReplacement(input: {
             requesterEmployeePublicId: resolution.employeePublicId,
             requesterTelegramId: input.requesterTelegramId,
         });
-        return { ok: true, replacementPublicId: created.publicId };
+        // Віддаємо і канонічний id зміни: резолвер щойно знайшов його — можливо
+        // запасним шляхом «співробітниця + локація + день», якщо в самому рядку
+        // дзеркала його ще немає. Без цього викликач писав би сире порожнє
+        // значення, і заявка випадала б з унікального індексу.
+        return {
+            ok: true,
+            replacementPublicId: created.publicId,
+            scheduledShiftPublicId: resolution.scheduledShiftPublicId,
+        };
     } catch (error: unknown) {
         /**
          * 409 ALREADY_OPEN — це осмислена відповідь доступного бекенда, а не

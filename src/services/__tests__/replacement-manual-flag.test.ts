@@ -10,7 +10,9 @@ const prismaMock = {
         update: vi.fn(),
     },
     location: { findUnique: vi.fn(), count: vi.fn() },
-    staffProfile: { findMany: vi.fn() },
+    // `findUnique` потрібен резолверу канонічного id: `startRequest` тепер
+    // до-резолвить його, коли в самій зміні поле порожнє.
+    staffProfile: { findMany: vi.fn(), findUnique: vi.fn() },
     replacementResponse: {
         findMany: vi.fn(),
         create: vi.fn(),
@@ -68,6 +70,7 @@ describe("isManual — розрізнення ручної заявки адмі
         });
         prismaMock.location.count.mockResolvedValue(1);
         prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.staffProfile.findUnique.mockResolvedValue({ awsEmployeePublicId: "emp-1" });
         prismaMock.replacementResponse.findMany.mockResolvedValue([]);
         prismaMock.workShift.findMany.mockResolvedValue([]);
     });

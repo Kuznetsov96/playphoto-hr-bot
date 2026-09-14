@@ -10,7 +10,9 @@ const prismaMock = {
         update: vi.fn(),
     },
     location: { count: vi.fn() },
-    staffProfile: { findMany: vi.fn() },
+    // `findUnique` потрібен резолверу: `startRequest` до-резолвить канонічний id,
+    // коли в самій зміні він порожній.
+    staffProfile: { findMany: vi.fn(), findUnique: vi.fn() },
     replacementResponse: { findMany: vi.fn() },
     $transaction: vi.fn(async (callback: any) => callback(prismaMock)),
 };
@@ -59,6 +61,7 @@ describe("startRequest — канонічний ідентифікатор зм�
         });
         prismaMock.location.count.mockResolvedValue(1);
         prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.staffProfile.findUnique.mockResolvedValue({ awsEmployeePublicId: "emp-1" });
         prismaMock.replacementResponse.findMany.mockResolvedValue([]);
         prismaMock.workShift.findMany.mockResolvedValue([]);
     });
@@ -87,7 +90,7 @@ describe("startRequest — канонічний ідентифікатор зм�
         expect(created.scheduledShiftPublicId).toBe("11111111-1111-4111-8111-111111111111");
     });
 
-    it("не падає, коли зміна ще не має канонічного id", async () => {
+    it("не падає, коли канонічний id не знайшов навіть резолвер", async () => {
         const shift = {
             id: "shift-2",
             staffId: "staff-1",
@@ -106,6 +109,9 @@ describe("startRequest — канонічний ідентифікатор зм�
         await replacementService.startRequest(api, "staff-1", "shift-2");
 
         const created = prismaMock.replacementRequest.create.mock.calls[0]![0]!.data;
+        // Ні в самій зміні, ні запасним шляхом резолвера id не знайшовся —
+        // заявка все одно створюється, бо людина не має втратити можливість
+        // попросити підміну через відставання синку.
         expect(created.scheduledShiftPublicId).toBeNull();
     });
 });

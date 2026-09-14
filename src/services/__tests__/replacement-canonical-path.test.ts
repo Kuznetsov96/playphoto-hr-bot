@@ -45,6 +45,9 @@ describe("startCanonicalReplacement", () => {
         await expect(startCanonicalReplacement(input)).resolves.toEqual({
             ok: true,
             replacementPublicId: "req-uuid",
+            // Резолвер повертає канонічний id зміни назовні: викликач пише його
+            // в рядок заявки замість сирого поля дзеркала, яке може бути порожнім.
+            scheduledShiftPublicId: "shift-uuid",
         });
         expect(createReplacement).toHaveBeenCalledWith({
             scheduledShiftPublicId: "shift-uuid",
