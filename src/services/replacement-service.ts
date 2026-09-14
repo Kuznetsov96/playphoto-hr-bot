@@ -991,10 +991,29 @@ export class ReplacementService {
             const currentShift = await this.findSameScheduledShift(request);
             if (!currentShift) {
                 await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
-            } else if (request.workShiftId !== currentShift.id) {
+            } else if (
+                request.workShiftId !== currentShift.id ||
+                request.scheduledShiftPublicId !== currentShift.awsScheduledShiftPublicId
+            ) {
+                // Оновлюємо workShiftId і scheduledShiftPublicId одним записом,
+                // а не лише локальний workShiftId: якщо розійдеться тільки
+                // канонічний id (наприклад, той самий локальний рядок зміни
+                // отримав новий awsScheduledShiftPublicId після пересинку), то
+                // заявка стане нести канон старої зміни поряд із локальним id
+                // нової. `listSelectableShifts` блокує вибір зміни і за
+                // локальним, і за канонічним полем — розбіжність між ними
+                // означає, що зміна, на яку канон уже не вказує, мовчки
+                // випаде зі списку фотографині, хоч пошук заміни по ній не
+                // ведеться.
+                // Тож правило одне: обидва поля завжди описують ту саму
+                // зміну, і будь-яке розходження хоч в одному з них — привід
+                // перезаписати обидва разом.
                 await prisma.replacementRequest.update({
                     where: { id: request.id },
-                    data: { workShiftId: currentShift.id }
+                    data: {
+                        workShiftId: currentShift.id,
+                        scheduledShiftPublicId: currentShift.awsScheduledShiftPublicId
+                    }
                 });
             }
         }
