@@ -356,6 +356,9 @@ export class ReplacementService {
 
         const request = await this.createActiveRequest({
             workShiftId: shift.id,
+            // Подвійний запис: локальний id лишається основним для читання,
+            // канонічний пишеться поряд і перейме читання окремим кроком.
+            scheduledShiftPublicId: shift.awsScheduledShiftPublicId,
             requesterStaffId,
             locationId: shift.locationId,
             city: shift.location.city,
