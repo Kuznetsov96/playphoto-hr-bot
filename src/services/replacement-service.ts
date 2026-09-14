@@ -188,19 +188,58 @@ export class ReplacementService {
             return a.startTime.getTime() - b.startTime.getTime();
         });
 
+        // Заявка на підміну несе і локальний workShiftId, і канонічний
+        // scheduledShiftPublicId (нові заявки пишуть обидва, старі —
+        // дозаповнені бекфілом). Тож блокувальний запит шукає збіг за
+        // будь-яким з полів: інакше заявка, у якої синк ще не проставив (або
+        // вже стер) локальний workShiftId, не заблокує повторний запуск
+        // пошуку на ту саму зміну. workShiftId-гілка лишається запасним
+        // шляхом для заявок, створених до переходу на канон, — прибрати її
+        // можна буде окремим PR, коли бекфіл завершиться і запис почне
+        // писати лише канонічний id.
+        //
+        // canonicalShiftIds свідомо відфільтровує null: `{ in: [] }` у Prisma
+        // не матчить нічого (на відміну від `{ not: null }`, який зловив би
+        // геть усі заявки співробітника з непорожнім канонічним полем, а не
+        // лише ті, що стосуються змін із поточного списку).
+        const localShiftIds = sortedShifts.map(shift => shift.id);
+        const canonicalShiftIds = sortedShifts.flatMap(shift =>
+            (shift.scheduledShiftPublicId ? [shift.scheduledShiftPublicId] : []));
+
+        const blockedFilters: Prisma.ReplacementRequestWhereInput[] = [
+            { workShiftId: { in: localShiftIds } }
+        ];
+        if (canonicalShiftIds.length > 0) {
+            blockedFilters.push({ scheduledShiftPublicId: { in: canonicalShiftIds } });
+        }
+
         const blocked = await prisma.replacementRequest.findMany({
             where: {
                 requesterStaffId: staffId,
                 status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
-                workShiftId: { in: sortedShifts.map(shift => shift.id) }
+                OR: blockedFilters
             },
-            select: { workShiftId: true }
+            select: { workShiftId: true, scheduledShiftPublicId: true }
         });
 
-        return rejectShiftsWithActiveRequest(
-            sortedShifts,
-            new Set(blocked.flatMap(row => (row.workShiftId ? [row.workShiftId] : [])))
+        // `rejectShiftsWithActiveRequest` звіряє за локальним `shift.id`, тож
+        // збіг за канонічним полем тут-таки мапиться назад на локальний id
+        // відповідної зміни зі `sortedShifts`.
+        const canonicalToLocalId = new Map(
+            sortedShifts.flatMap(shift =>
+                (shift.scheduledShiftPublicId ? [[shift.scheduledShiftPublicId, shift.id] as const] : []))
         );
+        const blockedShiftIds = new Set(blocked.flatMap(row => {
+            const ids: string[] = [];
+            if (row.workShiftId) ids.push(row.workShiftId);
+            const localId = row.scheduledShiftPublicId
+                ? canonicalToLocalId.get(row.scheduledShiftPublicId)
+                : undefined;
+            if (localId) ids.push(localId);
+            return ids;
+        }));
+
+        return rejectShiftsWithActiveRequest(sortedShifts, blockedShiftIds);
     }
 
     /**
@@ -1110,6 +1149,13 @@ export class ReplacementService {
         const sameSearchFilters: Prisma.ReplacementRequestWhereInput[] = [{ id: request.id }];
         if (request.workShiftId) {
             sameSearchFilters.push({ workShiftId: request.workShiftId });
+        }
+        // Та сама заявка може бути знайдена і за канонічним id зміни — гілка
+        // поряд із workShiftId, а не замість неї: старі заявки досі можуть
+        // мати лише локальний id. Прибрати workShiftId-гілку можна буде
+        // окремим PR після повного бекфілу.
+        if (request.scheduledShiftPublicId) {
+            sameSearchFilters.push({ scheduledShiftPublicId: request.scheduledShiftPublicId });
         }
         if (request.requesterStaffId) {
             sameSearchFilters.push({

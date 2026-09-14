@@ -30,8 +30,9 @@ vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
 }));
 
-const canonicalShift = (id: string, date: string) => ({
+const canonicalShift = (id: string, date: string, scheduledShiftPublicId: string | null = null) => ({
     id,
+    scheduledShiftPublicId,
     staffId: "staff-1",
     locationId: "loc-1",
     date: new Date(`${date}T00:00:00.000Z`),
@@ -79,6 +80,24 @@ describe("listSelectableShifts", () => {
             canonicalShift("s-2", "2026-09-21")
         ]);
         prismaMock.replacementRequest.findMany.mockResolvedValue([{ workShiftId: "s-1" }]);
+        const { replacementService } = await import("../replacement-service.js");
+
+        const result = await replacementService.listSelectableShifts("staff-1");
+
+        expect(result.map(row => row.id)).toEqual(["s-2"]);
+    });
+
+    it("прибирає зміну, по якій пошук уже триває, знайдений лише за канонічним id", async () => {
+        canonicalRead.findForStaff.mockResolvedValue([
+            canonicalShift("s-1", "2026-09-20", "canon-s-1"),
+            canonicalShift("s-2", "2026-09-21", "canon-s-2")
+        ]);
+        // Заявка створена (або дозаповнена бекфілом) з каноном, а локальний
+        // workShiftId відсутній — рівно випадок, який мав ловити старий
+        // фільтр, що дивився лише на workShiftId, і не ловив.
+        prismaMock.replacementRequest.findMany.mockResolvedValue([
+            { workShiftId: null, scheduledShiftPublicId: "canon-s-1" }
+        ]);
         const { replacementService } = await import("../replacement-service.js");
 
         const result = await replacementService.listSelectableShifts("staff-1");
