@@ -476,6 +476,9 @@ export class ReplacementService {
             shiftDate: dayStart,
             shiftStartTime: shiftTimes.start,
             shiftEndTime: shiftTimes.end,
+            // Ручна заявка адміна: зміни в графіку нема, це явна ознака,
+            // а не побічний ефект відсутнього workShiftId.
+            isManual: true,
         });
 
         await this.notifyAdminStarted(api, request.id);

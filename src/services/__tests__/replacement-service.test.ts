@@ -549,6 +549,7 @@ describe("ReplacementService", () => {
                 shiftDate: createdRequest.shiftDate,
                 shiftStartTime: createdRequest.shiftStartTime,
                 shiftEndTime: createdRequest.shiftEndTime,
+                isManual: true,
             },
         });
         expect(api.sendMessage).toHaveBeenCalledWith(
