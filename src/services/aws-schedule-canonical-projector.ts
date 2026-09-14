@@ -19,6 +19,8 @@ export type LocalShiftProjection = {
 
 export type CanonicalScheduledShift = {
     id: string;
+    /** Канонічний id тієї ж зміни. `null` лише для рядків дзеркала, яких синк ще не звʼязав з каноном. */
+    scheduledShiftPublicId: string | null;
     staffId: string;
     locationId: string;
     date: Date;
@@ -79,6 +81,7 @@ export function projectCanonicalSchedule(
 
         return [{
             id: projection.id,
+            scheduledShiftPublicId: shift.publicId,
             staffId,
             locationId: location.id,
             date: new Date(`${shift.localDate}T00:00:00.000Z`),

@@ -3,6 +3,7 @@ import { readSelectableShiftsSource, rejectShiftsWithActiveRequest } from "../re
 
 const shift = (id: string, date: string) => ({
     id,
+    scheduledShiftPublicId: `${id}-public`,
     staffId: "staff-1",
     locationId: "loc-1",
     date: new Date(`${date}T00:00:00.000Z`),

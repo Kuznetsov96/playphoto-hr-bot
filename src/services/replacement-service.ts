@@ -234,6 +234,7 @@ export class ReplacementService {
         const projected = rows.flatMap(row => (row.startTime && row.endTime
             ? [{
                 id: row.id,
+                scheduledShiftPublicId: row.awsScheduledShiftPublicId,
                 staffId: row.staffId,
                 locationId: row.locationId,
                 date: row.date,
