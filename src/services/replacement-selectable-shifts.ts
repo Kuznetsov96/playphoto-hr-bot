@@ -45,6 +45,10 @@ export async function readSelectableShiftsSource(
  *
  * Фільтр локальний і таким лишається: заявки живуть у нашій БД, канонічний
  * бекенд їх не бачить.
+ *
+ * **Важливо**: множество повинне містити лише справжні ID (`shift.id`), без `null`.
+ * Оскільки `ReplacementRequest.workShiftId` — nullable у схемі Prisma, викликальна
+ * сторона зобов'язана відфільтрувати `null` перед побудовою цієї множини.
  */
 export function rejectShiftsWithActiveRequest(
     shifts: CanonicalScheduledShift[],
