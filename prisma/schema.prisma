@@ -559,6 +559,11 @@ model ReplacementRequest {
   /// заявка перестала залежати від локального рядка дзеркала. Nullable, доки
   /// живуть заявки, створені до переходу.
   scheduledShiftPublicId String?
+  /// Ручна заявка адміністратора: пошук підміни на локацію й день, коли зміни
+  /// в графіку немає взагалі. Раніше цю роль грав порожній `workShiftId`, але
+  /// у звичайної заявки, якої дзеркало ще не звʼязало з каноном, він теж
+  /// порожній — і вона хибно сходила за ручну.
+  isManual Boolean @default(false)
   requesterStaffId   String?
   replacementStaffId String?
   locationId         String
