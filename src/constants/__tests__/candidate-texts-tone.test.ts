@@ -52,16 +52,34 @@ describe("candidate tone of voice", () => {
      * зв’яжемося з вами», а наступного дня бот команди звертався на «ти», і
      * вона просто помічала, що з нею раптом інакше.
      */
-    const HANDOFF_KEYS = ["candidate-accepted-welcome", "worker-offer-accepted"];
+    const HANDOFF_KEYS = ["worker-offer-accepted"];
+
+    /**
+     * Постійний екран статусу після прийняття: фрази переходу не несе, але
+     * звертається вже на «ти» — людина по цей бік рішення вже своя.
+     */
+    const IN_TEAM_KEYS = ["candidate-accepted-welcome"];
 
     it("никогда не обращается к кандидатке на «ти» — кроме момента приёма в команду", () => {
         const offenders = texts.filter(
             ({ key, value }) =>
                 !HANDOFF_KEYS.includes(key) &&
+                !IN_TEAM_KEYS.includes(key) &&
                 /(^|[^\p{L}])(ти|тебе|тобі|тобою|твоя|твої|твою|твоє|твій|твого|твоїх)([^\p{L}]|$)/iu.test(value),
         );
 
         expect(offenders.map((o) => o.key)).toEqual([]);
+    });
+
+    /**
+     * Перехід вимовляється один раз, у момент рішення. `candidate-accepted-welcome`
+     * — постійний екран статусу: він рендериться щоразу, коли вона відкриває
+     * анкету, і так до першої зміни. Фраза там перетворювала ритуал на напис.
+     */
+    it("постоянный экран статуса не повторяет фразу перехода", () => {
+        const screen = texts.find(({ key }) => key === "candidate-accepted-welcome");
+        expect(screen).toBeDefined();
+        expect(screen!.value).not.toContain("на «ти»");
     });
 
     it("оба текста приёма в команду проговаривают переход на «ти»", () => {

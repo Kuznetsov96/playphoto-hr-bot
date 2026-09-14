@@ -257,7 +257,7 @@ async function runPinger(bot: Bot<MyContext>) {
             if (isPrivate && isPreferences) {
                 text = `🔔 <b>Нагадування!</b>\nТи ще не заповнив побажання по графіку. Натисни кнопку нижче 👇`;
             } else if (isPrivate) {
-                text = `🔔 <b>Нагадування!</b>\nБудь ласка, натисніть кнопку "Підтвердити" у повідомленні вище 👆`;
+                text = `🔔 <b>Нагадування!</b>\nНатисни кнопку «Підтвердити» у повідомленні вище 👆`;
             } else {
                 // Group chat reminder with mentions
                 const mentions = activePendingReplies.map((p: any) => {

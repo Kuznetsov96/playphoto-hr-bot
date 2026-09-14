@@ -28,14 +28,14 @@ export function buildShiftPickerView<T>(shifts: T[]): ShiftPickerView<T> {
     const hiddenCount = shifts.length - visible.length;
 
     if (hiddenCount === 0) {
-        return { visible, hiddenCount, text: "Оберіть дату і локацію." };
+        return { visible, hiddenCount, text: "Обери дату і локацію." };
     }
 
     return {
         visible,
         hiddenCount,
         text:
-            `Оберіть дату і локацію.\n\n` +
+            `Обери дату і локацію.\n\n` +
             `Показані найближчі ${visible.length} змін з ${shifts.length}. ` +
             `Решта з'явиться тут, щойно ці пройдуть.`
     };

@@ -31,7 +31,7 @@ function getCandidateRateLimit(redis: any) {
             keyGenerator: (ctx) => ctx.from?.id.toString(),
             onLimitExceeded: async (ctx) => {
                 logger.warn(`⚠️ [LIMIT] Candidate ${ctx.from?.id} exceeded limit`);
-                await notifyRateLimit(ctx, "🧘‍♀️ Ви виконуєте дії занадто часто. Будь ласка, зачекайте хвилинку. ✨");
+                await notifyRateLimit(ctx, "Забагато дій поспіль — зачекай хвилинку.");
             }
         });
     }

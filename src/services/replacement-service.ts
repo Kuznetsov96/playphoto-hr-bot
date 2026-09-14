@@ -1313,7 +1313,7 @@ export class ReplacementService {
 
     private formatAnsweredCandidateText(status: ReplacementResponseStatus) {
         if (status === ReplacementResponseStatus.DECLINED) return "Дякуємо за відповідь.";
-        if (status === ReplacementResponseStatus.ACCEPTED) return "Дякуємо. Підміну вже прийнято вами.";
+        if (status === ReplacementResponseStatus.ACCEPTED) return "Дякуємо. Ти вже прийняла цю підміну.";
         return "Ця пропозиція більше неактивна.";
     }
 

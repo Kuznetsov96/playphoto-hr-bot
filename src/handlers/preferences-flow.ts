@@ -694,9 +694,9 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
 
                 // Always show "schedule is being prepared" screen
                 const welcomeText = `<b>Вітаємо в команді PlayPhoto</b>\n\n` +
-                    `⏳ <b>Ваш графік готується</b>\n\n` +
-                    `Ми вже створюємо для вас перші робочі зміни.\n` +
-                    `Щойно графік буде готовий, ви отримаєте сповіщення тут.`;
+                    `⏳ <b>Твій графік готується</b>\n\n` +
+                    `Ми вже створюємо твої перші робочі зміни.\n` +
+                    `Щойно графік буде готовий — напишемо тут.`;
                 // Персональне посилання приходить окремим повідомленням від
                 // accessService — зашивати спільний інвайт сюди не можна.
                 const welcomeKb = new InlineKeyboard()

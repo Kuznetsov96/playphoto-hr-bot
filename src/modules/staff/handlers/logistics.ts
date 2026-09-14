@@ -495,7 +495,7 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
 
         const askText = isValid
             ? LOGISTICS_TEXTS_STAFF.ask_phone(`+${phoneToUse}`)
-            : `⚠️ <b>Номер телефону відсутній або некоректний.</b>\nДля створення повноцінного доручення Нової Пошти потрібен правильний номер (380...).\n\nБудь ласка, оберіть «Змінити номер» і введіть його.`;
+            : `⚠️ <b>Номер телефону відсутній або некоректний.</b>\nДля створення повноцінного доручення Нової Пошти потрібен правильний номер (380...).\n\nОбери «Змінити номер» і введи його.`;
 
         await editOrReplyText(ctx, askText, kb);
 
@@ -760,7 +760,7 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
                 await ctx.reply(getManualProxyConfirmationText(false));
             }
         } else {
-            await ctx.reply("⚠️ Некоректний формат.\nБудь ласка, введіть номер телефону в форматі 380... (наприклад: 380991234567).");
+            await ctx.reply("⚠️ Некоректний формат.\nВведи номер телефону у форматі 380... (наприклад: 380991234567).");
         }
         return;
     }
