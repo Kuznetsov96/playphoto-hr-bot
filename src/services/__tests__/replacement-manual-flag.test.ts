@@ -145,12 +145,11 @@ describe("getSameReplacementSearchFilter — гілка «та сама заяв
     });
 
     // Перевіряємо саме аргументи findMany, бо мок Prisma ігнорує where —
-    // без цього тест зеленіє й на зламаній реалізації (workShiftId: null).
-    it("ручна заявка (isManual: true, workShiftId: null) шукається гілкою за isManual", async () => {
+    // без цього тест зеленіє й на зламаній реалізації.
+    it("ручна заявка (isManual: true, без посилання на зміну) шукається гілкою за isManual", async () => {
         const request: any = {
             id: "request-manual-1",
             requesterStaffId: null,
-            workShiftId: null,
             scheduledShiftPublicId: null,
             isManual: true,
             locationId: "loc-1",
@@ -185,20 +184,21 @@ describe("getSameReplacementSearchFilter — гілка «та сама заяв
         expect(requestFilter.OR).toContainEqual(
             expect.objectContaining({ isManual: true })
         );
+        // Порожнє посилання на зміну не має породжувати власної гілки:
+        // інакше фільтр зловив би геть усі заявки без канонічного id.
         expect(requestFilter.OR).not.toContainEqual(
-            expect.objectContaining({ workShiftId: null })
+            expect.objectContaining({ scheduledShiftPublicId: null })
         );
     });
 
     // Ключовий тест цієї роботи: звичайна заявка, якої дзеркало ще не
-    // звʼязало з каноном (workShiftId і scheduledShiftPublicId обидва null),
-    // НЕ має вважатись ручною — саме тут була помилка старої логіки
-    // (перевірка порожнього workShiftId).
-    it("звичайна заявка без requesterStaffId, workShiftId і scheduledShiftPublicId НЕ вважається ручною", async () => {
+    // звʼязало з каноном (scheduledShiftPublicId порожній), НЕ має
+    // вважатись ручною — саме тут була помилка старої логіки, яка судила
+    // про «ручність» за порожнім посиланням на зміну.
+    it("звичайна заявка без requesterStaffId і без канонічного id зміни НЕ вважається ручною", async () => {
         const request: any = {
             id: "request-plain-1",
             requesterStaffId: null,
-            workShiftId: null,
             scheduledShiftPublicId: null,
             isManual: false,
             locationId: "loc-1",
@@ -230,8 +230,10 @@ describe("getSameReplacementSearchFilter — гілка «та сама заяв
         expect(requestFilter.OR).not.toContainEqual(
             expect.objectContaining({ isManual: true })
         );
+        // Порожнє посилання на зміну не має породжувати власної гілки:
+        // інакше фільтр зловив би геть усі заявки без канонічного id.
         expect(requestFilter.OR).not.toContainEqual(
-            expect.objectContaining({ workShiftId: null })
+            expect.objectContaining({ scheduledShiftPublicId: null })
         );
     });
 });

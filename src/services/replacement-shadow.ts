@@ -8,7 +8,7 @@ const SHADOW_COMPARE_COOLDOWN_MS = 5 * 60 * 1000;
 
 export interface ReplacementShadowInput {
     requestId: string;
-    workShiftId: string | null;
+    scheduledShiftPublicId: string | null;
     requesterStaffId: string | null;
     requesterTelegramId: string;
     locationId: string;
@@ -57,7 +57,7 @@ export class ReplacementShadowService {
     private async compare(input: ReplacementShadowInput): Promise<void> {
         const startedAt = Date.now();
         const resolution = await resolveCanonicalShift({
-            workShiftId: input.workShiftId,
+            scheduledShiftPublicId: input.scheduledShiftPublicId,
             requesterStaffId: input.requesterStaffId,
             locationId: input.locationId,
             shiftDate: input.shiftDate

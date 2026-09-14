@@ -517,7 +517,6 @@ model WorkShift {
   endTime                   DateTime?
   location                  Location             @relation(fields: [locationId], references: [id])
   staff                     StaffProfile         @relation(fields: [staffId], references: [id])
-  replacementRequests       ReplacementRequest[]
 
   @@index([date])
 }
@@ -554,15 +553,14 @@ enum ReplacementAvailabilityKind {
 
 model ReplacementRequest {
   id                 String                   @id @default(cuid())
-  workShiftId        String?
-  /// Канонічний ідентифікатор зміни. Заповнюється поряд із workShiftId, щоб
-  /// заявка перестала залежати від локального рядка дзеркала. Nullable, доки
-  /// живуть заявки, створені до переходу.
+  /// Єдине посилання заявки на зміну — канонічний ідентифікатор. Nullable,
+  /// бо дзеркало могло ще не звʼязати рядок зміни з каноном, а ручна заявка
+  /// адміністратора зміни в графіку не має взагалі.
   scheduledShiftPublicId String?
   /// Ручна заявка адміністратора: пошук підміни на локацію й день, коли зміни
-  /// в графіку немає взагалі. Раніше цю роль грав порожній `workShiftId`, але
-  /// у звичайної заявки, якої дзеркало ще не звʼязало з каноном, він теж
-  /// порожній — і вона хибно сходила за ручну.
+  /// в графіку немає взагалі. Раніше цю роль грало порожнє посилання на зміну,
+  /// але у звичайної заявки, якої дзеркало ще не звʼязало з каноном, воно теж
+  /// порожнє — і вона хибно сходила за ручну.
   isManual Boolean @default(false)
   requesterStaffId   String?
   replacementStaffId String?
@@ -581,7 +579,6 @@ model ReplacementRequest {
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
-  workShift   WorkShift?            @relation(fields: [workShiftId], references: [id], onDelete: SetNull)
   requester   StaffProfile?         @relation("ReplacementRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
   replacement StaffProfile?         @relation("ReplacementAcceptor", fields: [replacementStaffId], references: [id])
   location    Location              @relation(fields: [locationId], references: [id])

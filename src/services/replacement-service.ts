@@ -188,55 +188,41 @@ export class ReplacementService {
             return a.startTime.getTime() - b.startTime.getTime();
         });
 
-        // Заявка на підміну несе і локальний workShiftId, і канонічний
-        // scheduledShiftPublicId (нові заявки пишуть обидва, старі —
-        // дозаповнені бекфілом). Тож блокувальний запит шукає збіг за
-        // будь-яким з полів: інакше заявка, у якої синк ще не проставив (або
-        // вже стер) локальний workShiftId, не заблокує повторний запуск
-        // пошуку на ту саму зміну. workShiftId-гілка лишається запасним
-        // шляхом для заявок, створених до переходу на канон, — прибрати її
-        // можна буде окремим PR, коли бекфіл завершиться і запис почне
-        // писати лише канонічний id.
+        // Заявка на підміну тримається за зміну канонічним
+        // scheduledShiftPublicId — локального посилання на рядок дзеркала в
+        // неї більше немає. Тож блокувальний запит шукає збіг лише за
+        // канонічним полем.
         //
         // canonicalShiftIds свідомо відфільтровує null: `{ in: [] }` у Prisma
         // не матчить нічого (на відміну від `{ not: null }`, який зловив би
         // геть усі заявки співробітника з непорожнім канонічним полем, а не
         // лише ті, що стосуються змін із поточного списку).
-        const localShiftIds = sortedShifts.map(shift => shift.id);
         const canonicalShiftIds = sortedShifts.flatMap(shift =>
             (shift.scheduledShiftPublicId ? [shift.scheduledShiftPublicId] : []));
 
-        const blockedFilters: Prisma.ReplacementRequestWhereInput[] = [
-            { workShiftId: { in: localShiftIds } }
-        ];
-        if (canonicalShiftIds.length > 0) {
-            blockedFilters.push({ scheduledShiftPublicId: { in: canonicalShiftIds } });
-        }
-
-        const blocked = await prisma.replacementRequest.findMany({
-            where: {
-                requesterStaffId: staffId,
-                status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
-                OR: blockedFilters
-            },
-            select: { workShiftId: true, scheduledShiftPublicId: true }
-        });
+        const blocked = canonicalShiftIds.length === 0
+            ? []
+            : await prisma.replacementRequest.findMany({
+                where: {
+                    requesterStaffId: staffId,
+                    status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
+                    scheduledShiftPublicId: { in: canonicalShiftIds }
+                },
+                select: { scheduledShiftPublicId: true }
+            });
 
         // `rejectShiftsWithActiveRequest` звіряє за локальним `shift.id`, тож
-        // збіг за канонічним полем тут-таки мапиться назад на локальний id
-        // відповідної зміни зі `sortedShifts`.
+        // збіг за канонічним полем заявки тут-таки мапиться назад на локальний
+        // id відповідної зміни зі `sortedShifts`.
         const canonicalToLocalId = new Map(
             sortedShifts.flatMap(shift =>
                 (shift.scheduledShiftPublicId ? [[shift.scheduledShiftPublicId, shift.id] as const] : []))
         );
         const blockedShiftIds = new Set(blocked.flatMap(row => {
-            const ids: string[] = [];
-            if (row.workShiftId) ids.push(row.workShiftId);
             const localId = row.scheduledShiftPublicId
                 ? canonicalToLocalId.get(row.scheduledShiftPublicId)
                 : undefined;
-            if (localId) ids.push(localId);
-            return ids;
+            return localId ? [localId] : [];
         }));
 
         return rejectShiftsWithActiveRequest(sortedShifts, blockedShiftIds);
@@ -246,16 +232,18 @@ export class ReplacementService {
      * Запасний шлях: той самий запит, яким екран жив до переходу на канон.
      * Лишається рівно для випадку, коли канон недоступний — дані можуть бути
      * на кілька хвилин старіші, але екран не падає.
+     *
+     * Зміни з відкритою заявкою тут не відсіюються: заявка більше не тримає
+     * посилання на локальний рядок, тож фільтр живе один — у
+     * `listSelectableShifts`, за канонічним id, і однаково накриває обидва
+     * джерела графіка.
      */
     private async listSelectableShiftsFromMirror(staffId: string, since: Date, horizonDays: number): Promise<CanonicalScheduledShift[]> {
         const horizon = new Date(since.getTime() + (horizonDays - 1) * DAY_MS);
         const rows = await prisma.workShift.findMany({
             where: {
                 staffId,
-                date: { gte: since, lte: horizon },
-                replacementRequests: {
-                    none: { status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES } }
-                }
+                date: { gte: since, lte: horizon }
             },
             include: { location: true },
             orderBy: { date: "asc" }
@@ -345,9 +333,9 @@ export class ReplacementService {
         });
     }
 
-    async startRequest(api: Api, requesterStaffId: string, workShiftId: string) {
+    async startRequest(api: Api, requesterStaffId: string, shiftId: string) {
         const shift = await prisma.workShift.findUnique({
-            where: { id: workShiftId },
+            where: { id: shiftId },
             include: { location: true, staff: { include: { user: true } } }
         });
 
@@ -359,20 +347,28 @@ export class ReplacementService {
             throw new Error("SHIFT_ALREADY_STARTED");
         }
 
+        // Збіг за зміною шукаємо за канонічним id; якщо дзеркало ще не
+        // звʼязало рядок з каноном, ця гілка просто не додається — другу
+        // заявку на той самий день все одно ловить гілка за
+        // «той самий автор + локація + день».
+        const sameShiftFilters: Prisma.ReplacementRequestWhereInput[] = [
+            {
+                requesterStaffId,
+                locationId: shift.locationId,
+                shiftDate: {
+                    gte: this.kyivStartOfDay(shift.date),
+                    lt: this.nextKyivDay(shift.date)
+                }
+            }
+        ];
+        if (shift.awsScheduledShiftPublicId) {
+            sameShiftFilters.unshift({ scheduledShiftPublicId: shift.awsScheduledShiftPublicId });
+        }
+
         const existing = await prisma.replacementRequest.findFirst({
             where: {
                 status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
-                OR: [
-                    { workShiftId: shift.id },
-                    {
-                        requesterStaffId,
-                        locationId: shift.locationId,
-                        shiftDate: {
-                            gte: this.kyivStartOfDay(shift.date),
-                            lt: this.nextKyivDay(shift.date)
-                        }
-                    }
-                ]
+                OR: sameShiftFilters
             }
         });
         if (existing?.status === ReplacementRequestStatus.ACTIVE) throw new Error("REQUEST_ALREADY_ACTIVE");
@@ -382,7 +378,7 @@ export class ReplacementService {
         let awsReplacementPublicId: string | null = null;
         if (AWS_REPLACEMENTS_CANONICAL_ENABLED) {
             const canonicalResult = await startCanonicalReplacement({
-                workShiftId: shift.id,
+                localShiftId: shift.id,
                 requesterStaffId,
                 requesterTelegramId: String(shift.staff.user.telegramId),
                 locationId: shift.locationId,
@@ -395,9 +391,7 @@ export class ReplacementService {
         }
 
         const request = await this.createActiveRequest({
-            workShiftId: shift.id,
-            // Подвійний запис: локальний id лишається основним для читання,
-            // канонічний пишеться поряд і перейме читання окремим кроком.
+            // Єдине посилання заявки на зміну — канонічний id.
             scheduledShiftPublicId: shift.awsScheduledShiftPublicId,
             requesterStaffId,
             locationId: shift.locationId,
@@ -477,7 +471,7 @@ export class ReplacementService {
             shiftStartTime: shiftTimes.start,
             shiftEndTime: shiftTimes.end,
             // Ручна заявка адміна: зміни в графіку нема, це явна ознака,
-            // а не побічний ефект відсутнього workShiftId.
+            // а не побічний ефект відсутнього посилання на зміну.
             isManual: true,
         });
 
@@ -994,29 +988,15 @@ export class ReplacementService {
             const currentShift = await this.findSameScheduledShift(request);
             if (!currentShift) {
                 await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
-            } else if (
-                request.workShiftId !== currentShift.id ||
-                request.scheduledShiftPublicId !== currentShift.awsScheduledShiftPublicId
-            ) {
-                // Оновлюємо workShiftId і scheduledShiftPublicId одним записом,
-                // а не лише локальний workShiftId: якщо розійдеться тільки
-                // канонічний id (наприклад, той самий локальний рядок зміни
-                // отримав новий awsScheduledShiftPublicId після пересинку), то
-                // заявка стане нести канон старої зміни поряд із локальним id
-                // нової. `listSelectableShifts` блокує вибір зміни і за
-                // локальним, і за канонічним полем — розбіжність між ними
-                // означає, що зміна, на яку канон уже не вказує, мовчки
-                // випаде зі списку фотографині, хоч пошук заміни по ній не
-                // ведеться.
-                // Тож правило одне: обидва поля завжди описують ту саму
-                // зміну, і будь-яке розходження хоч в одному з них — привід
-                // перезаписати обидва разом.
+            } else if (request.scheduledShiftPublicId !== currentShift.awsScheduledShiftPublicId) {
+                // Заявка мусить вказувати рівно на ту зміну, яку графік
+                // лишив живою: `listSelectableShifts` блокує вибір зміни за
+                // канонічним id заявки, тож застарілий канон означав би, що
+                // зміна, по якій пошук насправді не ведеться, мовчки випаде
+                // зі списку фотографині.
                 await prisma.replacementRequest.update({
                     where: { id: request.id },
-                    data: {
-                        workShiftId: currentShift.id,
-                        scheduledShiftPublicId: currentShift.awsScheduledShiftPublicId
-                    }
+                    data: { scheduledShiftPublicId: currentShift.awsScheduledShiftPublicId }
                 });
             }
         }
@@ -1151,7 +1131,7 @@ export class ReplacementService {
         if (requesterTelegramId) {
             replacementShadowService.compareInBackground({
                 requestId: request.id,
-                workShiftId: request.workShiftId,
+                scheduledShiftPublicId: request.scheduledShiftPublicId,
                 requesterStaffId: request.requesterStaffId,
                 requesterTelegramId: String(requesterTelegramId),
                 locationId: request.locationId,
@@ -1169,13 +1149,8 @@ export class ReplacementService {
 
     private getSameReplacementSearchFilter(request: RequestWithRelations) {
         const sameSearchFilters: Prisma.ReplacementRequestWhereInput[] = [{ id: request.id }];
-        if (request.workShiftId) {
-            sameSearchFilters.push({ workShiftId: request.workShiftId });
-        }
-        // Та сама заявка може бути знайдена і за канонічним id зміни — гілка
-        // поряд із workShiftId, а не замість неї: старі заявки досі можуть
-        // мати лише локальний id. Прибрати workShiftId-гілку можна буде
-        // окремим PR після повного бекфілу.
+        // Та сама заявка знаходиться за канонічним id зміни — єдиним
+        // посиланням заявки на зміну.
         if (request.scheduledShiftPublicId) {
             sameSearchFilters.push({ scheduledShiftPublicId: request.scheduledShiftPublicId });
         }
@@ -1189,10 +1164,10 @@ export class ReplacementService {
                 }
             });
         } else if (request.isManual) {
-            // Ознака ручної заявки тепер явна (isManual), а не побічний ефект
-            // порожнього workShiftId — звичайна заявка на зміну, якої дзеркало
-            // ще не звʼязало з каноном, теж має workShiftId: null і не мусить
-            // потрапляти в цю гілку.
+            // Ознака ручної заявки явна (isManual), а не побічний ефект
+            // порожнього посилання на зміну — звичайна заявка на зміну, якої
+            // дзеркало ще не звʼязало з каноном, теж має
+            // scheduledShiftPublicId: null і не мусить потрапляти в цю гілку.
             sameSearchFilters.push({
                 isManual: true,
                 locationId: request.locationId,

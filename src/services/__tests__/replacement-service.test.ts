@@ -627,7 +627,7 @@ describe("ReplacementService", () => {
     it("does not message the same photographer again when a cancelled search is restarted for the same shift", async () => {
         const request: any = {
             id: "request-restarted",
-            workShiftId: "shift-restarted",
+            scheduledShiftPublicId: "canonical-restarted",
             requesterStaffId: "requester-restarted",
             locationId: "location-restarted",
             city: "Черкаси",
@@ -1097,7 +1097,7 @@ describe("ReplacementService", () => {
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
         prismaMock.replacementRequest.findFirst.mockResolvedValue({
             id: "orphan-request",
-            workShiftId: null,
+            scheduledShiftPublicId: null,
             requesterStaffId: "requester-5",
             locationId: "location-5",
             shiftDate: shift.date,
@@ -1114,7 +1114,6 @@ describe("ReplacementService", () => {
             where: {
                 status: { in: ["ACTIVE", "FOUND", "FAILED"] },
                 OR: [
-                    { workShiftId: "shift-new" },
                     {
                         requesterStaffId: "requester-5",
                         locationId: "location-5",
@@ -1142,7 +1141,7 @@ describe("ReplacementService", () => {
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
         prismaMock.replacementRequest.findFirst.mockResolvedValue({
             id: "found-request",
-            workShiftId: null,
+            scheduledShiftPublicId: null,
             requesterStaffId: "requester-found",
             locationId: "location-found",
             shiftDate: shift.date,
@@ -1174,7 +1173,7 @@ describe("ReplacementService", () => {
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
         prismaMock.replacementRequest.findFirst.mockResolvedValue({
             id: "failed-request",
-            workShiftId: null,
+            scheduledShiftPublicId: null,
             requesterStaffId: "requester-7",
             locationId: "location-7",
             shiftDate: shift.date,
@@ -1194,7 +1193,6 @@ describe("ReplacementService", () => {
     it("reattaches an active orphaned replacement request to the resynced work shift", async () => {
         const request: any = {
             id: "request-orphan",
-            workShiftId: null,
             scheduledShiftPublicId: null,
             requesterStaffId: "requester-6",
             locationId: "location-6",
@@ -1211,7 +1209,6 @@ describe("ReplacementService", () => {
         });
         prismaMock.replacementRequest.update.mockResolvedValue({
             ...request,
-            workShiftId: "shift-resynced",
             scheduledShiftPublicId: "canonical-resynced"
         });
 
@@ -1225,22 +1222,19 @@ describe("ReplacementService", () => {
 
         expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
             where: { id: "request-orphan" },
-            data: { workShiftId: "shift-resynced", scheduledShiftPublicId: "canonical-resynced" },
+            data: { scheduledShiftPublicId: "canonical-resynced" },
         });
         expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("updates both workShiftId and scheduledShiftPublicId together so the two fields never point at different shifts", async () => {
-        // Локальний workShiftId уже збігається з поточним рядком зміни, але
-        // канонічний scheduledShiftPublicId заявки лишився вказувати на
-        // старий канон (наприклад, бекенд перепризначив
-        // awsScheduledShiftPublicId тому самому локальному рядку). Раніше
-        // умова дивилась лише на workShiftId і такий розсинхрон
-        // пропускала — заявка так і несла застарілий канонічний id.
+    it("переписує канонічний id заявки, коли той самий рядок зміни отримав новий канон", async () => {
+        // Локальний рядок зміни лишився той самий, але бекенд перепризначив
+        // йому awsScheduledShiftPublicId. Заявка досі несе старий канон —
+        // і, доки її не оновити, блокує в пікері зміну, по якій пошук
+        // насправді не ведеться.
         const request: any = {
             id: "request-canonical-drift",
-            workShiftId: "shift-same",
             scheduledShiftPublicId: "canonical-old",
             requesterStaffId: "requester-9",
             locationId: "location-9",
@@ -1257,7 +1251,6 @@ describe("ReplacementService", () => {
         });
         prismaMock.replacementRequest.update.mockResolvedValue({
             ...request,
-            workShiftId: "shift-same",
             scheduledShiftPublicId: "canonical-new"
         });
 
@@ -1271,14 +1264,14 @@ describe("ReplacementService", () => {
 
         expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
             where: { id: "request-canonical-drift" },
-            data: { workShiftId: "shift-same", scheduledShiftPublicId: "canonical-new" },
+            data: { scheduledShiftPublicId: "canonical-new" },
         });
     });
 
     it("closes an accepted replacement superseded by a third photographer in the schedule", async () => {
         const request: any = {
             id: "request-superseded",
-            workShiftId: null,
+            scheduledShiftPublicId: null,
             requesterStaffId: "original-staff",
             replacementStaffId: "replacement-staff",
             locationId: "location-1",

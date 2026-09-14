@@ -91,7 +91,13 @@ describe("staff schedule source selection", () => {
             shadowRead: true
         });
 
-        expect(result).toEqual([legacyShift]);
+        // Дзеркало зберігає канонічний id під іменем awsScheduledShiftPublicId,
+        // тож читання приводить обидва джерела графіка до спільного поля
+        // scheduledShiftPublicId — саме по ньому йде зіставлення із заявками.
+        expect(result).toEqual([{
+            ...legacyShift,
+            scheduledShiftPublicId: legacyShift.awsScheduledShiftPublicId
+        }]);
         expect(mocks.legacyRead).toHaveBeenCalledOnce();
         expect(mocks.shadowCompare).toHaveBeenCalledWith(expect.objectContaining({
             legacyShifts: [legacyShift]

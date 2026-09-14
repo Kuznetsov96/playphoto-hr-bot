@@ -21,6 +21,8 @@ type ShiftLocation = {
 
 type ScheduledShift = {
     id: string;
+    /** Канонічний id тієї ж зміни; `null` для рядків дзеркала, яких синк ще не звʼязав з каноном. */
+    scheduledShiftPublicId?: string | null;
     staffId: string;
     locationId: string;
     date: Date;
@@ -41,7 +43,7 @@ type ReplacementAssignment = {
 };
 
 type OutgoingReplacementRequest = ReplacementAssignment & {
-    workShiftId: string | null;
+    scheduledShiftPublicId: string | null;
     status: ReplacementRequestStatus;
 };
 
@@ -66,10 +68,12 @@ export function mergeStaffScheduleView(
     limit: number,
     scheduledAssignmentSlots: ScheduledShiftIdentity[] = scheduledShifts
 ): StaffShiftView[] {
-    const outgoingByShiftId = new Map(
+    // Заявка тримається за зміну канонічним id, тож і зіставлення йде по
+    // ньому: локального посилання на рядок дзеркала в заявці більше немає.
+    const outgoingByCanonicalShiftId = new Map(
         outgoingRequests
-            .filter(request => request.workShiftId)
-            .map(request => [request.workShiftId!, request])
+            .filter(request => request.scheduledShiftPublicId)
+            .map(request => [request.scheduledShiftPublicId!, request])
     );
     const activeByFallbackKey = new Map(
         outgoingRequests
@@ -79,7 +83,9 @@ export function mergeStaffScheduleView(
     const matchedActiveRequestIds = new Set<string>();
 
     const ownedShifts = scheduledShifts.flatMap<StaffShiftView>(shift => {
-        const request = outgoingByShiftId.get(shift.id)
+        const request = (shift.scheduledShiftPublicId
+            ? outgoingByCanonicalShiftId.get(shift.scheduledShiftPublicId)
+            : undefined)
             ?? activeByFallbackKey.get(getShiftFallbackKey(shift.locationId, shift.date));
 
         if (request?.status === ReplacementRequestStatus.FOUND) return [];
@@ -99,7 +105,7 @@ export function mergeStaffScheduleView(
             && !matchedActiveRequestIds.has(request.id)
         )
         .map(request => ({
-            id: request.workShiftId ?? `replacement-request:${request.id}`,
+            id: `replacement-request:${request.id}`,
             staffId,
             locationId: request.locationId,
             date: request.shiftDate,

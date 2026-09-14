@@ -48,7 +48,7 @@ const requestRow = (awsReplacementPublicId: string | null) => ({
     id: "req-local-1",
     awsReplacementPublicId,
     status: "ACTIVE",
-    workShiftId: "shift-1",
+    scheduledShiftPublicId: "canonical-shift-1",
     requesterStaffId: "staff-1",
     replacementStaffId: null,
     locationId: "loc-1",

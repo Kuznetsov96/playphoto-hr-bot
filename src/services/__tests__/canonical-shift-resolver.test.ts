@@ -17,7 +17,7 @@ vi.mock("../../db/core.js", () => ({
 const { resolveCanonicalShift } = await import("../canonical-shift-resolver.js");
 
 const input = {
-    workShiftId: "work-shift-1",
+    localShiftId: "work-shift-1",
     requesterStaffId: "staff-1",
     locationId: "location-1",
     shiftDate: new Date("2026-08-15T00:00:00.000Z"),
@@ -44,7 +44,7 @@ describe("resolveCanonicalShift", () => {
     it("falls back to employee+location+date when the link was nulled", async () => {
         findUniqueShift.mockResolvedValue({ awsScheduledShiftPublicId: null });
         findManyShift.mockResolvedValue([{ awsScheduledShiftPublicId: "shift-uuid" }]);
-        await expect(resolveCanonicalShift({ ...input, workShiftId: null })).resolves.toEqual({
+        await expect(resolveCanonicalShift({ ...input, localShiftId: null })).resolves.toEqual({
             ok: true,
             scheduledShiftPublicId: "shift-uuid",
             employeePublicId: "emp-uuid",
@@ -56,7 +56,7 @@ describe("resolveCanonicalShift", () => {
             { awsScheduledShiftPublicId: "shift-a" },
             { awsScheduledShiftPublicId: "shift-b" },
         ]);
-        await expect(resolveCanonicalShift({ ...input, workShiftId: null })).resolves.toEqual({
+        await expect(resolveCanonicalShift({ ...input, localShiftId: null })).resolves.toEqual({
             ok: false,
             reasonCode: "AMBIGUOUS_SHIFT",
         });
@@ -64,7 +64,7 @@ describe("resolveCanonicalShift", () => {
 
     it("reports SHIFT_NOT_MAPPED when nothing matches", async () => {
         findManyShift.mockResolvedValue([]);
-        await expect(resolveCanonicalShift({ ...input, workShiftId: null })).resolves.toEqual({
+        await expect(resolveCanonicalShift({ ...input, localShiftId: null })).resolves.toEqual({
             ok: false,
             reasonCode: "SHIFT_NOT_MAPPED",
         });
@@ -90,7 +90,7 @@ describe("resolveCanonicalShift", () => {
         findUniqueShift.mockResolvedValue({ awsScheduledShiftPublicId: null });
         findManyShift.mockResolvedValue([{ awsScheduledShiftPublicId: "shift-uuid" }]);
         // 2026-08-15T20:30:00.000Z is 23:30 on 2026-08-15 in Kyiv (UTC+3)
-        await expect(resolveCanonicalShift({ ...input, workShiftId: null, shiftDate: new Date("2026-08-15T20:30:00.000Z") })).resolves.toEqual({
+        await expect(resolveCanonicalShift({ ...input, localShiftId: null, shiftDate: new Date("2026-08-15T20:30:00.000Z") })).resolves.toEqual({
             ok: true,
             scheduledShiftPublicId: "shift-uuid",
             employeePublicId: "emp-uuid",
@@ -112,7 +112,7 @@ describe("resolveCanonicalShift", () => {
         findUniqueShift.mockResolvedValue({ awsScheduledShiftPublicId: null });
         findManyShift.mockResolvedValue([{ awsScheduledShiftPublicId: "shift-uuid" }]);
         // 2026-08-15T21:30:00.000Z is 00:30 on 2026-08-16 in Kyiv (UTC+3)
-        await expect(resolveCanonicalShift({ ...input, workShiftId: null, shiftDate: new Date("2026-08-15T21:30:00.000Z") })).resolves.toEqual({
+        await expect(resolveCanonicalShift({ ...input, localShiftId: null, shiftDate: new Date("2026-08-15T21:30:00.000Z") })).resolves.toEqual({
             ok: true,
             scheduledShiftPublicId: "shift-uuid",
             employeePublicId: "emp-uuid",

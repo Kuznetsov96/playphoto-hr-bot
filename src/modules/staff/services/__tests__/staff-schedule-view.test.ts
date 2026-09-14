@@ -6,6 +6,7 @@ const location = { id: "location-1", name: "Fantasy Town", schedule: "10:00-20:0
 const shiftDate = new Date("2030-05-12T00:00:00.000Z");
 const scheduledShift = {
     id: "shift-1",
+    scheduledShiftPublicId: "canonical-shift-1",
     staffId: "staff-1",
     locationId: location.id,
     date: shiftDate,
@@ -14,10 +15,13 @@ const scheduledShift = {
     location
 };
 
-function outgoingRequest(status: ReplacementRequestStatus, workShiftId: string | null = scheduledShift.id) {
+function outgoingRequest(
+    status: ReplacementRequestStatus,
+    scheduledShiftPublicId: string | null = scheduledShift.scheduledShiftPublicId
+) {
     return {
         id: "request-1",
-        workShiftId,
+        scheduledShiftPublicId,
         requesterStaffId: "staff-1",
         replacementStaffId: status === ReplacementRequestStatus.FOUND ? "replacement-staff" : null,
         locationId: location.id,

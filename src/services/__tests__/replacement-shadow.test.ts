@@ -25,7 +25,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 function input(overrides: Record<string, unknown> = {}) {
     return {
         requestId: `request-${Math.random()}`,
-        workShiftId: "work-shift-1",
+        scheduledShiftPublicId: "shift-uuid",
         requesterStaffId: "staff-1",
         requesterTelegramId: "12345",
         locationId: "location-1",
