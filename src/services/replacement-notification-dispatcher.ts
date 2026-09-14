@@ -109,6 +109,16 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
             // запустив пошук за неї, і мовчати про це не можна.
             return STAFF_TEXTS["staff-search-started"]({ location, date, time });
         }
+        case "OPEN_SHIFT_TAKEN": {
+            const time = formatLocalTime(row.payload.startsAtLocal)
+                ? `${formatLocalTime(row.payload.startsAtLocal)}-${formatLocalTime(row.payload.endsAtLocal)}`
+                : "";
+            return STAFF_TEXTS["staff-open-shift-accepted-confirm"]({ location, date, time });
+        }
+        case "OPEN_SHIFT_RELEASED":
+            // Не той самий текст, що OFFER_REOPENED: там скасувалася домовленість
+            // про підміну, тут ніхто нікого не підміняв — зміна просто знову вільна.
+            return STAFF_TEXTS["staff-open-shift-released"]({ location, date });
         case "OFFER_CLOSED":
             return STAFF_TEXTS["staff-replacement-offer-closed"]({ location, date });
         case "OFFER_REOPENED":
@@ -184,6 +194,12 @@ export const REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE = "replrvc";
  */
 export const OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE = "osoa";
 export const OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE = "osod";
+/**
+ * Кнопка скасування на підтвердженні взятої вакансії. Окремий код, а не
+ * `osod`: відмова каже «не піду», скасування — «я не хотіла погоджуватись», і
+ * бекенд відкочує ними різне.
+ */
+export const OPEN_SHIFT_UNDO_CALLBACK_CODE = "osu";
 export const REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE = "reploa";
 export const REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE = "replod";
 
@@ -217,6 +233,19 @@ function buildOpenShiftKeyboard(payload: AwsReplacementNotificationPayload): Inl
             STAFF_TEXTS["staff-open-shift-btn-decline"],
             buildSignedCallback(OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE, payload.offerPublicId),
         );
+}
+
+/**
+ * Кнопка скасування на підтвердженні. `offerPublicId` — адреса скасування, і
+ * без нього кнопка не змогла б назвати, що саме скасовує: повідомлення тоді
+ * йде звичайним текстом, як і решта кнопок у цьому файлі.
+ */
+function buildOpenShiftUndoKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard | null {
+    if (!payload.offerPublicId) return null;
+    return new InlineKeyboard().text(
+        STAFF_TEXTS["staff-replacement-accepted-btn-undo"],
+        buildSignedCallback(OPEN_SHIFT_UNDO_CALLBACK_CODE, payload.offerPublicId),
+    );
 }
 
 function buildOwnerReviewKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard {
@@ -322,7 +351,9 @@ export class ReplacementNotificationDispatcher {
                 ? buildOfferKeyboard(row.payload)
                 : row.kind === "OPEN_SHIFT_OFFER"
                   ? buildOpenShiftKeyboard(row.payload)
-                  : null;
+                  : row.kind === "OPEN_SHIFT_TAKEN"
+                    ? buildOpenShiftUndoKeyboard(row.payload)
+                    : null;
         const options: Parameters<Api["sendMessage"]>[2] =
             row.kind === "ACCEPTED_OWNER_REVIEW"
                 ? { parse_mode: "HTML", reply_markup: buildOwnerReviewKeyboard(row.payload) }
@@ -546,6 +577,66 @@ export async function undoReplacementAcceptanceAsCandidate(input: {
         result: "success",
         module: "replacement-notification-dispatcher",
         operation: "undoReplacementAcceptanceAsCandidate",
+    });
+    return "undone";
+}
+
+/** Just the client surface the open-shift undo handler needs. */
+export interface OpenShiftUndoClient {
+    undoOpenShiftAcceptance(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<void>;
+}
+
+/**
+ * Скасування власної згоди на вакансію.
+ *
+ * Дзеркало `undoReplacementAcceptanceAsCandidate`, аж до поділу
+ * відповідальності: вікно і власність предложення перевіряє бекенд, бот лише
+ * класифікує відповідь. Код помилки інший — `OPEN_SHIFT_UNDO_WINDOW_CLOSED`,
+ * не `REPLACEMENT_*`: це різні ендпойнти, і звірятися з чужим кодом означало б
+ * показати «спробуй ще раз» там, де насправді минув час.
+ */
+export async function undoOpenShiftAcceptanceAsCandidate(input: {
+    offerPublicId: string;
+    employeePublicId: string;
+    telegramId: number;
+    client: OpenShiftUndoClient;
+}): Promise<ReplacementUndoOutcome> {
+    try {
+        await input.client.undoOpenShiftAcceptance(input.offerPublicId, {
+            employeePublicId: input.employeePublicId,
+            telegramId: String(input.telegramId),
+        });
+    } catch (error) {
+        const code =
+            typeof error === "object" && error !== null && "code" in error
+                ? String((error as { code: unknown }).code)
+                : undefined;
+        logBusinessEvent({
+            event: "bot.open_shifts.undo_failed",
+            level: "warn",
+            telegramId: input.telegramId,
+            actorType: "staff",
+            actorRole: "staff",
+            result: "failed",
+            reasonCode: code ?? "UNDO_REQUEST_FAILED",
+            module: "replacement-notification-dispatcher",
+            operation: "undoOpenShiftAcceptanceAsCandidate",
+            safeContext: { offerPublicId: input.offerPublicId },
+        });
+        return code === "OPEN_SHIFT_UNDO_WINDOW_CLOSED" ? "window_closed" : "failed";
+    }
+
+    logBusinessEvent({
+        event: "bot.open_shifts.undone",
+        actorType: "staff",
+        actorRole: "staff",
+        telegramId: input.telegramId,
+        result: "success",
+        module: "replacement-notification-dispatcher",
+        operation: "undoOpenShiftAcceptanceAsCandidate",
     });
     return "undone";
 }

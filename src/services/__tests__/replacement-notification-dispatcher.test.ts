@@ -3,7 +3,9 @@ import {
     ReplacementNotificationDispatcher,
     revertReplacementIfOwner,
     answerReplacementOffer,
+    undoOpenShiftAcceptanceAsCandidate,
     undoReplacementAcceptanceAsCandidate,
+    OPEN_SHIFT_UNDO_CALLBACK_CODE,
 } from "../replacement-notification-dispatcher.js";
 
 const pendingRow = {
@@ -474,6 +476,161 @@ describe("revertReplacementIfOwner", () => {
 // employee/telegramId), so this only has to prove the client is called with
 // what the accepting photographer actually is, and that the result is
 // classified correctly.
+/*
+ * Прогалина, через яку фотографиня лишилась без скасування: `accept` вакансії
+ * не писав жодного повідомлення, тому кнопці не було до чого причепитися.
+ * Тут перевіряється саме доставка підтвердження з кнопкою, а не бекенд.
+ */
+describe("OPEN_SHIFT_TAKEN", () => {
+    const takenRow = {
+        publicId: "n-2",
+        kind: "OPEN_SHIFT_TAKEN" as const,
+        telegramId: "222",
+        payload: {
+            startsAtLocal: "2026-09-19T12:00",
+            endsAtLocal: "2026-09-19T21:00",
+            timezone: "Europe/Kyiv",
+            locationPublicId: "loc-1",
+            locationName: "Kidlandia",
+            locationCity: "Київ",
+            replacementPublicId: "os-1",
+            offerPublicId: "offer-1",
+        },
+    };
+
+    const dispatcherFor = (row: unknown, sendMessage: ReturnType<typeof vi.fn>) =>
+        new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([row]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+
+    it("причіплює кнопку скасування до підтвердження", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+
+        await dispatcherFor(takenRow, sendMessage).dispatchPending();
+
+        const markup = sendMessage.mock.calls[0]![2]?.reply_markup;
+        const button = markup?.inline_keyboard?.[0]?.[0];
+        expect(button?.callback_data).toContain(`cb:${OPEN_SHIFT_UNDO_CALLBACK_CODE}:`);
+    });
+
+    it("адресує скасування предложенням, бо саме ним його викликають", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+
+        await dispatcherFor(takenRow, sendMessage).dispatchPending();
+
+        const button = sendMessage.mock.calls[0]![2]?.reply_markup?.inline_keyboard?.[0]?.[0];
+        expect(button?.callback_data).toContain("offer-1");
+    });
+
+    it("надсилає текстом, коли payload без offerPublicId, а не падає", async () => {
+        // Старіший бекенд ще не кладе offerPublicId. Кнопка, яка не може назвати
+        // своє предложення, впала б на кожному натисканні — краще без неї.
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { offerPublicId: _omitted, ...payloadWithoutOffer } = takenRow.payload;
+
+        const result = await dispatcherFor(
+            { ...takenRow, payload: payloadWithoutOffer },
+            sendMessage,
+        ).dispatchPending();
+
+        expect(sendMessage.mock.calls[0]![2]?.reply_markup).toBeUndefined();
+        expect(result).toEqual({ delivered: 1, failed: 0 });
+    });
+
+    it("називає локацію і згадує вікно скасування", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+
+        await dispatcherFor(takenRow, sendMessage).dispatchPending();
+
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).toContain("Kidlandia");
+        expect(text).toContain("15 хвилин");
+    });
+
+    it("про звільнену вакансію пише як про вільну зміну, а не про скасовану підміну", async () => {
+        // OPEN_SHIFT_RELEASED — не OFFER_REOPENED: тут нікого не підміняли.
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+
+        await dispatcherFor(
+            { ...takenRow, kind: "OPEN_SHIFT_RELEASED" as const },
+            sendMessage,
+        ).dispatchPending();
+
+        const text = sendMessage.mock.calls[0]![1] as string;
+        expect(text).toContain("знову вільна");
+        expect(text).not.toContain("підмін");
+    });
+});
+
+describe("undoOpenShiftAcceptanceAsCandidate", () => {
+    it("передає особу тієї, хто натиснула, і повертає undone", async () => {
+        const undoOpenShiftAcceptance = vi.fn().mockResolvedValue(undefined);
+
+        const outcome = await undoOpenShiftAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoOpenShiftAcceptance },
+        });
+
+        expect(undoOpenShiftAcceptance).toHaveBeenCalledWith("offer-1", {
+            employeePublicId: "emp-2",
+            telegramId: "222",
+        });
+        expect(outcome).toBe("undone");
+    });
+
+    it("розрізняє закрите вікно вакансії за її власним кодом", async () => {
+        // Код інший, ніж у замін: звіряння з REPLACEMENT_* показало б «спробуй
+        // ще раз» там, де насправді минув час.
+        const undoOpenShiftAcceptance = vi.fn().mockRejectedValue(
+            Object.assign(new Error("too late"), { code: "OPEN_SHIFT_UNDO_WINDOW_CLOSED" }),
+        );
+
+        const outcome = await undoOpenShiftAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoOpenShiftAcceptance },
+        });
+
+        expect(outcome).toBe("window_closed");
+    });
+
+    it("не приймає код замін за свій", async () => {
+        const undoOpenShiftAcceptance = vi.fn().mockRejectedValue(
+            Object.assign(new Error("wrong domain"), { code: "REPLACEMENT_UNDO_WINDOW_CLOSED" }),
+        );
+
+        const outcome = await undoOpenShiftAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoOpenShiftAcceptance },
+        });
+
+        expect(outcome).toBe("failed");
+    });
+
+    it("будь-яка інша помилка — failed", async () => {
+        const undoOpenShiftAcceptance = vi.fn().mockRejectedValue(new Error("network down"));
+
+        const outcome = await undoOpenShiftAcceptanceAsCandidate({
+            offerPublicId: "offer-1",
+            employeePublicId: "emp-2",
+            telegramId: 222,
+            client: { undoOpenShiftAcceptance },
+        });
+
+        expect(outcome).toBe("failed");
+    });
+});
+
 describe("undoReplacementAcceptanceAsCandidate", () => {
     it("calls the client with the pressing photographer's own identity, not an admin gate", async () => {
         const undoReplacementAcceptance = vi.fn().mockResolvedValue({ publicId: "req-1", status: "ACTIVE" });
