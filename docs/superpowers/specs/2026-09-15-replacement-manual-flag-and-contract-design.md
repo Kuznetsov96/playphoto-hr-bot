@@ -90,7 +90,31 @@ ALTER TABLE "ReplacementRequest" DROP COLUMN "workShiftId";
 | Звичайна заявка без канонічного id | `isManual` лишається `false` — вона не сплутається з ручною; це і є та помилка, яку виправляє ця робота |
 | Дві ручні заявки на локацію й день | Індекс на `isManual = true` кидає `P2002`, як і раніше |
 | Два пошуки на одну зміну | Індекс на `scheduledShiftPublicId` кидає `P2002` |
-| `awsScheduledShiftPublicId` ще не проставлений синком | Заявка створюється з `scheduledShiftPublicId: null`; унікальність по зміні в цей момент не діє — так само, як сьогодні не діє для заявки без `workShiftId`. Ризик не новий і не зростає. |
+| `awsScheduledShiftPublicId` ще не проставлений синком | Заявка створюється з `scheduledShiftPublicId: null`; унікальність по зміні в цей момент не діє. **Це ослаблення, не перенесення старого ризику без змін** — див. абзац нижче. |
+
+Старий частковий індекс `ReplacementRequest_active_workShiftId_key` стояв на
+`workShiftId WHERE workShiftId IS NOT NULL`, а `startRequest` завжди писав
+`shift.id` — тобто індекс покривав 100% звичайних заявок. Новий
+`ReplacementRequest_active_scheduled_shift_key` стоїть на
+`scheduledShiftPublicId WHERE scheduledShiftPublicId IS NOT NULL`, а
+`startRequest` пише `shift.awsScheduledShiftPublicId`, яке дорівнює `null`,
+поки синк не зв'язав зміну з каноном. Така заявка випадає з предиката
+нового індексу. Тобто захист на рівні БД від двох активних пошуків на одну
+зміну **дійсно ослаб** — рівно для заявок, чию зміну дзеркало ще не встигло
+зв'язати з каноном.
+
+Що втрачено конкретно: гонка з двох майже одночасних натискань і випадок
+двох різних співробітників, що шукають підміну на ту саму незв'язану
+зміну, тепер тримаються лише кодом (перевірка в
+`getSameReplacementSearchFilter` / гілці `scheduledShiftPublicId` у
+`startRequest`), а не унікальним індексом БД.
+
+Що лишається прикритим: гілка `requesterStaffId + locationId + shiftDate` у
+`startRequest` працює безумовно (незалежно від того, зв'язана зміна з
+каноном чи ні), і індекс `ReplacementRequest_active_requester_location_date_key`
+її й далі захищає на рівні БД — цей індекс цим кроком не змінюється. На
+проді станом на 15.09.2026 живих заявок без канонічного id — нуль, тобто
+щілина зараз не реалізується жодним фактичним рядком, але існує структурно.
 
 ## Testing
 
@@ -133,3 +157,4 @@ WHERE status IN ('ACTIVE','FOUND') AND "workShiftId" IS NOT NULL AND "scheduledS
 - `WorkShift` як таблиця лишається: її наповнює синк і читають інші місця.
 - `ReplacementRequest_active_requester_location_date_key` не змінюється.
 - Борг з обгорткою `scripts/backfill-replacement-scheduled-shift.ts` (імпортує з `src/`, якого немає в контейнері) — окрема дрібна правка, не частина цієї роботи.
+- **Можливе продовження, свідомо відкладене:** `startRequest` міг би до-резолвити канонічний id при створенні заявки через `resolveCanonicalShift` (`src/services/canonical-shift-resolver.ts`) — у резолвера вже є запасний шлях за локацією й датою, який закрив би щілину в захисті БД, описану в Error Handling вище. Це не зобов'язання цієї роботи, а відомий варіант на майбутнє.
