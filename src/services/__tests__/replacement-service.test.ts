@@ -1194,6 +1194,7 @@ describe("ReplacementService", () => {
         const request: any = {
             id: "request-orphan",
             workShiftId: null,
+            scheduledShiftPublicId: null,
             requesterStaffId: "requester-6",
             locationId: "location-6",
             shiftDate: new Date("2030-05-13T00:00:00.000Z"),
@@ -1203,8 +1204,15 @@ describe("ReplacementService", () => {
         };
 
         prismaMock.replacementRequest.findMany.mockResolvedValue([request]);
-        prismaMock.workShift.findFirst.mockResolvedValue({ id: "shift-resynced" });
-        prismaMock.replacementRequest.update.mockResolvedValue({ ...request, workShiftId: "shift-resynced" });
+        prismaMock.workShift.findFirst.mockResolvedValue({
+            id: "shift-resynced",
+            awsScheduledShiftPublicId: "canonical-resynced"
+        });
+        prismaMock.replacementRequest.update.mockResolvedValue({
+            ...request,
+            workShiftId: "shift-resynced",
+            scheduledShiftPublicId: "canonical-resynced"
+        });
 
         const api = {
             sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
@@ -1216,10 +1224,54 @@ describe("ReplacementService", () => {
 
         expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
             where: { id: "request-orphan" },
-            data: { workShiftId: "shift-resynced" },
+            data: { workShiftId: "shift-resynced", scheduledShiftPublicId: "canonical-resynced" },
         });
         expect(prismaMock.replacementRequest.updateMany).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("updates both workShiftId and scheduledShiftPublicId together so the two fields never point at different shifts", async () => {
+        // Локальний workShiftId уже збігається з поточним рядком зміни, але
+        // канонічний scheduledShiftPublicId заявки лишився вказувати на
+        // старий канон (наприклад, бекенд перепризначив
+        // awsScheduledShiftPublicId тому самому локальному рядку). Раніше
+        // умова дивилась лише на workShiftId і такий розсинхрон
+        // пропускала — заявка так і несла застарілий канонічний id.
+        const request: any = {
+            id: "request-canonical-drift",
+            workShiftId: "shift-same",
+            scheduledShiftPublicId: "canonical-old",
+            requesterStaffId: "requester-9",
+            locationId: "location-9",
+            shiftDate: new Date("2030-05-13T00:00:00.000Z"),
+            status: "ACTIVE",
+            location: { id: "location-9", name: "Smile Park", city: "Київ", schedule: null },
+            requester: { id: "requester-9", fullName: "Прокопʼєва Маріанна", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.replacementRequest.findMany.mockResolvedValue([request]);
+        prismaMock.workShift.findFirst.mockResolvedValue({
+            id: "shift-same",
+            awsScheduledShiftPublicId: "canonical-new"
+        });
+        prismaMock.replacementRequest.update.mockResolvedValue({
+            ...request,
+            workShiftId: "shift-same",
+            scheduledShiftPublicId: "canonical-new"
+        });
+
+        const api = {
+            sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }),
+            editMessageText: vi.fn()
+        };
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await new ReplacementService().reconcileRequestsChangedBySchedule(api as any);
+
+        expect(prismaMock.replacementRequest.update).toHaveBeenCalledWith({
+            where: { id: "request-canonical-drift" },
+            data: { workShiftId: "shift-same", scheduledShiftPublicId: "canonical-new" },
+        });
     });
 
     it("closes an accepted replacement superseded by a third photographer in the schedule", async () => {

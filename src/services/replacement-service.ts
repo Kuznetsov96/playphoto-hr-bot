@@ -24,6 +24,26 @@ import { replacementShadowService } from "./replacement-shadow.js";
 import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
 import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
 import { formatLocation } from "../utils/location-label.js";
+import { awsScheduleCanonicalReadService } from "./aws-schedule-canonical-read.js";
+import type { CanonicalScheduledShift } from "./aws-schedule-canonical-projector.js";
+import { logBusinessEvent } from "../core/log-events.js";
+import {
+    readSelectableShiftsSource,
+    rejectShiftsWithActiveRequest
+} from "./replacement-selectable-shifts.js";
+
+/**
+ * Мінімальний набір полів локації, який потрібен для показу зміни у пікері
+ * підміни. Обидва джерела — канон і дзеркало — структурно сумісні з цим
+ * типом, хоча канонічний `location` (`LocalScheduleLocation`) лишає `branch`
+ * необов'язковим, а Prisma `Location` — ні.
+ */
+type ShiftDisplayLocation = {
+    name: string;
+    city?: string | null;
+    branch?: string | null;
+    schedule: string | null;
+};
 
 /**
  * How long to wait before retrying a canonical wave the backend could not
@@ -44,6 +64,14 @@ const CONTACTED_RESPONSE_STATUSES = [
     ReplacementResponseStatus.DECLINED,
     ReplacementResponseStatus.INACTIVE,
 ];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Горизонт вибору зміни для підміни, у днях включно. Дорівнює MAX_LIST_DAYS
+ * канонічного бекенду: якщо там вікно розширять, це число треба зрушити разом.
+ */
+const SELECTABLE_HORIZON_DAYS = 62;
+
 const REPLACEMENT_RESTART_BLOCKING_STATUSES = [
     ReplacementRequestStatus.ACTIVE,
     ReplacementRequestStatus.FOUND,
@@ -99,20 +127,181 @@ export class ReplacementService {
         });
     }
 
+    /**
+     * Усі майбутні зміни, для яких можна запустити пошук підміни.
+     *
+     * Вибірку обмежує горизонт дат, а не кількість рядків. Раніше тут стояло
+     * `take: 12`, і разом зі зрізом до восьми кнопок на екрані це означало, що
+     * фотографиня з дальньою зміною просто не могла її обрати: рядок мовчки
+     * зникав, і жодне повідомлення про це не казало.
+     *
+     * SELECTABLE_HORIZON_DAYS — це горизонт у днях, і саме так його розуміє
+     * дзеркало. Канонічний шлях отримує це саме число, але
+     * `awsScheduleCanonicalReadService.findForStaff` приймає його як `limit`
+     * (кількість рядків, `response.shifts.slice(0, limit)`), а вікно дат там
+     * задає окрема константа `MAX_SCHEDULE_WINDOW_DAYS` (=62) усередині
+     * `scheduleWindow()`. Тобто межа не одна на обидва джерела — це два різні
+     * числа, які зараз збігаються (62 = 62), але не гарантовано звʼязані: якщо
+     * SELECTABLE_HORIZON_DAYS розширять, дзеркало піде на нове вікно, а канон
+     * лишиться на 62 днях і додатково відріже стільки ж рядків, скільки нових
+     * днів додали.
+     *
+     * Джерело — канон (той самий, що й «Мій графік»): екран показує ту саму
+     * зміну, щойно вона з'явилась у графіку, а не лише після наступного
+     * синку дзеркала. Дзеркало лишається запасним шляхом на випадок, коли
+     * канон недоступний.
+     */
     async listSelectableShifts(staffId: string) {
         const today = this.kyivStartOfDay(new Date());
-        return prisma.workShift.findMany({
+        const { shifts } = await readSelectableShiftsSource(staffId, today, SELECTABLE_HORIZON_DAYS, {
+            // Третій аргумент тут — це `limit` (кількість рядків) з погляду
+            // `findForStaff`, а не горизонт у днях: `readSelectableShiftsSource`
+            // передає одне й те саме число обом джерелам, але канонічний шлях
+            // трактує його інакше, ніж дзеркало (див. докблок вище).
+            canonical: (id, since, rowLimit) =>
+                awsScheduleCanonicalReadService.findForStaff(id, since, rowLimit),
+            mirror: (id, since, horizonDays) => this.listSelectableShiftsFromMirror(id, since, horizonDays),
+            log: entry => logBusinessEvent({
+                event: "bot.replacement_picker_canonical_read.fallback",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                result: "fallback",
+                reasonCode: entry.reasonCode,
+                module: "replacement-selectable-shifts",
+                operation: "read",
+                safeContext: { errorType: entry.errorType }
+            })
+        });
+
+        // Дзеркало сортує явно (`orderBy: { date: "asc" }`), а канонічне джерело —
+        // ні: `projectCanonicalSchedule` зберігає порядок відповіді бекенду як є.
+        // Бекенд фактично віддає відсортованим (`orderBy: [{ startsAt: 'asc' },
+        // { publicId: 'asc' }]`), але цей контракт ніде явно не зафіксований, а
+        // `buildShiftPickerView` ріже список до 20 позицій і обіцяє «показані
+        // найближчі 20 змін». Без гарантованого порядку ця обіцянка може
+        // виявитись брехнею, тож сортуємо тут самі — за датою, а при рівних
+        // датах за часом початку (у фотографині бувають дві зміни в один день).
+        const sortedShifts = [...shifts].sort((a, b) => {
+            const dateDiff = a.date.getTime() - b.date.getTime();
+            if (dateDiff !== 0) return dateDiff;
+            return a.startTime.getTime() - b.startTime.getTime();
+        });
+
+        // Заявка на підміну несе і локальний workShiftId, і канонічний
+        // scheduledShiftPublicId (нові заявки пишуть обидва, старі —
+        // дозаповнені бекфілом). Тож блокувальний запит шукає збіг за
+        // будь-яким з полів: інакше заявка, у якої синк ще не проставив (або
+        // вже стер) локальний workShiftId, не заблокує повторний запуск
+        // пошуку на ту саму зміну. workShiftId-гілка лишається запасним
+        // шляхом для заявок, створених до переходу на канон, — прибрати її
+        // можна буде окремим PR, коли бекфіл завершиться і запис почне
+        // писати лише канонічний id.
+        //
+        // canonicalShiftIds свідомо відфільтровує null: `{ in: [] }` у Prisma
+        // не матчить нічого (на відміну від `{ not: null }`, який зловив би
+        // геть усі заявки співробітника з непорожнім канонічним полем, а не
+        // лише ті, що стосуються змін із поточного списку).
+        const localShiftIds = sortedShifts.map(shift => shift.id);
+        const canonicalShiftIds = sortedShifts.flatMap(shift =>
+            (shift.scheduledShiftPublicId ? [shift.scheduledShiftPublicId] : []));
+
+        const blockedFilters: Prisma.ReplacementRequestWhereInput[] = [
+            { workShiftId: { in: localShiftIds } }
+        ];
+        if (canonicalShiftIds.length > 0) {
+            blockedFilters.push({ scheduledShiftPublicId: { in: canonicalShiftIds } });
+        }
+
+        const blocked = await prisma.replacementRequest.findMany({
+            where: {
+                requesterStaffId: staffId,
+                status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
+                OR: blockedFilters
+            },
+            select: { workShiftId: true, scheduledShiftPublicId: true }
+        });
+
+        // `rejectShiftsWithActiveRequest` звіряє за локальним `shift.id`, тож
+        // збіг за канонічним полем тут-таки мапиться назад на локальний id
+        // відповідної зміни зі `sortedShifts`.
+        const canonicalToLocalId = new Map(
+            sortedShifts.flatMap(shift =>
+                (shift.scheduledShiftPublicId ? [[shift.scheduledShiftPublicId, shift.id] as const] : []))
+        );
+        const blockedShiftIds = new Set(blocked.flatMap(row => {
+            const ids: string[] = [];
+            if (row.workShiftId) ids.push(row.workShiftId);
+            const localId = row.scheduledShiftPublicId
+                ? canonicalToLocalId.get(row.scheduledShiftPublicId)
+                : undefined;
+            if (localId) ids.push(localId);
+            return ids;
+        }));
+
+        return rejectShiftsWithActiveRequest(sortedShifts, blockedShiftIds);
+    }
+
+    /**
+     * Запасний шлях: той самий запит, яким екран жив до переходу на канон.
+     * Лишається рівно для випадку, коли канон недоступний — дані можуть бути
+     * на кілька хвилин старіші, але екран не падає.
+     */
+    private async listSelectableShiftsFromMirror(staffId: string, since: Date, horizonDays: number): Promise<CanonicalScheduledShift[]> {
+        const horizon = new Date(since.getTime() + (horizonDays - 1) * DAY_MS);
+        const rows = await prisma.workShift.findMany({
             where: {
                 staffId,
-                date: { gte: today },
+                date: { gte: since, lte: horizon },
                 replacementRequests: {
                     none: { status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES } }
                 }
             },
             include: { location: true },
-            orderBy: { date: "asc" },
-            take: 12
+            orderBy: { date: "asc" }
         });
+
+        // `startTime`/`endTime` лишились nullable у Prisma-схемі з часів до синку
+        // з каноном. Джоба aws-business-sync.ts завжди проставляє обидва поля,
+        // але це операційний інваріант (тримається на env-прапорці
+        // BUSINESS_DATA_SOURCE === "aws"), а не структурний: schedule-sync.ts
+        // усе ще створює WorkShift без часу, і в схемі поля лишаються
+        // nullable. Рядок без них — не жива зміна для цього екрана, тож його
+        // чесніше відкинути, ніж підставити вигадану дату. Але відкидання не
+        // повинно бути німим — якщо цей інваріант колись порушиться, це має
+        // лишити слід у логах, а не мовчки зменшити список змін.
+        const projected = rows.flatMap(row => (row.startTime && row.endTime
+            ? [{
+                id: row.id,
+                scheduledShiftPublicId: row.awsScheduledShiftPublicId,
+                staffId: row.staffId,
+                locationId: row.locationId,
+                date: row.date,
+                startTime: row.startTime,
+                endTime: row.endTime,
+                location: row.location
+            }]
+            : []));
+
+        if (projected.length !== rows.length) {
+            logBusinessEvent({
+                event: "bot.replacement_picker_mirror_read.shift_without_time",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                result: "partial",
+                reasonCode: "SHIFT_TIME_MISSING",
+                module: "replacement-selectable-shifts",
+                operation: "read",
+                safeContext: {
+                    rowCount: rows.length,
+                    projectedCount: projected.length,
+                    skipped: rows.length - projected.length
+                }
+            });
+        }
+
+        return projected;
     }
 
     async listAcceptedAssignmentsForStaff(staffId: string, since: Date, take: number = 100) {
@@ -207,6 +396,9 @@ export class ReplacementService {
 
         const request = await this.createActiveRequest({
             workShiftId: shift.id,
+            // Подвійний запис: локальний id лишається основним для читання,
+            // канонічний пишеться поряд і перейме читання окремим кроком.
+            scheduledShiftPublicId: shift.awsScheduledShiftPublicId,
             requesterStaffId,
             locationId: shift.locationId,
             city: shift.location.city,
@@ -799,10 +991,29 @@ export class ReplacementService {
             const currentShift = await this.findSameScheduledShift(request);
             if (!currentShift) {
                 await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
-            } else if (request.workShiftId !== currentShift.id) {
+            } else if (
+                request.workShiftId !== currentShift.id ||
+                request.scheduledShiftPublicId !== currentShift.awsScheduledShiftPublicId
+            ) {
+                // Оновлюємо workShiftId і scheduledShiftPublicId одним записом,
+                // а не лише локальний workShiftId: якщо розійдеться тільки
+                // канонічний id (наприклад, той самий локальний рядок зміни
+                // отримав новий awsScheduledShiftPublicId після пересинку), то
+                // заявка стане нести канон старої зміни поряд із локальним id
+                // нової. `listSelectableShifts` блокує вибір зміни і за
+                // локальним, і за канонічним полем — розбіжність між ними
+                // означає, що зміна, на яку канон уже не вказує, мовчки
+                // випаде зі списку фотографині, хоч пошук заміни по ній не
+                // ведеться.
+                // Тож правило одне: обидва поля завжди описують ту саму
+                // зміну, і будь-яке розходження хоч в одному з них — привід
+                // перезаписати обидва разом.
                 await prisma.replacementRequest.update({
                     where: { id: request.id },
-                    data: { workShiftId: currentShift.id }
+                    data: {
+                        workShiftId: currentShift.id,
+                        scheduledShiftPublicId: currentShift.awsScheduledShiftPublicId
+                    }
                 });
             }
         }
@@ -957,6 +1168,13 @@ export class ReplacementService {
         const sameSearchFilters: Prisma.ReplacementRequestWhereInput[] = [{ id: request.id }];
         if (request.workShiftId) {
             sameSearchFilters.push({ workShiftId: request.workShiftId });
+        }
+        // Та сама заявка може бути знайдена і за канонічним id зміни — гілка
+        // поряд із workShiftId, а не замість неї: старі заявки досі можуть
+        // мати лише локальний id. Прибрати workShiftId-гілку можна буде
+        // окремим PR після повного бекфілу.
+        if (request.scheduledShiftPublicId) {
+            sameSearchFilters.push({ scheduledShiftPublicId: request.scheduledShiftPublicId });
         }
         if (request.requesterStaffId) {
             sameSearchFilters.push({
@@ -1455,18 +1673,18 @@ export class ReplacementService {
         return `${this.formatDate(request.shiftDate)}\n${escapeHtml(formatLocation(request.location, "in-city"))}\n${escapeHtml(this.formatShiftTime(request))}`;
     }
 
-    private formatShiftTime(request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: Location }) {
+    private formatShiftTime(request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: ShiftDisplayLocation }) {
         if (request.shiftStartTime && request.shiftEndTime) {
             return `${this.formatTime(request.shiftStartTime)}-${this.formatTime(request.shiftEndTime)}`;
         }
         return getShiftTimeFromLocationSchedule(request.location?.schedule, request.shiftDate) || "час не вказано";
     }
 
-    formatShiftButtonLabel(shift: { date: Date; location: Location }) {
+    formatShiftButtonLabel(shift: { date: Date; location: ShiftDisplayLocation }) {
         return `${this.formatDate(shift.date)}, ${formatLocation(shift.location, "in-city")}`;
     }
 
-    formatConfirmationText(shift: { date: Date; startTime?: Date | null; endTime?: Date | null; location: Location }) {
+    formatConfirmationText(shift: { date: Date; startTime?: Date | null; endTime?: Date | null; location: ShiftDisplayLocation }) {
         const time = this.formatShiftTime({
             shiftDate: shift.date,
             shiftStartTime: shift.startTime,

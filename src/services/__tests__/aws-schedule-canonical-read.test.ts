@@ -28,6 +28,7 @@ describe("projectCanonicalSchedule", () => {
     it("uses canonical business fields while preserving local technical identities", () => {
         expect(projectCanonicalSchedule("staff-1", [canonicalShift], [location], [projection])).toEqual([{
             id: projection.id,
+            scheduledShiftPublicId: canonicalShift.publicId,
             staffId: "staff-1",
             locationId: location.id,
             date: new Date("2026-08-10T00:00:00.000Z"),
@@ -42,6 +43,9 @@ describe("projectCanonicalSchedule", () => {
                 openingHours: location.openingHours
             }
         }]);
+
+        expect(projectCanonicalSchedule("staff-1", [canonicalShift], [location], [projection])[0])
+            .toMatchObject({ scheduledShiftPublicId: canonicalShift.publicId });
     });
 
     /**

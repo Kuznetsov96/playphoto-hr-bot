@@ -21,6 +21,7 @@ import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../uti
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
+import { buildShiftPickerView } from "../services/replacement-shift-picker-view.js";
 import { getStaffShiftToday } from "../services/staff-today-shift.js";
 
 export const staffHandlers = new Composer<MyContext>();
@@ -288,15 +289,17 @@ export async function showReplacementShiftPicker(ctx: MyContext) {
         return;
     }
 
+    const { visible, text } = buildShiftPickerView(shifts);
+
     const kb = new InlineKeyboard();
-    for (const shift of shifts.slice(0, 8)) {
+    for (const shift of visible) {
         kb.text(replacementService.formatShiftButtonLabel(shift), `staff_repl_pick_${shift.id}`).row();
     }
     kb.text("🏠 Меню", "staff_hub_nav");
 
     await ScreenManager.renderScreen(
         ctx,
-        "Оберіть дату і локацію.",
+        text,
         kb,
         { pushToStack: true }
     );
