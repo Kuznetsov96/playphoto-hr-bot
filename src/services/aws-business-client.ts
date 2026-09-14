@@ -388,6 +388,15 @@ const replacementNotificationSchema = z.object({
         "ACCEPTED_OWNER_REVIEW",
         "ACCEPTANCE_REVERTED",
         "OPEN_SHIFT_OFFER",
+        // Підтвердження взятої вакансії — єдине повідомлення про вакансію, що
+        // несе offerPublicId, тобто єдине, до чого можна причепити кнопку
+        // скасування. Вид, відсутній у цьому переліку, не просто не показується:
+        // рядок не проходить parse і потрапляє до invalidPublicIds, тобто зникає
+        // мовчки.
+        "OPEN_SHIFT_TAKEN",
+        // Та, що взяла, скасувала згоду: розбудженим наново треба сказати, що
+        // зміна знову вільна, інакше повторний виклик має вигляд збою.
+        "OPEN_SHIFT_RELEASED",
         "SEARCH_STARTED",
     ]),
     telegramId: z.string().regex(/^\d+$/u).nullable(),
@@ -1064,6 +1073,27 @@ export class AwsBusinessClient {
     ): Promise<void> {
         await this.request(
             `/open-shifts/offers/${encodeURIComponent(offerPublicId)}/accept`,
+            { method: "POST", body: JSON.stringify(input) },
+        );
+    }
+
+    /**
+     * Скасування власної згоди на вакансію в межах короткого вікна.
+     *
+     * Захист від промаху пальцем, а не спосіб передумати. Бекенд сам звіряє
+     * предложення з (employeePublicId, telegramId) і сам стежить за вікном —
+     * той самий поділ, що й у accept/decline: дублювати перевірки тут означало б
+     * лише мати другий шанс помилитися.
+     *
+     * Відповідь (оновлена вакансія) не розбирається: боту з неї нічого не
+     * потрібно, а зайва схема ламала б доставку щоразу, коли бекенд додасть полe.
+     */
+    async undoOpenShiftAcceptance(
+        offerPublicId: string,
+        input: { employeePublicId: string; telegramId: string },
+    ): Promise<void> {
+        await this.request(
+            `/open-shifts/offers/${encodeURIComponent(offerPublicId)}/undo`,
             { method: "POST", body: JSON.stringify(input) },
         );
     }

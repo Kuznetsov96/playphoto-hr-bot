@@ -148,6 +148,23 @@ ${p.details}
   "staff-open-shift-btn-accept": `✅ Беру`,
   "staff-open-shift-btn-decline": `🚫 Не можу`,
   "staff-open-shift-taken": (p: { location: string; date: string }) => `Цю зміну вже взяли: ${p.location}, ${p.date}.`,
+  /**
+   * Підтвердження взятої вакансії. Несе кнопку скасування — саме через
+   * відсутність цього повідомлення промах пальцем раніше не було чим виправити.
+   * Про вікно сказано прямо: кнопка, яка мовчки перестає працювати, гірша за її
+   * відсутність.
+   */
+  "staff-open-shift-accepted-confirm": (p: { location: string; date: string; time: string }) => `✅ Зміна твоя
+
+📍 ${p.location}
+📅 ${p.date}
+🕐 ${p.time}
+
+Перевір «Мій графік» 💛
+Якщо натиснула помилково — скасуй протягом 15 хвилин.`,
+  "staff-open-shift-released": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — та, що погодилась, скасувала це одразу.
+Якщо готова, можеш взяти 🌸`,
+  "staff-open-shift-undo-done": `Скасовано, зміна знову вільна 💛`,
   "staff-replacement-offer-btn-accept": `✅ Можу вийти`,
   "staff-replacement-offer-btn-decline": `🚫 Не можу`,
   "staff-replacement-offer-accepted": `Зміна твоя 💛 Перевір «Мій графік».`,

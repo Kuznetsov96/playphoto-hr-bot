@@ -33,11 +33,13 @@ import {
     answerReplacementOffer,
     OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE,
     OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE,
+    OPEN_SHIFT_UNDO_CALLBACK_CODE,
     REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE,
     REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE,
     REPLACEMENT_REVERT_CALLBACK_CODE,
     REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE,
     revertReplacementIfOwner,
+    undoOpenShiftAcceptanceAsCandidate,
     undoReplacementAcceptanceAsCandidate
 } from "../services/replacement-notification-dispatcher.js";
 import { REPLACEMENT_UNDO_CALLBACK_CODE } from "../services/schedule-notification-dispatcher.js";
@@ -339,6 +341,48 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_UNDO_CALLBACK_CODE}:`), asy
 
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-done"]);
+});
+
+// Скасування згоди на вакансію. Окремий обробник, а не гілка в тому, що вище:
+// ендпойнти різні, і код «вікно минуло» в них теж різний.
+//
+// Кнопка живе на власному повідомленні диспетчера (OPEN_SHIFT_TAKEN), а не на
+// повідомленні про зміну графіка, як у замін: вакансія створює зміну з нуля,
+// і підтвердження про неї надсилає саме цей диспетчер.
+handlers.callbackQuery(new RegExp(`^cb:${OPEN_SHIFT_UNDO_CALLBACK_CODE}:`), async (ctx) => {
+    const data = ctx.callbackQuery.data ?? "";
+    const offerPublicId = readCallbackPayload(data, { code: OPEN_SHIFT_UNDO_CALLBACK_CODE });
+    if (!offerPublicId) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+    }
+
+    const telegramId = ctx.from?.id;
+    const staff = telegramId
+        ? await prisma.staffProfile.findFirst({
+            where: { user: { telegramId: BigInt(telegramId) } },
+            select: { awsEmployeePublicId: true }
+        })
+        : null;
+    if (!staff?.awsEmployeePublicId || telegramId === undefined) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);
+    }
+
+    const outcome = await undoOpenShiftAcceptanceAsCandidate({
+        offerPublicId,
+        employeePublicId: staff.awsEmployeePublicId,
+        telegramId,
+        client: awsBusinessClient,
+    });
+
+    if (outcome === "window_closed") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-window-closed"]);
+    }
+    if (outcome === "failed") {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);
+    }
+
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
+    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-open-shift-undo-done"]);
 });
 
 // A candidate answering a canonical OFFER. Both buttons route here; the code
