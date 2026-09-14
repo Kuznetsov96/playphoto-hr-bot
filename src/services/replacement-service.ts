@@ -44,6 +44,14 @@ const CONTACTED_RESPONSE_STATUSES = [
     ReplacementResponseStatus.DECLINED,
     ReplacementResponseStatus.INACTIVE,
 ];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Горизонт вибору зміни для підміни, у днях включно. Дорівнює MAX_LIST_DAYS
+ * канонічного бекенду: якщо там вікно розширять, це число треба зрушити разом.
+ */
+const SELECTABLE_HORIZON_DAYS = 62;
+
 const REPLACEMENT_RESTART_BLOCKING_STATUSES = [
     ReplacementRequestStatus.ACTIVE,
     ReplacementRequestStatus.FOUND,
@@ -99,19 +107,31 @@ export class ReplacementService {
         });
     }
 
+    /**
+     * Усі майбутні зміни, для яких можна запустити пошук підміни.
+     *
+     * Вибірку обмежує горизонт дат, а не кількість рядків. Раніше тут стояло
+     * `take: 12`, і разом зі зрізом до восьми кнопок на екрані це означало, що
+     * фотографиня з дальньою зміною просто не могла її обрати: рядок мовчки
+     * зникав, і жодне повідомлення про це не казало.
+     *
+     * SELECTABLE_HORIZON_DAYS дорівнює вікну канонічного бекенду
+     * (MAX_LIST_DAYS = 62), тож цей список не обривається раніше за канон —
+     * межа одна на обидва джерела, а не два числа, які розходяться.
+     */
     async listSelectableShifts(staffId: string) {
         const today = this.kyivStartOfDay(new Date());
+        const horizon = new Date(today.getTime() + (SELECTABLE_HORIZON_DAYS - 1) * DAY_MS);
         return prisma.workShift.findMany({
             where: {
                 staffId,
-                date: { gte: today },
+                date: { gte: today, lte: horizon },
                 replacementRequests: {
                     none: { status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES } }
                 }
             },
             include: { location: true },
-            orderBy: { date: "asc" },
-            take: 12
+            orderBy: { date: "asc" }
         });
     }
 
