@@ -72,22 +72,34 @@ describe("candidate tone of voice", () => {
     });
 
     /**
-     * Перехід вимовляється один раз, у момент рішення. `candidate-accepted-welcome`
-     * — постійний екран статусу: він рендериться щоразу, коли вона відкриває
-     * анкету, і так до першої зміни. Фраза там перетворювала ритуал на напис.
+     * Перехід не оголошується вголос — «ти» просто з'являється з першої фрази,
+     * як у знайдених українських welcome-листах. Оголошення («тепер ми на "ти"
+     * — так у нас прийнято») звучало як правило, спущене зверху.
+     *
+     * Тест стежить за тим, що лишилося важливим: тексти по цей бік рішення вже
+     * на «ти» і не зісковзують назад на «ви». Саме розрив помітніший за саме
+     * звертання — бот не може вітати у команді й тут-таки «викати».
      */
-    it("постоянный экран статуса не повторяет фразу перехода", () => {
-        const screen = texts.find(({ key }) => key === "candidate-accepted-welcome");
-        expect(screen).toBeDefined();
-        expect(screen!.value).not.toContain("на «ти»");
+    it("тексты приёма в команду обращаются на «ти»", () => {
+        const handoff = texts.filter(({ key }) =>
+            [...HANDOFF_KEYS, ...IN_TEAM_KEYS].includes(key),
+        );
+        expect(handoff).toHaveLength(HANDOFF_KEYS.length + IN_TEAM_KEYS.length);
+
+        const formal = handoff.filter(({ value }) =>
+            /(^|[^\p{L}])(ви|вам|вас|вами|ваше|ваш|ваша|ваші)([^\p{L}]|$)/iu.test(value),
+        );
+        expect(formal.map((o) => o.key)).toEqual([]);
     });
 
-    it("оба текста приёма в команду проговаривают переход на «ти»", () => {
-        const handoff = texts.filter(({ key }) => HANDOFF_KEYS.includes(key));
-        expect(handoff).toHaveLength(HANDOFF_KEYS.length);
+    /**
+     * Оголошення переходу більше немає в жодному тексті: воно читалося як
+     * регламент, а не як прийняття у свої.
+     */
+    it("не объявляет переход на «ти» вслух", () => {
+        const offenders = texts.filter(({ value }) => value.includes("на «ти»"));
 
-        const silent = handoff.filter(({ value }) => !value.includes("на «ти»"));
-        expect(silent.map((o) => o.key)).toEqual([]);
+        expect(offenders.map((o) => o.key)).toEqual([]);
     });
 
     it("не использует эмодзи в текстах кандидатке", () => {
