@@ -5,9 +5,9 @@ export const STAFF_TEXTS = {
    * Посилання персональне й одноразове, але людині це знати не треба: вона
    * просто хоче потрапити всередину, тож механіка з тексту прибрана.
    */
-  "channel-invite-welcome": `<b>Вітаємо в команді PlayPhoto</b>\n\nОсь ваше посилання на базу знань — там усі матеріали по роботі.`,
-  "channel-invite-back": `<b>З поверненням</b>\n\nОсь ваше посилання на базу знань.`,
-  "channel-invite-link": `Ваше посилання на базу знань.`,
+  "channel-invite-welcome": `<b>Вітаємо в команді PlayPhoto</b>\n\nОсь твоє посилання на базу знань — там усі матеріали по роботі.`,
+  "channel-invite-back": `<b>З поверненням</b>\n\nОсь твоє посилання на базу знань.`,
+  "channel-invite-link": `Твоє посилання на базу знань.`,
   "channel-invite-denied": `Доступ до бази знань відкривається після оформлення.`,
   "channel-btn-join": `Приєднатися`,
   /**
@@ -17,12 +17,12 @@ export const STAFF_TEXTS = {
    */
   "channel-btn-get-link": `📚 База знань`,
 
-  "welcome-message": `Привіт! Ми дуже раді, що ти хочеш приєднатися до нашої команди PlayPhoto 🌸✨\nЯ допоможу тобі пройти шлях до твоєї першої зміни. Це буде цікаво! 📸`,
-  "ask-name": `Як тебе звати? 😊
-(Напиши, будь ласка, своє ім'я та прізвище)`,
+  "welcome-message": `Привіт! Раді, що ти з нами 💛\n\nПроведу тебе до першої зміни — це кілька кроків, почнемо просто зараз.`,
+  "ask-name": `Як тебе звати?
+(Напиши, будь ласка, своє ім’я та прізвище)`,
   "error-name-format": (p: { error: string | number }) => `⚠️ ${p.error}
-Як тебе звати? 😊
-(Напиши, будь ласка, своє ім'я та прізвище)`,
+Як тебе звати?
+(Напиши, будь ласка, своє ім’я та прізвище)`,
   "hr-error-format-session": `⚠️ Invalid format. Try again:
 DD.MM HH:MM-HH:MM
 Example: 05.02 10:00-14:00`,
@@ -52,11 +52,11 @@ Example: 05.02 10:00-14:00`,
   "staff-btn-home": `🏠 Меню`,
   "staff-replacement-accepted": (p: { details: string }) => `✅ <b>Підміну підтверджено</b>
 
-Ця зміна закріплена за вами:
+Ця зміна закріплена за тобою:
 ${p.details}
 
-Більше пропозицій на цю дату бот не надсилатиме. У розділі «Мій графік» зміна може з'явитися трохи пізніше після синхронізації адміністратором.`,
-  "staff-replacement-other-offer-closed": (p: { details: string }) => `Цю пропозицію закрито для вас, бо ви вже підтвердили іншу зміну на цю дату.
+Більше пропозицій на цю дату бот не надсилатиме. У розділі «Мій графік» зміна може з’явитися трохи пізніше після синхронізації адміністратором.`,
+  "staff-replacement-other-offer-closed": (p: { details: string }) => `Цю пропозицію закрито, бо ти вже підтвердила іншу зміну на цю дату.
 
 ${p.details}`,
   "staff-replacement-canonical-failed": `Не вдалося створити запит на підміну. Спробуй ще раз або напиши в підтримку.`,
@@ -87,7 +87,7 @@ ${p.details}
   // Sent when the candidate had marked this day unavailable. Naming that first
   // is the point: she is being asked anyway, and pretending otherwise reads as
   // if nobody looked at her preferences.
-  "staff-replacement-offer-unavailable-wave": (p: { location: string; date: string; time: string }) => `🌸 Знаємо, що ти позначала цей день як зайнятий — і це ок.
+  "staff-replacement-offer-unavailable-wave": (p: { location: string; date: string; time: string }) => `Знаємо, що ти позначала цей день як зайнятий — і це ок.
 Просто на випадок, якщо плани змінилися: зміна ще вільна.
 
 📍 ${p.location}
@@ -171,18 +171,18 @@ ${p.details}
   "staff-replacement-offer-declined": `Зрозуміло, дякуємо за відповідь 💛`,
   "staff-replacement-offer-gone": `Зміну вже закрито — хтось був раніше 💛`,
   /** Узкая всплывашка: обрезается после ~45 символов, поэтому только действие. */
-  "staff-replacement-offer-error": `Спробуй ще раз за хвилину 🌸`,
+  "staff-replacement-offer-error": `Спробуй ще раз за хвилину.`,
   /** Плашка з кнопкою «ОК» — місця більше, тому тут і куди звертатися. */
   "staff-replacement-offer-error-alert": `Не вдалося зберегти відповідь.
 
-Спробуй ще раз за хвилину. Якщо не вийде — напиши в підтримку 💛`,
+Спробуй ще раз за хвилину. Якщо не вийде — напиши в підтримку.`,
   "staff-replacement-offer-closed": (p: { location: string; date: string }) => `Зміну на ${p.location} ${p.date} вже закрито. Дякуємо, що відгукнулася 💛`,
   "staff-replacement-offer-reopened": (p: { location: string; date: string }) => `Зміна на ${p.location} ${p.date} знову вільна — попередня домовленість скасувалася.
 Якщо готова, можеш взяти 🌸`,
   "staff-replacement-undo-done": `Скасовано, зміна знову у пошуку 💛`,
   "staff-replacement-accepted-btn-undo": `↩️ Це помилка, скасувати`,
   "staff-replacement-undo-ans-window-closed": `Час на скасування минув — напиши в підтримку.`,
-  "staff-replacement-undo-ans-failed": `Спробуй ще раз 🌸`,
+  "staff-replacement-undo-ans-failed": `Не вийшло. Спробуй ще раз.`,
   "staff-replacement-reverted-by-owner": (p: { location: string; date: string }) => `Підміну на ${p.location} ${p.date} скасовано адміністратором. Пошук продовжується.`,
   "staff-replacement-reverted-by-candidate": (p: { location: string; date: string }) => `Домовленість на ${p.location} ${p.date} скасувалася — фотографиня, яка погодилась, відмінила це одразу. Пошук заміни триває.`,
   "staff-replacement-owner-review-confirmed": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `✅ <b>Підміну автоматично підтверджено</b>
@@ -277,14 +277,14 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
   "hr-label-no-offline-staging": `No one in offline staging. 🌸`,
   "hr-btn-passed": `✅ Pass`,
   "hr-btn-failed": `❌ Fail`,
-  "hr-info-staging-success-cand": `🎉 Вітаємо з успішним проходженням офлайн-стажування!
-Ти чудово впоралася на локації. Тепер залишився фінальний юридичний крок перед тим, як ми додамо тебе в офіційний графік:
-📝 <b>Заповнення даних для договору NDA.</b>
-Натисни кнопку нижче, щоб розпочати!`,
+  "hr-info-staging-success-cand": `✅ <b>Стажування пройдено</b>
+Ти чудово впоралася на локації 💛
+Лишився останній крок перед офіційним графіком — дані для договору NDA.
+Натисни кнопку нижче, щоб заповнити.`,
   "hr-ans-status-updated-success": `Status updated: Success! 🎉`,
   "hr-btn-schedule-created": `✅ Schedule Ready`,
   "hr-info-cand-schedule-ready": `✨ <b>Твій графік готовий!</b>
-Наш адміністратор вніс твої дані в систему та підготував робочий графік. Твій наставник зв'яжеться з тобою для узгодження твоєї першої робочої зміни. Ласкаво просимо! 📸`,
+Наш адміністратор вніс твої дані в систему та підготував робочий графік. Твій наставник зв’яжеться з тобою для узгодження твоєї першої робочої зміни. Ласкаво просимо! 📸`,
   "hr-ans-mentor-notified": `Done! Mentor notified. 🚀`,
   "hr-info-broadcast-confirm": (p: { city: string | number, count: string | number }) => `🌆 City: <b>${p.city}</b>
 👥 Candidates in queue: <b>${p.count}</b>
@@ -296,18 +296,18 @@ Are you sure you want to send invitations to all these candidates?`,
   "hr-label-waitlist-none": `Waitlist is empty 🌸`,
   "hr-info-waitlist-broadcast-confirm": (p: { locationName: string | number, count: string | number }) => `🏢 Location: <b>${p.locationName}</b>\n⏳ Candidates in reserve: <b>${p.count}</b>\n\nSend invitation to all candidates in reserve for this location? ✨`,
   "hr-ans-waitlist-broadcast-started": `Waitlist broadcast started... ⏳`,
-  "hr-info-waitlist-broadcast-item": (p: { fullName: string | number, locationName: string | number }) => `Привіт, ${p.fullName}! ✨
-Чудові новини! На локації <b>${p.locationName}</b> з'явилося вільне місце. 😍
+  "hr-info-waitlist-broadcast-item": (p: { fullName: string | number, locationName: string | number }) => `Привіт, ${p.fullName} 💛
+На локації <b>${p.locationName}</b> з’явилося вільне місце.
 Ми готові запросити тебе на коротку online-співбесіду у Google Meet. Скоріше обирай зручний час за кнопкою нижче, поки його не забронювали інші — і я одразу надішлю посилання на зустріч!`,
   "hr-info-waitlist-broadcast-done": (p: { count: string | number, locationName: string | number }) => `📢 Broadcast finished! Invited ${p.count} girls to ${p.locationName}. 🚀`,
-  "support-ans-already-processing": `Твій запит вже обробляється! 💌`,
+  "support-ans-already-processing": `Твій запит уже обробляється 💛`,
   "support-info-already-open": `<b>Твій діалог з куратором вже відкритий.</b>
 Просто напиши повідомлення сюди, і я миттєво передам його кураторам. ✨`,
-  "support-ask-issue": `📝 <b>Пиши все, що тебе турбує!</b> ✨
-Просто опиши своє питання або ситуацію одним повідомленням. Я все передам кураторам.
-<i>Можна надсилати текст, фото або навіть кружечки!</i>`,
+  "support-ask-issue": `<b>Пиши все, що тебе турбує 💛</b>
+Опиши питання або ситуацію одним повідомленням — передам кураторам.
+<i>Можна текстом, фото або кружечком.</i>`,
   "support-ans-assigned": (p: { ticketId: string | number }) => `✅ You assigned ticket #${p.ticketId} to yourself`,
-  "support-info-assigned-to-user": `✅ <b>Твоє повідомлення вже в роботі!</b> ✨
+  "support-info-assigned-to-user": `✅ <b>Твоє повідомлення вже в роботі</b>
 Зачекай, будь ласка, ми вже вивчаємо деталі і скоро відповімо.`,
   "support-ans-already-closed": `Ticket already closed.`,
   "support-ask-reply": `💬 <b>Write response to photographer:</b>
@@ -325,15 +325,15 @@ Ticket will be closed after sending.`,
   "support-info-closed-by-admin": `🔒 Curator closed the ticket.`,
   "support-info-closed-notice": `<b>Ми закрили твій запит.</b> Дякуємо за довіру! 🌸`,
   "support-info-no-active-ticket": `ℹ️ <b>У тебе наразі немає відкритого запиту.</b>
-Якщо у тебе виникло питання або потрібна допомога — натисни кнопку нижче, щоб створити новий тікет. 🌸`,
+Якщо виникло питання або потрібна допомога — натисни кнопку нижче, щоб створити новий запит.`,
   "support-btn-write-to-support": `🤍 Написати в сапорт`,
   "support-error-not-found": `⚠️ Ticket not found.`,
   "support-info-reply-from-admin": (p: { text: string | number }) => `💬 <b>Відповідь куратора:</b>
 ${p.text}`,
   "support-error-reply-failed": `❌ Error sending reply.`,
-  "support-info-ticket-created": `✅ <b>Твій запит створено!</b> 🐾✨
-Ми вже отримали твоє повідомлення і скоро відповімо. Дякуємо, що ти з нами! 🤍
-<i>Можеш продовжувати писати сюди, якщо захочеш щось додати.</i>`,
+  "support-info-ticket-created": `✅ <b>Твій запит створено</b>
+Отримали повідомлення — скоро відповімо 💛
+<i>Можеш писати сюди далі, якщо захочеш щось додати.</i>`,
   "support-info-clarification-sent": `✅ <b>Питання по задачі відправлено!</b> 📤
 Куратор отримав твій запит і скоро відпише. Очікуй сповіщення! ⏳`,
   "support-info-clarification-closed": `✅ <b>Питання по задачі закрито.</b> 🌸`,
@@ -505,8 +505,8 @@ Please check bot permissions (Manage Topics).`,
   "admin-btn-main-menu": `🏠 Main Menu`,
   "admin-ans-gen-report": `⏳ Generating report...`,
   "broadcast-ans-success": `✅ Суперово! Твоє підтвердження отримано. Гарного дня! ✨`,
-  "broadcast-ans-decline": `🐾 Бачу, що виникли запитання. Напиши деталі сюди, і наша команда допоможе! 💬`,
-  "broadcast-ask-decline-reason": `🌸 <b>Будь ласка, напиши причину, чому ти не згодна:</b>\n\nТвоє повідомлення буде передано кураторам у вигляді тікета, і вони зв'яжуться з тобою найближчим часом.`,
+  "broadcast-ans-decline": `Бачу, що виникли запитання. Напиши деталі сюди — команда допоможе 💛`,
+  "broadcast-ask-decline-reason": `<b>Напиши, будь ласка, причину, чому ти не згодна:</b>\n\nТвоє повідомлення буде передано кураторам у вигляді тікета, і вони зв’яжуться з тобою найближчим часом.`,
   "broadcast-popup-not-found": `⚠️ Не вдалося знайти цю розсилку.`,
   "broadcast-popup-no-pending-confirm": `⚠️ Для тебе тут немає активного підтвердження.`,
   "broadcast-popup-no-pending-decline": `⚠️ Для тебе тут немає активної відповіді.`,
@@ -658,14 +658,14 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-changed-unknown": `🔄 Змінено зміну — деталі уточнюються`,
   "schedule-notif-summary": (p: { count: string | number }) => `Всього змін: <b>${p.count}</b>`,
   "schedule-notif-btn-schedule": `🗓 Мій графік`,
-  "schedule-notif-ans-confirmed": `Дякуємо! Ми записали твоє підтвердження ✨`,
-  "schedule-notif-ans-declined": `Дякуємо, ми записали твою відповідь. Щоб змінити цю зміну, напиши в підтримку 🌸`,
-  "schedule-notif-ans-expired": `Це сповіщення вже неактуальне 🌸`,
-  "schedule-notif-ans-unavailable": `Спробуй ще раз за хвилину 🌸`,
+  "schedule-notif-ans-confirmed": `Дякуємо! Підтвердження записали 💛`,
+  "schedule-notif-ans-declined": `Дякуємо, відповідь записали. Щоб змінити цю зміну, напиши в підтримку.`,
+  "schedule-notif-ans-expired": `Це сповіщення вже неактуальне.`,
+  "schedule-notif-ans-unavailable": `Спробуй ще раз за хвилину.`,
   /** Плашка з кнопкою «ОК» — місця більше, тому тут і куди звертатися. */
   "schedule-notif-ans-unavailable-alert": `Не вдалося зберегти відповідь.
 
-Спробуй ще раз за хвилину. Якщо не вийде — напиши в підтримку 🌸`,
+Спробуй ще раз за хвилину. Якщо не вийде — напиши в підтримку.`,
   // Сбор пожеланий на следующий месяц.
   //
   // Тон дружелюбно-нейтральный: сообщение приходит одному человеку двенадцать

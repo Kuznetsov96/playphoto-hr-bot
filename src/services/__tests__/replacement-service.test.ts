@@ -780,7 +780,7 @@ describe("ReplacementService", () => {
         expect(api.editMessageText).toHaveBeenCalledWith(
             1132074881,
             321,
-            expect.stringContaining("Ця зміна закріплена за вами:\n15 травня\nSmile Park (Darynok)\n15:00-23:00"),
+            expect.stringContaining("Ця зміна закріплена за тобою:\n15 травня\nSmile Park (Darynok)\n15:00-23:00"),
             {
                 parse_mode: "HTML",
                 reply_markup: { inline_keyboard: [] },
@@ -798,7 +798,7 @@ describe("ReplacementService", () => {
         expect(api.editMessageText).toHaveBeenCalledWith(
             1132074881,
             987,
-            expect.stringContaining("Цю пропозицію закрито для вас, бо ви вже підтвердили іншу зміну на цю дату."),
+            expect.stringContaining("Цю пропозицію закрито, бо ти вже підтвердила іншу зміну на цю дату."),
             {
                 parse_mode: "HTML",
                 reply_markup: { inline_keyboard: [] }
