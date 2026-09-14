@@ -86,4 +86,33 @@ describe("listSelectableShifts", () => {
         );
         expect(spanDays).toBe(61);
     });
+
+    it("відкидає рядок дзеркала без startTime, а не показує його з вигаданим часом", async () => {
+        canonicalRead.findForStaff.mockRejectedValue(new Error("boom"));
+        prismaMock.workShift.findMany.mockResolvedValue([
+            {
+                id: "s-1",
+                staffId: "staff-1",
+                locationId: "loc-1",
+                date: new Date("2026-09-20T00:00:00.000Z"),
+                startTime: new Date("2026-09-20T08:00:00.000Z"),
+                endTime: new Date("2026-09-20T17:00:00.000Z"),
+                location: { id: "loc-1", name: "Smile Park", city: "Київ", branch: null, schedule: null, openingHours: [] }
+            },
+            {
+                id: "s-2",
+                staffId: "staff-1",
+                locationId: "loc-1",
+                date: new Date("2026-09-21T00:00:00.000Z"),
+                startTime: null,
+                endTime: null,
+                location: { id: "loc-1", name: "Smile Park", city: "Київ", branch: null, schedule: null, openingHours: [] }
+            }
+        ]);
+        const { replacementService } = await import("../replacement-service.js");
+
+        const result = await replacementService.listSelectableShifts("staff-1");
+
+        expect(result.map(row => row.id)).toEqual(["s-1"]);
+    });
 });

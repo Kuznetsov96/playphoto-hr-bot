@@ -198,10 +198,15 @@ export class ReplacementService {
         });
 
         // `startTime`/`endTime` лишились nullable у Prisma-схемі з часів до синку
-        // з каноном, але sync-джоба (aws-business-sync.ts) завжди проставляє
-        // обидва поля. Рядок без них — не жива зміна для цього екрана, а слід
-        // легасі-даних, тож його чесніше відкинути, ніж підставити вигадану дату.
-        return rows.flatMap(row => (row.startTime && row.endTime
+        // з каноном. Джоба aws-business-sync.ts завжди проставляє обидва поля,
+        // але це операційний інваріант (тримається на env-прапорці
+        // BUSINESS_DATA_SOURCE === "aws"), а не структурний: schedule-sync.ts
+        // усе ще створює WorkShift без часу, і в схемі поля лишаються
+        // nullable. Рядок без них — не жива зміна для цього екрана, тож його
+        // чесніше відкинути, ніж підставити вигадану дату. Але відкидання не
+        // повинно бути німим — якщо цей інваріант колись порушиться, це має
+        // лишити слід у логах, а не мовчки зменшити список змін.
+        const projected = rows.flatMap(row => (row.startTime && row.endTime
             ? [{
                 id: row.id,
                 staffId: row.staffId,
@@ -212,6 +217,26 @@ export class ReplacementService {
                 location: row.location
             }]
             : []));
+
+        if (projected.length !== rows.length) {
+            logBusinessEvent({
+                event: "bot.replacement_picker_mirror_read.shift_without_time",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                result: "partial",
+                reasonCode: "SHIFT_TIME_MISSING",
+                module: "replacement-selectable-shifts",
+                operation: "read",
+                safeContext: {
+                    rowCount: rows.length,
+                    projectedCount: projected.length,
+                    skipped: rows.length - projected.length
+                }
+            });
+        }
+
+        return projected;
     }
 
     async listAcceptedAssignmentsForStaff(staffId: string, since: Date, take: number = 100) {
