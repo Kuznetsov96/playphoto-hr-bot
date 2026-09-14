@@ -1188,9 +1188,13 @@ export class ReplacementService {
                     lt: this.nextKyivDay(request.shiftDate)
                 }
             });
-        } else {
+        } else if (request.isManual) {
+            // Ознака ручної заявки тепер явна (isManual), а не побічний ефект
+            // порожнього workShiftId — звичайна заявка на зміну, якої дзеркало
+            // ще не звʼязало з каноном, теж має workShiftId: null і не мусить
+            // потрапляти в цю гілку.
             sameSearchFilters.push({
-                workShiftId: null,
+                isManual: true,
                 locationId: request.locationId,
                 shiftDate: {
                     gte: this.kyivStartOfDay(request.shiftDate),
