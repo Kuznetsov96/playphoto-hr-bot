@@ -18,7 +18,7 @@ export type SelectableShiftsDeps = {
  * інакше свіжа зміна видима в одному місці й недоступна в іншому.
  *
  * Дзеркало лишається запасним шляхом, бо перед екраном стоїть людина: краще
- * показати дані п'ятихвилинної давнини, ніж помилку. Мовчки, бо для неї ці
+ * показати дані п'ятихвилинної давнину, ніж помилку. Мовчки, бо для неї ці
  * дані валідні — розходження цікаве нам, і воно йде в лог.
  */
 export async function readSelectableShiftsSource(
@@ -38,4 +38,17 @@ export async function readSelectableShiftsSource(
         });
         return { shifts: await deps.mirror(staffId, since, horizonDays), source: "mirror" };
     }
+}
+
+/**
+ * Прибирає зміни, по яких пошук підміни вже триває.
+ *
+ * Фільтр локальний і таким лишається: заявки живуть у нашій БД, канонічний
+ * бекенд їх не бачить.
+ */
+export function rejectShiftsWithActiveRequest(
+    shifts: CanonicalScheduledShift[],
+    blockedShiftIds: Set<string>
+): CanonicalScheduledShift[] {
+    return shifts.filter(shift => !blockedShiftIds.has(shift.id));
 }

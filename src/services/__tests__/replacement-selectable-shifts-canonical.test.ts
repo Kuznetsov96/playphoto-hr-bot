@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readSelectableShiftsSource } from "../replacement-selectable-shifts.js";
+import { readSelectableShiftsSource, rejectShiftsWithActiveRequest } from "../replacement-selectable-shifts.js";
 
 const shift = (id: string, date: string) => ({
     id,
@@ -46,5 +46,21 @@ describe("readSelectableShiftsSource", () => {
         await readSelectableShiftsSource("staff-1", new Date("2026-09-14"), 62, { canonical, mirror, log });
 
         expect(log).toHaveBeenCalledWith(expect.objectContaining({ reasonCode: "EMPLOYEE_NOT_MAPPED" }));
+    });
+});
+
+describe("rejectShiftsWithActiveRequest", () => {
+    it("прибирає зміни, для яких пошук уже триває", () => {
+        const shifts = [shift("s-1", "2026-09-20"), shift("s-2", "2026-09-21")];
+
+        const result = rejectShiftsWithActiveRequest(shifts, new Set(["s-1"]));
+
+        expect(result.map(row => row.id)).toEqual(["s-2"]);
+    });
+
+    it("не чіпає список, коли активних заявок немає", () => {
+        const shifts = [shift("s-1", "2026-09-20")];
+
+        expect(rejectShiftsWithActiveRequest(shifts, new Set())).toHaveLength(1);
     });
 });
