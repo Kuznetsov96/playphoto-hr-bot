@@ -23,6 +23,7 @@ import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDa
 import { replacementShadowService } from "./replacement-shadow.js";
 import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
 import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
+import { resolveCanonicalShift } from "./canonical-shift-resolver.js";
 import { formatLocation } from "../utils/location-label.js";
 import { awsScheduleCanonicalReadService } from "./aws-schedule-canonical-read.js";
 import type { CanonicalScheduledShift } from "./aws-schedule-canonical-projector.js";
@@ -376,6 +377,23 @@ export class ReplacementService {
         if (existing?.status === ReplacementRequestStatus.FAILED) throw new Error("REQUEST_PREVIOUSLY_FAILED");
 
         let awsReplacementPublicId: string | null = null;
+        /**
+         * Канонічний id зміни для рядка заявки.
+         *
+         * Беремо не сире `shift.awsScheduledShiftPublicId`, а результат
+         * резолвера: у зміни, якої синк ще не встиг звʼязати з каноном, власне
+         * поле порожнє, і заявка випадала б з унікального індексу
+         * `ReplacementRequest_active_scheduled_shift_key` — тобто захист БД від
+         * двох активних пошуків на одну зміну на неї не діяв би.
+         *
+         * Резолвер уміє дістати id запасним шляхом «співробітниця + локація +
+         * день». Якщо не вийшло й так — лишається `null`, і заявка живе на
+         * захисті рівня застосунку, як і до цієї правки. Кидати помилку тут не
+         * можна: людина не має втратити можливість попросити підміну через те,
+         * що синк відстав.
+         */
+        let scheduledShiftPublicId: string | null = shift.awsScheduledShiftPublicId;
+
         if (AWS_REPLACEMENTS_CANONICAL_ENABLED) {
             const canonicalResult = await startCanonicalReplacement({
                 localShiftId: shift.id,
@@ -388,11 +406,21 @@ export class ReplacementService {
                 throw new Error(`CANONICAL_REPLACEMENT_FAILED:${canonicalResult.reasonCode}`);
             }
             awsReplacementPublicId = canonicalResult.replacementPublicId;
+            scheduledShiftPublicId = canonicalResult.scheduledShiftPublicId;
+        } else if (scheduledShiftPublicId === null) {
+            // Прапорець вимкнено — канонічного шляху не було, тож резолвимо самі.
+            const resolution = await resolveCanonicalShift({
+                localShiftId: shift.id,
+                requesterStaffId,
+                locationId: shift.locationId,
+                shiftDate: shift.date,
+            });
+            if (resolution.ok) scheduledShiftPublicId = resolution.scheduledShiftPublicId;
         }
 
         const request = await this.createActiveRequest({
             // Єдине посилання заявки на зміну — канонічний id.
-            scheduledShiftPublicId: shift.awsScheduledShiftPublicId,
+            scheduledShiftPublicId,
             requesterStaffId,
             locationId: shift.locationId,
             city: shift.location.city,
