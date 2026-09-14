@@ -90,7 +90,12 @@ describe("listSelectableShifts", () => {
     it("прибирає зміну, по якій пошук уже триває, знайдений лише за канонічним id", async () => {
         canonicalRead.findForStaff.mockResolvedValue([
             canonicalShift("s-1", "2026-09-20", "canon-s-1"),
-            canonicalShift("s-2", "2026-09-21", "canon-s-2")
+            canonicalShift("s-2", "2026-09-21", "canon-s-2"),
+            // Зміна без канонічного id (синк ще не звʼязав із каноном) —
+            // її id не повинен потрапити у фільтр scheduledShiftPublicId,
+            // інакше `{ in: [...] }` міг би непередбачувано зловити чужі
+            // заявки з null-полем.
+            canonicalShift("s-3", "2026-09-22", null)
         ]);
         // Заявка створена (або дозаповнена бекфілом) з каноном, а локальний
         // workShiftId відсутній — рівно випадок, який мав ловити старий
@@ -102,7 +107,22 @@ describe("listSelectableShifts", () => {
 
         const result = await replacementService.listSelectableShifts("staff-1");
 
-        expect(result.map(row => row.id)).toEqual(["s-2"]);
+        // Перевіряємо не лише постобробку результату (нижче), а й сам запит:
+        // prismaMock — простий мок, що ігнорує `where` і завжди повертає
+        // заданий масив, тож без цієї перевірки тест не відрізнить робочий
+        // фільтр від зламаного (де гілку по scheduledShiftPublicId прибрали).
+        expect(prismaMock.replacementRequest.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: expect.objectContaining({
+                    OR: expect.arrayContaining([
+                        { workShiftId: { in: ["s-1", "s-2", "s-3"] } },
+                        { scheduledShiftPublicId: { in: ["canon-s-1", "canon-s-2"] } }
+                    ])
+                })
+            })
+        );
+
+        expect(result.map(row => row.id)).toEqual(["s-2", "s-3"]);
     });
 
     it("падає на дзеркало з горизонтом у 62 дні, коли канон недоступний", async () => {
