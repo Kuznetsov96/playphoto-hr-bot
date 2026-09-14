@@ -60,6 +60,19 @@ describe("listSelectableShifts", () => {
         expect(prismaMock.workShift.findMany).not.toHaveBeenCalled();
     });
 
+    it("сортує зміни з канону за датою зростання, навіть якщо бекенд віддав їх упереміш", async () => {
+        canonicalRead.findForStaff.mockResolvedValue([
+            canonicalShift("s-3", "2026-09-25"),
+            canonicalShift("s-1", "2026-09-20"),
+            canonicalShift("s-2", "2026-09-22")
+        ]);
+        const { replacementService } = await import("../replacement-service.js");
+
+        const result = await replacementService.listSelectableShifts("staff-1");
+
+        expect(result.map(row => row.id)).toEqual(["s-1", "s-2", "s-3"]);
+    });
+
     it("прибирає зміну, по якій пошук уже триває", async () => {
         canonicalRead.findForStaff.mockResolvedValue([
             canonicalShift("s-1", "2026-09-20"),

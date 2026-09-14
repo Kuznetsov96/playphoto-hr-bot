@@ -5,6 +5,16 @@ export type SelectableShiftsSource = {
     source: "canonical" | "mirror";
 };
 
+/**
+ * `canonical` і `mirror` отримують від `readSelectableShiftsSource` одне й те
+ * саме число (третій параметр функції нижче — `horizonDays`), але трактують
+ * його по-різному: `mirror` розуміє це як справжню кількість днів горизонту,
+ * а `canonical` — як `limit`, кількість рядків, так само як робить далі
+ * `awsScheduleCanonicalReadService.findForStaff`. Це не спільна межа, а лише
+ * число, яке зараз збігається; вікно дат для канону задає окрема константа
+ * `MAX_SCHEDULE_WINDOW_DAYS` в `aws-schedule-canonical-read.ts`. Детальніше —
+ * у докблоку `listSelectableShifts` в `replacement-service.ts`.
+ */
 export type SelectableShiftsDeps = {
     canonical: (staffId: string, since: Date, limit: number) => Promise<CanonicalScheduledShift[]>;
     mirror: (staffId: string, since: Date, horizonDays: number) => Promise<CanonicalScheduledShift[]>;

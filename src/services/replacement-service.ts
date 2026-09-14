@@ -135,9 +135,16 @@ export class ReplacementService {
      * фотографиня з дальньою зміною просто не могла її обрати: рядок мовчки
      * зникав, і жодне повідомлення про це не казало.
      *
-     * SELECTABLE_HORIZON_DAYS дорівнює вікну канонічного бекенду
-     * (MAX_LIST_DAYS = 62), тож цей список не обривається раніше за канон —
-     * межа одна на обидва джерела, а не два числа, які розходяться.
+     * SELECTABLE_HORIZON_DAYS — це горизонт у днях, і саме так його розуміє
+     * дзеркало. Канонічний шлях отримує це саме число, але
+     * `awsScheduleCanonicalReadService.findForStaff` приймає його як `limit`
+     * (кількість рядків, `response.shifts.slice(0, limit)`), а вікно дат там
+     * задає окрема константа `MAX_SCHEDULE_WINDOW_DAYS` (=62) усередині
+     * `scheduleWindow()`. Тобто межа не одна на обидва джерела — це два різні
+     * числа, які зараз збігаються (62 = 62), але не гарантовано звʼязані: якщо
+     * SELECTABLE_HORIZON_DAYS розширять, дзеркало піде на нове вікно, а канон
+     * лишиться на 62 днях і додатково відріже стільки ж рядків, скільки нових
+     * днів додали.
      *
      * Джерело — канон (той самий, що й «Мій графік»): екран показує ту саму
      * зміну, щойно вона з'явилась у графіку, а не лише після наступного
@@ -147,9 +154,13 @@ export class ReplacementService {
     async listSelectableShifts(staffId: string) {
         const today = this.kyivStartOfDay(new Date());
         const { shifts } = await readSelectableShiftsSource(staffId, today, SELECTABLE_HORIZON_DAYS, {
-            canonical: (id, since, horizon) =>
-                awsScheduleCanonicalReadService.findForStaff(id, since, horizon),
-            mirror: (id, since, horizon) => this.listSelectableShiftsFromMirror(id, since, horizon),
+            // Третій аргумент тут — це `limit` (кількість рядків) з погляду
+            // `findForStaff`, а не горизонт у днях: `readSelectableShiftsSource`
+            // передає одне й те саме число обом джерелам, але канонічний шлях
+            // трактує його інакше, ніж дзеркало (див. докблок вище).
+            canonical: (id, since, rowLimit) =>
+                awsScheduleCanonicalReadService.findForStaff(id, since, rowLimit),
+            mirror: (id, since, horizonDays) => this.listSelectableShiftsFromMirror(id, since, horizonDays),
             log: entry => logBusinessEvent({
                 event: "bot.replacement_picker_canonical_read.fallback",
                 level: "warn",
@@ -163,17 +174,31 @@ export class ReplacementService {
             })
         });
 
+        // Дзеркало сортує явно (`orderBy: { date: "asc" }`), а канонічне джерело —
+        // ні: `projectCanonicalSchedule` зберігає порядок відповіді бекенду як є.
+        // Бекенд фактично віддає відсортованим (`orderBy: [{ startsAt: 'asc' },
+        // { publicId: 'asc' }]`), але цей контракт ніде явно не зафіксований, а
+        // `buildShiftPickerView` ріже список до 20 позицій і обіцяє «показані
+        // найближчі 20 змін». Без гарантованого порядку ця обіцянка може
+        // виявитись брехнею, тож сортуємо тут самі — за датою, а при рівних
+        // датах за часом початку (у фотографині бувають дві зміни в один день).
+        const sortedShifts = [...shifts].sort((a, b) => {
+            const dateDiff = a.date.getTime() - b.date.getTime();
+            if (dateDiff !== 0) return dateDiff;
+            return a.startTime.getTime() - b.startTime.getTime();
+        });
+
         const blocked = await prisma.replacementRequest.findMany({
             where: {
                 requesterStaffId: staffId,
                 status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
-                workShiftId: { in: shifts.map(shift => shift.id) }
+                workShiftId: { in: sortedShifts.map(shift => shift.id) }
             },
             select: { workShiftId: true }
         });
 
         return rejectShiftsWithActiveRequest(
-            shifts,
+            sortedShifts,
             new Set(blocked.flatMap(row => (row.workShiftId ? [row.workShiftId] : [])))
         );
     }
