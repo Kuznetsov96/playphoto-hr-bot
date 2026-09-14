@@ -24,6 +24,26 @@ import { replacementShadowService } from "./replacement-shadow.js";
 import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
 import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
 import { formatLocation } from "../utils/location-label.js";
+import { awsScheduleCanonicalReadService } from "./aws-schedule-canonical-read.js";
+import type { CanonicalScheduledShift } from "./aws-schedule-canonical-projector.js";
+import { logBusinessEvent } from "../core/log-events.js";
+import {
+    readSelectableShiftsSource,
+    rejectShiftsWithActiveRequest
+} from "./replacement-selectable-shifts.js";
+
+/**
+ * Мінімальний набір полів локації, який потрібен для показу зміни у пікері
+ * підміни. Обидва джерела — канон і дзеркало — структурно сумісні з цим
+ * типом, хоча канонічний `location` (`LocalScheduleLocation`) лишає `branch`
+ * необов'язковим, а Prisma `Location` — ні.
+ */
+type ShiftDisplayLocation = {
+    name: string;
+    city?: string | null;
+    branch?: string | null;
+    schedule: string | null;
+};
 
 /**
  * How long to wait before retrying a canonical wave the backend could not
@@ -118,14 +138,57 @@ export class ReplacementService {
      * SELECTABLE_HORIZON_DAYS дорівнює вікну канонічного бекенду
      * (MAX_LIST_DAYS = 62), тож цей список не обривається раніше за канон —
      * межа одна на обидва джерела, а не два числа, які розходяться.
+     *
+     * Джерело — канон (той самий, що й «Мій графік»): екран показує ту саму
+     * зміну, щойно вона з'явилась у графіку, а не лише після наступного
+     * синку дзеркала. Дзеркало лишається запасним шляхом на випадок, коли
+     * канон недоступний.
      */
     async listSelectableShifts(staffId: string) {
         const today = this.kyivStartOfDay(new Date());
-        const horizon = new Date(today.getTime() + (SELECTABLE_HORIZON_DAYS - 1) * DAY_MS);
-        return prisma.workShift.findMany({
+        const { shifts } = await readSelectableShiftsSource(staffId, today, SELECTABLE_HORIZON_DAYS, {
+            canonical: (id, since, horizon) =>
+                awsScheduleCanonicalReadService.findForStaff(id, since, horizon),
+            mirror: (id, since, horizon) => this.listSelectableShiftsFromMirror(id, since, horizon),
+            log: entry => logBusinessEvent({
+                event: "bot.replacement_picker_canonical_read.fallback",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                result: "fallback",
+                reasonCode: entry.reasonCode,
+                module: "replacement-selectable-shifts",
+                operation: "read",
+                safeContext: { errorType: entry.errorType }
+            })
+        });
+
+        const blocked = await prisma.replacementRequest.findMany({
+            where: {
+                requesterStaffId: staffId,
+                status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
+                workShiftId: { in: shifts.map(shift => shift.id) }
+            },
+            select: { workShiftId: true }
+        });
+
+        return rejectShiftsWithActiveRequest(
+            shifts,
+            new Set(blocked.flatMap(row => (row.workShiftId ? [row.workShiftId] : [])))
+        );
+    }
+
+    /**
+     * Запасний шлях: той самий запит, яким екран жив до переходу на канон.
+     * Лишається рівно для випадку, коли канон недоступний — дані можуть бути
+     * на кілька хвилин старіші, але екран не падає.
+     */
+    private async listSelectableShiftsFromMirror(staffId: string, since: Date, horizonDays: number): Promise<CanonicalScheduledShift[]> {
+        const horizon = new Date(since.getTime() + (horizonDays - 1) * DAY_MS);
+        const rows = await prisma.workShift.findMany({
             where: {
                 staffId,
-                date: { gte: today, lte: horizon },
+                date: { gte: since, lte: horizon },
                 replacementRequests: {
                     none: { status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES } }
                 }
@@ -133,6 +196,22 @@ export class ReplacementService {
             include: { location: true },
             orderBy: { date: "asc" }
         });
+
+        // `startTime`/`endTime` лишились nullable у Prisma-схемі з часів до синку
+        // з каноном, але sync-джоба (aws-business-sync.ts) завжди проставляє
+        // обидва поля. Рядок без них — не жива зміна для цього екрана, а слід
+        // легасі-даних, тож його чесніше відкинути, ніж підставити вигадану дату.
+        return rows.flatMap(row => (row.startTime && row.endTime
+            ? [{
+                id: row.id,
+                staffId: row.staffId,
+                locationId: row.locationId,
+                date: row.date,
+                startTime: row.startTime,
+                endTime: row.endTime,
+                location: row.location
+            }]
+            : []));
     }
 
     async listAcceptedAssignmentsForStaff(staffId: string, since: Date, take: number = 100) {
@@ -1475,18 +1554,18 @@ export class ReplacementService {
         return `${this.formatDate(request.shiftDate)}\n${escapeHtml(formatLocation(request.location, "in-city"))}\n${escapeHtml(this.formatShiftTime(request))}`;
     }
 
-    private formatShiftTime(request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: Location }) {
+    private formatShiftTime(request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: ShiftDisplayLocation }) {
         if (request.shiftStartTime && request.shiftEndTime) {
             return `${this.formatTime(request.shiftStartTime)}-${this.formatTime(request.shiftEndTime)}`;
         }
         return getShiftTimeFromLocationSchedule(request.location?.schedule, request.shiftDate) || "час не вказано";
     }
 
-    formatShiftButtonLabel(shift: { date: Date; location: Location }) {
+    formatShiftButtonLabel(shift: { date: Date; location: ShiftDisplayLocation }) {
         return `${this.formatDate(shift.date)}, ${formatLocation(shift.location, "in-city")}`;
     }
 
-    formatConfirmationText(shift: { date: Date; startTime?: Date | null; endTime?: Date | null; location: Location }) {
+    formatConfirmationText(shift: { date: Date; startTime?: Date | null; endTime?: Date | null; location: ShiftDisplayLocation }) {
         const time = this.formatShiftTime({
             shiftDate: shift.date,
             shiftStartTime: shift.startTime,
