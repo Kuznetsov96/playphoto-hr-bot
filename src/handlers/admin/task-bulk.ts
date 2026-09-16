@@ -8,7 +8,7 @@ import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { groupRecipientsByLocation, type BulkTaskLocationGroup } from "./bulk-task-recipients.js";
 import { formatStaffName } from "../../utils/task-helpers.js";
-import { normalizeCity, getMessageHtml, sendTaskNotification } from "./utils.js";
+import { normalizeCity, getMessageHtml, sendTaskNotification, escapeHtml } from "./utils.js";
 import { taskService, TASK_TEXT_MAX_LENGTH, type BulkTaskCreationResult } from "../../services/task-service.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
@@ -530,21 +530,48 @@ taskBulkHandlers.callbackQuery("tbk_restart", async (ctx: MyContext) => {
  * createTasksBulk) и задача создалась, но уведомление не дошло (нет
  * telegramId или бот заблокирован). Это разные причины, требующие разных
  * действий от админа, поэтому их нельзя схлопывать в одну цифру.
+ *
+ * Экранирование ошибок обязательно: createTasksBulk кладёт в failed[].error
+ * message исключения как есть, а он может быть сырым ZodError (многострочный
+ * JSON с угловыми скобками в issue.path/expected). Рендер отчёта идёт с
+ * parse_mode HTML — один неэкранированный "<" ломает Telegram-парсинг ВСЕГО
+ * сообщения, и админ не увидит отчёт вовсе, хотя задачи уже создались
+ * необратимо. Поэтому текст ошибки экранируется и обрезается до короткой
+ * читаемой строки.
  */
-export function buildResultReport(result: BulkTaskCreationResult, notifyFailures: string[]): string {
-    const lines = [`✅ <b>Bulk task done — ${result.created.length} task(s) created.</b>`];
+const RESULT_ERROR_MAX_LENGTH = 160;
+
+function formatResultError(error: string): string {
+    const truncated = error.length > RESULT_ERROR_MAX_LENGTH
+        ? `${error.slice(0, RESULT_ERROR_MAX_LENGTH)}…`
+        : error;
+    return escapeHtml(truncated);
+}
+
+export function buildResultReport(
+    result: BulkTaskCreationResult,
+    notifyFailures: string[],
+    nameByStaffId: Map<string, string>,
+): string {
+    const header = result.created.length === 0
+        ? ADMIN_TEXTS["admin-bulk-result-failed"]
+        : result.failed.length > 0
+            ? ADMIN_TEXTS["admin-bulk-result-partial"]
+            : ADMIN_TEXTS["admin-bulk-result-done"];
+    const lines = [`${header} — ${result.created.length} task(s) created.</b>`];
 
     if (result.failed.length > 0) {
         lines.push("", `⚠️ <b>${result.failed.length} not created:</b>`);
         for (const failure of result.failed) {
-            lines.push(`• ${failure.staffId}: ${failure.error}`);
+            const name = nameByStaffId.get(failure.staffId) || failure.staffId;
+            lines.push(`• ${escapeHtml(name)}: ${formatResultError(failure.error)}`);
         }
     }
 
     if (notifyFailures.length > 0) {
         lines.push("", `📵 <b>${notifyFailures.length} not notified</b> (bot may be blocked):`);
         for (const name of notifyFailures) {
-            lines.push(`• ${name}`);
+            lines.push(`• ${escapeHtml(name)}`);
         }
     }
 
@@ -614,7 +641,7 @@ taskBulkHandlers.callbackQuery("tbk_send", async (ctx: MyContext) => {
         }
     }
 
-    const report = buildResultReport(result, notifyFailures);
+    const report = buildResultReport(result, notifyFailures, nameByStaffId);
 
     delete ctx.session.bulkTaskData;
     if (ctx.session.adminFlow === 'BULK_TASK') delete ctx.session.adminFlow;
