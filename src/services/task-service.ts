@@ -7,6 +7,22 @@ import { workShiftRepository } from "../repositories/work-shift-repository.js";
 
 export const TASK_TEXT_MAX_LENGTH = 3000;
 
+export type BulkTaskCreationResult = {
+    created: { staffId: string; taskId: string; telegramId: bigint | null }[];
+    failed: { staffId: string; error: string }[];
+};
+
+export type BulkTaskCreationInput = {
+    staffIds: string[];
+    taskText: string;
+    workDate: Date;
+    deadlineTime: string | null;
+    fileId: string | null;
+    createdById: string;
+    completionMode: TaskCompletionMode;
+    telegramIdByStaffId: Map<string, bigint | null>;
+};
+
 // Zod schemas
 const CreateTaskSchema = z.object({
     staffId: z.string().cuid(),
@@ -98,6 +114,41 @@ export class TaskService {
             isCompleted: false,
             completedAt: null,
         });
+    }
+
+    /**
+     * Создать задачу каждому сотруднику из списка.
+     * Падение на одном сотруднике не прерывает остальных: задача либо создана,
+     * либо попадает в failed с текстом ошибки.
+     */
+    async createTasksBulk(input: BulkTaskCreationInput): Promise<BulkTaskCreationResult> {
+        const result: BulkTaskCreationResult = { created: [], failed: [] };
+
+        for (const staffId of input.staffIds) {
+            try {
+                const task = await this.createTask({
+                    staffId,
+                    taskText: input.taskText,
+                    workDate: input.workDate,
+                    deadlineTime: input.deadlineTime,
+                    city: null,
+                    locationName: null,
+                    fileId: input.fileId,
+                    createdById: input.createdById,
+                    completionMode: input.completionMode,
+                });
+
+                result.created.push({
+                    staffId,
+                    taskId: task.id,
+                    telegramId: input.telegramIdByStaffId.get(staffId) ?? null,
+                });
+            } catch (error: any) {
+                result.failed.push({ staffId, error: error?.message ?? String(error) });
+            }
+        }
+
+        return result;
     }
 
     /**
