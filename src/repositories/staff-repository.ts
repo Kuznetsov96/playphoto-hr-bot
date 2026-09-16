@@ -57,8 +57,8 @@ export class StaffRepository {
         const endOfDay = new Date(date);
         endOfDay.setHours(23, 59, 59, 999);
 
-        logger.debug({ 
-            locationId, 
+        logger.debug({
+            locationId,
             inputDate: date.toISOString(),
             startWindow: startOfDay.toISOString(),
             endWindow: endOfDay.toISOString()
@@ -82,6 +82,34 @@ export class StaffRepository {
 
         logger.debug({ foundCount: result.length }, "🔍 findWithShiftAtLocation search result");
         return result;
+    }
+
+    async findWithShiftAtLocations(locationIds: string[], date: Date): Promise<StaffWithRelations[]> {
+        if (locationIds.length === 0) return [];
+
+        const startOfDay = new Date(date);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(date);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const result = await prisma.staffProfile.findMany({
+            where: {
+                isActive: true,
+                shifts: {
+                    some: {
+                        locationId: { in: locationIds },
+                        date: {
+                            gte: startOfDay,
+                            lte: endOfDay
+                        }
+                    }
+                }
+            },
+            include: { user: true, location: true }
+        });
+
+        logger.debug({ locationCount: locationIds.length, foundCount: result.length }, "🔍 findWithShiftAtLocations search result");
+        return result as unknown as StaffWithRelations[];
     }
 
     async findManyByIds(ids: string[]): Promise<StaffWithRelations[]> {
