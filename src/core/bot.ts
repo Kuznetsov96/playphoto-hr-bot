@@ -179,6 +179,7 @@ bot.use(async (ctx, next) => {
             delete ctx.session.adminFlow;
             delete ctx.session.taskData;
             delete ctx.session.taskCreation;
+            delete ctx.session.bulkTaskData;
             delete ctx.session.broadcastData;
             delete ctx.session.broadcastDraft;
             delete ctx.session.manualChannelAccess;

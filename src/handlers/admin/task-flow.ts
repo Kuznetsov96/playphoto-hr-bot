@@ -21,6 +21,7 @@ export async function startTaskFlow(ctx: MyContext, identifier?: string) {
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.manualChannelAccess;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;

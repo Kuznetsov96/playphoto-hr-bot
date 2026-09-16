@@ -16,6 +16,7 @@ function startManualFlow(ctx: MyContext, step: NonNullable<MyContext["session"][
     delete ctx.session.broadcastDraft;
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
     ctx.session.manualChannelAccess = { step };

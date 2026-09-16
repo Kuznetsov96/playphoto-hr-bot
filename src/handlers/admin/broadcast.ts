@@ -56,6 +56,7 @@ export async function startStatelessBroadcast(ctx: MyContext) {
     ctx.session.candidateData = {};
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.manualChannelAccess;
     delete ctx.session.broadcastDraft;
     delete ctx.session.supportData?.step;

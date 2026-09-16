@@ -70,6 +70,7 @@ composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
     ctx.session.step = "idle";
     ctx.session.candidateData = {};
     delete ctx.session.taskData;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;
