@@ -20,6 +20,7 @@ import { adminStepHandlers } from "./steps.js";
 import { taskFlowHandlers, handleTaskText, startTaskFlow } from "./task-flow.js";
 import tasksHandlers from "./tasks.js";
 import taskCreationHandlers from "./task-creation.js";
+import { taskBulkHandlers, handleBulkTaskContent } from "./task-bulk.js";
 import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
 import { adminMagnetCounterHandlers, handleAdminMagnetCounterMessage } from "./magnet-counter.js";
@@ -76,6 +77,7 @@ adminHandlers.use(adminBroadcastHandlers);
 adminHandlers.use(taskFlowHandlers);
 adminHandlers.use(tasksHandlers);
 adminHandlers.use(taskCreationHandlers);
+adminHandlers.use(taskBulkHandlers);
 adminHandlers.use(adminSystemHandlers);
 adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
@@ -87,6 +89,7 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     if (await handleAdminMagnetCounterMessage(ctx)) return;
     if (await handleManualChannelAccess(ctx)) return;
     if (await handleBroadcastContent(ctx)) return;
+    if (await handleBulkTaskContent(ctx)) return;
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
@@ -155,7 +158,8 @@ const protectedAdminCallbacks = adminProtected.filter(c => c.has("callback_query
     c.callbackQuery.data.startsWith("ticket_") ||
     c.callbackQuery.data.startsWith("pref_") ||
     c.callbackQuery.data.startsWith("task_") ||
-    c.callbackQuery.data.startsWith("tas_")
+    c.callbackQuery.data.startsWith("tas_") ||
+    c.callbackQuery.data.startsWith("tbk_")
 ));
 protectedAdminCallbacks.use(requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT', 'HR_LEAD', 'MENTOR_LEAD'));
 
@@ -174,6 +178,7 @@ protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) 
     delete ctx.session.selectedLocationId;
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;

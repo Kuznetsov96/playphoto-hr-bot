@@ -118,6 +118,7 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
 
     keyboard.text((ADMIN_TEXTS["admin-tasks-history"] || STAFF_TEXTS["admin-tasks-history"] || "admin-tasks-history"), "task_calendar_open").row();
     keyboard.text((ADMIN_TEXTS["admin-tasks-new"] || STAFF_TEXTS["admin-tasks-new"] || "admin-tasks-new"), `task_add_start_${dateStr}`).row();
+    keyboard.text(ADMIN_TEXTS["admin-bulk-entry"], "tbk_start").row();
     keyboard.text((ADMIN_TEXTS["admin-sys-back"] || STAFF_TEXTS["admin-sys-back"] || "admin-sys-back"), "admin_system_back");
 
     return { text, keyboard };
@@ -347,6 +348,14 @@ composer.callbackQuery(/^admin_msg_staff_(.+)$/, async (ctx: MyContext) => {
     }
     const { startAdminMessageFlow } = await import("./search.js");
     await startAdminMessageFlow(ctx, staff.userId);
+});
+
+// Вхід у майстер масової постановки задач (динамічний імпорт запобігає
+// циклу tasks.ts <-> task-bulk.ts)
+composer.callbackQuery("tbk_start", async (ctx: MyContext) => {
+    const { startBulkTask } = await import("./task-bulk.js");
+    await startBulkTask(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 export default composer;
