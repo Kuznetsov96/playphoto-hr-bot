@@ -9,6 +9,7 @@ import { TEAM_CHATS } from "../../config.js";
 import { audit } from "../../core/audit-logger.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../utils/logistics-formatters.js";
 import { escapeHtml } from "./utils.js";
+import { buildParcelLocationChoices } from "./parcel-location-picker.js";
 
 export const adminLogisticsHandlers = new Composer<MyContext>();
 
@@ -227,11 +228,13 @@ adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_delete_(?:direct_)?|apd_)
 // Select Location Menu
 adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
-    const locations = await prisma.location.findMany({ where: { isHidden: false }, orderBy: { name: 'asc' } });
+    const locations = await prisma.location.findMany({ where: { isHidden: false } });
 
     const kb = new InlineKeyboard();
-    locations.forEach(loc => {
-        kb.text(loc.name, buildParcelSetLocationCallback(parcelId, loc.id)).row();
+    // Порядок и подписи — в buildParcelLocationChoices: сырое `name` давало три
+    // неразличимых Karamel и три Volkland подряд.
+    buildParcelLocationChoices(locations).forEach(choice => {
+        kb.text(choice.label, buildParcelSetLocationCallback(parcelId, choice.id)).row();
     });
     kb.text("✖️ Cancel", `admin_parcel_view_details_${parcelId}`).danger();
 
