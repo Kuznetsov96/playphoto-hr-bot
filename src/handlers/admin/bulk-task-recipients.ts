@@ -5,6 +5,12 @@ export type BulkTaskLocationGroup = {
     locationId: string;
     city: string;
     locationName: string;
+    /**
+     * Готовый ярлык локации, построенный через `formatLocation`. Названия площадок
+     * неуникальны — «Smile Park» их четыре, — поэтому город плюс имя не опознают
+     * локацию; ярлык учитывает ещё и `branch`.
+     */
+    label: string;
     staff: StaffWithRelations[];
 };
 
@@ -12,6 +18,7 @@ export type SelectedLocation = {
     id: string;
     city: string;
     name: string;
+    label: string;
 };
 
 /**
@@ -59,6 +66,7 @@ export function groupRecipientsByLocation(
             locationId: loc.id,
             city: loc.city,
             locationName: loc.name,
+            label: loc.label,
             staff,
         };
     });

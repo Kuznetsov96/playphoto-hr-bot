@@ -9,6 +9,7 @@ import { workShiftRepository } from "../../repositories/work-shift-repository.js
 import { groupRecipientsByLocation, type BulkTaskLocationGroup } from "./bulk-task-recipients.js";
 import { formatStaffName } from "../../utils/task-helpers.js";
 import { normalizeCity, getMessageHtml, sendTaskNotification, escapeHtml } from "./utils.js";
+import { formatLocation } from "../../utils/location-label.js";
 import { taskService, TASK_TEXT_MAX_LENGTH, type BulkTaskCreationResult } from "../../services/task-service.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
@@ -201,7 +202,7 @@ async function renderLocationSelection(ctx: MyContext) {
 
     const keyboard = new InlineKeyboard();
     for (const loc of locations) {
-        const label = `${normalizeCity(loc.city)} · ${loc.name}`;
+        const label = formatLocation(loc, "listing");
         keyboard.text(selected.has(loc.id) ? `✅ ${label}` : `⬜ ${label}`, `tbk_loc_${loc.id}`).row();
     }
 
@@ -276,8 +277,8 @@ export function buildRecipientRows(
 
     for (const group of groups) {
         const header = group.staff.length === 0
-            ? `— ${group.city} · ${group.locationName} — ${ADMIN_TEXTS["admin-bulk-no-shifts"]}`
-            : `— ${group.city} · ${group.locationName} —`;
+            ? `— ${group.label} — ${ADMIN_TEXTS["admin-bulk-no-shifts"]}`
+            : `— ${group.label} —`;
         rows.push([{ text: header, callback_data: "tbk_noop" }]);
 
         for (const member of group.staff) {
@@ -315,7 +316,12 @@ async function loadRecipientGroups(ctx: MyContext): Promise<BulkTaskLocationGrou
 
     return groupRecipientsByLocation(
         shifts,
-        chosen.map(l => ({ id: l.id, city: normalizeCity(l.city), name: l.name })),
+        chosen.map(l => ({
+            id: l.id,
+            city: normalizeCity(l.city),
+            name: l.name,
+            label: formatLocation(l, "listing"),
+        })),
     );
 }
 
@@ -504,7 +510,7 @@ export function buildConfirmationSummary(
 ): string {
     const excluded = new Set(excludedStaffIds);
     const perLocation = groups
-        .map(g => ({ label: `${g.city} · ${g.locationName}`, count: g.staff.filter(s => !excluded.has(s.id)).length }))
+        .map(g => ({ label: g.label, count: g.staff.filter(s => !excluded.has(s.id)).length }))
         .filter(entry => entry.count > 0);
 
     const staffTotal = perLocation.reduce((sum, entry) => sum + entry.count, 0);
