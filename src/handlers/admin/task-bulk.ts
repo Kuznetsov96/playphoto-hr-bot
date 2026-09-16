@@ -14,6 +14,14 @@ import { TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
 export const taskBulkHandlers = new Composer<MyContext>();
 
 /**
+ * Telegram отвергает сообщения длиннее 4096 символов. Сводка подтверждения
+ * склеивает текст задачи (до TASK_TEXT_MAX_LENGTH, включая HTML-разметку) с
+ * неограниченной построчной разбивкой по локациям — при большом числе локаций
+ * с длинными названиями лимит превышается даже при коротком тексте задачи.
+ */
+export const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+/**
  * Спрашивать про scope есть смысл только когда есть что сужать.
  */
 export function shouldSkipScopeStep(locationCount: number): boolean {
@@ -496,6 +504,12 @@ async function renderConfirmation(ctx: MyContext): Promise<void> {
         completionMode: data.completionMode ?? TaskCompletionMode.QUICK,
         taskText: data.taskText || "",
     });
+
+    if (summary.length > TELEGRAM_MESSAGE_LIMIT) {
+        data.step = "AWAITING_TEXT";
+        await ctx.reply(ADMIN_TEXTS["admin-bulk-err-summary-too-long"]);
+        return;
+    }
 
     const keyboard = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-bulk-confirm-send"], "tbk_send").row()

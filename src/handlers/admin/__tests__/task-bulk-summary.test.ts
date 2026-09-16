@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildConfirmationSummary } from "../task-bulk.js";
+import { buildConfirmationSummary, TELEGRAM_MESSAGE_LIMIT } from "../task-bulk.js";
 import type { BulkTaskLocationGroup } from "../bulk-task-recipients.js";
 
 const groups: BulkTaskLocationGroup[] = [
@@ -54,5 +54,28 @@ describe("buildConfirmationSummary", () => {
         const summary = buildConfirmationSummary(groups, [], { ...params, deadlineTime: null });
 
         expect(summary).toContain("No deadline");
+    });
+
+    it("stays under the Telegram message limit for a realistic single-location case", () => {
+        const summary = buildConfirmationSummary(groups, [], params);
+
+        expect(summary.length).toBeLessThan(TELEGRAM_MESSAGE_LIMIT);
+    });
+
+    it("can exceed the Telegram message limit with many locations and a long task text", () => {
+        // Reflects a realistic scenario: 20 locations with 55-char Ukrainian-style
+        // labels, plus a task text at the TASK_TEXT_MAX_LENGTH ceiling (3000 chars,
+        // which counts HTML markup, not just visible text).
+        const manyGroups: BulkTaskLocationGroup[] = Array.from({ length: 20 }, (_, i) => ({
+            locationId: `loc-${i}`,
+            city: "Дніпропетровськ-Наддніпрянський",
+            locationName: `Фотостудія на вулиці Соборній, корпус ${i + 1}`,
+            staff: [{ id: `s${i}` }] as any,
+        }));
+        const longText = "<b>" + "Перевірте принтери та камери. ".repeat(90).slice(0, 2990) + "</b>";
+
+        const summary = buildConfirmationSummary(manyGroups, [], { ...params, taskText: longText });
+
+        expect(summary.length).toBeGreaterThan(TELEGRAM_MESSAGE_LIMIT);
     });
 });

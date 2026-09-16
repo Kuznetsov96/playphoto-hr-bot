@@ -272,6 +272,7 @@ export const ADMIN_TEXTS = {
   "admin-bulk-err-too-many": "Too many recipients to show at once ({count}). Telegram limits how many buttons one screen can hold. Go back and select fewer locations, then send a second batch.",
   "admin-bulk-err-text-too-long": "Task text is too long (max 3000 characters).",
   "admin-bulk-err-bad-time": "Invalid time format. Use HH:MM (for example 15:00) or the buttons.",
+  "admin-bulk-err-summary-too-long": "The confirmation preview does not fit in one Telegram message. Shorten the task text or select fewer locations, then try again.",
   "admin-bulk-cancelled": "Bulk task cancelled.",
   "hr-hub-title": `🚀 <b>HR Hub</b>`,
   "mentor-hub-title": `🎓 <b>Mentor Hub</b>`,
