@@ -7,19 +7,28 @@ const selected = [
     { id: "loc-c", city: "Lviv", name: "Center" },
 ];
 
-function staffRow(id: string, locationId: string | null) {
+function shiftRow(staffId: string, shiftLocation: { id: string; city: string; name: string }, homeLocationId: string | null = null) {
     return {
-        id,
-        fullName: `Staff ${id}`,
-        locationId,
-        user: { telegramId: BigInt(100) },
-        location: locationId ? { id: locationId, city: "Kyiv", name: "Podil" } : null,
+        id: `shift-${staffId}-${shiftLocation.id}`,
+        staffId,
+        date: new Date("2026-09-20T10:00:00"),
+        staff: {
+            id: staffId,
+            fullName: `Staff ${staffId}`,
+            locationId: homeLocationId,
+            user: { telegramId: BigInt(100) },
+        },
+        location: shiftLocation,
     } as any;
 }
 
+const locA = selected[0]!;
+const locB = selected[1]!;
+const locC = selected[2]!;
+
 describe("groupRecipientsByLocation", () => {
     it("keeps every selected location, including ones with no shifts", () => {
-        const groups = groupRecipientsByLocation([staffRow("s1", "loc-a")], selected);
+        const groups = groupRecipientsByLocation([shiftRow("s1", locA)], selected);
 
         expect(groups.map(g => g.locationId)).toEqual(["loc-a", "loc-b", "loc-c"]);
         expect(groups[1]!.staff).toEqual([]);
@@ -36,9 +45,9 @@ describe("groupRecipientsByLocation", () => {
         }));
     });
 
-    it("places each staff member under their own location", () => {
+    it("places each staff member under the location of their shift", () => {
         const groups = groupRecipientsByLocation(
-            [staffRow("s1", "loc-a"), staffRow("s2", "loc-c"), staffRow("s3", "loc-a")],
+            [shiftRow("s1", locA), shiftRow("s2", locC), shiftRow("s3", locA)],
             selected,
         );
 
@@ -46,18 +55,37 @@ describe("groupRecipientsByLocation", () => {
         expect(groups[2]!.staff.map(s => s.id)).toEqual(["s2"]);
     });
 
-    it("lists a staff member only once even if they match several selected locations", () => {
-        const duplicated = [staffRow("s1", "loc-a"), staffRow("s1", "loc-b")];
+    it("lists a staff member only once even if they have shifts at several selected locations, keeping the first in caller order", () => {
+        const duplicated = [shiftRow("s1", locA), shiftRow("s1", locB)];
 
         const groups = groupRecipientsByLocation(duplicated, selected);
         const allIds = groups.flatMap(g => g.staff.map(s => s.id));
 
         expect(allIds).toEqual(["s1"]);
+        expect(groups[0]!.staff.map(s => s.id)).toEqual(["s1"]);
+        expect(groups[1]!.staff).toEqual([]);
     });
 
-    it("drops staff whose location is not among the selected ones", () => {
-        const groups = groupRecipientsByLocation([staffRow("s9", "loc-zzz")], selected);
+    it("drops shifts whose location is not among the selected ones", () => {
+        const groups = groupRecipientsByLocation(
+            [shiftRow("s9", { id: "loc-zzz", city: "Odesa", name: "Somewhere" })],
+            selected,
+        );
 
         expect(groups.flatMap(g => g.staff)).toEqual([]);
+    });
+
+    it("groups a staff member under the SHIFT location, not their home location (the defect this feature must not repeat)", () => {
+        // s1's home location is Obolon (loc-b), but today they are on shift at Podil (loc-a).
+        // Only Podil is selected. They must show up there, not be dropped, and not be listed
+        // under their home location.
+        const groups = groupRecipientsByLocation(
+            [shiftRow("s1", locA, "loc-b")],
+            [locA],
+        );
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0]!.locationId).toBe("loc-a");
+        expect(groups[0]!.staff.map(s => s.id)).toEqual(["s1"]);
     });
 });

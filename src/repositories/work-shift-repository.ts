@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import type { WorkShift } from "@prisma/client";
 import prisma from "../db/core.js";
+import type { StaffWithRelations } from "./staff-repository.js";
+import logger from "../core/logger.js";
 
 /**
  * `location: true` alone loads only scalars, so the canonical opening hours would come back
@@ -10,6 +12,19 @@ import prisma from "../db/core.js";
 const locationWithOpeningHours = {
     include: { openingHours: { orderBy: { dayOfWeek: "asc" } } },
 } satisfies Prisma.LocationDefaultArgs;
+
+/**
+ * A shift row for bulk task assignment: the staff member on shift plus the *shift's own*
+ * location — never the staff member's home `StaffProfile.locationId`, which can differ from
+ * where they actually work that day.
+ */
+export type ShiftWithStaffAtLocation = {
+    id: string;
+    staffId: string;
+    date: Date;
+    staff: StaffWithRelations;
+    location: { id: string; city: string; name: string };
+};
 
 export class WorkShiftRepository {
     async findShiftWithLocationOnDate(staffId: string, date: Date) {
@@ -180,6 +195,33 @@ export class WorkShiftRepository {
         return prisma.workShift.findMany({
             where: { OR: conditions }
         });
+    }
+
+    /**
+     * Finds every active staff member on shift at any of the given locations on the given date,
+     * one row per shift, carrying the shift's own location — not the staff member's home
+     * `StaffProfile.locationId`, which can point somewhere else entirely. Used for bulk task
+     * assignment, where a task must follow the location someone actually works that day.
+     */
+    async findWithShiftAtLocations(locationIds: string[], date: Date): Promise<ShiftWithStaffAtLocation[]> {
+        if (locationIds.length === 0) return [];
+
+        const startOfDay = new Date(date);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(date);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const result = await prisma.workShift.findMany({
+            where: {
+                locationId: { in: locationIds },
+                date: { gte: startOfDay, lte: endOfDay },
+                staff: { isActive: true }
+            },
+            include: { staff: { include: { user: true } }, location: true }
+        });
+
+        logger.debug({ locationCount: locationIds.length, foundCount: result.length }, "🔍 findWithShiftAtLocations search result");
+        return result as unknown as ShiftWithStaffAtLocation[];
     }
 
     async countShiftsForStaff(staffId: string, since: Date): Promise<number> {

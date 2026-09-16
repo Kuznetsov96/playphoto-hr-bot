@@ -1,4 +1,5 @@
 import type { StaffWithRelations } from "../../repositories/staff-repository.js";
+import type { ShiftWithStaffAtLocation } from "../../repositories/work-shift-repository.js";
 
 export type BulkTaskLocationGroup = {
     locationId: string;
@@ -14,12 +15,14 @@ export type SelectedLocation = {
 };
 
 /**
- * Разложить сотрудников со сменами по выбранным локациям.
+ * Разложить сотрудников со сменами по выбранным локациям — по локации САМОЙ СМЕНЫ, а не
+ * по домашней локации сотрудника (`StaffProfile.locationId`), которая в этот день может
+ * не совпадать с тем, где он реально работает.
  * Каждая выбранная локация присутствует в результате, даже если смен на ней нет —
  * администратор должен видеть, что туда задача не уйдёт.
  */
 export function groupRecipientsByLocation(
-    staff: StaffWithRelations[],
+    shifts: ShiftWithStaffAtLocation[],
     selectedLocations: SelectedLocation[],
 ): BulkTaskLocationGroup[] {
     const groups: BulkTaskLocationGroup[] = selectedLocations.map(loc => ({
@@ -32,14 +35,14 @@ export function groupRecipientsByLocation(
     const byLocationId = new Map(groups.map(g => [g.locationId, g]));
     const alreadyPlaced = new Set<string>();
 
-    for (const member of staff) {
-        if (alreadyPlaced.has(member.id)) continue;
+    for (const shift of shifts) {
+        if (alreadyPlaced.has(shift.staff.id)) continue;
 
-        const target = member.locationId ? byLocationId.get(member.locationId) : undefined;
+        const target = byLocationId.get(shift.location.id);
         if (!target) continue;
 
-        target.staff.push(member);
-        alreadyPlaced.add(member.id);
+        target.staff.push(shift.staff);
+        alreadyPlaced.add(shift.staff.id);
     }
 
     return groups;
