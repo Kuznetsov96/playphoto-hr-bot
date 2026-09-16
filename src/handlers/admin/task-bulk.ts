@@ -222,9 +222,14 @@ taskBulkHandlers.callbackQuery("tbk_cancel", async (ctx: MyContext) => {
  */
 export const MAX_RECIPIENT_ROWS = 80;
 
+/**
+ * Считать весь бюджет клавиатуры, а не только сотрудников: каждая выбранная локация
+ * добавляет строку-заголовок, поэтому 80 человек на 20 локациях — это 100 строк,
+ * а не 80. Заголовки рисуются для КАЖДОЙ выбранной локации, включая пустые.
+ */
 export function exceedsRecipientRowLimit(groups: BulkTaskLocationGroup[]): boolean {
     const totalStaff = groups.reduce((total, group) => total + group.staff.length, 0);
-    return totalStaff > MAX_RECIPIENT_ROWS;
+    return totalStaff + groups.length > MAX_RECIPIENT_ROWS;
 }
 
 export function buildRecipientRows(

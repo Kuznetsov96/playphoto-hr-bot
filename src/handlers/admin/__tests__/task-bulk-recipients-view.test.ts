@@ -64,21 +64,44 @@ describe("countSelectedRecipients", () => {
 });
 
 describe("exceedsRecipientRowLimit", () => {
-    it("is false at or under the cap", () => {
-        const atCap = [groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS)];
+    it("is false when staff plus location headers exactly fill the cap", () => {
+        const atCap = [groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS - 1)];
         expect(exceedsRecipientRowLimit(atCap)).toBe(false);
     });
 
-    it("is true once total staff rows exceed the cap", () => {
-        const overCap = [groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS + 1)];
+    it("is true one row past the cap", () => {
+        const overCap = [groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS)];
         expect(exceedsRecipientRowLimit(overCap)).toBe(true);
     });
 
     it("sums staff across multiple location groups", () => {
         const groupsAcrossLocations = [
-            groupWithStaffCount("loc-a", Math.ceil(MAX_RECIPIENT_ROWS / 2) + 1),
-            groupWithStaffCount("loc-b", Math.ceil(MAX_RECIPIENT_ROWS / 2) + 1),
+            groupWithStaffCount("loc-a", Math.ceil(MAX_RECIPIENT_ROWS / 2)),
+            groupWithStaffCount("loc-b", Math.ceil(MAX_RECIPIENT_ROWS / 2)),
         ];
         expect(exceedsRecipientRowLimit(groupsAcrossLocations)).toBe(true);
+    });
+
+    it("counts the header row every location adds, so many small locations still trip the cap", () => {
+        // 70 человек, разбросанные по 20 локациям, — это 90 строк, а не 70.
+        const staffPerLocation = 70 / 20;
+        const manySmallLocations = Array.from({ length: 20 }, (_, i) =>
+            groupWithStaffCount(`loc-${i}`, Math.ceil(staffPerLocation)),
+        );
+        const totalStaff = manySmallLocations.reduce((sum, g) => sum + g.staff.length, 0);
+
+        expect(totalStaff).toBeLessThanOrEqual(MAX_RECIPIENT_ROWS);
+        expect(exceedsRecipientRowLimit(manySmallLocations)).toBe(true);
+    });
+
+    it("counts headers of empty locations too, since they are still rendered", () => {
+        const withEmptyLocations = [
+            groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS - 3),
+            groupWithStaffCount("loc-b", 0),
+            groupWithStaffCount("loc-c", 0),
+            groupWithStaffCount("loc-d", 0),
+        ];
+        // 77 человек уместились бы, но 4 заголовка пустых локаций перебирают бюджет.
+        expect(exceedsRecipientRowLimit(withEmptyLocations)).toBe(true);
     });
 });
