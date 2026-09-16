@@ -213,6 +213,20 @@ taskBulkHandlers.callbackQuery("tbk_cancel", async (ctx: MyContext) => {
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
+/**
+ * Telegram caps an inline keyboard at ~100 buttons total. This screen puts every staff
+ * member and every location header on its own row, and the Continue/Cancel rows share the
+ * same budget — so the cap on staff rows alone must sit comfortably under 100, not at it.
+ * Past this, Telegram rejects the whole keyboard with "reply markup is too long", which the
+ * admin would otherwise see as a dead generic error screen with no indication of the cause.
+ */
+export const MAX_RECIPIENT_ROWS = 80;
+
+export function exceedsRecipientRowLimit(groups: BulkTaskLocationGroup[]): boolean {
+    const totalStaff = groups.reduce((total, group) => total + group.staff.length, 0);
+    return totalStaff > MAX_RECIPIENT_ROWS;
+}
+
 export function buildRecipientRows(
     groups: BulkTaskLocationGroup[],
     excludedStaffIds: string[],
@@ -229,7 +243,7 @@ export function buildRecipientRows(
         for (const member of group.staff) {
             const mark = excluded.has(member.id) ? "⬜" : "✅";
             rows.push([{
-                text: `${mark} ${formatStaffName(member.fullName || "Staff")}`,
+                text: `${mark} ${formatStaffName(member.fullName)}`,
                 callback_data: `tbk_staff_${member.id}`,
             }]);
         }
@@ -268,6 +282,21 @@ async function loadRecipientGroups(ctx: MyContext): Promise<BulkTaskLocationGrou
 async function renderRecipientSelection(ctx: MyContext): Promise<void> {
     const data = ctx.session.bulkTaskData!;
     const groups = await loadRecipientGroups(ctx);
+
+    if (exceedsRecipientRowLimit(groups)) {
+        const totalStaff = groups.reduce((total, group) => total + group.staff.length, 0);
+        const keyboard = new InlineKeyboard()
+            .text(ADMIN_TEXTS["admin-btn-back"], "tbk_scope_pick").row()
+            .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+        await ScreenManager.renderScreen(
+            ctx,
+            ADMIN_TEXTS["admin-bulk-err-too-many"].replace("{count}", String(totalStaff)),
+            keyboard,
+        );
+        return;
+    }
+
     const excluded = data.excludedStaffIds || [];
     const selectedCount = countSelectedRecipients(groups, excluded);
 

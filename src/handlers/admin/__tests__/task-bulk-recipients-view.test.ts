@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildRecipientRows, countSelectedRecipients } from "../task-bulk.js";
+import { buildRecipientRows, countSelectedRecipients, exceedsRecipientRowLimit, MAX_RECIPIENT_ROWS } from "../task-bulk.js";
 import type { BulkTaskLocationGroup } from "../bulk-task-recipients.js";
 
 function group(locationId: string, city: string, name: string, staff: { id: string; fullName: string }[]): BulkTaskLocationGroup {
     return { locationId, city, locationName: name, staff: staff as any };
+}
+
+function groupWithStaffCount(locationId: string, count: number): BulkTaskLocationGroup {
+    const staff = Array.from({ length: count }, (_, i) => ({ id: `${locationId}-s${i}`, fullName: `Staff ${i}` }));
+    return group(locationId, "Kyiv", locationId, staff);
 }
 
 const groups: BulkTaskLocationGroup[] = [
@@ -55,5 +60,25 @@ describe("countSelectedRecipients", () => {
 
     it("ignores exclusions that no longer match anyone on shift", () => {
         expect(countSelectedRecipients(groups, ["ghost"])).toBe(2);
+    });
+});
+
+describe("exceedsRecipientRowLimit", () => {
+    it("is false at or under the cap", () => {
+        const atCap = [groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS)];
+        expect(exceedsRecipientRowLimit(atCap)).toBe(false);
+    });
+
+    it("is true once total staff rows exceed the cap", () => {
+        const overCap = [groupWithStaffCount("loc-a", MAX_RECIPIENT_ROWS + 1)];
+        expect(exceedsRecipientRowLimit(overCap)).toBe(true);
+    });
+
+    it("sums staff across multiple location groups", () => {
+        const groupsAcrossLocations = [
+            groupWithStaffCount("loc-a", Math.ceil(MAX_RECIPIENT_ROWS / 2) + 1),
+            groupWithStaffCount("loc-b", Math.ceil(MAX_RECIPIENT_ROWS / 2) + 1),
+        ];
+        expect(exceedsRecipientRowLimit(groupsAcrossLocations)).toBe(true);
     });
 });
