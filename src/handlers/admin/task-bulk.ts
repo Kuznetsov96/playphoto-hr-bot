@@ -8,8 +8,8 @@ import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { groupRecipientsByLocation, type BulkTaskLocationGroup } from "./bulk-task-recipients.js";
 import { formatStaffName } from "../../utils/task-helpers.js";
-import { normalizeCity, getMessageHtml } from "./utils.js";
-import { TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
+import { normalizeCity, getMessageHtml, sendTaskNotification } from "./utils.js";
+import { taskService, TASK_TEXT_MAX_LENGTH, type BulkTaskCreationResult } from "../../services/task-service.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
 
@@ -522,4 +522,103 @@ async function renderConfirmation(ctx: MyContext): Promise<void> {
 taskBulkHandlers.callbackQuery("tbk_restart", async (ctx: MyContext) => {
     await startBulkTask(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
+});
+
+/**
+ * Отчёт показывает ФАКТИЧЕСКОЕ число созданных задач, а не число выбранных
+ * сотрудников — и отдельно две разные проблемы: задача не создалась (сбой
+ * createTasksBulk) и задача создалась, но уведомление не дошло (нет
+ * telegramId или бот заблокирован). Это разные причины, требующие разных
+ * действий от админа, поэтому их нельзя схлопывать в одну цифру.
+ */
+export function buildResultReport(result: BulkTaskCreationResult, notifyFailures: string[]): string {
+    const lines = [`✅ <b>Bulk task done — ${result.created.length} task(s) created.</b>`];
+
+    if (result.failed.length > 0) {
+        lines.push("", `⚠️ <b>${result.failed.length} not created:</b>`);
+        for (const failure of result.failed) {
+            lines.push(`• ${failure.staffId}: ${failure.error}`);
+        }
+    }
+
+    if (notifyFailures.length > 0) {
+        lines.push("", `📵 <b>${notifyFailures.length} not notified</b> (bot may be blocked):`);
+        for (const name of notifyFailures) {
+            lines.push(`• ${name}`);
+        }
+    }
+
+    return lines.join("\n");
+}
+
+taskBulkHandlers.callbackQuery("tbk_send", async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return;
+
+    await ctx.answerCallbackQuery().catch(() => { });
+
+    const groups = await loadRecipientGroups(ctx);
+    const excluded = new Set(data.excludedStaffIds || []);
+    const recipients = groups.flatMap(g => g.staff.filter(s => !excluded.has(s.id)));
+
+    if (recipients.length === 0) {
+        await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["admin-bulk-err-no-recipients"], show_alert: true }).catch(() => { });
+        return;
+    }
+
+    const telegramIdByStaffId = new Map<string, bigint | null>(
+        recipients.map(s => [s.id, s.user?.telegramId ?? null]),
+    );
+    const nameByStaffId = new Map<string, string>(
+        recipients.map(s => [s.id, formatStaffName(s.fullName || "Staff")]),
+    );
+
+    const result = await taskService.createTasksBulk({
+        staffIds: recipients.map(s => s.id),
+        taskText: data.taskText!,
+        workDate: new Date(`${data.date}T00:00:00`),
+        deadlineTime: data.deadlineTime ?? null,
+        fileId: data.fileId ?? null,
+        createdById: ctx.from!.id.toString(),
+        completionMode: data.completionMode ?? TaskCompletionMode.QUICK,
+        telegramIdByStaffId,
+    });
+
+    const notifyFailures: string[] = [];
+    const dateLabel = new Date(`${data.date}T00:00:00`).toLocaleDateString("uk-UA");
+    const deadlineText = data.deadlineTime ? `\n⏰ Дедлайн: ${data.deadlineTime}` : "";
+    const completionHint = data.completionMode === TaskCompletionMode.PROOF_REQUIRED
+        ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
+        : "";
+    const taskMessage = `✨ <b>Нове завдання!</b> 📋\n\n${data.taskText}\n\n📅 Дата: ${dateLabel}${deadlineText}${completionHint}\n\nБажаю успіхів! Ти впораєшся! 💖`;
+    const staffKb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
+
+    for (const created of result.created) {
+        const name = nameByStaffId.get(created.staffId) || created.staffId;
+        if (!created.telegramId) {
+            notifyFailures.push(name);
+            continue;
+        }
+        try {
+            const options: {
+                replyMarkup: InlineKeyboard;
+                textIsHtml: boolean;
+                fileId?: string | null;
+                mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
+            } = { replyMarkup: staffKb, textIsHtml: true };
+            if (data.fileId) options.fileId = data.fileId;
+            if (data.mediaType) options.mediaType = data.mediaType;
+            await sendTaskNotification(ctx, Number(created.telegramId), taskMessage, options);
+        } catch {
+            notifyFailures.push(name);
+        }
+    }
+
+    const report = buildResultReport(result, notifyFailures);
+
+    delete ctx.session.bulkTaskData;
+    if (ctx.session.adminFlow === 'BULK_TASK') delete ctx.session.adminFlow;
+
+    const keyboard = new InlineKeyboard().text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${data.date}_0`);
+    await ScreenManager.renderScreen(ctx, report, keyboard);
 });
