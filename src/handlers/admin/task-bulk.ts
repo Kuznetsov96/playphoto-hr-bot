@@ -29,6 +29,17 @@ export function shouldSkipScopeStep(locationCount: number): boolean {
 }
 
 /**
+ * "Слишком много получателей" — тупик, если единственный выход с экрана
+ * ведёт назад к выбору локаций, а сузить нечем: при одной локации (или без
+ * scope-шага вовсе) назад приводит на тот же результат. Совпадает с условием
+ * shouldSkipScopeStep не случайно — это один и тот же факт "sub-location
+ * narrowing доступен", проверяемый в двух разных местах мастера.
+ */
+export function canNarrowByLocation(locationCount: number): boolean {
+    return !shouldSkipScopeStep(locationCount);
+}
+
+/**
  * Старт мастера. Гасит состояние остальных админских флоу,
  * чтобы свободный текст не перехватил чужой обработчик.
  */
@@ -62,6 +73,20 @@ taskBulkHandlers.callbackQuery(/^tbk_d_(\d{4}-\d{2}-\d{2})$/, async (ctx: MyCont
     ctx.session.bulkTaskData.date = ctx.match![1]!;
     ctx.session.bulkTaskData.step = "SELECT_CITIES";
     await renderCitySelection(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+/**
+ * Выход с тупикового экрана «слишком много получателей», когда сузить
+ * некуда (одна локация без scope-шага): дата — единственное, что реально
+ * меняет число получателей, если локация уже одна.
+ */
+taskBulkHandlers.callbackQuery("tbk_back_to_date", async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return;
+
+    data.step = "SELECT_DATE";
+    await renderDateSelection(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -300,13 +325,23 @@ async function renderRecipientSelection(ctx: MyContext): Promise<void> {
 
     if (exceedsRecipientRowLimit(groups)) {
         const totalStaff = groups.reduce((total, group) => total + group.staff.length, 0);
-        const keyboard = new InlineKeyboard()
-            .text(ADMIN_TEXTS["admin-btn-back"], "tbk_scope_pick").row()
-            .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+        const canNarrow = canNarrowByLocation((data.locationIds || []).length);
+
+        const keyboard = new InlineKeyboard();
+        if (canNarrow) {
+            keyboard.text(ADMIN_TEXTS["admin-btn-back"], "tbk_scope_pick").row();
+        } else {
+            keyboard.text(ADMIN_TEXTS["admin-bulk-back-to-date"], "tbk_back_to_date").row();
+        }
+        keyboard.text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+        const message = canNarrow
+            ? ADMIN_TEXTS["admin-bulk-err-too-many"]
+            : ADMIN_TEXTS["admin-bulk-err-too-many-single-location"];
 
         await ScreenManager.renderScreen(
             ctx,
-            ADMIN_TEXTS["admin-bulk-err-too-many"].replace("{count}", String(totalStaff)),
+            message.replace("{count}", String(totalStaff)),
             keyboard,
         );
         return;
@@ -582,7 +617,12 @@ taskBulkHandlers.callbackQuery("tbk_send", async (ctx: MyContext) => {
     const data = ctx.session.bulkTaskData;
     if (!data) return;
 
-    await ctx.answerCallbackQuery().catch(() => { });
+    // Session state is only cleared at the very end of this handler, after a loop that
+    // awaits one Telegram send per recipient (potentially 30+ sequential network calls).
+    // Marking the flow spent up front — before that loop — closes the re-entry window a
+    // double tap could otherwise land in, so a second tap finds nothing left to send.
+    if (data.step === "SENDING") return;
+    data.step = "SENDING";
 
     const groups = await loadRecipientGroups(ctx);
     const excluded = new Set(data.excludedStaffIds || []);
@@ -590,8 +630,11 @@ taskBulkHandlers.callbackQuery("tbk_send", async (ctx: MyContext) => {
 
     if (recipients.length === 0) {
         await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["admin-bulk-err-no-recipients"], show_alert: true }).catch(() => { });
+        data.step = "CONFIRM";
         return;
     }
+
+    await ctx.answerCallbackQuery().catch(() => { });
 
     const telegramIdByStaffId = new Map<string, bigint | null>(
         recipients.map(s => [s.id, s.user?.telegramId ?? null]),

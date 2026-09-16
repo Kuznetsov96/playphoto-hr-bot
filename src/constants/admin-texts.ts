@@ -270,6 +270,8 @@ export const ADMIN_TEXTS = {
   "admin-bulk-err-no-locations": "Select at least one location.",
   "admin-bulk-err-no-recipients": "Nobody is selected — this task would reach no one.",
   "admin-bulk-err-too-many": "Too many recipients to show at once ({count}). Telegram limits how many buttons one screen can hold. Go back and select fewer locations, then send a second batch.",
+  "admin-bulk-err-too-many-single-location": "Too many recipients to show at once ({count}). Telegram limits how many buttons one screen can hold, and this location has no smaller area to narrow down to. Try a different date, or cancel and send this as a smaller batch another way.",
+  "admin-bulk-back-to-date": "⬅️ Change date",
   "admin-bulk-err-text-too-long": "Task text is too long (max 3000 characters).",
   "admin-bulk-err-bad-time": "Invalid time format. Use HH:MM (for example 15:00) or the buttons.",
   "admin-bulk-err-summary-too-long": "The confirmation preview does not fit in one Telegram message. Shorten the task text or select fewer locations, then try again.",

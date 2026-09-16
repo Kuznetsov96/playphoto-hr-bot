@@ -214,7 +214,7 @@ export interface SessionData {
     };
     bulkTaskData?: {
         step?: "SELECT_DATE" | "SELECT_CITIES" | "SELECT_SCOPE" | "SELECT_LOCATIONS"
-             | "SELECT_RECIPIENTS" | "SELECT_MODE" | "AWAITING_TEXT" | "SELECT_DEADLINE" | "CONFIRM";
+             | "SELECT_RECIPIENTS" | "SELECT_MODE" | "AWAITING_TEXT" | "SELECT_DEADLINE" | "CONFIRM" | "SENDING";
         date?: string;
         cities?: string[];
         locationIds?: string[];
