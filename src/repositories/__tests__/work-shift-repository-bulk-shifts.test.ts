@@ -40,6 +40,16 @@ describe("workShiftRepository.findWithShiftAtLocations", () => {
         }));
     });
 
+    it("excludes deactivated staff, even if they still hold a future shift row", async () => {
+        await workShiftRepository.findWithShiftAtLocations(["loc-a"], new Date("2026-09-20T10:00:00"));
+
+        expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: expect.objectContaining({
+                staff: { isActive: true },
+            }),
+        }));
+    });
+
     it("includes staff (with user) and location so callers can group and notify without extra queries", async () => {
         await workShiftRepository.findWithShiftAtLocations(["loc-a"], new Date("2026-09-20T10:00:00"));
 

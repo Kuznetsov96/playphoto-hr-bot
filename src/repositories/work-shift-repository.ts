@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { WorkShift } from "@prisma/client";
 import prisma from "../db/core.js";
-import type { StaffWithRelations } from "./staff-repository.js";
 import logger from "../core/logger.js";
 
 /**
@@ -13,18 +12,18 @@ const locationWithOpeningHours = {
     include: { openingHours: { orderBy: { dayOfWeek: "asc" } } },
 } satisfies Prisma.LocationDefaultArgs;
 
+/** The exact include shape `findWithShiftAtLocations` queries with. */
+const shiftWithStaffAtLocationArgs = {
+    include: { staff: { include: { user: true } }, location: true },
+} satisfies Prisma.WorkShiftDefaultArgs;
+
 /**
  * A shift row for bulk task assignment: the staff member on shift plus the *shift's own*
  * location — never the staff member's home `StaffProfile.locationId`, which can differ from
- * where they actually work that day.
+ * where they actually work that day. Derived directly from the Prisma payload for the include
+ * above, so the type can never drift from what the query actually returns.
  */
-export type ShiftWithStaffAtLocation = {
-    id: string;
-    staffId: string;
-    date: Date;
-    staff: StaffWithRelations;
-    location: { id: string; city: string; name: string };
-};
+export type ShiftWithStaffAtLocation = Prisma.WorkShiftGetPayload<typeof shiftWithStaffAtLocationArgs>;
 
 export class WorkShiftRepository {
     async findShiftWithLocationOnDate(staffId: string, date: Date) {
@@ -217,11 +216,12 @@ export class WorkShiftRepository {
                 date: { gte: startOfDay, lte: endOfDay },
                 staff: { isActive: true }
             },
-            include: { staff: { include: { user: true } }, location: true }
+            orderBy: { date: 'asc' },
+            ...shiftWithStaffAtLocationArgs
         });
 
         logger.debug({ locationCount: locationIds.length, foundCount: result.length }, "🔍 findWithShiftAtLocations search result");
-        return result as unknown as ShiftWithStaffAtLocation[];
+        return result;
     }
 
     async countShiftsForStaff(staffId: string, since: Date): Promise<number> {

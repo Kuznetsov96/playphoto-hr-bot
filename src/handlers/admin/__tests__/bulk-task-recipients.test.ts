@@ -75,6 +75,22 @@ describe("groupRecipientsByLocation", () => {
         expect(groups.flatMap(g => g.staff)).toEqual([]);
     });
 
+    it("picks the dedup winner by selected-location order, not by row order (Postgres gives no row order without ORDER BY)", () => {
+        const rowPodilFirst = [shiftRow("s1", locA), shiftRow("s1", locB)];
+        const rowObolonFirst = [shiftRow("s1", locB), shiftRow("s1", locA)];
+
+        const groupsPodilFirst = groupRecipientsByLocation(rowPodilFirst, selected);
+        const groupsObolonFirst = groupRecipientsByLocation(rowObolonFirst, selected);
+
+        // selected = [Podil (loc-a), Obolon (loc-b), ...] — Podil is first in caller order,
+        // so s1 must land under Podil regardless of which row the DB happened to return first.
+        expect(groupsPodilFirst[0]!.staff.map(s => s.id)).toEqual(["s1"]);
+        expect(groupsPodilFirst[1]!.staff).toEqual([]);
+
+        expect(groupsObolonFirst[0]!.staff.map(s => s.id)).toEqual(["s1"]);
+        expect(groupsObolonFirst[1]!.staff).toEqual([]);
+    });
+
     it("groups a staff member under the SHIFT location, not their home location (the defect this feature must not repeat)", () => {
         // s1's home location is Obolon (loc-b), but today they are on shift at Podil (loc-a).
         // Only Podil is selected. They must show up there, not be dropped, and not be listed

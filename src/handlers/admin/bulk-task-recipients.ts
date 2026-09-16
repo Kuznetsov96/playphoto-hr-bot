@@ -20,30 +20,46 @@ export type SelectedLocation = {
  * не совпадать с тем, где он реально работает.
  * Каждая выбранная локация присутствует в результате, даже если смен на ней нет —
  * администратор должен видеть, что туда задача не уйдёт.
+ *
+ * Сотрудник, у которого в этот день смены на нескольких выбранных локациях, попадает
+ * только в ПЕРВУЮ по порядку `selectedLocations` — он получит одну задачу, а в списке
+ * получателей остальных таких локаций его не будет.
+ *
+ * Порядок при выборе "первой" локации определяется исключительно порядком
+ * `selectedLocations`, а не порядком строк `shifts` — Postgres без `ORDER BY` не
+ * гарантирует стабильный порядок строк, поэтому решение не должно зависеть от него.
  */
 export function groupRecipientsByLocation(
     shifts: ShiftWithStaffAtLocation[],
     selectedLocations: SelectedLocation[],
 ): BulkTaskLocationGroup[] {
-    const groups: BulkTaskLocationGroup[] = selectedLocations.map(loc => ({
-        locationId: loc.id,
-        city: loc.city,
-        locationName: loc.name,
-        staff: [],
-    }));
-
-    const byLocationId = new Map(groups.map(g => [g.locationId, g]));
-    const alreadyPlaced = new Set<string>();
-
+    const shiftsByLocationId = new Map<string, ShiftWithStaffAtLocation[]>();
     for (const shift of shifts) {
-        if (alreadyPlaced.has(shift.staff.id)) continue;
-
-        const target = byLocationId.get(shift.location.id);
-        if (!target) continue;
-
-        target.staff.push(shift.staff);
-        alreadyPlaced.add(shift.staff.id);
+        const bucket = shiftsByLocationId.get(shift.location.id);
+        if (bucket) {
+            bucket.push(shift);
+        } else {
+            shiftsByLocationId.set(shift.location.id, [shift]);
+        }
     }
 
-    return groups;
+    const alreadyPlaced = new Set<string>();
+
+    return selectedLocations.map(loc => {
+        const candidates = shiftsByLocationId.get(loc.id) ?? [];
+        const staff: StaffWithRelations[] = [];
+
+        for (const shift of candidates) {
+            if (alreadyPlaced.has(shift.staff.id)) continue;
+            staff.push(shift.staff);
+            alreadyPlaced.add(shift.staff.id);
+        }
+
+        return {
+            locationId: loc.id,
+            city: loc.city,
+            locationName: loc.name,
+            staff,
+        };
+    });
 }
