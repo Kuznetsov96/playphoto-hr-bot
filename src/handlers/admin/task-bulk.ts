@@ -1,4 +1,5 @@
 import { Composer, InlineKeyboard } from "grammy";
+import { TaskCompletionMode } from "@prisma/client";
 import type { MyContext } from "../../types/context.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
@@ -7,7 +8,8 @@ import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { groupRecipientsByLocation, type BulkTaskLocationGroup } from "./bulk-task-recipients.js";
 import { formatStaffName } from "../../utils/task-helpers.js";
-import { normalizeCity } from "./utils.js";
+import { normalizeCity, getMessageHtml } from "./utils.js";
+import { TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
 
@@ -351,7 +353,159 @@ taskBulkHandlers.callbackQuery("tbk_recipients_done", async (ctx: MyContext) => 
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
-// renderModeSelection реализуется в Task 7.
-async function renderModeSelection(_ctx: MyContext): Promise<void> {
-    throw new Error("renderModeSelection is implemented in Task 7");
+async function renderModeSelection(ctx: MyContext): Promise<void> {
+    const keyboard = new InlineKeyboard()
+        .text(ADMIN_TEXTS["admin-bulk-mode-proof"], "tbk_mode_proof").row()
+        .text(ADMIN_TEXTS["admin-bulk-mode-quick"], "tbk_mode_quick").row()
+        .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-mode-title"], keyboard);
 }
+
+taskBulkHandlers.callbackQuery(/^tbk_mode_(proof|quick)$/, async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return;
+
+    data.completionMode = ctx.match![1] === "proof"
+        ? TaskCompletionMode.PROOF_REQUIRED
+        : TaskCompletionMode.QUICK;
+    data.step = "AWAITING_TEXT";
+
+    const keyboard = new InlineKeyboard().text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-text-title"], keyboard);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+/**
+ * Приём свободного текста и ручного времени дедлайна. Вызывается из общего
+ * message-funnel в admin/index.ts, следом за handleBroadcastContent.
+ * Возвращает true, если сообщение поглощено этим флоу.
+ */
+export async function handleBulkTaskContent(ctx: MyContext): Promise<boolean> {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return false;
+    if (ctx.session.adminFlow !== 'BULK_TASK') return false;
+    if (data.step !== "AWAITING_TEXT" && data.step !== "SELECT_DEADLINE") return false;
+    if (ctx.chat?.type !== "private") return false;
+
+    const { getUserAdminRole } = await import("../../middleware/role-check.js");
+    const { hasAnyRole } = await import("../../config/roles.js");
+    const role = await getUserAdminRole(BigInt(ctx.from!.id));
+    if (!hasAnyRole(role, 'SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT')) return false;
+
+    const message = ctx.message;
+    if (!message) return false;
+
+    if (data.step === "SELECT_DEADLINE" && message.text) {
+        const timeInput = message.text.trim();
+        if (/^([01]?\d|2[0-3]):[0-5]\d$/.test(timeInput)) {
+            data.deadlineTime = timeInput;
+            data.step = "CONFIRM";
+            await ctx.deleteMessage().catch(() => { });
+            await renderConfirmation(ctx);
+        } else {
+            await ctx.reply(ADMIN_TEXTS["admin-bulk-err-bad-time"]);
+        }
+        return true;
+    }
+
+    if (data.step !== "AWAITING_TEXT") return false;
+
+    const html = getMessageHtml(message);
+    if (!html || html.trim().length === 0) return true;
+
+    if (html.length > TASK_TEXT_MAX_LENGTH) {
+        await ctx.reply(ADMIN_TEXTS["admin-bulk-err-text-too-long"]);
+        return true;
+    }
+
+    data.taskText = html;
+    if (message.photo?.length) {
+        data.fileId = message.photo[message.photo.length - 1]!.file_id;
+        data.mediaType = "photo";
+    } else if (message.document) {
+        data.fileId = message.document.file_id;
+        data.mediaType = "document";
+    }
+
+    data.step = "SELECT_DEADLINE";
+    await ctx.deleteMessage().catch(() => { });
+    await renderDeadlineSelection(ctx);
+    return true;
+}
+
+async function renderDeadlineSelection(ctx: MyContext): Promise<void> {
+    const keyboard = new InlineKeyboard()
+        .text(ADMIN_TEXTS["admin-bulk-deadline-eod"], "tbk_time_23:59")
+        .text(ADMIN_TEXTS["admin-bulk-deadline-none"], "tbk_time_none").row()
+        .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-deadline-title"], keyboard);
+}
+
+taskBulkHandlers.callbackQuery(/^tbk_time_(.+)$/, async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return;
+
+    const raw = ctx.match![1]!;
+    data.deadlineTime = raw === "none" ? null : raw;
+    data.step = "CONFIRM";
+    await renderConfirmation(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+export function buildConfirmationSummary(
+    groups: BulkTaskLocationGroup[],
+    excludedStaffIds: string[],
+    params: { date: string; deadlineTime: string | null; completionMode: string; taskText: string },
+): string {
+    const excluded = new Set(excludedStaffIds);
+    const perLocation = groups
+        .map(g => ({ label: `${g.city} · ${g.locationName}`, count: g.staff.filter(s => !excluded.has(s.id)).length }))
+        .filter(entry => entry.count > 0);
+
+    const staffTotal = perLocation.reduce((sum, entry) => sum + entry.count, 0);
+    const locationTotal = perLocation.length;
+
+    const locationWord = locationTotal === 1 ? "location" : "locations";
+    const modeLabel = params.completionMode === "PROOF_REQUIRED" ? "With proof" : "Quick";
+    const deadlineLabel = params.deadlineTime ? `by ${params.deadlineTime}` : "No deadline";
+
+    const breakdown = perLocation.map(entry => `• ${entry.label}: ${entry.count}`).join("\n");
+
+    return [
+        `📋 <b>Bulk task review</b>`,
+        ``,
+        params.taskText,
+        ``,
+        `📅 ${params.date} — ${deadlineLabel}`,
+        `⚙️ ${modeLabel}`,
+        ``,
+        `👥 <b>${staffTotal} staff · ${locationTotal} ${locationWord}</b>`,
+        breakdown,
+    ].join("\n");
+}
+
+async function renderConfirmation(ctx: MyContext): Promise<void> {
+    const data = ctx.session.bulkTaskData!;
+    const groups = await loadRecipientGroups(ctx);
+
+    const summary = buildConfirmationSummary(groups, data.excludedStaffIds || [], {
+        date: data.date!,
+        deadlineTime: data.deadlineTime ?? null,
+        completionMode: data.completionMode ?? TaskCompletionMode.QUICK,
+        taskText: data.taskText || "",
+    });
+
+    const keyboard = new InlineKeyboard()
+        .text(ADMIN_TEXTS["admin-bulk-confirm-send"], "tbk_send").row()
+        .text(ADMIN_TEXTS["admin-bulk-restart"], "tbk_restart")
+        .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+    await ScreenManager.renderScreen(ctx, summary, keyboard);
+}
+
+taskBulkHandlers.callbackQuery("tbk_restart", async (ctx: MyContext) => {
+    await startBulkTask(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
