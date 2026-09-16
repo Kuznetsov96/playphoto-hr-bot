@@ -212,7 +212,20 @@ export interface SessionData {
         sourceMessageId?: number;
         completionMode?: TaskCompletionModeValue;
     };
-    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
+    bulkTaskData?: {
+        step?: "SELECT_DATE" | "SELECT_CITIES" | "SELECT_SCOPE" | "SELECT_LOCATIONS"
+             | "SELECT_RECIPIENTS" | "SELECT_MODE" | "AWAITING_TEXT" | "SELECT_DEADLINE" | "CONFIRM";
+        date?: string;
+        cities?: string[];
+        locationIds?: string[];
+        excludedStaffIds?: string[];
+        completionMode?: TaskCompletionModeValue;
+        taskText?: string;
+        fileId?: string | null;
+        mediaType?: TaskAttachmentItem["type"];
+        deadlineTime?: string | null;
+    };
+    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'BULK_TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;
     teamSyncPreview?: {
