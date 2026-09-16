@@ -4,6 +4,9 @@ import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { build14DayCalendar } from "../../utils/task-helpers.js";
 import { locationRepository } from "../../repositories/location-repository.js";
+import { workShiftRepository } from "../../repositories/work-shift-repository.js";
+import { groupRecipientsByLocation, type BulkTaskLocationGroup } from "./bulk-task-recipients.js";
+import { formatStaffName } from "../../utils/task-helpers.js";
 import { normalizeCity } from "./utils.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
@@ -210,7 +213,111 @@ taskBulkHandlers.callbackQuery("tbk_cancel", async (ctx: MyContext) => {
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
-// renderRecipientSelection реализуется в Task 6.
-async function renderRecipientSelection(_ctx: MyContext): Promise<void> {
-    throw new Error("renderRecipientSelection is implemented in Task 6");
+export function buildRecipientRows(
+    groups: BulkTaskLocationGroup[],
+    excludedStaffIds: string[],
+): { text: string; callback_data: string }[][] {
+    const excluded = new Set(excludedStaffIds);
+    const rows: { text: string; callback_data: string }[][] = [];
+
+    for (const group of groups) {
+        const header = group.staff.length === 0
+            ? `— ${group.city} · ${group.locationName} — ${ADMIN_TEXTS["admin-bulk-no-shifts"]}`
+            : `— ${group.city} · ${group.locationName} —`;
+        rows.push([{ text: header, callback_data: "tbk_noop" }]);
+
+        for (const member of group.staff) {
+            const mark = excluded.has(member.id) ? "⬜" : "✅";
+            rows.push([{
+                text: `${mark} ${formatStaffName(member.fullName || "Staff")}`,
+                callback_data: `tbk_staff_${member.id}`,
+            }]);
+        }
+    }
+
+    return rows;
+}
+
+export function countSelectedRecipients(
+    groups: BulkTaskLocationGroup[],
+    excludedStaffIds: string[],
+): number {
+    const excluded = new Set(excludedStaffIds);
+    return groups.reduce(
+        (total, group) => total + group.staff.filter(s => !excluded.has(s.id)).length,
+        0,
+    );
+}
+
+async function loadRecipientGroups(ctx: MyContext): Promise<BulkTaskLocationGroup[]> {
+    const data = ctx.session.bulkTaskData!;
+    const locations = await findLocationsInCities(data.cities || []);
+    const chosen = locations.filter(l => (data.locationIds || []).includes(l.id));
+
+    const shifts = await workShiftRepository.findWithShiftAtLocations(
+        chosen.map(l => l.id),
+        new Date(`${data.date}T00:00:00`),
+    );
+
+    return groupRecipientsByLocation(
+        shifts,
+        chosen.map(l => ({ id: l.id, city: normalizeCity(l.city), name: l.name })),
+    );
+}
+
+async function renderRecipientSelection(ctx: MyContext): Promise<void> {
+    const data = ctx.session.bulkTaskData!;
+    const groups = await loadRecipientGroups(ctx);
+    const excluded = data.excludedStaffIds || [];
+    const selectedCount = countSelectedRecipients(groups, excluded);
+
+    const keyboard = new InlineKeyboard();
+    for (const row of buildRecipientRows(groups, excluded)) {
+        keyboard.row(...row);
+    }
+
+    if (selectedCount > 0) {
+        keyboard.row().text(`${ADMIN_TEXTS["admin-bulk-continue"]} (${selectedCount})`, "tbk_recipients_done");
+    }
+    keyboard.row().text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-recipients-title"], keyboard);
+}
+
+taskBulkHandlers.callbackQuery("tbk_noop", async (ctx: MyContext) => {
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+taskBulkHandlers.callbackQuery(/^tbk_staff_(.+)$/, async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return;
+
+    const staffId = ctx.match![1]!;
+    const excluded = new Set(data.excludedStaffIds || []);
+    if (excluded.has(staffId)) excluded.delete(staffId);
+    else excluded.add(staffId);
+    data.excludedStaffIds = Array.from(excluded);
+
+    await renderRecipientSelection(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+taskBulkHandlers.callbackQuery("tbk_recipients_done", async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data) return;
+
+    const groups = await loadRecipientGroups(ctx);
+    if (countSelectedRecipients(groups, data.excludedStaffIds || []) === 0) {
+        await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["admin-bulk-err-no-recipients"], show_alert: true }).catch(() => { });
+        return;
+    }
+
+    data.step = "SELECT_MODE";
+    await renderModeSelection(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+// renderModeSelection реализуется в Task 7.
+async function renderModeSelection(_ctx: MyContext): Promise<void> {
+    throw new Error("renderModeSelection is implemented in Task 7");
 }
