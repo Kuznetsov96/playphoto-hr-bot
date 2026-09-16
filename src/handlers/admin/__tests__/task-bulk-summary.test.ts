@@ -3,9 +3,9 @@ import { buildConfirmationSummary, TELEGRAM_MESSAGE_LIMIT } from "../task-bulk.j
 import type { BulkTaskLocationGroup } from "../bulk-task-recipients.js";
 
 const groups: BulkTaskLocationGroup[] = [
-    { locationId: "loc-a", city: "Kyiv", locationName: "Podil", staff: [{ id: "s1" }, { id: "s2" }] as any },
-    { locationId: "loc-b", city: "Lviv", locationName: "Center", staff: [{ id: "s3" }] as any },
-    { locationId: "loc-c", city: "Lviv", locationName: "Airport", staff: [] as any },
+    { locationId: "loc-a", city: "Kyiv", locationName: "Podil", label: "Podil (Kyiv)", staff: [{ id: "s1" }, { id: "s2" }] as any },
+    { locationId: "loc-b", city: "Lviv", locationName: "Center", label: "Center (Lviv)", staff: [{ id: "s3" }] as any },
+    { locationId: "loc-c", city: "Lviv", locationName: "Airport", label: "Airport (Lviv)", staff: [] as any },
 ];
 
 const params = {
@@ -33,14 +33,30 @@ describe("buildConfirmationSummary", () => {
     it("breaks the count down per location", () => {
         const summary = buildConfirmationSummary(groups, [], params);
 
-        expect(summary).toContain("Kyiv · Podil: 2");
-        expect(summary).toContain("Lviv · Center: 1");
+        expect(summary).toContain("Podil (Kyiv): 2");
+        expect(summary).toContain("Center (Lviv): 1");
     });
 
     it("omits locations where nobody is selected", () => {
         const summary = buildConfirmationSummary(groups, [], params);
 
         expect(summary).not.toContain("Airport");
+    });
+
+    it("breaks down two same-named venues in different branches as distinguishable lines (the defect CI caught)", () => {
+        // Zaporizhzhia alone has three venues called "Volkland". A breakdown built from
+        // city + name would print "Zaporizhzhia · Volkland: N" for both, and an owner
+        // could not tell which branch is which. The label carries `branch`, so the two
+        // lines must read differently.
+        const sameNameGroups: BulkTaskLocationGroup[] = [
+            { locationId: "loc-volkland-1", city: "Zaporizhzhia", locationName: "Volkland", label: "Volkland (Шевчик)", staff: [{ id: "s1" }, { id: "s2" }] as any },
+            { locationId: "loc-volkland-2", city: "Zaporizhzhia", locationName: "Volkland", label: "Volkland (Центр)", staff: [{ id: "s3" }] as any },
+        ];
+
+        const summary = buildConfirmationSummary(sameNameGroups, [], params);
+
+        expect(summary).toContain("Volkland (Шевчик): 2");
+        expect(summary).toContain("Volkland (Центр): 1");
     });
 
     it("shows the task text and the deadline", () => {
@@ -70,6 +86,7 @@ describe("buildConfirmationSummary", () => {
             locationId: `loc-${i}`,
             city: "Дніпропетровськ-Наддніпрянський",
             locationName: `Фотостудія на вулиці Соборній, корпус ${i + 1}`,
+            label: `Фотостудія на вулиці Соборній, корпус ${i + 1} (Дніпропетровськ-Наддніпрянський)`,
             staff: [{ id: `s${i}` }] as any,
         }));
         const longText = "<b>" + "Перевірте принтери та камери. ".repeat(90).slice(0, 2990) + "</b>";

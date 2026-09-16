@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { groupRecipientsByLocation } from "../bulk-task-recipients.js";
 
 const selected = [
-    { id: "loc-a", city: "Kyiv", name: "Podil" },
-    { id: "loc-b", city: "Kyiv", name: "Obolon" },
-    { id: "loc-c", city: "Lviv", name: "Center" },
+    { id: "loc-a", city: "Kyiv", name: "Podil", label: "Podil (Kyiv)" },
+    { id: "loc-b", city: "Kyiv", name: "Obolon", label: "Obolon (Kyiv)" },
+    { id: "loc-c", city: "Lviv", name: "Center", label: "Center (Lviv)" },
 ];
 
 function shiftRow(staffId: string, shiftLocation: { id: string; city: string; name: string }, homeLocationId: string | null = null) {
@@ -42,6 +42,7 @@ describe("groupRecipientsByLocation", () => {
             locationId: "loc-c",
             city: "Lviv",
             locationName: "Center",
+            label: "Center (Lviv)",
         }));
     });
 

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { buildRecipientRows, countSelectedRecipients, exceedsRecipientRowLimit, MAX_RECIPIENT_ROWS } from "../task-bulk.js";
 import type { BulkTaskLocationGroup } from "../bulk-task-recipients.js";
 
-function group(locationId: string, city: string, name: string, staff: { id: string; fullName: string }[]): BulkTaskLocationGroup {
-    return { locationId, city, locationName: name, staff: staff as any };
+function group(locationId: string, city: string, name: string, staff: { id: string; fullName: string }[], label?: string): BulkTaskLocationGroup {
+    return { locationId, city, locationName: name, label: label ?? `${name} (${city})`, staff: staff as any };
 }
 
 function groupWithStaffCount(locationId: string, count: number): BulkTaskLocationGroup {
@@ -12,8 +12,8 @@ function groupWithStaffCount(locationId: string, count: number): BulkTaskLocatio
 }
 
 const groups: BulkTaskLocationGroup[] = [
-    group("loc-a", "Kyiv", "Podil", [{ id: "s1", fullName: "Шевченко Тарас" }, { id: "s2", fullName: "Леся Українка" }]),
-    group("loc-b", "Kyiv", "Obolon", []),
+    group("loc-a", "Kyiv", "Podil", [{ id: "s1", fullName: "Шевченко Тарас" }, { id: "s2", fullName: "Леся Українка" }], "Podil (Kyiv)"),
+    group("loc-b", "Kyiv", "Obolon", [], "Obolon (Kyiv)"),
 ];
 
 describe("buildRecipientRows", () => {
@@ -46,6 +46,25 @@ describe("buildRecipientRows", () => {
 
         expect(obolon.text).toContain("no shifts");
         expect(obolon.callback_data).toBe("tbk_noop");
+    });
+
+    it("renders two same-named venues in different branches as distinguishable rows (the defect CI caught)", () => {
+        // Three "Volkland" venues exist in Zaporizhzhia alone. A header built from
+        // city + name would print the identical "— Zaporizhzhia · Volkland —" for
+        // both, and the admin could not tell which shift list they were looking at.
+        // The label carries `branch`, so the two rows must read differently.
+        const sameNameGroups: BulkTaskLocationGroup[] = [
+            group("loc-volkland-1", "Zaporizhzhia", "Volkland", [{ id: "s1", fullName: "Іван Іванов" }], "Volkland (Шевчик)"),
+            group("loc-volkland-2", "Zaporizhzhia", "Volkland", [{ id: "s2", fullName: "Петро Петров" }], "Volkland (Центр)"),
+        ];
+
+        const rows = buildRecipientRows(sameNameGroups, []);
+        const headers = rows.flat().filter(b => b.callback_data === "tbk_noop");
+
+        expect(headers).toHaveLength(2);
+        expect(headers[0]!.text).toContain("Volkland (Шевчик)");
+        expect(headers[1]!.text).toContain("Volkland (Центр)");
+        expect(headers[0]!.text).not.toBe(headers[1]!.text);
     });
 });
 
