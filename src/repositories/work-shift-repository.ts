@@ -43,6 +43,42 @@ export class WorkShiftRepository {
         });
     }
 
+    /**
+     * Batch version of `findShiftWithLocationOnDate`: resolves the on-date shift for many
+     * (staffId, date) pairs in one query instead of one round trip per pair. Used to hydrate
+     * a whole day's task list without a per-task query — the shift's own location still wins
+     * over the staff member's home location, same as the single-pair lookup.
+     *
+     * Returns every matching shift row (a staff member can only have one shift per day per
+     * the domain, but this makes no such assumption) — callers pick the shift for a given
+     * (staffId, date) pair from the result.
+     */
+    async findShiftsWithLocationForStaffOnDates(pairs: { staffId: string; date: Date }[]) {
+        if (pairs.length === 0) return [];
+
+        // Dedupe by (staffId, day) so a page with many tasks on the same day for the same
+        // staff member doesn't inflate the OR clause with identical conditions.
+        const seen = new Map<string, { staffId: string; start: Date; end: Date }>();
+        for (const { staffId, date } of pairs) {
+            const start = new Date(date);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(date);
+            end.setHours(23, 59, 59, 999);
+            seen.set(`${staffId}:${start.getTime()}`, { staffId, start, end });
+        }
+
+        return prisma.workShift.findMany({
+            where: {
+                OR: Array.from(seen.values()).map(({ staffId, start, end }) => ({
+                    staffId,
+                    date: { gte: start, lte: end },
+                })),
+            },
+            include: { location: locationWithOpeningHours },
+            orderBy: { date: 'asc' },
+        });
+    }
+
     async findByDateRange(start: Date, end: Date): Promise<WorkShift[]> {
         return prisma.workShift.findMany({
             where: {
