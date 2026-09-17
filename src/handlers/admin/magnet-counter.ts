@@ -116,6 +116,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
     ctx.session.step = "support_magnet_count_photo";
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;

@@ -20,6 +20,8 @@ import { adminStepHandlers } from "./steps.js";
 import { taskFlowHandlers, handleTaskText, startTaskFlow } from "./task-flow.js";
 import tasksHandlers from "./tasks.js";
 import taskCreationHandlers from "./task-creation.js";
+import { taskBulkHandlers, handleBulkTaskContent } from "./task-bulk.js";
+import { buildTaskCallbackGuard } from "./task-callback-guard.js";
 import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
 import { adminMagnetCounterHandlers, handleAdminMagnetCounterMessage } from "./magnet-counter.js";
@@ -66,6 +68,12 @@ adminMenu.dynamic(async (ctx, range) => {
 
 export const adminHandlers = new Composer<MyContext>();
 
+// 0. Гейт ролей для задач и рассылок.
+// Обязан стоять ПЕРЕД композерами задач: их обработчики завершают апдейт без next(),
+// поэтому protectedAdminCallbacks в конце файла для префиксов tbk_/tas_/task_/b_
+// не выполняется вовсе. Политика та же, что уже стоит на вводе текста этих флоу.
+adminHandlers.use(buildTaskCallbackGuard());
+
 // 1. Step handlers
 adminHandlers.use(adminStepHandlers);
 
@@ -76,6 +84,7 @@ adminHandlers.use(adminBroadcastHandlers);
 adminHandlers.use(taskFlowHandlers);
 adminHandlers.use(tasksHandlers);
 adminHandlers.use(taskCreationHandlers);
+adminHandlers.use(taskBulkHandlers);
 adminHandlers.use(adminSystemHandlers);
 adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
@@ -87,6 +96,7 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     if (await handleAdminMagnetCounterMessage(ctx)) return;
     if (await handleManualChannelAccess(ctx)) return;
     if (await handleBroadcastContent(ctx)) return;
+    if (await handleBulkTaskContent(ctx)) return;
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
@@ -142,20 +152,22 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     await next();
 });
 
+// Префиксы задач и рассылок (tbk_, tas_, task_, b_) здесь НЕ перечислены намеренно:
+// их композеры смонтированы выше и завершают апдейт без next(), поэтому этот фильтр
+// для них никогда не выполнялся. Их защищает buildTaskCallbackGuard() в начале файла,
+// причём более узким набором ролей. Не возвращайте их сюда — это создаёт видимость
+// защиты, которой нет.
 const adminProtected = new Composer<MyContext>();
 const protectedAdminCallbacks = adminProtected.filter(c => c.has("callback_query:data") && (
     c.callbackQuery.data.startsWith("admin_") ||
     c.callbackQuery.data.startsWith("admin-") ||
-    c.callbackQuery.data.startsWith("b_") ||
     c.callbackQuery.data.startsWith("view_") ||
     c.callbackQuery.data.startsWith("close_topic_") ||
     c.callbackQuery.data.startsWith("recovery_reopen_") ||
     c.callbackQuery.data.startsWith("forward_to_kuznetsov_") ||
     c.callbackQuery.data.startsWith("back_to_") ||
     c.callbackQuery.data.startsWith("ticket_") ||
-    c.callbackQuery.data.startsWith("pref_") ||
-    c.callbackQuery.data.startsWith("task_") ||
-    c.callbackQuery.data.startsWith("tas_")
+    c.callbackQuery.data.startsWith("pref_")
 ));
 protectedAdminCallbacks.use(requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT', 'HR_LEAD', 'MENTOR_LEAD'));
 
@@ -174,6 +186,7 @@ protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) 
     delete ctx.session.selectedLocationId;
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;

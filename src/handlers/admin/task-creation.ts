@@ -6,10 +6,13 @@ import { taskService, TASK_TEXT_MAX_LENGTH } from "../../services/task-service.j
 import { locationRepository } from "../../repositories/location-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js";
+import { kyivDateStr } from "../../utils/format-deadline.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
 import { getMessageHtml, sendTaskNotification } from "./utils.js";
 import { getRichMessageMedia } from "../../utils/rich-message.js";
+import { isValidTaskDeadlineTime } from "../../utils/task-time.js";
+import { buildTaskNotificationText, TASK_NOTIFICATION_BUTTON_CALLBACK, taskNotificationButtonLabel } from "../../utils/task-notification.js";
 
 const composer = new Composer<MyContext>();
 
@@ -30,6 +33,27 @@ async function getTaskCreationStaff(locationId: string, dateStr?: string) {
     };
 }
 
+/**
+ * Same result as `getTaskCreationStaff`, memoized in the session for the duration of one
+ * (locationId, date) screen. Toggling a staff checkbox re-renders the same roster with only
+ * `selectedStaffIds` changed, so re-querying the DB on every tap is pure waste — but picking a
+ * different location or date changes the key and falls through to a fresh fetch, so the memo
+ * can never show a roster for the wrong screen.
+ */
+export async function getTaskCreationStaffCached(ctx: MyContext, locationId: string, dateStr?: string) {
+    if (!ctx.session.taskCreation) return getTaskCreationStaff(locationId, dateStr);
+
+    const key = `${locationId}:${dateStr ?? ""}`;
+    const cached = ctx.session.taskCreation.staffOptionsCache;
+    if (cached && cached.key === key) {
+        return { staff: cached.staff, source: cached.source };
+    }
+
+    const result = await getTaskCreationStaff(locationId, dateStr);
+    ctx.session.taskCreation.staffOptionsCache = { key, staff: result.staff, source: result.source };
+    return result;
+}
+
 function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "location" = "location") {
     const prettyDate = dateStr ? dateStr.split("-").reverse().slice(0, 2).join(".") : null;
 
@@ -46,6 +70,21 @@ function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "locatio
     }
 
     return `⚠️ <i>Showing all active staff for this location</i>`;
+}
+
+/**
+ * Back target for any "entering_text"-family screen, which always wants to
+ * return to the location screen it came from. `locationId` is set by every
+ * live path into these screens (tas_loc_ handler, and the single-location
+ * auto-advance in tas_city_), so this should never actually need the
+ * fallback — but a Back button built from an unset id degrades to
+ * `tas_loc_undefined`, which resolves to no location and freezes the screen
+ * behind a dead-end alert. Falling back to "select a date" re-enters the
+ * flow at a screen that always renders, rather than risk that dead end
+ * again if some future path reaches these screens without a locationId.
+ */
+export function taskLocationBackCallback(taskCreation: { locationId?: string } | undefined): string {
+    return taskCreation?.locationId ? `tas_loc_${taskCreation.locationId}` : "task_add_by_date";
 }
 
 async function renderTaskModeSelection(ctx: MyContext, backCallback: string) {
@@ -70,6 +109,14 @@ composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
     ctx.session.step = "idle";
     ctx.session.candidateData = {};
     delete ctx.session.taskData;
+    delete ctx.session.bulkTaskData;
+    // Own slice must be cleared too, like every other flow-start clears its
+    // own: Redis sessions live 24h, so an admin who abandons this wizard
+    // mid-way and comes back a day later (or starts a fresh one) would
+    // otherwise resume a draft they don't remember — a stale taskText jumping
+    // straight to the deadline screen, or a stale selectedStaffIds
+    // short-circuiting city/location selection entirely.
+    delete ctx.session.taskCreation;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;
@@ -141,14 +188,6 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
         return;
     }
 
-    // Check if staff is already selected (Direct Task Assignment)
-    if (ctx.session.taskCreation.selectedStaffIds && ctx.session.taskCreation.selectedStaffIds.length > 0) {
-        ctx.session.taskCreation.step = "selecting_mode";
-        await renderTaskModeSelection(ctx, "task_add_by_date");
-        await ctx.answerCallbackQuery().catch(() => { });
-        return;
-    }
-
     ctx.session.taskCreation.step = "selecting_city";
     const cities = await locationRepository.findAllCities();
     const keyboard = new InlineKeyboard();
@@ -175,7 +214,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
         ctx.session.taskCreation.locationName = formatLocation({ ...location, city }, "sentence");
         ctx.session.taskCreation.step = "selecting_staff";
 
-        const { staff, source } = await getTaskCreationStaff(location.id, ctx.session.taskCreation.date);
+        const { staff, source } = await getTaskCreationStaffCached(ctx, location.id, ctx.session.taskCreation.date);
         const staffKeyboard = new InlineKeyboard();
         const selectedIds = ctx.session.taskCreation.selectedStaffIds || [];
 
@@ -219,7 +258,7 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
     ctx.session.taskCreation.locationName = formatLocation(location, "sentence");
     ctx.session.taskCreation.step = "selecting_staff";
 
-    const { staff, source } = await getTaskCreationStaff(locationId, ctx.session.taskCreation.date);
+    const { staff, source } = await getTaskCreationStaffCached(ctx, locationId, ctx.session.taskCreation.date);
     const keyboard = new InlineKeyboard();
     const selectedIds = ctx.session.taskCreation.selectedStaffIds || [];
 
@@ -252,7 +291,7 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     if (index === -1) ctx.session.taskCreation.selectedStaffIds.push(staffId);
     else ctx.session.taskCreation.selectedStaffIds.splice(index, 1);
 
-    const { staff, source } = await getTaskCreationStaff(ctx.session.taskCreation.locationId || "", ctx.session.taskCreation.date);
+    const { staff, source } = await getTaskCreationStaffCached(ctx, ctx.session.taskCreation.locationId || "", ctx.session.taskCreation.date);
     const keyboard = new InlineKeyboard();
     const selectedIds = ctx.session.taskCreation.selectedStaffIds;
 
@@ -264,7 +303,7 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     }
 
     if (selectedIds.length > 0) keyboard.text("➡️ Done", "tas_st_done").row();
-    keyboard.text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+    keyboard.text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
 
     await ScreenManager.renderScreen(
         ctx,
@@ -284,7 +323,7 @@ composer.callbackQuery("tas_st_done", async (ctx) => {
     const names = selectedStaff.map(s => formatStaffName(s.fullName)).join(", ");
     ctx.session.taskCreation.staffName = names.length > 30 ? `${selectedStaff.length} photographers` : names;
     ctx.session.taskCreation.step = "selecting_mode";
-    await renderTaskModeSelection(ctx, `tas_loc_${ctx.session.taskCreation.locationId}`);
+    await renderTaskModeSelection(ctx, taskLocationBackCallback(ctx.session.taskCreation));
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -294,10 +333,7 @@ composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
     ctx.session.taskCreation.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskCreation.step = "entering_text";
 
-    const backCallback = ctx.session.taskCreation.locationId
-        ? `tas_loc_${ctx.session.taskCreation.locationId}`
-        : "task_add_by_date";
-    const keyboard = new InlineKeyboard().text("⬅️ Back", backCallback);
+    const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
     await ScreenManager.renderScreen(
         ctx,
         `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n` +
@@ -343,7 +379,7 @@ async function handleTaskInput(
     }
 
     if (!taskText) {
-        const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+        const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
         await ScreenManager.renderScreen(
             ctx,
             `📎 <b>Attachment saved for ${ctx.session.taskCreation.staffName}</b>\n\nNow send the full task text in a separate message.`,
@@ -380,7 +416,6 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
     if (!ctx.session.taskCreation) return;
 
     const staffIds = ctx.session.taskCreation.selectedStaffIds || [];
-    if (staffIds.length === 0 && ctx.session.taskCreation.staffId) staffIds.push(ctx.session.taskCreation.staffId);
     if (staffIds.length === 0) return ctx.reply("❌ No staff selected!");
 
     ctx.session.taskCreation.deadlineTime = time === "none" ? null : time;
@@ -413,12 +448,13 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
                 continue;
             }
 
-            const deadlineText = task.deadlineTime ? `\n⏰ Дедлайн: ${task.deadlineTime}` : "";
-            const completionHint = task.completionMode === "PROOF_REQUIRED"
-                ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
-                : "";
-            const taskMessage = `✨ <b>Нове завдання!</b> 📋\n\n${task.taskText}\n\n📅 Дата: ${new Date(task.workDate!).toLocaleDateString("uk-UA")}${deadlineText}${completionHint}\n\nБажаю успіхів! Ти впораєшся! 💖`;
-            const staffKb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
+            const taskMessage = buildTaskNotificationText({
+                text: task.taskText,
+                date: new Date(task.workDate!).toLocaleDateString("uk-UA"),
+                deadlineTime: task.deadlineTime,
+                completionMode: task.completionMode,
+            });
+            const staffKb = new InlineKeyboard().text(taskNotificationButtonLabel(), TASK_NOTIFICATION_BUTTON_CALLBACK);
 
             try {
                 const notificationOptions: {
@@ -444,7 +480,7 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
             }
         }
 
-        const createdTaskDate = ctx.session.taskCreation.date || new Date().toISOString().split("T")[0];
+        const createdTaskDate = ctx.session.taskCreation.date || kyivDateStr(new Date());
         delete ctx.session.taskCreation;
         if (ctx.session.adminFlow === "TASK") {
             delete ctx.session.adminFlow;
@@ -505,8 +541,8 @@ composer.on("message:text", async (ctx, next) => {
         }
         else {
             const timeInput = ctx.message.text.trim();
-            if (/^\d{1,2}:\d{2}$/.test(timeInput)) await executeTaskCreation(ctx, timeInput);
-            else await ScreenManager.renderScreen(ctx, "❌ Невірний формат часу. Введіть HH:MM (наприклад, 15:00) або скористайтеся кнопками:");
+            if (isValidTaskDeadlineTime(timeInput)) await executeTaskCreation(ctx, timeInput);
+            else await ctx.reply(ADMIN_TEXTS["admin-task-err-bad-time"]);
         }
     } else await next();
 });
@@ -630,7 +666,7 @@ composer.callbackQuery(/^tas_time_/, async (ctx) => {
 composer.callbackQuery("tas_edit_text", async (ctx) => {
     if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
     ctx.session.taskCreation.step = "entering_text";
-    const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+    const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
     await ScreenManager.renderScreen(
         ctx,
         `📝 <b>Correct task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>Current text:</i> ${ctx.session.taskCreation.taskText || "[Media]"}`,

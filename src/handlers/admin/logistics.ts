@@ -48,6 +48,7 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
         ctx.session.step = "admin_logistics_add_ttn";
         delete ctx.session.taskData;
         delete ctx.session.taskCreation;
+        delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
         delete ctx.session.manualChannelAccess;

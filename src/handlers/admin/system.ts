@@ -117,6 +117,7 @@ async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
     ctx.session.adminFlow = "LOCATIONS";
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
+    delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;

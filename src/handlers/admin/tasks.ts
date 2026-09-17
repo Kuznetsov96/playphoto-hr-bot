@@ -17,6 +17,8 @@ import {
     groupTasksByLocation,
     formatDeadline,
 } from "../../utils/task-helpers.js";
+import { kyivDateStr, isTaskUrgent } from "../../utils/format-deadline.js";
+import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 import { escapeHtml, htmlToPlainText, normalizeCity } from "./utils.js";
 
 
@@ -25,17 +27,38 @@ const composer = new Composer<MyContext>();
 /**
  * Побудувати дашборд завдань
  */
-export async function buildTasksDashboard(dateStr: string, page = 0) {
+export async function buildTasksDashboard(dateStr: string, page = 0, hideCompleted = false) {
     const date = new Date(dateStr);
-    const tasks = await taskService.getTasksForDate(date, false);
+    // Always fetched unfiltered: the header counters ("N/M completed") must
+    // reflect the WHOLE day regardless of the toggle, or hiding completed
+    // tasks would also hide the fact that they were ever done — "0/15" reads
+    // as "nothing happened today", not "5 done, 15 remaining, 5 hidden".
+    const allTasks = await taskService.getTasksForDate(date, false);
+    const tasks = hideCompleted ? allTasks.filter((t: any) => !t.isCompleted) : allTasks;
 
     const day = date.getDate().toString().padStart(2, "0");
     const month = (date.getMonth() + 1).toString().padStart(2, "0");
     const datePretty = `${day}.${month}`;
 
-    const total = tasks.length;
-    const completed = tasks.filter((t: any) => t.isCompleted).length;
-    const urgent = tasks.filter((t: any) => !t.isCompleted && t.deadlineTime).length;
+    // Header counters summarize the WHOLE day, never just the current page —
+    // and never just the visible (post-toggle) subset either.
+    const total = allTasks.length;
+    const completed = allTasks.filter((t: any) => t.isCompleted).length;
+    const urgent = allTasks.filter((t: any) => isTaskUrgent(t)).length;
+
+    const PAGE_SIZE = 8;
+    const startIdx = page * PAGE_SIZE;
+    const endIdx = startIdx + PAGE_SIZE;
+    // The text body is built from the SAME slice as the keyboard below, so the
+    // "№N" buttons and the rows described in the text always refer to the same
+    // tasks. Telegram caps a message at 4096 chars; rendering every task of the
+    // day into the text (while only paginating the keyboard) blew past that
+    // limit on any day with ~35+ tasks and silently failed to send.
+    //
+    // Pagination is over `tasks` (post-toggle), not `allTasks`: page count and
+    // page contents must match what hideCompleted actually shows.
+    const pageTasks = tasks.slice(startIdx, endIdx);
+    const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
 
     let text = (ADMIN_TEXTS["admin-tasks-title"] || STAFF_TEXTS["admin-tasks-title"] || (() => "admin-tasks-title"))({ date: datePretty } as any) + "\n";
     text = text.replace(/[\u200B-\u200D\uFEFF\u2060-\u206F\u202A-\u202E]/g, "");
@@ -44,16 +67,24 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
     if (total > 0) {
         text += `📊 <b>${completed}/${total}</b> completed`;
         if (urgent > 0) text += `  |  🚨 <b>${urgent}</b> urgent`;
+        if (totalPages > 1) {
+            text += "\n" + ADMIN_TEXTS["admin-tasks-page-indicator"]({ page: page + 1, totalPages });
+        }
         text += "\n\n";
     }
 
     if (tasks.length === 0) {
-        text += (ADMIN_TEXTS["admin-tasks-no-tasks"] || STAFF_TEXTS["admin-tasks-no-tasks"] || "admin-tasks-no-tasks");
+        // Distinguish "nothing exists for this day" from "everything is done
+        // and hidden" — the toggle hiding every remaining row should not read
+        // like the day never had any tasks.
+        text += total > 0
+            ? ADMIN_TEXTS["admin-tasks-all-hidden"]
+            : (ADMIN_TEXTS["admin-tasks-no-tasks"] || STAFF_TEXTS["admin-tasks-no-tasks"] || "admin-tasks-no-tasks");
     }
 
-    if (tasks.length > 0) {
-        const urgentTasks = tasks.filter((t: any) => !t.isCompleted && t.deadlineTime);
-        const regularTasks = tasks.filter((t: any) => t.isCompleted || !t.deadlineTime);
+    if (pageTasks.length > 0) {
+        const urgentTasks = pageTasks.filter((t: any) => isTaskUrgent(t));
+        const regularTasks = pageTasks.filter((t: any) => !isTaskUrgent(t));
 
         if (urgentTasks.length > 0) {
             text += (ADMIN_TEXTS["admin-tasks-urgent"] || STAFF_TEXTS["admin-tasks-urgent"] || "admin-tasks-urgent");
@@ -87,12 +118,20 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
         }
     }
 
-    const PAGE_SIZE = 8;
-    const startIdx = page * PAGE_SIZE;
-    const endIdx = startIdx + PAGE_SIZE;
-    const pageTasks = tasks.slice(startIdx, endIdx);
+    // Defensive guard: even one page of tasks could in theory exceed the
+    // limit (extreme name/location lengths). Truncate gracefully instead of
+    // letting the send fail outright.
+    if (text.length > TELEGRAM_MESSAGE_LIMIT) {
+        const notice = ADMIN_TEXTS["admin-tasks-truncated-notice"];
+        text = text.slice(0, TELEGRAM_MESSAGE_LIMIT - notice.length) + notice;
+    }
 
     const keyboard = new InlineKeyboard();
+
+    // `_0`/`_1` suffix carries the toggle through every navigation callback on
+    // this screen (pagination, opening a task and coming back) so the chosen
+    // mode survives instead of resetting on the next tap.
+    const hideFlag = hideCompleted ? 1 : 0;
 
     for (let i = 0; i < pageTasks.length; i++) {
         const task = pageTasks[i];
@@ -100,24 +139,35 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
         const globalIdx = startIdx + i + 1;
         const nameParts = (task.staff.fullName || "").trim().split(/\s+/);
         const lastName = nameParts[0] || "Unknown";
-        keyboard.text(`№${globalIdx} | ${lastName}`, `task_det_${task.id}_${dateStr}`).row();
+        keyboard.text(`№${globalIdx} | ${lastName}`, `task_det_${task.id}_${dateStr}_${page}_${hideFlag}`).row();
     }
 
     const navRow = [];
     const nextBtnLabel = (ADMIN_TEXTS["admin-tasks-next"] || STAFF_TEXTS["admin-tasks-next"] || "admin-tasks-next");
 
     if (page > 0) {
-        navRow.push({ text: (ADMIN_TEXTS["admin-sys-back"] || STAFF_TEXTS["admin-sys-back"] || "admin-sys-back"), callback_data: `task_page_${page - 1}_${dateStr}` });
+        navRow.push({ text: (ADMIN_TEXTS["admin-sys-back"] || STAFF_TEXTS["admin-sys-back"] || "admin-sys-back"), callback_data: `task_page_${page - 1}_${dateStr}_${hideFlag}` });
     }
     if (endIdx < tasks.length) {
-        navRow.push({ text: nextBtnLabel, callback_data: `task_page_${page + 1}_${dateStr}` });
+        navRow.push({ text: nextBtnLabel, callback_data: `task_page_${page + 1}_${dateStr}_${hideFlag}` });
     }
     if (navRow.length > 0) {
         keyboard.row(...navRow);
     }
 
+    // Distinct prefix (not `task_dash_...`) on purpose: `/^task_dash_/` is
+    // registered as a callback matcher below, and a `task_dash_toggle_...`
+    // callback_data would also match that broader prefix — handler order
+    // would then decide which one wins instead of the data being unambiguous
+    // on its own.
+    const toggleLabel = hideCompleted
+        ? ADMIN_TEXTS["admin-tasks-toggle-hide-on"]
+        : ADMIN_TEXTS["admin-tasks-toggle-hide-off"];
+    keyboard.text(toggleLabel, `task_hide_${dateStr}_${page}_${hideCompleted ? 0 : 1}`).row();
+
     keyboard.text((ADMIN_TEXTS["admin-tasks-history"] || STAFF_TEXTS["admin-tasks-history"] || "admin-tasks-history"), "task_calendar_open").row();
     keyboard.text((ADMIN_TEXTS["admin-tasks-new"] || STAFF_TEXTS["admin-tasks-new"] || "admin-tasks-new"), `task_add_start_${dateStr}`).row();
+    keyboard.text(ADMIN_TEXTS["admin-bulk-entry"], "tbk_start").row();
     keyboard.text((ADMIN_TEXTS["admin-sys-back"] || STAFF_TEXTS["admin-sys-back"] || "admin-sys-back"), "admin_system_back");
 
     return { text, keyboard };
@@ -126,7 +176,7 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
 /**
  * Показати деталі завдання
  */
-async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) {
+async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string, page = 0, hideCompleted = false) {
     const task = await taskService.getTaskById(taskId);
 
     if (!task) {
@@ -180,8 +230,9 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
         text += `📎 <b>Proof:</b> ${proofStatus}\n`;
     }
 
+    const hideFlag = hideCompleted ? 1 : 0;
     const keyboard = new InlineKeyboard();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-toggle"], `task_toggle_${taskId}_${dateStr}`).row();
+    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-toggle"], `task_toggle_${taskId}_${dateStr}_${page}_${hideFlag}`).row();
 
     if (task.fileId) {
         keyboard.text(ADMIN_TEXTS["admin-tasks-btn-view-file"], `task_view_file_${taskId}`).row();
@@ -191,19 +242,40 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
     }
 
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-msg-staff"], `admin_msg_staff_${task.staffId}`).row();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-delete"], `task_del_conf_${taskId}_${dateStr}`).danger().row();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-back-list"], `task_dash_${dateStr}`);
+    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-delete"], `task_del_conf_${taskId}_${dateStr}_${page}_${hideFlag}`).danger().row();
+    // Back to the SAME page and hide-mode the admin came from, not a reset to
+    // page 0 / hideCompleted=false — otherwise opening a task and coming back
+    // would silently drop both.
+    keyboard.text(ADMIN_TEXTS["admin-tasks-btn-back-list"], `task_page_${page}_${dateStr}_${hideFlag}`);
 
     await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
+}
+
+/** "1"/"0" (or anything else) → boolean, defaulting safely to false. */
+function parseHideFlag(raw: string | undefined): boolean {
+    return raw === "1";
 }
 
 // Обробник головного дашборду
 composer.callbackQuery(/^task_dash_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_dash_", "").split("_");
-    const dateStr = data[0] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[0] || kyivDateStr(new Date()) || "";
 
     const { text, keyboard } = await buildTasksDashboard(dateStr, 0);
     await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+// Обробник перемикача "Hide completed" — окремий префікс, щоб не перетинатись
+// з /^task_dash_/ вище (див. коментар у buildTasksDashboard).
+composer.callbackQuery(/^task_hide_/, async (ctx: MyContext) => {
+    const data = ctx.callbackQuery!.data!.replace("task_hide_", "").split("_");
+    const dateStr = data[0] || kyivDateStr(new Date()) || "";
+    const page = parseInt(data[1] || "0");
+    const hideCompleted = parseHideFlag(data[2]);
+
+    const { text, keyboard } = await buildTasksDashboard(dateStr, page, hideCompleted);
+    await ScreenManager.renderScreen(ctx, text, keyboard);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -211,9 +283,10 @@ composer.callbackQuery(/^task_dash_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_page_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_page_", "").split("_");
     const page = parseInt(data[0] || "0");
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
+    const hideCompleted = parseHideFlag(data[2]);
 
-    const { text, keyboard } = await buildTasksDashboard(dateStr, page);
+    const { text, keyboard } = await buildTasksDashboard(dateStr, page, hideCompleted);
     await ScreenManager.renderScreen(ctx, text, keyboard);
     await ctx.answerCallbackQuery().catch(() => { });
 });
@@ -222,9 +295,11 @@ composer.callbackQuery(/^task_page_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_det_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_det_", "").split("_");
     const taskId = data[0] || "";
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
+    const page = parseInt(data[2] || "0");
+    const hideCompleted = parseHideFlag(data[3]);
 
-    await showTaskDetails(ctx, taskId, dateStr);
+    await showTaskDetails(ctx, taskId, dateStr, page, hideCompleted);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -232,10 +307,12 @@ composer.callbackQuery(/^task_det_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_toggle_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_toggle_", "").split("_");
     const taskId = data[0] || "";
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
+    const page = parseInt(data[2] || "0");
+    const hideCompleted = parseHideFlag(data[3]);
 
     await taskService.toggleTaskStatus(taskId);
-    await showTaskDetails(ctx, taskId, dateStr);
+    await showTaskDetails(ctx, taskId, dateStr, page, hideCompleted);
     await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-toggled"]).catch(() => { });
 });
 
@@ -244,10 +321,12 @@ composer.callbackQuery(/^task_del_conf_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_del_conf_", "").split("_");
     const taskId = data[0]!;
     const dateStr = data[1]!;
+    const page = parseInt(data[2] || "0");
+    const hideFlag = data[3] || "0";
 
     const keyboard = new InlineKeyboard();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-del-yes"], `task_del_exec_${taskId}_${dateStr}`).danger().row();
-    keyboard.text(ADMIN_TEXTS["admin-tasks-del-no"], `task_det_${taskId}_${dateStr}`).danger();
+    keyboard.text(ADMIN_TEXTS["admin-tasks-del-yes"], `task_del_exec_${taskId}_${dateStr}_${page}_${hideFlag}`).danger().row();
+    keyboard.text(ADMIN_TEXTS["admin-tasks-del-no"], `task_det_${taskId}_${dateStr}_${page}_${hideFlag}`).danger();
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-del-conf"], keyboard);
     await ctx.answerCallbackQuery().catch(() => { });
@@ -257,10 +336,12 @@ composer.callbackQuery(/^task_del_conf_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_del_exec_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_del_exec_", "").split("_");
     const taskId = data[0] || "";
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
+    const page = parseInt(data[2] || "0");
+    const hideCompleted = parseHideFlag(data[3]);
 
     await taskService.deleteTask(taskId);
-    const { text, keyboard } = await buildTasksDashboard(dateStr, 0);
+    const { text, keyboard } = await buildTasksDashboard(dateStr, page, hideCompleted);
     await ScreenManager.renderScreen(ctx, text, keyboard);
     await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-tasks-ans-deleted"]).catch(() => { });
 });
@@ -274,7 +355,7 @@ composer.callbackQuery("task_calendar_open", async (ctx: MyContext) => {
         keyboard.row(...row);
     }
 
-    keyboard.text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${new Date().toISOString().split("T")[0]}_0`);
+    keyboard.text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${kyivDateStr(new Date())}_0`);
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-calendar-title"], keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
@@ -347,6 +428,14 @@ composer.callbackQuery(/^admin_msg_staff_(.+)$/, async (ctx: MyContext) => {
     }
     const { startAdminMessageFlow } = await import("./search.js");
     await startAdminMessageFlow(ctx, staff.userId);
+});
+
+// Вхід у майстер масової постановки задач (динамічний імпорт запобігає
+// циклу tasks.ts <-> task-bulk.ts)
+composer.callbackQuery("tbk_start", async (ctx: MyContext) => {
+    const { startBulkTask } = await import("./task-bulk.js");
+    await startBulkTask(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 export default composer;

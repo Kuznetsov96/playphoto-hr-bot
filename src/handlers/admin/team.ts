@@ -355,6 +355,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         ctx.session.step = "idle";
         delete ctx.session.taskData;
         delete ctx.session.taskCreation;
+        delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
         delete ctx.session.manualChannelAccess;
@@ -370,6 +371,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.selectedLocationId;
         delete ctx.session.taskData;
         delete ctx.session.taskCreation;
+        delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
         delete ctx.session.manualChannelAccess;
@@ -425,6 +427,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
             ctx.session.step = "sync_other_sheet";
             delete ctx.session.taskData;
             delete ctx.session.taskCreation;
+            delete ctx.session.bulkTaskData;
             delete ctx.session.broadcastData;
             delete ctx.session.broadcastDraft;
             delete ctx.session.manualChannelAccess;

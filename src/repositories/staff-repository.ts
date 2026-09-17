@@ -57,8 +57,8 @@ export class StaffRepository {
         const endOfDay = new Date(date);
         endOfDay.setHours(23, 59, 59, 999);
 
-        logger.debug({ 
-            locationId, 
+        logger.debug({
+            locationId,
             inputDate: date.toISOString(),
             startWindow: startOfDay.toISOString(),
             endWindow: endOfDay.toISOString()

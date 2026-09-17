@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { WorkShift } from "@prisma/client";
 import prisma from "../db/core.js";
+import logger from "../core/logger.js";
 
 /**
  * `location: true` alone loads only scalars, so the canonical opening hours would come back
@@ -10,6 +11,19 @@ import prisma from "../db/core.js";
 const locationWithOpeningHours = {
     include: { openingHours: { orderBy: { dayOfWeek: "asc" } } },
 } satisfies Prisma.LocationDefaultArgs;
+
+/** The exact include shape `findWithShiftAtLocations` queries with. */
+const shiftWithStaffAtLocationArgs = {
+    include: { staff: { include: { user: true } }, location: true },
+} satisfies Prisma.WorkShiftDefaultArgs;
+
+/**
+ * A shift row for bulk task assignment: the staff member on shift plus the *shift's own*
+ * location — never the staff member's home `StaffProfile.locationId`, which can differ from
+ * where they actually work that day. Derived directly from the Prisma payload for the include
+ * above, so the type can never drift from what the query actually returns.
+ */
+export type ShiftWithStaffAtLocation = Prisma.WorkShiftGetPayload<typeof shiftWithStaffAtLocationArgs>;
 
 export class WorkShiftRepository {
     async findShiftWithLocationOnDate(staffId: string, date: Date) {
@@ -26,6 +40,42 @@ export class WorkShiftRepository {
             },
             include: { location: locationWithOpeningHours },
             orderBy: { date: 'asc' }
+        });
+    }
+
+    /**
+     * Batch version of `findShiftWithLocationOnDate`: resolves the on-date shift for many
+     * (staffId, date) pairs in one query instead of one round trip per pair. Used to hydrate
+     * a whole day's task list without a per-task query — the shift's own location still wins
+     * over the staff member's home location, same as the single-pair lookup.
+     *
+     * Returns every matching shift row (a staff member can only have one shift per day per
+     * the domain, but this makes no such assumption) — callers pick the shift for a given
+     * (staffId, date) pair from the result.
+     */
+    async findShiftsWithLocationForStaffOnDates(pairs: { staffId: string; date: Date }[]) {
+        if (pairs.length === 0) return [];
+
+        // Dedupe by (staffId, day) so a page with many tasks on the same day for the same
+        // staff member doesn't inflate the OR clause with identical conditions.
+        const seen = new Map<string, { staffId: string; start: Date; end: Date }>();
+        for (const { staffId, date } of pairs) {
+            const start = new Date(date);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(date);
+            end.setHours(23, 59, 59, 999);
+            seen.set(`${staffId}:${start.getTime()}`, { staffId, start, end });
+        }
+
+        return prisma.workShift.findMany({
+            where: {
+                OR: Array.from(seen.values()).map(({ staffId, start, end }) => ({
+                    staffId,
+                    date: { gte: start, lte: end },
+                })),
+            },
+            include: { location: locationWithOpeningHours },
+            orderBy: { date: 'asc' },
         });
     }
 
@@ -180,6 +230,34 @@ export class WorkShiftRepository {
         return prisma.workShift.findMany({
             where: { OR: conditions }
         });
+    }
+
+    /**
+     * Finds every active staff member on shift at any of the given locations on the given date,
+     * one row per shift, carrying the shift's own location — not the staff member's home
+     * `StaffProfile.locationId`, which can point somewhere else entirely. Used for bulk task
+     * assignment, where a task must follow the location someone actually works that day.
+     */
+    async findWithShiftAtLocations(locationIds: string[], date: Date): Promise<ShiftWithStaffAtLocation[]> {
+        if (locationIds.length === 0) return [];
+
+        const startOfDay = new Date(date);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(date);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const result = await prisma.workShift.findMany({
+            where: {
+                locationId: { in: locationIds },
+                date: { gte: startOfDay, lte: endOfDay },
+                staff: { isActive: true }
+            },
+            orderBy: { date: 'asc' },
+            ...shiftWithStaffAtLocationArgs
+        });
+
+        logger.debug({ locationCount: locationIds.length, foundCount: result.length }, "🔍 findWithShiftAtLocations search result");
+        return result;
     }
 
     async countShiftsForStaff(staffId: string, since: Date): Promise<number> {

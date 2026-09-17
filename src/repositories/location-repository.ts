@@ -17,6 +17,13 @@ import { TtlCache } from "../utils/ttl-cache.js";
 const LOCATION_CACHE_TTL_MS = 30_000;
 const citiesCache = new TtlCache<string[]>(LOCATION_CACHE_TTL_MS);
 const byCityCache = new TtlCache<Location[]>(LOCATION_CACHE_TTL_MS);
+/**
+ * Той самий прийом, що й для citiesCache/byCityCache: майстер масової постановки задач
+ * читає повний довідник активних локацій на КОЖЕН тап чекбокса (місто, scope, локація,
+ * отримувач) — без кешу один прогін майстра на пів сотні співробітників робив стільки ж
+ * запитів findAllActive, скільки було тапів. Той самий TTL і той самий clear() у update().
+ */
+const activeCache = new TtlCache<Location[]>(LOCATION_CACHE_TTL_MS);
 
 export class LocationRepository {
     async findAll(): Promise<Location[]> {
@@ -24,37 +31,39 @@ export class LocationRepository {
     }
 
     async findAllActive(): Promise<Location[]> {
-        const locations = await prisma.location.findMany({
-            where: { isHidden: false }
-        });
-        const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 2', 'Volkland 2 (Шевчик)', 'Volkland 3', 'Karamel Sambir'];
-        const karpukLocs = ['Volkland', 'Fly Kids'];
-        const acquiringLocs = ['Smile Park Lviv', 'Dragon Park', 'Smile Park (Даринок)', 'Smile Park (Darynok)', 'Leoland', 'Leolend', 'Smile Park Київ', 'Smile Park Kharkiv'];
+        return activeCache.get("active", async () => {
+            const locations = await prisma.location.findMany({
+                where: { isHidden: false }
+            });
+            const posrednikovaLocs = ['Fly Kids Львів', 'Smile Park Lviv', 'Карамель Коломия', 'Карамель Шептицький', 'Volkland 2', 'Volkland 2 (Шевчик)', 'Volkland 3', 'Karamel Sambir'];
+            const karpukLocs = ['Volkland', 'Fly Kids'];
+            const acquiringLocs = ['Smile Park Lviv', 'Dragon Park', 'Smile Park (Даринок)', 'Smile Park (Darynok)', 'Leoland', 'Leolend', 'Smile Park Київ', 'Smile Park Kharkiv'];
 
-        return locations.map(l => {
-            const isSmileKyiv = l.name === 'Smile Park Київ' || (l.legacyName === 'Smile Park Київ');
-            const isDarynok = l.name.includes('Даринок') || l.name.includes('Darynok');
-            const isKarpukTerminalLocation =
-                (l.name === 'Volkland' && l.city === 'Запоріжжя') ||
-                (l.name === 'Fly Kids' && l.city === 'Рівне') ||
-                (l.legacyName === 'Volkland 1 (Бабурка)' && l.city === 'Запоріжжя') ||
-                (l.legacyName === 'Fly Kids Рівне' && l.city === 'Рівне');
-            
-            // Priority: DB > Hardcoded
-            const hasAcquiring = l.hasAcquiring || acquiringLocs.includes(l.name) || acquiringLocs.includes(l.legacyName || '') || isSmileKyiv || isDarynok;
-            
-            let fopId = l.fopId;
-            if (!fopId || fopId === 'KUZNETSOV') { // Kuznetsov is default, check for overrides
-                if (isSmileKyiv || l.name === 'Leoland') {
-                    fopId = 'POSREDNIKOVA';
-                } else if (isKarpukTerminalLocation || karpukLocs.includes(l.legacyName || '')) {
-                    fopId = 'KARPUK';
-                } else if (posrednikovaLocs.includes(l.name) || posrednikovaLocs.includes(l.legacyName || '')) {
-                    fopId = 'POSREDNIKOVA';
+            return locations.map(l => {
+                const isSmileKyiv = l.name === 'Smile Park Київ' || (l.legacyName === 'Smile Park Київ');
+                const isDarynok = l.name.includes('Даринок') || l.name.includes('Darynok');
+                const isKarpukTerminalLocation =
+                    (l.name === 'Volkland' && l.city === 'Запоріжжя') ||
+                    (l.name === 'Fly Kids' && l.city === 'Рівне') ||
+                    (l.legacyName === 'Volkland 1 (Бабурка)' && l.city === 'Запоріжжя') ||
+                    (l.legacyName === 'Fly Kids Рівне' && l.city === 'Рівне');
+
+                // Priority: DB > Hardcoded
+                const hasAcquiring = l.hasAcquiring || acquiringLocs.includes(l.name) || acquiringLocs.includes(l.legacyName || '') || isSmileKyiv || isDarynok;
+
+                let fopId = l.fopId;
+                if (!fopId || fopId === 'KUZNETSOV') { // Kuznetsov is default, check for overrides
+                    if (isSmileKyiv || l.name === 'Leoland') {
+                        fopId = 'POSREDNIKOVA';
+                    } else if (isKarpukTerminalLocation || karpukLocs.includes(l.legacyName || '')) {
+                        fopId = 'KARPUK';
+                    } else if (posrednikovaLocs.includes(l.name) || posrednikovaLocs.includes(l.legacyName || '')) {
+                        fopId = 'POSREDNIKOVA';
+                    }
                 }
-            }
 
-            return { ...l, fopId, hasAcquiring };
+                return { ...l, fopId, hasAcquiring };
+            });
         });
     }
 
@@ -149,6 +158,7 @@ export class LocationRepository {
         // локацію не пропонували кандидаткам ще пів хвилини.
         citiesCache.clear();
         byCityCache.clear();
+        activeCache.clear();
         return updated;
     }
     async countCandidatesByCity(city: string, status: any, extraWhere: any = {}): Promise<number> {

@@ -1,3 +1,5 @@
+import { kyivDateStr } from "./format-deadline.js";
+
 /**
  * Побудувати прогрес-бар для завдань
  */
@@ -13,19 +15,27 @@ export function buildProgressBar(completed: number, total: number): string {
 }
 
 /**
- * Побудувати календар на 14 днів для вибору дати
+ * Побудувати календар на 14 днів для вибору дати.
+ *
+ * Ярлик кнопки (що бачить людина) і callback_data (що піде в базу як робоча
+ * дата) мають називати ОДИН і той самий день. Обидва беруться з київської
+ * дати одного й того ж моменту (`kyivDateStr`), а не змішують локальний час
+ * сервера (UTC у контейнері) з UTC-рядком `toISOString()` — інакше ввечері в
+ * Києві (після 21:00 влітку, 22:00 взимку) ярлик і значення розходяться на
+ * добу.
  */
 export function build14DayCalendar(callbackPrefix: string) {
     const buttons = [];
-    const today = new Date();
+    const now = new Date();
 
     let currentRow = [];
     for (let i = 0; i < 14; i++) {
-        const date = new Date(today);
-        date.setDate(today.getDate() + i);
+        const instant = new Date(now);
+        instant.setUTCDate(instant.getUTCDate() + i);
 
-        const dateStr = date.toISOString().split("T")[0]; // YYYY-MM-DD
-        const displayDate = `${date.getDate().toString().padStart(2, "0")}.${(date.getMonth() + 1).toString().padStart(2, "0")}`;
+        const dateStr = kyivDateStr(instant); // YYYY-MM-DD у Києві
+        const parts = dateStr.split("-");
+        const displayDate = `${parts[2]}.${parts[1]}`;
 
         const label = i === 0 ? `☀️ Today (${displayDate})` : i === 1 ? `🌅 Tomorrow (${displayDate})` : displayDate;
 

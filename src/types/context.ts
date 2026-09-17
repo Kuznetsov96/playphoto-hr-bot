@@ -2,6 +2,7 @@ import type { Context, SessionFlavor } from "grammy";
 import type { ConversationFlavor } from "@grammyjs/conversations";
 import type { MenuFlavor } from "@grammyjs/menu";
 import type { User, StaffProfile, Candidate, Location } from "@prisma/client";
+import type { StaffWithRelations } from "../repositories/staff-repository.js";
 
 export type CtxDbUser = User & {
     staffProfile: (StaffProfile & { location: Location | null }) | null;
@@ -105,6 +106,19 @@ export interface SessionData {
         step: string;
         staffId?: string;
         staffName?: string;
+        /**
+         * `staff.user.telegramId` read at `startTaskFlow` (step 0), where the staff record —
+         * with its `user` relation — is already in hand. Carrying it through the session means
+         * `task_confirm_save` can notify the photographer without a second
+         * `userRepository.findByStaffProfileId` lookup for data already fetched once.
+         *
+         * Stored as a string, not bigint: the session round-trips through Redis as JSON
+         * (see core/session.ts `bigIntReplacer`), which turns a bigint into a string on the
+         * way out but never converts it back on the way in — so a `bigint`-typed field here
+         * would silently become a string on the very next request anyway. `null` means the
+         * staff member has no linked Telegram account.
+         */
+        staffTelegramId?: string | null;
         city?: string;
         locationName?: string;
         workDate?: string;
@@ -202,7 +216,6 @@ export interface SessionData {
         locationId?: string;
         locationName?: string;
         selectedStaffIds?: string[];
-        staffId?: string;
         staffName?: string;
         taskText?: string;
         deadlineTime?: string | null;
@@ -211,8 +224,34 @@ export interface SessionData {
         sourceChatId?: number;
         sourceMessageId?: number;
         completionMode?: TaskCompletionModeValue;
+        /**
+         * Memo of the last `getTaskCreationStaff(locationId, date)` result, keyed on that
+         * same (locationId, date) pair. Toggling one staff checkbox only changes
+         * `selectedStaffIds` — the roster for that location/date hasn't moved — so re-fetching
+         * it from the DB on every tap is wasted work. Keying on the pair means the memo is
+         * used only while it's still describing the screen the admin is looking at; picking a
+         * different location or date naturally misses the key and refetches.
+         */
+        staffOptionsCache?: {
+            key: string;
+            staff: StaffWithRelations[];
+            source: "schedule" | "location";
+        };
     };
-    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
+    bulkTaskData?: {
+        step?: "SELECT_DATE" | "SELECT_CITIES" | "SELECT_SCOPE" | "SELECT_LOCATIONS"
+             | "SELECT_RECIPIENTS" | "SELECT_MODE" | "AWAITING_TEXT" | "SELECT_DEADLINE" | "CONFIRM" | "SENDING";
+        date?: string;
+        cities?: string[];
+        locationIds?: string[];
+        excludedStaffIds?: string[];
+        completionMode?: TaskCompletionModeValue;
+        taskText?: string;
+        fileId?: string | null;
+        mediaType?: TaskAttachmentItem["type"];
+        deadlineTime?: string | null;
+    };
+    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'BULK_TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;
     teamSyncPreview?: {
