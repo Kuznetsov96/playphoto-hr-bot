@@ -2,7 +2,6 @@ import { Composer, InlineKeyboard } from "grammy";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import type { MyContext } from "../../types/context.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
-import { userRepository } from "../../repositories/user-repository.js";
 import { taskService } from "../../services/task-service.js";
 import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js";
 import logger from "../../core/logger.js";
@@ -40,6 +39,7 @@ export async function startTaskFlow(ctx: MyContext, identifier?: string) {
             ctx.session.taskData!.staffName = formatStaffName(staff.fullName);
             ctx.session.taskData!.city = staff.location?.city || "Unknown";
             ctx.session.taskData!.locationName = staff.location?.name || "Unknown";
+            ctx.session.taskData!.staffTelegramId = staff.user?.telegramId != null ? staff.user.telegramId.toString() : null;
             ctx.session.taskData!.step = 'SELECT_DATE';
             return await renderDateSelection(ctx);
         }
@@ -282,11 +282,13 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
             delete ctx.session.adminFlow;
         }
         
-        // Notify photographer and check delivery
+        // Notify photographer and check delivery. The telegram id was already fetched in
+        // startTaskFlow (step 0), where the staff record's `user` relation is in hand — no
+        // need for a second user lookup here just to read the same field again.
         let deliveryStatus = "✅ Task created and notification sent!";
         try {
-            const staffUser = await userRepository.findByStaffProfileId(data.staffId!);
-            if (staffUser?.telegramId) {
+            const staffTelegramId = data.staffTelegramId;
+            if (staffTelegramId) {
                 const dateStr = task.workDate
                     ? new Date(task.workDate).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" })
                     : "";
@@ -313,7 +315,7 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                 if (data.fileId !== undefined) notificationOptions.fileId = data.fileId;
                 if (data.mediaType !== undefined) notificationOptions.mediaType = data.mediaType;
 
-                await sendTaskNotification(ctx, Number(staffUser.telegramId), notifText, notificationOptions);
+                await sendTaskNotification(ctx, Number(staffTelegramId), notifText, notificationOptions);
             } else {
                 deliveryStatus = "✅ Task created, but user has no Telegram ID linked.";
             }

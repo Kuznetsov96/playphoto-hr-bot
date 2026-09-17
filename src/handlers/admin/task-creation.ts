@@ -40,7 +40,7 @@ async function getTaskCreationStaff(locationId: string, dateStr?: string) {
  * different location or date changes the key and falls through to a fresh fetch, so the memo
  * can never show a roster for the wrong screen.
  */
-async function getTaskCreationStaffCached(ctx: MyContext, locationId: string, dateStr?: string) {
+export async function getTaskCreationStaffCached(ctx: MyContext, locationId: string, dateStr?: string) {
     if (!ctx.session.taskCreation) return getTaskCreationStaff(locationId, dateStr);
 
     const key = `${locationId}:${dateStr ?? ""}`;
