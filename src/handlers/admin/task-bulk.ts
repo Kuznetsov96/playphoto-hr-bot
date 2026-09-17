@@ -44,6 +44,52 @@ export function canNarrowByLocation(locationCount: number): boolean {
     return !shouldSkipScopeStep(locationCount);
 }
 
+export type BulkTaskStep = NonNullable<MyContext["session"]["bulkTaskData"]>["step"];
+
+/**
+ * Куда ведёт Back с данного шага — чистая функция без побочных эффектов,
+ * поэтому она тестируема без сессии, ScreenManager и сети.
+ *
+ * `locationCount` — число локаций в уже выбранных городах: тот же факт, что
+ * решает shouldSkipScopeStep/canNarrowByLocation. Назад с SELECT_RECIPIENTS
+ * обязан учитывать его же — если экран SELECT_SCOPE был пропущен на пути
+ * вперёд (одна локация), Back не имеет права показать админу экран, которого
+ * тот никогда не видел.
+ *
+ * Возвращает null для SELECT_DATE (первый шаг — уходить некуда, только
+ * Cancel) и для SENDING (переходного состояния, из которого Back не
+ * вызывается).
+ */
+export function previousStep(
+    step: BulkTaskStep,
+    context: { locationCount: number },
+): BulkTaskStep | null {
+    switch (step) {
+        case "SELECT_DATE":
+            return null;
+        case "SELECT_CITIES":
+            return "SELECT_DATE";
+        case "SELECT_SCOPE":
+            return "SELECT_CITIES";
+        case "SELECT_LOCATIONS":
+            return "SELECT_SCOPE";
+        case "SELECT_RECIPIENTS":
+            return shouldSkipScopeStep(context.locationCount) ? "SELECT_CITIES" : "SELECT_SCOPE";
+        case "SELECT_MODE":
+            return "SELECT_RECIPIENTS";
+        case "AWAITING_TEXT":
+            return "SELECT_MODE";
+        case "SELECT_DEADLINE":
+            return "AWAITING_TEXT";
+        case "CONFIRM":
+            return "SELECT_DEADLINE";
+        case "SENDING":
+            return null;
+        default:
+            return null;
+    }
+}
+
 /**
  * Старт мастера. Гасит состояние остальных админских флоу,
  * чтобы свободный текст не перехватил чужой обработчик.
@@ -122,6 +168,7 @@ async function renderCitySelection(ctx: MyContext, allCities?: string[]) {
         selected.size === cities.length ? ADMIN_TEXTS["admin-bulk-unselect-all"] : ADMIN_TEXTS["admin-bulk-select-all"],
         "tbk_cities_toggle_all",
     ).row();
+    keyboard.text(ADMIN_TEXTS["admin-btn-back"], "tbk_back").row();
     keyboard.text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-cities-title"], keyboard);
@@ -182,6 +229,7 @@ async function renderScopeSelection(ctx: MyContext) {
     const keyboard = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-bulk-scope-all"], "tbk_scope_all").row()
         .text(ADMIN_TEXTS["admin-bulk-scope-pick"], "tbk_scope_pick").row()
+        .text(ADMIN_TEXTS["admin-btn-back"], "tbk_back").row()
         .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-scope-title"], keyboard);
@@ -221,6 +269,7 @@ async function renderLocationSelection(ctx: MyContext) {
     if (selected.size > 0) {
         keyboard.text(`${ADMIN_TEXTS["admin-bulk-continue"]} (${selected.size})`, "tbk_locs_done").row();
     }
+    keyboard.text(ADMIN_TEXTS["admin-btn-back"], "tbk_back").row();
     keyboard.text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-locations-title"], keyboard);
@@ -358,6 +407,9 @@ async function renderRecipientSelection(ctx: MyContext, activeLocations?: Awaite
             keyboard.text(ADMIN_TEXTS["admin-bulk-back-to-date"], "tbk_back_to_date").row();
         }
         keyboard.text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+        // Эти два дедэнда — не обычный шаг мастера, поэтому не участвуют в
+        // общей tbk_back/previousStep логике: у них уже есть собственный,
+        // более точный выход (сузить локации или сменить дату).
 
         const message = canNarrow
             ? ADMIN_TEXTS["admin-bulk-err-too-many"]
@@ -382,6 +434,7 @@ async function renderRecipientSelection(ctx: MyContext, activeLocations?: Awaite
     if (selectedCount > 0) {
         keyboard.row().text(`${ADMIN_TEXTS["admin-bulk-continue"]} (${selectedCount})`, "tbk_recipients_done");
     }
+    keyboard.row().text(ADMIN_TEXTS["admin-btn-back"], "tbk_back");
     keyboard.row().text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-recipients-title"], keyboard);
@@ -424,6 +477,7 @@ async function renderModeSelection(ctx: MyContext): Promise<void> {
     const keyboard = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-bulk-mode-proof"], "tbk_mode_proof").row()
         .text(ADMIN_TEXTS["admin-bulk-mode-quick"], "tbk_mode_quick").row()
+        .text(ADMIN_TEXTS["admin-btn-back"], "tbk_back").row()
         .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-mode-title"], keyboard);
@@ -438,10 +492,27 @@ taskBulkHandlers.callbackQuery(/^tbk_mode_(proof|quick)$/, async (ctx: MyContext
         : TaskCompletionMode.QUICK;
     data.step = "AWAITING_TEXT";
 
-    const keyboard = new InlineKeyboard().text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-text-title"], keyboard);
+    await renderTextStep(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
 });
+
+/**
+ * Общий рендер для AWAITING_TEXT — используется как при движении вперёд (после
+ * выбора режима), так и при Back с шага дедлайна. В обоих случаях уже введённый
+ * текст (если есть) не стирается: админ его правит, а не перепечатывает.
+ */
+async function renderTextStep(ctx: MyContext): Promise<void> {
+    const data = ctx.session.bulkTaskData!;
+    const keyboard = new InlineKeyboard()
+        .text(ADMIN_TEXTS["admin-btn-back"], "tbk_back").row()
+        .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
+
+    const title = data.taskText
+        ? `${ADMIN_TEXTS["admin-bulk-text-title"]}\n\n<i>${ADMIN_TEXTS["admin-bulk-text-current"]}</i>\n${data.taskText}`
+        : ADMIN_TEXTS["admin-bulk-text-title"];
+
+    await ScreenManager.renderScreen(ctx, title, keyboard);
+}
 
 /**
  * Divergence D з аудиту вирівнювання майстрів постановки задач: bulk-флоу
@@ -533,6 +604,7 @@ async function renderDeadlineSelection(ctx: MyContext): Promise<void> {
     const keyboard = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-bulk-deadline-eod"], "tbk_time_23:59")
         .text(ADMIN_TEXTS["admin-bulk-deadline-none"], "tbk_time_none").row()
+        .text(ADMIN_TEXTS["admin-btn-back"], "tbk_back").row()
         .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-bulk-deadline-title"], keyboard);
@@ -600,7 +672,8 @@ async function renderConfirmation(ctx: MyContext): Promise<void> {
 
     const keyboard = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-bulk-confirm-send"], "tbk_send").row()
-        .text(ADMIN_TEXTS["admin-bulk-restart"], "tbk_restart")
+        .text(ADMIN_TEXTS["admin-btn-back"], "tbk_back")
+        .text(ADMIN_TEXTS["admin-bulk-restart"], "tbk_restart").row()
         .text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
 
     await ScreenManager.renderScreen(ctx, summary, keyboard);
@@ -608,6 +681,65 @@ async function renderConfirmation(ctx: MyContext): Promise<void> {
 
 taskBulkHandlers.callbackQuery("tbk_restart", async (ctx: MyContext) => {
     await startBulkTask(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+/**
+ * Единая точка Back для всех шагов мастера, кроме SELECT_DATE (там кнопки
+ * Back нет вовсе — это первый экран). Решение "куда" принимает чистая
+ * previousStep(); здесь только рендер выбранного экрана с состоянием,
+ * которое уже лежит в data (previousStep ничего не мутирует).
+ *
+ * `locationCount` считается по текущим data.cities — тем же способом, каким
+ * его считает шаг SELECT_CITIES→SELECT_SCOPE/RECIPIENTS на пути вперёд, так
+ * что назад с SELECT_RECIPIENTS воспроизводит то самое решение "был ли
+ * scope-шаг пропущен", а не гадает по данным, которые могли не относиться к
+ * тому переходу.
+ */
+taskBulkHandlers.callbackQuery("tbk_back", async (ctx: MyContext) => {
+    const data = ctx.session.bulkTaskData;
+    if (!data || !data.step) return;
+
+    const locations = await findLocationsInCities(data.cities || []);
+    const target = previousStep(data.step, { locationCount: locations.length });
+
+    if (!target) {
+        await ctx.answerCallbackQuery().catch(() => { });
+        return;
+    }
+
+    data.step = target;
+
+    switch (target) {
+        case "SELECT_DATE":
+            await renderDateSelection(ctx);
+            break;
+        case "SELECT_CITIES":
+            await renderCitySelection(ctx);
+            break;
+        case "SELECT_SCOPE":
+            await renderScopeSelection(ctx);
+            break;
+        case "SELECT_LOCATIONS":
+            await renderLocationSelection(ctx);
+            break;
+        case "SELECT_RECIPIENTS":
+            await renderRecipientSelection(ctx, locations);
+            break;
+        case "SELECT_MODE":
+            await renderModeSelection(ctx);
+            break;
+        case "AWAITING_TEXT":
+            await renderTextStep(ctx);
+            break;
+        case "SELECT_DEADLINE":
+            await renderDeadlineSelection(ctx);
+            break;
+        case "CONFIRM":
+            await renderConfirmation(ctx);
+            break;
+    }
+
     await ctx.answerCallbackQuery().catch(() => { });
 });
 

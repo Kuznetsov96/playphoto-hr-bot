@@ -259,6 +259,7 @@ export const ADMIN_TEXTS = {
   "admin-bulk-mode-proof": "✅ With proof",
   "admin-bulk-mode-quick": "⚡ Quick",
   "admin-bulk-text-title": "✍️ <b>Bulk task</b>\n\nSend the task text (a photo or document may be attached):",
+  "admin-bulk-text-current": "Current text (send a new message to replace it):",
   "admin-bulk-deadline-title": "⏰ <b>Bulk task</b>\n\nSet a deadline:",
   "admin-bulk-deadline-eod": "🌑 End of day",
   "admin-bulk-deadline-none": "⏩ No time",
