@@ -72,6 +72,21 @@ function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "locatio
     return `⚠️ <i>Showing all active staff for this location</i>`;
 }
 
+/**
+ * Back target for any "entering_text"-family screen, which always wants to
+ * return to the location screen it came from. `locationId` is set by every
+ * live path into these screens (tas_loc_ handler, and the single-location
+ * auto-advance in tas_city_), so this should never actually need the
+ * fallback — but a Back button built from an unset id degrades to
+ * `tas_loc_undefined`, which resolves to no location and freezes the screen
+ * behind a dead-end alert. Falling back to "select a date" re-enters the
+ * flow at a screen that always renders, rather than risk that dead end
+ * again if some future path reaches these screens without a locationId.
+ */
+export function taskLocationBackCallback(taskCreation: { locationId?: string } | undefined): string {
+    return taskCreation?.locationId ? `tas_loc_${taskCreation.locationId}` : "task_add_by_date";
+}
+
 async function renderTaskModeSelection(ctx: MyContext, backCallback: string) {
     const keyboard = new InlineKeyboard()
         .text("⚡ Quick Completion", "tas_mode_quick").row()
@@ -95,6 +110,13 @@ composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
     ctx.session.candidateData = {};
     delete ctx.session.taskData;
     delete ctx.session.bulkTaskData;
+    // Own slice must be cleared too, like every other flow-start clears its
+    // own: Redis sessions live 24h, so an admin who abandons this wizard
+    // mid-way and comes back a day later (or starts a fresh one) would
+    // otherwise resume a draft they don't remember — a stale taskText jumping
+    // straight to the deadline screen, or a stale selectedStaffIds
+    // short-circuiting city/location selection entirely.
+    delete ctx.session.taskCreation;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
     delete ctx.session.manualChannelAccess;
@@ -162,14 +184,6 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
             keyboard,
             { pushToStack: true }
         );
-        await ctx.answerCallbackQuery().catch(() => { });
-        return;
-    }
-
-    // Check if staff is already selected (Direct Task Assignment)
-    if (ctx.session.taskCreation.selectedStaffIds && ctx.session.taskCreation.selectedStaffIds.length > 0) {
-        ctx.session.taskCreation.step = "selecting_mode";
-        await renderTaskModeSelection(ctx, "task_add_by_date");
         await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
@@ -289,7 +303,7 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     }
 
     if (selectedIds.length > 0) keyboard.text("➡️ Done", "tas_st_done").row();
-    keyboard.text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+    keyboard.text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
 
     await ScreenManager.renderScreen(
         ctx,
@@ -309,7 +323,7 @@ composer.callbackQuery("tas_st_done", async (ctx) => {
     const names = selectedStaff.map(s => formatStaffName(s.fullName)).join(", ");
     ctx.session.taskCreation.staffName = names.length > 30 ? `${selectedStaff.length} photographers` : names;
     ctx.session.taskCreation.step = "selecting_mode";
-    await renderTaskModeSelection(ctx, `tas_loc_${ctx.session.taskCreation.locationId}`);
+    await renderTaskModeSelection(ctx, taskLocationBackCallback(ctx.session.taskCreation));
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -319,10 +333,7 @@ composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
     ctx.session.taskCreation.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskCreation.step = "entering_text";
 
-    const backCallback = ctx.session.taskCreation.locationId
-        ? `tas_loc_${ctx.session.taskCreation.locationId}`
-        : "task_add_by_date";
-    const keyboard = new InlineKeyboard().text("⬅️ Back", backCallback);
+    const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
     await ScreenManager.renderScreen(
         ctx,
         `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n` +
@@ -368,7 +379,7 @@ async function handleTaskInput(
     }
 
     if (!taskText) {
-        const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+        const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
         await ScreenManager.renderScreen(
             ctx,
             `📎 <b>Attachment saved for ${ctx.session.taskCreation.staffName}</b>\n\nNow send the full task text in a separate message.`,
@@ -405,7 +416,6 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
     if (!ctx.session.taskCreation) return;
 
     const staffIds = ctx.session.taskCreation.selectedStaffIds || [];
-    if (staffIds.length === 0 && ctx.session.taskCreation.staffId) staffIds.push(ctx.session.taskCreation.staffId);
     if (staffIds.length === 0) return ctx.reply("❌ No staff selected!");
 
     ctx.session.taskCreation.deadlineTime = time === "none" ? null : time;
@@ -656,7 +666,7 @@ composer.callbackQuery(/^tas_time_/, async (ctx) => {
 composer.callbackQuery("tas_edit_text", async (ctx) => {
     if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
     ctx.session.taskCreation.step = "entering_text";
-    const keyboard = new InlineKeyboard().text("⬅️ Back", `tas_loc_${ctx.session.taskCreation.locationId}`);
+    const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
     await ScreenManager.renderScreen(
         ctx,
         `📝 <b>Correct task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>Current text:</i> ${ctx.session.taskCreation.taskText || "[Media]"}`,

@@ -216,7 +216,6 @@ export interface SessionData {
         locationId?: string;
         locationName?: string;
         selectedStaffIds?: string[];
-        staffId?: string;
         staffName?: string;
         taskText?: string;
         deadlineTime?: string | null;
