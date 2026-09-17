@@ -17,7 +17,7 @@ import {
     groupTasksByLocation,
     formatDeadline,
 } from "../../utils/task-helpers.js";
-import { kyivDateStr } from "../../utils/format-deadline.js";
+import { kyivDateStr, isTaskUrgent } from "../../utils/format-deadline.js";
 import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 import { escapeHtml, htmlToPlainText, normalizeCity } from "./utils.js";
 
@@ -38,7 +38,7 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
     // Header counters summarize the WHOLE day, never just the current page.
     const total = tasks.length;
     const completed = tasks.filter((t: any) => t.isCompleted).length;
-    const urgent = tasks.filter((t: any) => !t.isCompleted && t.deadlineTime).length;
+    const urgent = tasks.filter((t: any) => isTaskUrgent(t)).length;
 
     const PAGE_SIZE = 8;
     const startIdx = page * PAGE_SIZE;
@@ -69,8 +69,8 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
     }
 
     if (pageTasks.length > 0) {
-        const urgentTasks = pageTasks.filter((t: any) => !t.isCompleted && t.deadlineTime);
-        const regularTasks = pageTasks.filter((t: any) => t.isCompleted || !t.deadlineTime);
+        const urgentTasks = pageTasks.filter((t: any) => isTaskUrgent(t));
+        const regularTasks = pageTasks.filter((t: any) => !isTaskUrgent(t));
 
         if (urgentTasks.length > 0) {
             text += (ADMIN_TEXTS["admin-tasks-urgent"] || STAFF_TEXTS["admin-tasks-urgent"] || "admin-tasks-urgent");

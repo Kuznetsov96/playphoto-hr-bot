@@ -12,6 +12,13 @@ vi.mock("../../../middleware/role-check.js", () => ({ getUserAdminRole: vi.fn() 
 
 const { buildTasksDashboard } = await import("../tasks.js");
 
+// A fixed date in the past, independent of when the suite actually runs.
+// isTaskUrgent treats any incomplete task whose workDate has already passed
+// as unconditionally urgent (overdue), so fixtures built on this date stay
+// "urgent" no matter what real wall-clock time the test executes at — unlike
+// "today + deadlineTime", whose urgency now depends on proximity to `now`.
+const PAST_WORK_DATE = new Date("2020-01-06T00:00:00.000Z");
+
 function makeTask(overrides: Partial<{
     id: string;
     isCompleted: boolean;
@@ -19,6 +26,7 @@ function makeTask(overrides: Partial<{
     city: string;
     locationName: string;
     fullName: string;
+    workDate: Date;
 }> = {}) {
     const id = overrides.id ?? `task-${Math.random().toString(36).slice(2)}`;
     return {
@@ -28,7 +36,7 @@ function makeTask(overrides: Partial<{
         city: overrides.city ?? "Kyiv",
         locationName: overrides.locationName ?? "Podil",
         taskText: "Do the thing",
-        workDate: new Date("2026-09-17T00:00:00.000Z"),
+        workDate: overrides.workDate ?? new Date("2026-09-17T00:00:00.000Z"),
         completionMode: "QUICK",
         fileId: null,
         staff: {
@@ -44,7 +52,7 @@ describe("buildTasksDashboard pagination", () => {
         // so page 0 should only describe its own 8 tasks in the body, but the
         // header must still say 20 total / 3 urgent.
         const tasks = [
-            ...Array.from({ length: 3 }, (_, i) => makeTask({ id: `urgent-${i}`, deadlineTime: "18:00", fullName: `Urgent${i} Staff${i}` })),
+            ...Array.from({ length: 3 }, (_, i) => makeTask({ id: `urgent-${i}`, deadlineTime: "18:00", workDate: PAST_WORK_DATE, fullName: `Urgent${i} Staff${i}` })),
             ...Array.from({ length: 17 }, (_, i) => makeTask({ id: `regular-${i}`, fullName: `Regular${i} Staff${i}` })),
         ];
         getTasksForDate.mockResolvedValue(tasks);
@@ -98,6 +106,7 @@ describe("buildTasksDashboard pagination", () => {
             city: i % 5 === 0 ? "Дніпропетровськ-Наддніпрянський" : "Kyiv",
             locationName: `Фотостудія на вулиці Соборній, корпус номер ${i}`,
             deadlineTime: i % 4 === 0 ? "18:00" : null,
+            workDate: i % 4 === 0 ? PAST_WORK_DATE : new Date("2026-09-17T00:00:00.000Z"),
         }));
         getTasksForDate.mockResolvedValue(tasks);
 
