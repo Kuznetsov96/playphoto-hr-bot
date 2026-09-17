@@ -116,3 +116,98 @@ describe("buildTasksDashboard pagination", () => {
         }
     });
 });
+
+describe("buildTasksDashboard hideCompleted toggle (ITEM 5)", () => {
+    it("shows every task by default (hideCompleted defaults to false)", async () => {
+        const tasks = [
+            makeTask({ id: "done-1", isCompleted: true, fullName: "Done One" }),
+            makeTask({ id: "pending-1", isCompleted: false, fullName: "Pending One" }),
+        ];
+        getTasksForDate.mockResolvedValue(tasks);
+
+        const { text } = await buildTasksDashboard("2026-09-17", 0);
+
+        expect(text).toContain("Done One");
+        expect(text).toContain("Pending One");
+        expect(text).toContain("1/2");
+    });
+
+    it("hides completed rows from the body while the header still counts them", async () => {
+        const tasks = [
+            makeTask({ id: "done-1", isCompleted: true, fullName: "Done One" }),
+            makeTask({ id: "done-2", isCompleted: true, fullName: "Done Two" }),
+            makeTask({ id: "pending-1", isCompleted: false, fullName: "Pending One" }),
+        ];
+        getTasksForDate.mockResolvedValue(tasks);
+
+        const { text } = await buildTasksDashboard("2026-09-17", 0, true);
+
+        // Header still summarizes the WHOLE day, toggle or not.
+        expect(text).toContain("2/3");
+        // But the completed rows themselves are gone from the body.
+        expect(text).not.toContain("Done One");
+        expect(text).not.toContain("Done Two");
+        expect(text).toContain("Pending One");
+    });
+
+    it("shows a distinct message (not the generic 'no tasks') when every task is hidden", async () => {
+        const tasks = [makeTask({ id: "done-1", isCompleted: true })];
+        getTasksForDate.mockResolvedValue(tasks);
+
+        const { text } = await buildTasksDashboard("2026-09-17", 0, true);
+
+        expect(text).not.toContain("No tasks for this date");
+        expect(text).toMatch(/hidden/i);
+    });
+
+    it("paginates over the post-toggle list, not the full day's list", async () => {
+        // 3 completed + 10 pending, PAGE_SIZE 8: with completed hidden there
+        // are only 10 visible tasks (2 pages), not 13 (still 2 pages, but a
+        // wrong implementation counting allTasks could show stale contents).
+        const tasks = [
+            ...Array.from({ length: 3 }, (_, i) => makeTask({ id: `done-${i}`, isCompleted: true, fullName: `Done${i} Staff${i}` })),
+            ...Array.from({ length: 10 }, (_, i) => makeTask({ id: `pending-${i}`, isCompleted: false, fullName: `Pending${i} Staff${i}` })),
+        ];
+        getTasksForDate.mockResolvedValue(tasks);
+
+        const page0 = await buildTasksDashboard("2026-09-17", 0, true);
+        for (let i = 0; i < 8; i++) expect(page0.text).toContain(`Pending${i}`);
+        expect(page0.text).not.toContain("Pending8");
+
+        const page1 = await buildTasksDashboard("2026-09-17", 1, true);
+        expect(page1.text).toContain("Pending8");
+        expect(page1.text).toContain("Pending9");
+    });
+
+    it("labels the toggle button by the CURRENT mode and flips it in the callback data", async () => {
+        const tasks = [makeTask({ id: "t-1" })];
+        getTasksForDate.mockResolvedValue(tasks);
+
+        const shown = await buildTasksDashboard("2026-09-17", 0, false);
+        const shownButtons = shown.keyboard.inline_keyboard.flat();
+        const hideButton = shownButtons.find((b: any) => "callback_data" in b && b.callback_data.startsWith("task_hide_"));
+        expect(hideButton).toBeDefined();
+        expect((hideButton as any).text).toMatch(/hide/i);
+        expect((hideButton as any).callback_data).toBe("task_hide_2026-09-17_0_1");
+
+        const hidden = await buildTasksDashboard("2026-09-17", 0, true);
+        const hiddenButtons = hidden.keyboard.inline_keyboard.flat();
+        const showButton = hiddenButtons.find((b: any) => "callback_data" in b && b.callback_data.startsWith("task_hide_"));
+        expect(showButton).toBeDefined();
+        expect((showButton as any).text).toMatch(/show/i);
+        expect((showButton as any).callback_data).toBe("task_hide_2026-09-17_0_0");
+    });
+
+    it("carries the page and hide-mode through every task detail button's callback_data", async () => {
+        // 9 tasks so page 1 (the second page, PAGE_SIZE 8) actually has a row.
+        const tasks = Array.from({ length: 9 }, (_, i) => makeTask({ id: `task-${i}`, fullName: `Staff${i} Last${i}` }));
+        getTasksForDate.mockResolvedValue(tasks);
+
+        const { keyboard } = await buildTasksDashboard("2026-09-17", 1, true);
+        const buttons = keyboard.inline_keyboard.flat();
+        const detailButton = buttons.find((b: any) => "callback_data" in b && b.callback_data.startsWith("task_det_"));
+
+        expect(detailButton).toBeDefined();
+        expect((detailButton as any).callback_data).toBe("task_det_task-8_2026-09-17_1_1");
+    });
+});
