@@ -20,13 +20,33 @@ function read(relativePath: string): string {
 }
 
 describe("bulk task wiring pins", () => {
-    it("protectedAdminCallbacks filter includes the tbk_ prefix", () => {
+    it("mounts the task callback role guard BEFORE the task composers", () => {
+        // Порядок здесь и есть защита. grammY выполняет middleware в порядке регистрации,
+        // а обработчики задач завершают апдейт без next() — всё, что смонтировано после них,
+        // для tbk_/tas_/task_/b_ не выполняется. Раньше на этом месте стоял грep строки
+        // startsWith("tbk_") в protectedAdminCallbacks: он зеленел, хотя requireRole
+        // не вызывался ни разу. Поведение гейта покрыто task-callback-role-guard.test.ts.
+        const source = read("../index.ts");
+        const guardAt = source.indexOf("adminHandlers.use(buildTaskCallbackGuard());");
+        const firstTaskComposerAt = source.indexOf("adminHandlers.use(adminBroadcastHandlers);");
+        const bulkComposerAt = source.indexOf("adminHandlers.use(taskBulkHandlers);");
+
+        expect(guardAt).toBeGreaterThan(-1);
+        expect(firstTaskComposerAt).toBeGreaterThan(-1);
+        expect(guardAt).toBeLessThan(firstTaskComposerAt);
+        expect(guardAt).toBeLessThan(bulkComposerAt);
+    });
+
+    it("keeps the task prefixes out of protectedAdminCallbacks, which never runs for them", () => {
         const source = read("../index.ts");
         const filterBlock = source.slice(
             source.indexOf("const protectedAdminCallbacks"),
             source.indexOf("));", source.indexOf("const protectedAdminCallbacks")),
         );
-        expect(filterBlock).toContain('c.callbackQuery.data.startsWith("tbk_")');
+        for (const prefix of ["tbk_", "tas_", "task_", "b_"]) {
+            expect(filterBlock, `${prefix} advertises protection this filter cannot provide`)
+                .not.toContain(`c.callbackQuery.data.startsWith("${prefix}")`);
+        }
     });
 
     it("staff shield in handlers/index.ts includes the tbk_ prefix", () => {
