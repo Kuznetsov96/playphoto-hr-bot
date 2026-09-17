@@ -11,16 +11,18 @@ import { formatStaffName } from "../../utils/task-helpers.js";
 import { normalizeCity, getMessageHtml, sendTaskNotification, escapeHtml } from "./utils.js";
 import { formatLocation } from "../../utils/location-label.js";
 import { taskService, TASK_TEXT_MAX_LENGTH, type BulkTaskCreationResult } from "../../services/task-service.js";
+import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
 
 /**
- * Telegram отвергает сообщения длиннее 4096 символов. Сводка подтверждения
- * склеивает текст задачи (до TASK_TEXT_MAX_LENGTH, включая HTML-разметку) с
- * неограниченной построчной разбивкой по локациям — при большом числе локаций
- * с длинными названиями лимит превышается даже при коротком тексте задачи.
+ * Telegram отвергает сообщения длиннее 4096 символов (TELEGRAM_MESSAGE_LIMIT,
+ * см. constants/telegram-limits.ts). Сводка подтверждения склеивает текст
+ * задачи (до TASK_TEXT_MAX_LENGTH, включая HTML-разметку) с неограниченной
+ * построчной разбивкой по локациям — при большом числе локаций с длинными
+ * названиями лимит превышается даже при коротком тексте задачи.
  */
-export const TELEGRAM_MESSAGE_LIMIT = 4096;
+export { TELEGRAM_MESSAGE_LIMIT };
 
 /**
  * Спрашивать про scope есть смысл только когда есть что сужать.

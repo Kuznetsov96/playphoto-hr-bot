@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { getRichMessageHtml, getRichMessageMedia } from "../../utils/rich-message.js";
+import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 
 // `CITY_MAP`, `normalizeCity` and the location formatter live in `utils/location-label.ts`,
 // which stays free of grammy and of the context type so light modules can import it without
@@ -10,7 +11,6 @@ export { CITY_MAP, normalizeCity, formatLocation } from "../../utils/location-la
 export type { LocationDisplayContext, LocationParts } from "../../utils/location-label.js";
 
 
-const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
 
 

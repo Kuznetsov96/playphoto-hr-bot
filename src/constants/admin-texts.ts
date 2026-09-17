@@ -219,6 +219,8 @@ export const ADMIN_TEXTS = {
   "admin-tasks-urgent": `\n🚨 <b>URGENT:</b>\n`,
   "admin-tasks-loc-unknown": `Not set`,
   "admin-tasks-next": `Next ➡️`,
+  "admin-tasks-page-indicator": (p: { page: string | number, totalPages: string | number }) => `📄 Page ${p.page}/${p.totalPages}`,
+  "admin-tasks-truncated-notice": `\n<i>… list truncated, use Back/Next to see more</i>`,
   "admin-tasks-history": `📂 History`,
   "admin-tasks-new": `➕ New Task`,
   "admin-tasks-details-title": `📋 <b>Task Details</b>`,

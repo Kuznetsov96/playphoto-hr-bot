@@ -11,6 +11,7 @@ import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import type { BroadcastMediaItem } from "../../types/context.js";
 import { getRichMessageMedia } from "../../utils/rich-message.js";
+import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 
 export const adminBroadcastHandlers = new Composer<MyContext>();
 const ARCHIVE_KEEP_COMPLETED = 50;
@@ -21,7 +22,6 @@ export const adminBroadcastHubMenu = new Menu<MyContext>("admin-broadcast-hub");
 export const adminBroadcastListMenu = new Menu<MyContext>("admin-broadcast-list");
 export const adminBroadcastArchiveMenu = new Menu<MyContext>("admin-broadcast-archive");
 export const adminBroadcastManageMenu = new Menu<MyContext>("admin-broadcast-manage");
-const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 function getPendingCount(broadcast: any): number {
     return broadcast.trackedMessages?.reduce((acc: number, tracked: any) =>

@@ -17,6 +17,8 @@ import {
     groupTasksByLocation,
     formatDeadline,
 } from "../../utils/task-helpers.js";
+import { kyivDateStr } from "../../utils/format-deadline.js";
+import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 import { escapeHtml, htmlToPlainText, normalizeCity } from "./utils.js";
 
 
@@ -33,9 +35,21 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
     const month = (date.getMonth() + 1).toString().padStart(2, "0");
     const datePretty = `${day}.${month}`;
 
+    // Header counters summarize the WHOLE day, never just the current page.
     const total = tasks.length;
     const completed = tasks.filter((t: any) => t.isCompleted).length;
     const urgent = tasks.filter((t: any) => !t.isCompleted && t.deadlineTime).length;
+
+    const PAGE_SIZE = 8;
+    const startIdx = page * PAGE_SIZE;
+    const endIdx = startIdx + PAGE_SIZE;
+    // The text body is built from the SAME slice as the keyboard below, so the
+    // "№N" buttons and the rows described in the text always refer to the same
+    // tasks. Telegram caps a message at 4096 chars; rendering every task of the
+    // day into the text (while only paginating the keyboard) blew past that
+    // limit on any day with ~35+ tasks and silently failed to send.
+    const pageTasks = tasks.slice(startIdx, endIdx);
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     let text = (ADMIN_TEXTS["admin-tasks-title"] || STAFF_TEXTS["admin-tasks-title"] || (() => "admin-tasks-title"))({ date: datePretty } as any) + "\n";
     text = text.replace(/[\u200B-\u200D\uFEFF\u2060-\u206F\u202A-\u202E]/g, "");
@@ -44,6 +58,9 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
     if (total > 0) {
         text += `📊 <b>${completed}/${total}</b> completed`;
         if (urgent > 0) text += `  |  🚨 <b>${urgent}</b> urgent`;
+        if (totalPages > 1) {
+            text += "\n" + ADMIN_TEXTS["admin-tasks-page-indicator"]({ page: page + 1, totalPages });
+        }
         text += "\n\n";
     }
 
@@ -51,9 +68,9 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
         text += (ADMIN_TEXTS["admin-tasks-no-tasks"] || STAFF_TEXTS["admin-tasks-no-tasks"] || "admin-tasks-no-tasks");
     }
 
-    if (tasks.length > 0) {
-        const urgentTasks = tasks.filter((t: any) => !t.isCompleted && t.deadlineTime);
-        const regularTasks = tasks.filter((t: any) => t.isCompleted || !t.deadlineTime);
+    if (pageTasks.length > 0) {
+        const urgentTasks = pageTasks.filter((t: any) => !t.isCompleted && t.deadlineTime);
+        const regularTasks = pageTasks.filter((t: any) => t.isCompleted || !t.deadlineTime);
 
         if (urgentTasks.length > 0) {
             text += (ADMIN_TEXTS["admin-tasks-urgent"] || STAFF_TEXTS["admin-tasks-urgent"] || "admin-tasks-urgent");
@@ -87,10 +104,13 @@ export async function buildTasksDashboard(dateStr: string, page = 0) {
         }
     }
 
-    const PAGE_SIZE = 8;
-    const startIdx = page * PAGE_SIZE;
-    const endIdx = startIdx + PAGE_SIZE;
-    const pageTasks = tasks.slice(startIdx, endIdx);
+    // Defensive guard: even one page of tasks could in theory exceed the
+    // limit (extreme name/location lengths). Truncate gracefully instead of
+    // letting the send fail outright.
+    if (text.length > TELEGRAM_MESSAGE_LIMIT) {
+        const notice = ADMIN_TEXTS["admin-tasks-truncated-notice"];
+        text = text.slice(0, TELEGRAM_MESSAGE_LIMIT - notice.length) + notice;
+    }
 
     const keyboard = new InlineKeyboard();
 
@@ -201,7 +221,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string) 
 // Обробник головного дашборду
 composer.callbackQuery(/^task_dash_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_dash_", "").split("_");
-    const dateStr = data[0] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[0] || kyivDateStr(new Date()) || "";
 
     const { text, keyboard } = await buildTasksDashboard(dateStr, 0);
     await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
@@ -212,7 +232,7 @@ composer.callbackQuery(/^task_dash_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_page_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_page_", "").split("_");
     const page = parseInt(data[0] || "0");
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
 
     const { text, keyboard } = await buildTasksDashboard(dateStr, page);
     await ScreenManager.renderScreen(ctx, text, keyboard);
@@ -223,7 +243,7 @@ composer.callbackQuery(/^task_page_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_det_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_det_", "").split("_");
     const taskId = data[0] || "";
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
 
     await showTaskDetails(ctx, taskId, dateStr);
     await ctx.answerCallbackQuery().catch(() => { });
@@ -233,7 +253,7 @@ composer.callbackQuery(/^task_det_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_toggle_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_toggle_", "").split("_");
     const taskId = data[0] || "";
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
 
     await taskService.toggleTaskStatus(taskId);
     await showTaskDetails(ctx, taskId, dateStr);
@@ -258,7 +278,7 @@ composer.callbackQuery(/^task_del_conf_/, async (ctx: MyContext) => {
 composer.callbackQuery(/^task_del_exec_/, async (ctx: MyContext) => {
     const data = ctx.callbackQuery!.data!.replace("task_del_exec_", "").split("_");
     const taskId = data[0] || "";
-    const dateStr = data[1] || new Date().toISOString().split("T")[0] || "";
+    const dateStr = data[1] || kyivDateStr(new Date()) || "";
 
     await taskService.deleteTask(taskId);
     const { text, keyboard } = await buildTasksDashboard(dateStr, 0);
@@ -275,7 +295,7 @@ composer.callbackQuery("task_calendar_open", async (ctx: MyContext) => {
         keyboard.row(...row);
     }
 
-    keyboard.text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${new Date().toISOString().split("T")[0]}_0`);
+    keyboard.text(ADMIN_TEXTS["admin-sys-back"], `task_dash_${kyivDateStr(new Date())}_0`);
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-tasks-calendar-title"], keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
