@@ -1,6 +1,6 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { TaskCompletionMode } from "@prisma/client";
-import type { MyContext } from "../../types/context.js";
+import type { MyContext, TaskAttachmentItem } from "../../types/context.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { build14DayCalendar } from "../../utils/task-helpers.js";
@@ -12,6 +12,8 @@ import { normalizeCity, getMessageHtml, sendTaskNotification, escapeHtml } from 
 import { formatLocation } from "../../utils/location-label.js";
 import { taskService, TASK_TEXT_MAX_LENGTH, type BulkTaskCreationResult } from "../../services/task-service.js";
 import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
+import { isValidTaskDeadlineTime } from "../../utils/task-time.js";
+import { buildTaskNotificationText, TASK_NOTIFICATION_BUTTON_CALLBACK, taskNotificationButtonLabel } from "../../utils/task-notification.js";
 
 export const taskBulkHandlers = new Composer<MyContext>();
 
@@ -93,14 +95,23 @@ taskBulkHandlers.callbackQuery("tbk_back_to_date", async (ctx: MyContext) => {
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
-async function renderCitySelection(ctx: MyContext) {
-    const data = ctx.session.bulkTaskData!;
+async function getAllBulkTaskCities(): Promise<string[]> {
     const rawCities = await locationRepository.findAllCities();
-    const allCities = Array.from(new Set(rawCities.map(normalizeCity))).sort();
+    return Array.from(new Set(rawCities.map(normalizeCity))).sort();
+}
+
+/**
+ * `allCities` is optional so a caller that already computed it (e.g. the toggle-all
+ * handler, which needs the list to decide what "all" means) doesn't make grammY's menu
+ * rebuild fetch it a second time for the same tap.
+ */
+async function renderCitySelection(ctx: MyContext, allCities?: string[]) {
+    const data = ctx.session.bulkTaskData!;
+    const cities = allCities ?? await getAllBulkTaskCities();
     const selected = new Set(data.cities || []);
 
     const keyboard = new InlineKeyboard();
-    for (const city of allCities) {
+    for (const city of cities) {
         keyboard.text(selected.has(city) ? `✅ ${city}` : `⬜ ${city}`, `tbk_city_${city}`).row();
     }
 
@@ -108,7 +119,7 @@ async function renderCitySelection(ctx: MyContext) {
         keyboard.text(`${ADMIN_TEXTS["admin-bulk-continue"]} (${selected.size})`, "tbk_cities_done").row();
     }
     keyboard.text(
-        selected.size === allCities.length ? ADMIN_TEXTS["admin-bulk-unselect-all"] : ADMIN_TEXTS["admin-bulk-select-all"],
+        selected.size === cities.length ? ADMIN_TEXTS["admin-bulk-unselect-all"] : ADMIN_TEXTS["admin-bulk-select-all"],
         "tbk_cities_toggle_all",
     ).row();
     keyboard.text(ADMIN_TEXTS["admin-bulk-cancel"], "tbk_cancel");
@@ -134,11 +145,10 @@ taskBulkHandlers.callbackQuery("tbk_cities_toggle_all", async (ctx: MyContext) =
     const data = ctx.session.bulkTaskData;
     if (!data) return;
 
-    const rawCities = await locationRepository.findAllCities();
-    const allCities = Array.from(new Set(rawCities.map(normalizeCity))).sort();
+    const allCities = await getAllBulkTaskCities();
     data.cities = (data.cities || []).length === allCities.length ? [] : allCities;
 
-    await renderCitySelection(ctx);
+    await renderCitySelection(ctx, allCities);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -184,7 +194,7 @@ taskBulkHandlers.callbackQuery("tbk_scope_all", async (ctx: MyContext) => {
     const locations = await findLocationsInCities(data.cities || []);
     data.locationIds = locations.map(l => l.id);
     data.step = "SELECT_RECIPIENTS";
-    await renderRecipientSelection(ctx);
+    await renderRecipientSelection(ctx, locations);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -306,9 +316,15 @@ export function countSelectedRecipients(
     );
 }
 
-async function loadRecipientGroups(ctx: MyContext): Promise<BulkTaskLocationGroup[]> {
+/**
+ * `activeLocations` is optional so a caller that already resolved the active locations for
+ * the chosen cities (e.g. `tbk_scope_all`, which needs that list to decide what "all" means)
+ * doesn't make `findLocationsInCities` re-run `locationRepository.findAllActive()` for the
+ * same tap.
+ */
+async function loadRecipientGroups(ctx: MyContext, activeLocations?: Awaited<ReturnType<typeof findLocationsInCities>>): Promise<BulkTaskLocationGroup[]> {
     const data = ctx.session.bulkTaskData!;
-    const locations = await findLocationsInCities(data.cities || []);
+    const locations = activeLocations ?? await findLocationsInCities(data.cities || []);
     const chosen = locations.filter(l => (data.locationIds || []).includes(l.id));
 
     const shifts = await workShiftRepository.findWithShiftAtLocations(
@@ -327,9 +343,9 @@ async function loadRecipientGroups(ctx: MyContext): Promise<BulkTaskLocationGrou
     );
 }
 
-async function renderRecipientSelection(ctx: MyContext): Promise<void> {
+async function renderRecipientSelection(ctx: MyContext, activeLocations?: Awaited<ReturnType<typeof findLocationsInCities>>): Promise<void> {
     const data = ctx.session.bulkTaskData!;
-    const groups = await loadRecipientGroups(ctx);
+    const groups = await loadRecipientGroups(ctx, activeLocations);
 
     if (exceedsRecipientRowLimit(groups)) {
         const totalStaff = groups.reduce((total, group) => total + group.staff.length, 0);
@@ -428,6 +444,36 @@ taskBulkHandlers.callbackQuery(/^tbk_mode_(proof|quick)$/, async (ctx: MyContext
 });
 
 /**
+ * Divergence D з аудиту вирівнювання майстрів постановки задач: bulk-флоу
+ * розпізнавав лише photo і document, тоді як task-creation.ts і task-flow.ts
+ * приймали усі 7 типів з `TaskAttachmentItem["type"]`. Адмін, що прикріпив
+ * voice/video/video_note/audio/animation до масового завдання, втрачав його
+ * без жодного попередження.
+ *
+ * Приймає підмножину полів grammY-повідомлення, яка тут потрібна — не саме
+ * повідомлення, щоб функцію можна було протестувати без побудови повного
+ * grammY Context.
+ */
+export function extractBulkTaskMedia(message: {
+    photo?: { file_id: string }[];
+    document?: { file_id: string };
+    video?: { file_id: string };
+    voice?: { file_id: string };
+    video_note?: { file_id: string };
+    audio?: { file_id: string };
+    animation?: { file_id: string };
+}): { fileId: string; mediaType: TaskAttachmentItem["type"] } | null {
+    if (message.photo?.length) return { fileId: message.photo[message.photo.length - 1]!.file_id, mediaType: "photo" };
+    if (message.document) return { fileId: message.document.file_id, mediaType: "document" };
+    if (message.video) return { fileId: message.video.file_id, mediaType: "video" };
+    if (message.voice) return { fileId: message.voice.file_id, mediaType: "voice" };
+    if (message.video_note) return { fileId: message.video_note.file_id, mediaType: "video_note" };
+    if (message.audio) return { fileId: message.audio.file_id, mediaType: "audio" };
+    if (message.animation) return { fileId: message.animation.file_id, mediaType: "animation" };
+    return null;
+}
+
+/**
  * Приём свободного текста и ручного времени дедлайна. Вызывается из общего
  * message-funnel в admin/index.ts, следом за handleBroadcastContent.
  * Возвращает true, если сообщение поглощено этим флоу.
@@ -449,7 +495,7 @@ export async function handleBulkTaskContent(ctx: MyContext): Promise<boolean> {
 
     if (data.step === "SELECT_DEADLINE" && message.text) {
         const timeInput = message.text.trim();
-        if (/^([01]?\d|2[0-3]):[0-5]\d$/.test(timeInput)) {
+        if (isValidTaskDeadlineTime(timeInput)) {
             data.deadlineTime = timeInput;
             data.step = "CONFIRM";
             await ctx.deleteMessage().catch(() => { });
@@ -471,12 +517,10 @@ export async function handleBulkTaskContent(ctx: MyContext): Promise<boolean> {
     }
 
     data.taskText = html;
-    if (message.photo?.length) {
-        data.fileId = message.photo[message.photo.length - 1]!.file_id;
-        data.mediaType = "photo";
-    } else if (message.document) {
-        data.fileId = message.document.file_id;
-        data.mediaType = "document";
+    const media = extractBulkTaskMedia(message);
+    if (media) {
+        data.fileId = media.fileId;
+        data.mediaType = media.mediaType;
     }
 
     data.step = "SELECT_DEADLINE";
@@ -664,12 +708,13 @@ taskBulkHandlers.callbackQuery("tbk_send", async (ctx: MyContext) => {
 
     const notifyFailures: string[] = [];
     const dateLabel = new Date(`${data.date}T00:00:00`).toLocaleDateString("uk-UA");
-    const deadlineText = data.deadlineTime ? `\n⏰ Дедлайн: ${data.deadlineTime}` : "";
-    const completionHint = data.completionMode === TaskCompletionMode.PROOF_REQUIRED
-        ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
-        : "";
-    const taskMessage = `✨ <b>Нове завдання!</b> 📋\n\n${data.taskText}\n\n📅 Дата: ${dateLabel}${deadlineText}${completionHint}\n\nБажаю успіхів! Ти впораєшся! 💖`;
-    const staffKb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
+    const taskMessage = buildTaskNotificationText({
+        text: data.taskText || "",
+        date: dateLabel,
+        deadlineTime: data.deadlineTime,
+        completionMode: data.completionMode,
+    });
+    const staffKb = new InlineKeyboard().text(taskNotificationButtonLabel(), TASK_NOTIFICATION_BUTTON_CALLBACK);
 
     for (const created of result.created) {
         const name = nameByStaffId.get(created.staffId) || created.staffId;

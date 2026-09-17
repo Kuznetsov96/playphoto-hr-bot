@@ -11,6 +11,8 @@ import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
 import { getMessageHtml, sendTaskNotification } from "./utils.js";
 import { getRichMessageMedia } from "../../utils/rich-message.js";
+import { isValidTaskDeadlineTime } from "../../utils/task-time.js";
+import { buildTaskNotificationText, TASK_NOTIFICATION_BUTTON_CALLBACK, taskNotificationButtonLabel } from "../../utils/task-notification.js";
 
 const composer = new Composer<MyContext>();
 
@@ -29,6 +31,27 @@ async function getTaskCreationStaff(locationId: string, dateStr?: string) {
         staff: await staffRepository.findByLocation(locationId),
         source: "location" as const,
     };
+}
+
+/**
+ * Same result as `getTaskCreationStaff`, memoized in the session for the duration of one
+ * (locationId, date) screen. Toggling a staff checkbox re-renders the same roster with only
+ * `selectedStaffIds` changed, so re-querying the DB on every tap is pure waste — but picking a
+ * different location or date changes the key and falls through to a fresh fetch, so the memo
+ * can never show a roster for the wrong screen.
+ */
+async function getTaskCreationStaffCached(ctx: MyContext, locationId: string, dateStr?: string) {
+    if (!ctx.session.taskCreation) return getTaskCreationStaff(locationId, dateStr);
+
+    const key = `${locationId}:${dateStr ?? ""}`;
+    const cached = ctx.session.taskCreation.staffOptionsCache;
+    if (cached && cached.key === key) {
+        return { staff: cached.staff, source: cached.source };
+    }
+
+    const result = await getTaskCreationStaff(locationId, dateStr);
+    ctx.session.taskCreation.staffOptionsCache = { key, staff: result.staff, source: result.source };
+    return result;
 }
 
 function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "location" = "location") {
@@ -177,7 +200,7 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
         ctx.session.taskCreation.locationName = formatLocation({ ...location, city }, "sentence");
         ctx.session.taskCreation.step = "selecting_staff";
 
-        const { staff, source } = await getTaskCreationStaff(location.id, ctx.session.taskCreation.date);
+        const { staff, source } = await getTaskCreationStaffCached(ctx, location.id, ctx.session.taskCreation.date);
         const staffKeyboard = new InlineKeyboard();
         const selectedIds = ctx.session.taskCreation.selectedStaffIds || [];
 
@@ -221,7 +244,7 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
     ctx.session.taskCreation.locationName = formatLocation(location, "sentence");
     ctx.session.taskCreation.step = "selecting_staff";
 
-    const { staff, source } = await getTaskCreationStaff(locationId, ctx.session.taskCreation.date);
+    const { staff, source } = await getTaskCreationStaffCached(ctx, locationId, ctx.session.taskCreation.date);
     const keyboard = new InlineKeyboard();
     const selectedIds = ctx.session.taskCreation.selectedStaffIds || [];
 
@@ -254,7 +277,7 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     if (index === -1) ctx.session.taskCreation.selectedStaffIds.push(staffId);
     else ctx.session.taskCreation.selectedStaffIds.splice(index, 1);
 
-    const { staff, source } = await getTaskCreationStaff(ctx.session.taskCreation.locationId || "", ctx.session.taskCreation.date);
+    const { staff, source } = await getTaskCreationStaffCached(ctx, ctx.session.taskCreation.locationId || "", ctx.session.taskCreation.date);
     const keyboard = new InlineKeyboard();
     const selectedIds = ctx.session.taskCreation.selectedStaffIds;
 
@@ -415,12 +438,13 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
                 continue;
             }
 
-            const deadlineText = task.deadlineTime ? `\n⏰ Дедлайн: ${task.deadlineTime}` : "";
-            const completionHint = task.completionMode === "PROOF_REQUIRED"
-                ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
-                : "";
-            const taskMessage = `✨ <b>Нове завдання!</b> 📋\n\n${task.taskText}\n\n📅 Дата: ${new Date(task.workDate!).toLocaleDateString("uk-UA")}${deadlineText}${completionHint}\n\nБажаю успіхів! Ти впораєшся! 💖`;
-            const staffKb = new InlineKeyboard().text("🏠 Меню", "staff_hub_nav");
+            const taskMessage = buildTaskNotificationText({
+                text: task.taskText,
+                date: new Date(task.workDate!).toLocaleDateString("uk-UA"),
+                deadlineTime: task.deadlineTime,
+                completionMode: task.completionMode,
+            });
+            const staffKb = new InlineKeyboard().text(taskNotificationButtonLabel(), TASK_NOTIFICATION_BUTTON_CALLBACK);
 
             try {
                 const notificationOptions: {
@@ -507,8 +531,8 @@ composer.on("message:text", async (ctx, next) => {
         }
         else {
             const timeInput = ctx.message.text.trim();
-            if (/^\d{1,2}:\d{2}$/.test(timeInput)) await executeTaskCreation(ctx, timeInput);
-            else await ScreenManager.renderScreen(ctx, "❌ Невірний формат часу. Введіть HH:MM (наприклад, 15:00) або скористайтеся кнопками:");
+            if (isValidTaskDeadlineTime(timeInput)) await executeTaskCreation(ctx, timeInput);
+            else await ctx.reply(ADMIN_TEXTS["admin-task-err-bad-time"]);
         }
     } else await next();
 });

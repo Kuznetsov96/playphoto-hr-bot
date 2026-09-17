@@ -11,6 +11,8 @@ import { sendTaskNotification } from "./utils.js";
 import { getMessageHtml } from "./utils.js";
 import { getRichMessageMedia } from "../../utils/rich-message.js";
 import { TASK_TEXT_MAX_LENGTH } from "../../services/task-service.js";
+import { isValidTaskDeadlineTime } from "../../utils/task-time.js";
+import { buildTaskNotificationText, TASK_NOTIFICATION_BUTTON_CALLBACK, taskNotificationButtonLabel } from "../../utils/task-notification.js";
 
 export const taskFlowHandlers = new Composer<MyContext>();
 
@@ -168,13 +170,13 @@ export async function handleTaskText(ctx: MyContext) {
         if (!text) return false;
         await ctx.deleteMessage().catch(() => {});
         const timeInput = text.trim();
-        if (/^\d{1,2}:\d{2}$/.test(timeInput)) {
+        if (isValidTaskDeadlineTime(timeInput)) {
             ctx.session.taskData.deadlineTime = timeInput;
             ctx.session.taskData.step = 'CONFIRMATION';
             await renderConfirmation(ctx);
             return true;
         } else {
-            await ScreenManager.renderScreen(ctx, "❌ Невірний формат часу. Введіть HH:MM (наприклад, 15:00) або скористайтеся кнопками:");
+            await ctx.reply(ADMIN_TEXTS["admin-task-err-bad-time"]);
             return true;
         }
     }
@@ -288,13 +290,12 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                 const dateStr = task.workDate
                     ? new Date(task.workDate).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" })
                     : "";
-                const deadlineStr = task.deadlineTime ? ` (до ${task.deadlineTime})` : "";
-                const completionHint = task.completionMode === "PROOF_REQUIRED"
-                    ? `\n\n📎 <b>Для завершення потрібно надіслати підтвердження в розділі «Мої завдання».</b>`
-                    : "";
-                const notifText =
-                    `📋 <b>Нове завдання${dateStr ? ` на ${dateStr}` : ""}!</b>\n\n` +
-                    `${task.taskText}${deadlineStr}${completionHint}`;
+                const notifText = buildTaskNotificationText({
+                    text: task.taskText,
+                    date: dateStr,
+                    deadlineTime: task.deadlineTime,
+                    completionMode: task.completionMode,
+                });
 
                 const notificationOptions: {
                     replyMarkup: InlineKeyboard;
@@ -304,7 +305,7 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
                     mediaType?: "photo" | "video" | "document" | "voice" | "video_note" | "audio" | "animation";
                     textIsHtml?: boolean;
                 } = {
-                    replyMarkup: new InlineKeyboard().text("📋 Переглянути завдання", "staff_hub_tasks_redirect"),
+                    replyMarkup: new InlineKeyboard().text(taskNotificationButtonLabel(), TASK_NOTIFICATION_BUTTON_CALLBACK),
                     textIsHtml: true,
                 };
                 if (data.sourceChatId !== undefined) notificationOptions.sourceChatId = data.sourceChatId;
