@@ -6,6 +6,7 @@ import { taskService, TASK_TEXT_MAX_LENGTH } from "../../services/task-service.j
 import { locationRepository } from "../../repositories/location-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { build14DayCalendar, formatStaffName } from "../../utils/task-helpers.js";
+import { kyivDateStr } from "../../utils/format-deadline.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
 import { getMessageHtml, sendTaskNotification } from "./utils.js";
@@ -445,7 +446,7 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
             }
         }
 
-        const createdTaskDate = ctx.session.taskCreation.date || new Date().toISOString().split("T")[0];
+        const createdTaskDate = ctx.session.taskCreation.date || kyivDateStr(new Date());
         delete ctx.session.taskCreation;
         if (ctx.session.adminFlow === "TASK") {
             delete ctx.session.adminFlow;

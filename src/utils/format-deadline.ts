@@ -41,6 +41,23 @@ export function formatDeadline(deadline: Date, timeZone = "Europe/Kyiv"): string
 }
 
 /**
+ * «2026-09-18» — календарна дата в Києві, а не в UTC.
+ *
+ * Будь-яке місце, що показує людині «сьогодні» чи «завтра» і водночас
+ * зберігає дату як `YYYY-MM-DD`, має брати обидва значення з ОДНІЄЇ й тієї ж
+ * київської репрезентації моменту: розбіжність між тим, що бачить людина, і
+ * тим, що піде в базу, з'являється, коли ярлик береться в одній таймзоні
+ * (локальний час сервера, тобто UTC), а рядок дати — в іншій.
+ */
+export function kyivDateStr(instant: Date, timeZone = "Europe/Kyiv"): string {
+    const local = new Date(instant.toLocaleString("en-US", { timeZone }));
+    const year = local.getFullYear();
+    const month = (local.getMonth() + 1).toString().padStart(2, "0");
+    const day = local.getDate().toString().padStart(2, "0");
+    return `${year}-${month}-${day}`;
+}
+
+/**
  * Момент, когда закрывается сбор: заданное число месяца, 23:59 по Киеву.
  *
  * Собирать через `new Date(y, m, d, 23, 59)` нельзя: этот конструктор читает
