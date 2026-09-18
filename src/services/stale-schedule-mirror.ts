@@ -71,6 +71,25 @@ export async function checkScheduleMirrorFreshness(input: {
     };
 }
 
+/**
+ * Renders the last-sync moment as local wall-clock time.
+ *
+ * The raw ISO string the sync stores reads as `2026-09-18T12:43:34.876Z`, which
+ * asks the reader to strip milliseconds and shift out of UTC before they can
+ * compare it against the clock on their wall — at the exact moment they are
+ * trying to judge how urgent this is.
+ */
+function formatKyivTime(isoTime: string | null): string {
+    if (isoTime === null || Number.isNaN(Date.parse(isoTime))) return "unknown";
+    return new Date(isoTime).toLocaleString("en-GB", {
+        timeZone: "Europe/Kyiv",
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "short",
+    });
+}
+
 /** Where the last alert time is kept, so a restart cannot reset the anti-spam window. */
 const ALERT_STATE_KEY = "schedule-mirror:last-alert";
 
@@ -134,15 +153,18 @@ export function startScheduleMirrorWatch(api: {
         if (!result.shouldNotify) return;
 
         const text =
-            `⚠️ <b>Графік не оновлюється</b>\n\n` +
-            `Синхронізація з вебаппом не відпрацювала вже ${result.staleForMinutes} хв.\n` +
-            `Фотографи бачать графік станом на ${result.lastSyncAt ?? "невідомо"}.\n\n` +
-            `Нові зміни й заміни з вебаппа до бота зараз не доходять.`;
+            `⚠️ <b>Schedule sync has stopped</b>\n\n` +
+            `No successful sync for ${result.staleForMinutes} min.\n` +
+            `Photographers are seeing the schedule as of ${formatKyivTime(result.lastSyncAt)}.\n\n` +
+            `Changes and replacements made in the webapp are not reaching the bot.`;
 
-        // One failed admin must not stop the others from being told, and a
-        // delivery failure must not abort the watch loop itself.
-        for (const adminId of adminIds) {
-            await api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => undefined);
+        // The owner is ADMIN_IDS[0] by the convention the rest of the bot follows.
+        // Fanning an operational alert out to every admin trains all of them to
+        // swipe it away, and then the one that matters goes unread too.
+        const owner = adminIds.at(0);
+        if (owner !== undefined) {
+            // A delivery failure must not abort the watch loop itself.
+            await api.sendMessage(owner, text, { parse_mode: "HTML" }).catch(() => undefined);
         }
         await systemStateRepository.setJson(ALERT_STATE_KEY, { at: new Date().toISOString() });
     };
