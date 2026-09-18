@@ -56,6 +56,7 @@ const prismaMock = {
     systemState: {
         upsert: vi.fn().mockResolvedValue(undefined),
         findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     $transaction: vi.fn((callback: (tx: ReturnType<typeof transactionStub>) => unknown) =>
         callback(transactionStub())),

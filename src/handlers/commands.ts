@@ -369,6 +369,37 @@ commandHandlers.command("ping_admin", async (ctx) => {
     await ctx.reply("Pong! 🏓 (Admin system online)");
 });
 
+/**
+ * Lets the next sync accept a snapshot that has shrunk past the guard.
+ *
+ * The case this exists for is a planned closure of several venues at once: the
+ * snapshot legitimately loses a large share of its rows, and without this the only
+ * way through is to close them a few at a time, waiting for a sync pass between
+ * each. It covers one pass and expires on its own, so it cannot become a guard
+ * left switched off.
+ */
+commandHandlers.command("allow_shrink", requireRole('SUPER_ADMIN', 'CO_FOUNDER'), async (ctx) => {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return;
+
+    const { awsBusinessSyncService } = await import("../services/aws-business-sync.js");
+    const { expiresAt } = await awsBusinessSyncService.armShrinkOverride(String(telegramId));
+    const expiresAtKyiv = expiresAt.toLocaleTimeString("uk-UA", {
+        timeZone: "Europe/Kyiv",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+
+    await ctx.reply(
+        `✅ <b>Наступну синхронізацію пропущено повз перевірку</b>\n\n` +
+        `Знімок із великою втратою локацій або співробітників буде прийнятий один раз — ` +
+        `для запланованого закриття точок.\n\n` +
+        `Діє до <b>${expiresAtKyiv}</b>, далі перевірка вмикається сама. ` +
+        `Порожній знімок не буде прийнятий у будь-якому разі.`,
+        { parse_mode: "HTML" },
+    );
+});
+
 
 commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'), async (ctx) => {
     if (ctx.chat?.type !== "private") return;

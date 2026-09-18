@@ -26,6 +26,20 @@ const SNAPSHOT_SHRINK_LIMIT = 0.7;
 
 /** Where each successful pass records its result, and the baseline for the next one. */
 const LAST_SYNC_STATE_KEY = "aws-business-sync:last";
+
+/** Where an admin's one-pass permission to accept a shrinking snapshot is held. */
+const SHRINK_OVERRIDE_STATE_KEY = "aws-business-sync:allow-shrink";
+
+/**
+ * How long an armed override stays usable.
+ *
+ * The failure mode worth designing against is not a mistaken override but a
+ * forgotten one: armed for a planned closure, never spent because plans changed,
+ * and still sitting there weeks later when the backend genuinely breaks. An hour
+ * covers arming it and then doing the closure unhurried; anything left past that
+ * has been abandoned and should not be waiting to admit a bad snapshot.
+ */
+const SHRINK_OVERRIDE_TTL_MS = 60 * 60_000;
 // The backend rejects a `links` payload larger than 500 entries outright.
 const TELEGRAM_LINKS_CHUNK_SIZE = 500;
 
@@ -247,6 +261,30 @@ export class AwsBusinessSyncService {
         const shrankEmployees = employees < previous.employees * SNAPSHOT_SHRINK_LIMIT;
         if (!shrankLocations && !shrankEmployees) return;
 
+        // Read the override only once a snapshot actually needs it, so arming ahead
+        // of a planned closure survives the ordinary passes in between.
+        const override = await this.consumeShrinkOverride();
+        if (override !== null) {
+            logBusinessEvent({
+                event: "bot.aws_business_snapshot.shrink_admitted",
+                level: "warn",
+                actorType: "admin",
+                actorRole: "admin",
+                result: "success",
+                reasonCode: "SHRINK_OVERRIDE_ARMED",
+                module: "aws-business-sync",
+                operation: "syncAll",
+                safeContext: {
+                    locations,
+                    employees,
+                    previousLocations: previous.locations,
+                    previousEmployees: previous.employees,
+                    armedBy: override.armedBy,
+                },
+            });
+            return;
+        }
+
         this.logSnapshotRejected({
             locations,
             employees,
@@ -259,6 +297,74 @@ export class AwsBusinessSyncService {
         throw new Error(
             `AWS snapshot lost too many ${subject} since the last pass: ${was} -> ${now}`,
         );
+    }
+
+    /**
+     * Arms a one-pass permission for the next shrinking snapshot.
+     *
+     * Exists for the closure the owner already decided on: without it the only way
+     * to retire several venues at once is to do them a few at a time, waiting for a
+     * sync pass between each. It does not disable the guard — see
+     * {@link consumeShrinkOverride} for what "one pass" means here.
+     */
+    async armShrinkOverride(armedBy: string): Promise<{ expiresAt: Date }> {
+        const armedAt = new Date();
+        const value = JSON.stringify({ armedAt: armedAt.toISOString(), armedBy });
+        await prisma.systemState.upsert({
+            where: { key: SHRINK_OVERRIDE_STATE_KEY },
+            create: { key: SHRINK_OVERRIDE_STATE_KEY, value },
+            update: { value },
+        });
+        logSecurityEvent({
+            event: "bot.aws_business_snapshot.shrink_override_armed",
+            actorType: "admin",
+            actorRole: "admin",
+            result: "success",
+            module: "aws-business-sync",
+            operation: "armShrinkOverride",
+            safeContext: { armedBy },
+        });
+        return { expiresAt: new Date(armedAt.getTime() + SHRINK_OVERRIDE_TTL_MS) };
+    }
+
+    /**
+     * Takes the armed override if there is a usable one, and clears it.
+     *
+     * Spending it here rather than on a timer is what keeps "one pass" honest: the
+     * next shrinking snapshot is judged on its own, so an override cannot quietly
+     * become a disabled guard.
+     */
+    private async consumeShrinkOverride(): Promise<{ armedBy: string } | null> {
+        const record = await prisma.systemState.findUnique({
+            where: { key: SHRINK_OVERRIDE_STATE_KEY },
+        });
+        if (!record) return null;
+
+        let armedAt: number | null = null;
+        let armedBy = "unknown";
+        try {
+            const parsed: unknown = JSON.parse(String(record.value));
+            if (typeof parsed === "object" && parsed !== null) {
+                const candidate = parsed as { armedAt?: unknown; armedBy?: unknown };
+                if (typeof candidate.armedAt === "string" && !Number.isNaN(Date.parse(candidate.armedAt))) {
+                    armedAt = Date.parse(candidate.armedAt);
+                }
+                if (typeof candidate.armedBy === "string") armedBy = candidate.armedBy;
+            }
+        } catch {
+            armedAt = null;
+        }
+
+        // An unreadable or expired record is cleared rather than left in place: it
+        // cannot authorise anything, and leaving it would mask the next arming.
+        const expired = armedAt === null || Date.now() - armedAt > SHRINK_OVERRIDE_TTL_MS;
+        if (expired) {
+            await prisma.systemState.deleteMany({ where: { key: SHRINK_OVERRIDE_STATE_KEY } });
+            return null;
+        }
+
+        await prisma.systemState.deleteMany({ where: { key: SHRINK_OVERRIDE_STATE_KEY } });
+        return { armedBy };
     }
 
     /** Counts written by the last successful pass, or null when there is none yet. */
