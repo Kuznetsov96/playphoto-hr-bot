@@ -13,8 +13,6 @@ const envSchema = z.object({
     AWS_BUSINESS_API_URL: z.string().url().optional(),
     AWS_BUSINESS_API_TOKEN: z.string().min(32).optional(),
     AWS_BUSINESS_SYNC_INTERVAL_MS: z.coerce.number().int().min(60_000).default(300_000),
-    AWS_BUSINESS_MIN_EMPLOYEES: z.coerce.number().int().min(1).default(50),
-    AWS_BUSINESS_MIN_LOCATIONS: z.coerce.number().int().min(1).default(19),
     AWS_SCHEDULE_SHADOW_READ_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_SCHEDULE_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_PARCELS_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
@@ -144,8 +142,6 @@ export const BUSINESS_DATA_SOURCE = env.BUSINESS_DATA_SOURCE;
 export const AWS_BUSINESS_API_URL = env.AWS_BUSINESS_API_URL || "";
 export const AWS_BUSINESS_API_TOKEN = env.AWS_BUSINESS_API_TOKEN || "";
 export const AWS_BUSINESS_SYNC_INTERVAL_MS = env.AWS_BUSINESS_SYNC_INTERVAL_MS;
-export const AWS_BUSINESS_MIN_EMPLOYEES = env.AWS_BUSINESS_MIN_EMPLOYEES;
-export const AWS_BUSINESS_MIN_LOCATIONS = env.AWS_BUSINESS_MIN_LOCATIONS;
 export const AWS_SCHEDULE_SHADOW_READ_ENABLED = env.AWS_SCHEDULE_SHADOW_READ_ENABLED === "true";
 export const AWS_SCHEDULE_CANONICAL_READ_ENABLED = env.AWS_SCHEDULE_CANONICAL_READ_ENABLED === "true";
 export const AWS_PARCELS_CANONICAL_READ_ENABLED = env.AWS_PARCELS_CANONICAL_READ_ENABLED === "true";

@@ -5,17 +5,27 @@ import prisma from "../db/core.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
-import {
-    AWS_BUSINESS_MIN_EMPLOYEES,
-    AWS_BUSINESS_MIN_LOCATIONS,
-    AWS_BUSINESS_SYNC_INTERVAL_MS,
-} from "../config.js";
+import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
 import {
     awsBusinessClient,
     type AwsBusinessSnapshot,
 } from "./aws-business-client.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The share of the previous pass a snapshot must keep to be accepted.
+ *
+ * Set by what the two kinds of change look like from here. Venues close and staff
+ * leave a few at a time, which against a base of ~16 and ~180 is a handful of
+ * percent per pass. A backend fault — a filter that stopped matching, a half-read
+ * table — drops a large fraction at once. 0.7 sits in the gap: ordinary change
+ * never approaches it, and the smallest fault worth stopping clears it easily.
+ */
+const SNAPSHOT_SHRINK_LIMIT = 0.7;
+
+/** Where each successful pass records its result, and the baseline for the next one. */
+const LAST_SYNC_STATE_KEY = "aws-business-sync:last";
 // The backend rejects a `links` payload larger than 500 entries outright.
 const TELEGRAM_LINKS_CHUNK_SIZE = 500;
 
@@ -180,8 +190,8 @@ export class AwsBusinessSyncService {
         };
         this.lastResult = result;
         await prisma.systemState.upsert({
-            where: { key: "aws-business-sync:last" },
-            create: { key: "aws-business-sync:last", value: JSON.stringify(result) },
+            where: { key: LAST_SYNC_STATE_KEY },
+            create: { key: LAST_SYNC_STATE_KEY, value: JSON.stringify(result) },
             update: { value: JSON.stringify(result) },
         });
         logBusinessEvent({
@@ -196,17 +206,105 @@ export class AwsBusinessSyncService {
         return result;
     }
 
+    /**
+     * Refuses a snapshot that has lost a large share of its rows since the last
+     * successful pass.
+     *
+     * The sync replaces the bot's mirror wholesale rather than applying a diff, so a
+     * backend that answers with a partial dataset would silently erase whatever it
+     * omitted — and the loss surfaces as a photographer standing at a venue whose
+     * shift no longer exists, not as an error anywhere.
+     *
+     * The comparison is against the previous pass rather than a configured floor.
+     * A floor encodes what was true on the day someone last edited it: closing
+     * three venues, which is ordinary business, then stops the sync until a human
+     * notices and redeploys. Re-baselining on every pass asks the question that
+     * actually matters — what changed in the last five minutes — so ordinary
+     * change flows through and only a cliff is held back.
+     *
+     * A cliff, not a single row: each pass is compared to the one before it, so a
+     * business that shrinks gradually moves its own baseline down with it.
+     */
+    private async rejectIfSnapshotShrank(snapshot: AwsBusinessSnapshot): Promise<void> {
+        const locations = snapshot.locations.length;
+        const employees = snapshot.employees.length;
+
+        // Zero is never a legitimate state for a running business, and with no
+        // previous pass to compare against the ratio test alone would admit it.
+        if (locations === 0 || employees === 0) {
+            this.logSnapshotRejected({ locations, employees, previousLocations: null, previousEmployees: null });
+            throw new Error(
+                `AWS snapshot is empty: ${locations} locations, ${employees} employees`,
+            );
+        }
+
+        const previous = await this.readLastSyncCounts();
+        // First pass against an empty mirror has no baseline; refusing here would
+        // mean the bot could never bootstrap.
+        if (previous === null) return;
+
+        const shrankLocations = locations < previous.locations * SNAPSHOT_SHRINK_LIMIT;
+        const shrankEmployees = employees < previous.employees * SNAPSHOT_SHRINK_LIMIT;
+        if (!shrankLocations && !shrankEmployees) return;
+
+        this.logSnapshotRejected({
+            locations,
+            employees,
+            previousLocations: previous.locations,
+            previousEmployees: previous.employees,
+        });
+        const subject = shrankLocations ? "locations" : "employees";
+        const was = shrankLocations ? previous.locations : previous.employees;
+        const now = shrankLocations ? locations : employees;
+        throw new Error(
+            `AWS snapshot lost too many ${subject} since the last pass: ${was} -> ${now}`,
+        );
+    }
+
+    /** Counts written by the last successful pass, or null when there is none yet. */
+    private async readLastSyncCounts(): Promise<{ locations: number; employees: number } | null> {
+        const record = await prisma.systemState.findUnique({ where: { key: LAST_SYNC_STATE_KEY } });
+        if (!record) return null;
+        try {
+            const parsed: unknown = JSON.parse(String(record.value));
+            if (typeof parsed !== "object" || parsed === null) return null;
+            const { locations, employees } = parsed as { locations?: unknown; employees?: unknown };
+            // A record written before this field existed, or a truncated one, is
+            // treated as "no baseline" rather than as zero — zero would reject
+            // every subsequent snapshot and wedge the sync permanently.
+            if (typeof locations !== "number" || typeof employees !== "number") return null;
+            if (locations <= 0 || employees <= 0) return null;
+            return { locations, employees };
+        } catch {
+            return null;
+        }
+    }
+
+    private logSnapshotRejected(context: {
+        locations: number;
+        employees: number;
+        previousLocations: number | null;
+        previousEmployees: number | null;
+    }): void {
+        logBusinessEvent({
+            event: "bot.aws_business_snapshot.rejected",
+            level: "error",
+            actorType: "system",
+            actorRole: "system",
+            result: "degraded",
+            reasonCode: "SNAPSHOT_SHRANK",
+            module: "aws-business-sync",
+            operation: "syncAll",
+            safeContext: context,
+        });
+    }
+
     private async fetchSnapshot(): Promise<AwsBusinessSnapshot> {
         const today = localDate(new Date(), "Europe/Kyiv");
         const from = addDays(today, -30);
         const to = addDays(today, 62);
         const snapshot = await awsBusinessClient.snapshot(from, to);
-        if (snapshot.locations.length < AWS_BUSINESS_MIN_LOCATIONS) {
-            throw new Error(`AWS snapshot location guard failed: ${snapshot.locations.length}`);
-        }
-        if (snapshot.employees.length < AWS_BUSINESS_MIN_EMPLOYEES) {
-            throw new Error(`AWS snapshot employee guard failed: ${snapshot.employees.length}`);
-        }
+        await this.rejectIfSnapshotShrank(snapshot);
         const employeeIds = new Set(snapshot.employees.map((employee) => employee.publicId));
         const locationIds = new Set(snapshot.locations.map((location) => location.publicId));
         if (
