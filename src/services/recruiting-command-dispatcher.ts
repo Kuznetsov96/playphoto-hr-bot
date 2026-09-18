@@ -8,7 +8,6 @@ import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client
 import { hrService } from "./hr-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
-import { runPendingRecruitingBroadcasts } from "./recruiting-broadcast-delivery.js";
 
 export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
@@ -164,22 +163,11 @@ export class RecruitingCommandDispatcher {
                 safeContext: { pendingCount: pending.items.length, applied, failed },
             });
 
-            // Фаза 3b: исходящие сообщения рекрутёра и рассылки по пулу
-            // города живут в том же тике под той же лизой. Оба прохода
-            // спроектированы «никогда не бросать», но и неожиданный сбой
-            // одного не должен срывать другой.
+            // Фаза 3b: исходящие сообщения рекрутёра живут в том же тике под
+            // той же лизой. Проход спроектирован «никогда не бросать», но и
+            // неожиданный сбой не должен срывать тик целиком.
             await deliverPendingRecruitingMessages(api).catch(error => logBusinessEvent({
                 event: "bot.recruiting_messages.iteration_failed",
-                level: "error",
-                actorType: "system",
-                actorRole: "system",
-                result: "failed",
-                module: "recruiting-command-dispatcher",
-                operation: "runOnce",
-                error,
-            }));
-            await runPendingRecruitingBroadcasts(api).catch(error => logBusinessEvent({
-                event: "bot.recruiting_broadcasts.iteration_failed",
                 level: "error",
                 actorType: "system",
                 actorRole: "system",

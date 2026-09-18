@@ -18,7 +18,6 @@ vi.mock("../aws-business-client.js", () => ({
         ackRecruitingCommandApplied: ackApplied,
         ackRecruitingCommandFailed: ackFailed,
         listPendingRecruitingMessages: vi.fn().mockResolvedValue({ items: [] }),
-        listPendingRecruitingBroadcasts: vi.fn().mockResolvedValue({ items: [], stages: [] }),
     },
 }));
 

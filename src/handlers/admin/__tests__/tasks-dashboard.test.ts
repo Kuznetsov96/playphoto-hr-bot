@@ -19,6 +19,13 @@ const { buildTasksDashboard } = await import("../tasks.js");
 // "today + deadlineTime", whose urgency now depends on proximity to `now`.
 const PAST_WORK_DATE = new Date("2020-01-06T00:00:00.000Z");
 
+// Дзеркальна пара до PAST_WORK_DATE, і так само навмисна: isTaskUrgent вважає
+// НЕтерміновою задачу, день якої ще попереду, хай який у неї deadlineTime.
+// Дефолт тут раніше був жорстким "2026-09-17" — і лишався нетерміновим рівно
+// доти, доки той день не настав: з 18.09.2026 усі 20 фікстур стали простроченими
+// й сьюта падала щопрогону. Дата, полічена від `now`, так протухнути не може.
+const futureWorkDate = () => new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+
 function makeTask(overrides: Partial<{
     id: string;
     isCompleted: boolean;
@@ -36,7 +43,7 @@ function makeTask(overrides: Partial<{
         city: overrides.city ?? "Kyiv",
         locationName: overrides.locationName ?? "Podil",
         taskText: "Do the thing",
-        workDate: overrides.workDate ?? new Date("2026-09-17T00:00:00.000Z"),
+        workDate: overrides.workDate ?? futureWorkDate(),
         completionMode: "QUICK",
         fileId: null,
         staff: {
@@ -106,7 +113,7 @@ describe("buildTasksDashboard pagination", () => {
             city: i % 5 === 0 ? "Дніпропетровськ-Наддніпрянський" : "Kyiv",
             locationName: `Фотостудія на вулиці Соборній, корпус номер ${i}`,
             deadlineTime: i % 4 === 0 ? "18:00" : null,
-            workDate: i % 4 === 0 ? PAST_WORK_DATE : new Date("2026-09-17T00:00:00.000Z"),
+            workDate: i % 4 === 0 ? PAST_WORK_DATE : futureWorkDate(),
         }));
         getTasksForDate.mockResolvedValue(tasks);
 

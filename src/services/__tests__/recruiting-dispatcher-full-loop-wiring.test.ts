@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Полный цикл найма живёт в ТОМ ЖЕ минутном тике диспетчера команд и под той
- * же Redis-лизой: команды → исходящие сообщения → рассылки. Отдельного флага
- * нет — всё гейтится существующим AWS_RECRUITING_COMMANDS_ENABLED в worker.
+ * же Redis-лизой: команды → исходящие сообщения. Отдельного флага нет — всё
+ * гейтится существующим AWS_RECRUITING_COMMANDS_ENABLED в worker.
+ *
+ * Третьего прохода — рассылок по пулу города — здесь больше нет: он опрашивал
+ * фид `broadcasts/pending`, снесённый на стороне вебаппа 16.09.2026 вместе со
+ * старым контуром INVITE. Приглашения давно идут поимённо, командами.
  */
 const listPending = vi.fn();
 
@@ -21,9 +25,6 @@ vi.mock("../../repositories/candidate-repository.js", () => ({ candidateReposito
 
 const deliverPendingRecruitingMessages = vi.fn();
 vi.mock("../recruiting-message-delivery.js", () => ({ deliverPendingRecruitingMessages }));
-
-const runPendingRecruitingBroadcasts = vi.fn();
-vi.mock("../recruiting-broadcast-delivery.js", () => ({ runPendingRecruitingBroadcasts }));
 
 const redisSet = vi.fn();
 const redisEval = vi.fn();
@@ -50,32 +51,37 @@ beforeEach(() => {
     redisEval.mockResolvedValue(1);
     listPending.mockResolvedValue({ items: [] });
     deliverPendingRecruitingMessages.mockResolvedValue({ sent: 0, failed: 0 });
-    runPendingRecruitingBroadcasts.mockResolvedValue({ processed: 0 });
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("RecruitingCommandDispatcher: тик полного цикла", () => {
-    it("после команд гоняет доставку сообщений и рассылки тем же Api", async () => {
+    it("после команд гоняет доставку сообщений тем же Api", async () => {
         const api = makeApi();
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
         expect(deliverPendingRecruitingMessages).toHaveBeenCalledWith(api);
-        expect(runPendingRecruitingBroadcasts).toHaveBeenCalledWith(api);
     });
 
-    it("чужая лиза — ни сообщений, ни рассылок", async () => {
+    it("чужая лиза — ни команд, ни сообщений", async () => {
         redisSet.mockResolvedValue(null);
         await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
 
+        expect(listPending).not.toHaveBeenCalled();
         expect(deliverPendingRecruitingMessages).not.toHaveBeenCalled();
-        expect(runPendingRecruitingBroadcasts).not.toHaveBeenCalled();
     });
 
-    it("упавшая доставка сообщений не срывает рассылки", async () => {
+    /**
+     * Проход спроектирован «никогда не бросать», но гарантия важна и без
+     * второго прохода рядом: сбой доставки не должен уносить с собой лизу —
+     * иначе она дотикает до TTL, и следующий тик встанет на пять минут.
+     */
+    it("упавшая доставка сообщений не срывает тик и отпускает лизу", async () => {
         deliverPendingRecruitingMessages.mockRejectedValue(new Error("boom"));
-        await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
 
-        expect(runPendingRecruitingBroadcasts).toHaveBeenCalled();
+        await expect(
+            new RecruitingCommandDispatcher().runOnce(makeApi() as never),
+        ).resolves.not.toThrow();
+        expect(redisEval).toHaveBeenCalled();
     });
 });
