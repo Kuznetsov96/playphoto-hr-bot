@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../config.js", () => ({
-    AWS_BUSINESS_MIN_EMPLOYEES: 0,
-    AWS_BUSINESS_MIN_LOCATIONS: 0,
     AWS_BUSINESS_SYNC_INTERVAL_MS: 300_000,
 }));
 
@@ -28,6 +26,10 @@ function transactionStub() {
             update: vi.fn(),
             create: vi.fn().mockResolvedValue({ id: "location-1" }),
             findMany: vi.fn().mockResolvedValue([]),
+        },
+        locationOpeningHours: {
+            deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+            createMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
         user: {
             upsert: vi.fn().mockResolvedValue({ id: "user-1" }),
@@ -58,6 +60,7 @@ const prismaMock = {
     },
     systemState: {
         upsert: vi.fn().mockResolvedValue(undefined),
+        findUnique: vi.fn().mockResolvedValue(null),
     },
     $transaction: vi.fn((callback: (tx: ReturnType<typeof transactionStub>) => unknown) =>
         callback(transactionStub())),
@@ -72,7 +75,14 @@ function snapshot(employees: Array<{ telegramId: string }>) {
         completeEmployeeSnapshot: true as const,
         completeLocationSnapshot: true as const,
         scheduleWindow: { from: "2026-08-01", to: "2026-08-31" },
-        locations: [],
+        locations: [{
+            publicId: "22222222-2222-4222-8222-222222222200",
+            canonicalCode: "location-0",
+            name: "Location 0",
+            city: "Kyiv",
+            isActive: true,
+            openingHours: [],
+        }],
         employees: employees.map((employee, index) => ({
             publicId: `11111111-1111-4111-8111-11111111111${index}`,
             telegramId: employee.telegramId,
@@ -168,8 +178,12 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         );
     });
 
-    it("issues no HTTP request for an empty employee list", async () => {
-        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([]));
+    it("issues no HTTP request when no employee has a User row to report", async () => {
+        // The snapshot itself carries staff — an empty one is data loss and the
+        // shrink guard rejects it before this code runs. What empties the payload
+        // is every employee being unknown to the User table.
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        prismaMock.user.findMany.mockResolvedValue([]);
         const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
 
         await new AwsBusinessSyncService().syncAll();
