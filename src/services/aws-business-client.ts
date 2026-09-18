@@ -612,35 +612,7 @@ const recruitingMessageAckSchema = z.object({
     status: z.string(),
 });
 
-/**
- * Одна рассылка по пулу города. Получателей выбирает ВЕБАПП и присылает
- * готовым списком telegramId (`recipients`) — та же выборка, что показала
- * число на кнопке подтверждения; бот не выбирает сам, иначе два словаря
- * городов (анкета vs справочник) дали бы разные множества. kind: INVITE —
- * стандартное запрошення на выбор слота (body null), MESSAGE — произвольный
- * текст. kind строкой, не enum: незнакомый вид от более свежего вебаппа
- * должен дойти до контрактного failed-ack, а не убить разбор всей очереди.
- */
-const recruitingBroadcastSchema = z.object({
-    publicId: z.string().uuid(),
-    city: z.string(),
-    kind: z.string(),
-    body: z.string().nullable(),
-    recipients: z.array(z.string()),
-});
-
-const recruitingBroadcastsSchema = z.object({
-    items: z.array(recruitingBroadcastSchema),
-});
-
-const recruitingBroadcastAckSchema = z.object({
-    publicId: z.string(),
-    status: z.string(),
-});
-
 export type RecruitingOutgoingMessage = z.infer<typeof recruitingOutgoingMessageSchema>;
-export type RecruitingBroadcast = z.infer<typeof recruitingBroadcastSchema>;
-export type RecruitingBroadcastsPending = z.infer<typeof recruitingBroadcastsSchema>;
 
 const locationCutoverSchema = z.object({
     items: z.array(
@@ -878,29 +850,6 @@ export class AwsBusinessClient {
             method: "POST",
             body: JSON.stringify(input),
         });
-    }
-
-    /** Рассылки, ждущие исполнения, вместе со стадиями-получателями. */
-    async listPendingRecruitingBroadcasts(): Promise<RecruitingBroadcastsPending> {
-        const body = await this.request("/recruiting/broadcasts/pending", { method: "GET" });
-        return recruitingBroadcastsSchema.parse(body);
-    }
-
-    /** Счётчики — факты после исполнения, не оценка. Идемпотентен на стороне вебаппа. */
-    async ackRecruitingBroadcastDone(publicId: string, counts: { sent: number; failed: number }) {
-        const body = await this.request(
-            `/recruiting/broadcasts/${encodeURIComponent(publicId)}/done`,
-            { method: "POST", body: JSON.stringify(counts) },
-        );
-        return recruitingBroadcastAckSchema.parse(body);
-    }
-
-    async ackRecruitingBroadcastFailed(publicId: string, error: string) {
-        const body = await this.request(
-            `/recruiting/broadcasts/${encodeURIComponent(publicId)}/failed`,
-            { method: "POST", body: JSON.stringify({ error: error.slice(0, 500) }) },
-        );
-        return recruitingBroadcastAckSchema.parse(body);
     }
 
     async upsertEmployee(employee: AwsEmployeeUpsert) {
