@@ -8,6 +8,7 @@ import { LOGISTICS_TEXTS_STAFF } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
+import { resolveParcelStatusTransition, selectTtnsClosedForTracking } from './parcel-status-transition.js';
 import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canonical-read.js';
@@ -81,7 +82,23 @@ export class LogisticsService {
                 arrivedAt: row.arrivedAt
             }));
         }
-        return parcelCanonicalReadService.findActive();
+        const canonical = await parcelCanonicalReadService.findActive();
+
+        // Веб отдаёт посылку как активную вечно: закрывает её ФОТОГРАФ и САППОРТ
+        // через Telegram, а у веба таких статусов нет вовсе — VERIFYING и
+        // COMPLETED живут только здесь (граница владения: веб владеет фактами
+        // НП, бот владеет разговором). Поэтому спрашиваем свою базу, а не
+        // canonical.status: для закрытой посылки он навсегда DELIVERED, и
+        // фильтр по нему не отсекал бы ничего.
+        const localStatuses = await prisma.parcel.findMany({
+            where: { ttn: { in: canonical.map(parcel => parcel.ttn) } },
+            select: { ttn: true, status: true },
+        });
+        const closedTtns = selectTtnsClosedForTracking(
+            new Map(localStatuses.map(row => [row.ttn, row.status])),
+        );
+
+        return canonical.filter(parcel => !closedTtns.has(parcel.ttn));
     }
 
     /**
@@ -126,7 +143,7 @@ export class LogisticsService {
                     }));
 
                 const npStatus = this.mapNPStatusToParcelStatus(statusDoc.StatusCode);
-                const newStatus = this.resolveStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
+                const newStatus = resolveParcelStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
                 if (localParcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
                         where: { id: localParcel.id },
@@ -152,44 +169,6 @@ export class LogisticsService {
                 }
             }
         }
-    }
-
-    /**
-     * Guards status transitions: prevents NP from auto-completing parcels
-     * that haven't gone through staff pickup & photo verification flow.
-     *
-     * Rules:
-     * - PICKUP_IN_PROGRESS / VERIFYING: staff is handling it — freeze, ignore NP updates
-    * - Address delivery: DELIVERED means courier dropoff, allow direct photo flow
-    * - Warehouse/postomat: DELIVERED/COMPLETED means NP already handed it out, allow photo flow
-     */
-    private resolveStatusTransition(currentStatus: ParcelStatus, npStatus: ParcelStatus, deliveryType: string | null): ParcelStatus {
-        // VERIFYING: photos uploaded, awaiting admin — freeze completely
-        if (currentStatus === 'VERIFYING') {
-            return currentStatus;
-        }
-
-        // PICKUP_IN_PROGRESS: staff accepted. Allow NP DELIVERED through —
-        // it means parcel was physically picked up from NP.
-        if (currentStatus === 'PICKUP_IN_PROGRESS') {
-            return npStatus === 'DELIVERED' ? 'DELIVERED' : currentStatus;
-        }
-
-        // Address delivery: NP gives DELIVERED when courier drops off.
-        // This is legitimate — let it through so staff gets notified to upload photo.
-        if (npStatus === 'DELIVERED' && deliveryType === 'Address') {
-            return 'DELIVERED';
-        }
-
-        // For warehouse/postomat parcels, DELIVERED/COMPLETED means the parcel was already
-        // handed out by Nova Poshta. Don't send staff into trustee flow again.
-        if (npStatus === 'DELIVERED' || npStatus === 'COMPLETED') {
-            if (currentStatus === 'EXPECTED' || currentStatus === 'IN_TRANSIT' || currentStatus === 'ARRIVED') {
-                return 'DELIVERED';
-            }
-        }
-
-        return npStatus;
     }
 
     /**
