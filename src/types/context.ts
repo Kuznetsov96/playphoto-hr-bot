@@ -166,6 +166,13 @@ export interface SessionData {
         fileIds: string[];
         startedAt: number;
         lastPhotoAt?: number;
+        /**
+         * Сообщения бота, несущие кнопки «Готово»/«Скасувати». Их несколько:
+         * приглашение и по одному на каждое принятое фото. Завершение гасит
+         * клавиатуры во всех, иначе в чате остаются рабочие кнопки поверх уже
+         * сданной посылки.
+         */
+        promptMessageIds?: number[];
     };
     parcelPhotoCancelledDraft?: {
         parcelId: string;
