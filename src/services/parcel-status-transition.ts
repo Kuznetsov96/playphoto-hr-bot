@@ -3,13 +3,31 @@ import type { ParcelStatus } from "@prisma/client";
 /**
  * Посылка закрыта: трекинг НП её больше не касается.
  *
- * Канонический список активных посылок приходит из вебаппа, а тот отсекает
- * только CANCELLED и отдаёт COMPLETED. Legacy-выборка бота исключала оба
- * статуса — при переходе на канонический источник фильтр потерялся, и закрытые
- * посылки снова попадали в синхронизацию.
+ * Спрашивать об этом можно только статус БОТА. Веб о закрытии не знает: в его
+ * enum нет ни VERIFYING, ни COMPLETED — это состояния разговора, и граница
+ * владения проведена сознательно (см. parcel-status-mapping.ts в вебаппе:
+ * «веб владеет фактами НП, бот владеет разговором»).
  */
-export function isParcelClosedForTracking(status: ParcelStatus | string): boolean {
+export function isParcelClosedForTracking(status: ParcelStatus): boolean {
     return status === 'COMPLETED' || status === 'CANCELLED';
+}
+
+/**
+ * ТТН, которые бот у себя уже закрыл, — их не нужно ни опрашивать в НП, ни
+ * тем более переоткрывать.
+ *
+ * Принимает статусы из базы бота (ttn → status), потому что канонический
+ * список несёт статус веба, а он для закрытой посылки навсегда остаётся
+ * DELIVERED. Фильтр по нему не отсекал бы ничего.
+ */
+export function selectTtnsClosedForTracking(
+    localStatusByTtn: ReadonlyMap<string, ParcelStatus>,
+): Set<string> {
+    const closed = new Set<string>();
+    for (const [ttn, status] of localStatusByTtn) {
+        if (isParcelClosedForTracking(status)) closed.add(ttn);
+    }
+    return closed;
 }
 
 /**

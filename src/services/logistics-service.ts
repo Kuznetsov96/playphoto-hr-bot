@@ -8,7 +8,7 @@ import { LOGISTICS_TEXTS_STAFF } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
-import { isParcelClosedForTracking, resolveParcelStatusTransition } from './parcel-status-transition.js';
+import { resolveParcelStatusTransition, selectTtnsClosedForTracking } from './parcel-status-transition.js';
 import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canonical-read.js';
@@ -82,16 +82,23 @@ export class LogisticsService {
                 arrivedAt: row.arrivedAt
             }));
         }
-        // Веб отдаёт и закрытые посылки (фильтрует только CANCELLED), тогда как
-        // legacy-выборка выше исключала COMPLETED. Отсекаем их и здесь, чтобы
-        // канонический путь не опрашивал НП по уже закрытым ТТН.
-        //
-        // Статус разговора всё равно живёт в базе бота и может расходиться с
-        // вебом, поэтому единственная настоящая защита от переоткрытия —
-        // resolveParcelStatusTransition по localParcel.status ниже; этот фильтр
-        // лишь убирает заведомо лишнюю работу.
         const canonical = await parcelCanonicalReadService.findActive();
-        return canonical.filter(parcel => !isParcelClosedForTracking(parcel.status));
+
+        // Веб отдаёт посылку как активную вечно: закрывает её ФОТОГРАФ и САППОРТ
+        // через Telegram, а у веба таких статусов нет вовсе — VERIFYING и
+        // COMPLETED живут только здесь (граница владения: веб владеет фактами
+        // НП, бот владеет разговором). Поэтому спрашиваем свою базу, а не
+        // canonical.status: для закрытой посылки он навсегда DELIVERED, и
+        // фильтр по нему не отсекал бы ничего.
+        const localStatuses = await prisma.parcel.findMany({
+            where: { ttn: { in: canonical.map(parcel => parcel.ttn) } },
+            select: { ttn: true, status: true },
+        });
+        const closedTtns = selectTtnsClosedForTracking(
+            new Map(localStatuses.map(row => [row.ttn, row.status])),
+        );
+
+        return canonical.filter(parcel => !closedTtns.has(parcel.ttn));
     }
 
     /**

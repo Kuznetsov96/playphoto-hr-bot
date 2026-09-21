@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { isParcelClosedForTracking, resolveParcelStatusTransition } from "../parcel-status-transition.js";
+import {
+    isParcelClosedForTracking,
+    resolveParcelStatusTransition,
+    selectTtnsClosedForTracking,
+} from "../parcel-status-transition.js";
 
 /**
  * Прод 20.09.2026, посылка cmu6u5cxo061lpt0l8myjdx2v:
@@ -45,25 +49,33 @@ describe("resolveParcelStatusTransition", () => {
 });
 
 /**
- * Вторая половина той же дыры: канонический список активных посылок приходит из
- * вебаппа, а он отфильтровывает только CANCELLED и отдаёт COMPLETED (см.
- * BotParcelsService.parcels в репозитории вебаппа). Legacy-выборка бота
- * исключала оба статуса — при переходе на канонический источник фильтр потерялся.
+ * Канонический список несёт статус ВЕБА, а веб про закрытие посылки не знает:
+ * в его enum нет ни VERIFYING, ни COMPLETED — это состояния разговора, и
+ * граница владения проведена сознательно (apps/api/src/logistics/
+ * parcel-status-mapping.ts в репозитории вебаппа).
+ *
+ * Поэтому отбирать закрытые посылки можно только по статусу БОТА. Фильтр по
+ * статусу из канонической выдачи не отсекал бы ничего и создавал ложное
+ * ощущение защиты.
  */
-describe("isParcelClosedForTracking", () => {
-    it("excludes a parcel support already confirmed", () => {
-        expect(isParcelClosedForTracking("COMPLETED")).toBe(true);
+describe("selectTtnsClosedForTracking", () => {
+    it("picks the ttns the bot itself has already closed", () => {
+        const local = new Map([
+            ["TTN-DONE", "COMPLETED" as const],
+            ["TTN-CANCELLED", "CANCELLED" as const],
+            ["TTN-WAITING", "DELIVERED" as const],
+        ]);
+
+        expect(selectTtnsClosedForTracking(local)).toEqual(new Set(["TTN-DONE", "TTN-CANCELLED"]));
     });
 
-    it("excludes a cancelled parcel", () => {
-        expect(isParcelClosedForTracking("CANCELLED")).toBe(true);
+    it("keeps a parcel under support review in tracking", () => {
+        const local = new Map([["TTN-REVIEW", "VERIFYING" as const]]);
+
+        expect(selectTtnsClosedForTracking(local)).toEqual(new Set());
     });
 
-    it("keeps tracking a parcel still awaiting photos", () => {
-        expect(isParcelClosedForTracking("DELIVERED")).toBe(false);
-    });
-
-    it("keeps tracking a parcel under support review", () => {
-        expect(isParcelClosedForTracking("VERIFYING")).toBe(false);
+    it("returns nothing when the bot knows no parcel yet", () => {
+        expect(selectTtnsClosedForTracking(new Map())).toEqual(new Set());
     });
 });
