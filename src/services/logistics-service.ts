@@ -8,7 +8,11 @@ import { LOGISTICS_TEXTS_STAFF } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
-import { resolveParcelStatusTransition, selectTtnsClosedForTracking } from './parcel-status-transition.js';
+import {
+    canMarkParcelPickedUpManually,
+    resolveParcelStatusTransition,
+    selectTtnsClosedForTracking,
+} from './parcel-status-transition.js';
 import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canonical-read.js';
@@ -427,7 +431,11 @@ export class LogisticsService {
             include: { location: true, responsibleStaff: true }
         });
         if (!parcel) return null;
-        if (parcel.status === 'COMPLETED' || parcel.status === 'CANCELLED') {
+        // VERIFYING в том же ряду, что COMPLETED и CANCELLED: фотограф уже сдала
+        // фото, отмечать выдачу поздно. Иначе запись ниже откатила бы статус в
+        // DELIVERED и обнулила отметки об отправленных напоминаниях — посылку,
+        // с которой человек закончил, снова начали бы о ней напоминать.
+        if (!canMarkParcelPickedUpManually(parcel.status)) {
             return parcel;
         }
 
