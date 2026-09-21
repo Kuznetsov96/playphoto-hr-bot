@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    canMarkParcelPickedUpManually,
     isParcelClosedForTracking,
     resolveParcelStatusTransition,
     selectTtnsClosedForTracking,
@@ -77,5 +78,36 @@ describe("selectTtnsClosedForTracking", () => {
 
     it("returns nothing when the bot knows no parcel yet", () => {
         expect(selectTtnsClosedForTracking(new Map())).toEqual(new Set());
+    });
+});
+
+/**
+ * Кнопка саппорта «📬 Picked Up Manually» ставит DELIVERED и обнуляет отметки
+ * об отправленных напоминаниях. От COMPLETED и CANCELLED она защищена, а
+ * VERIFYING пропускала — хотя это «фото уже сданы, ждём подтверждения».
+ *
+ * Нажатие в этом окне сбивало статус назад и снимало защиту от напоминаний:
+ * не так громко, как откат трекингом (тот бил по людям 20.09), но ровно то же
+ * по сути — машина забывает, что человек свою часть уже сделал.
+ */
+describe("canMarkParcelPickedUpManually", () => {
+    it("does not touch a parcel whose photos are awaiting support", () => {
+        expect(canMarkParcelPickedUpManually("VERIFYING")).toBe(false);
+    });
+
+    it("does not touch a parcel support already confirmed", () => {
+        expect(canMarkParcelPickedUpManually("COMPLETED")).toBe(false);
+    });
+
+    it("does not touch a cancelled parcel", () => {
+        expect(canMarkParcelPickedUpManually("CANCELLED")).toBe(false);
+    });
+
+    it("still marks a parcel that is waiting to be picked up", () => {
+        expect(canMarkParcelPickedUpManually("ARRIVED")).toBe(true);
+    });
+
+    it("still marks a parcel the photographer has taken on", () => {
+        expect(canMarkParcelPickedUpManually("PICKUP_IN_PROGRESS")).toBe(true);
     });
 });

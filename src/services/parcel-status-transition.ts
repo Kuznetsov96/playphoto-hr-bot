@@ -13,6 +13,20 @@ export function isParcelClosedForTracking(status: ParcelStatus): boolean {
 }
 
 /**
+ * Можно ли отметить посылку выданной вручную (кнопка саппорта «Picked Up
+ * Manually»).
+ *
+ * Нельзя, как только фотограф сдала фото: отметка ставит DELIVERED и обнуляет
+ * `photoReminderSentAt` / `shiftEndReminderSentAt`, то есть откатывает статус
+ * назад и заново открывает напоминания по посылке, с которой человек уже
+ * закончил. VERIFYING («фото сданы, ждём саппорта») здесь равноценен
+ * закрытому: содержимое подтверждать нечем — оно уже у саппорта.
+ */
+export function canMarkParcelPickedUpManually(status: ParcelStatus): boolean {
+    return !isParcelClosedForTracking(status) && status !== 'VERIFYING';
+}
+
+/**
  * ТТН, которые бот у себя уже закрыл, — их не нужно ни опрашивать в НП, ни
  * тем более переоткрывать.
  *
