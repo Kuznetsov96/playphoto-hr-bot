@@ -7,3 +7,8 @@
 --
 -- Старые строки получают 'default': их окна напоминаний уже истекли.
 ALTER TABLE "TrackedMessage" ADD COLUMN "buttonType" TEXT NOT NULL DEFAULT 'default';
+
+-- Месяц сбора пожеланий (`YYYY-MM`) у рассылки пожеланий. Срок и признак
+-- «сбор открыт» пингер спрашивает у вебаппа по этому месяцу перед каждым
+-- напоминанием — вместо зашитого в строку `pingUntil`. NULL у всех прочих.
+ALTER TABLE "TrackedMessage" ADD COLUMN "targetMonth" TEXT;

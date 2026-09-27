@@ -1,16 +1,12 @@
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { userRepository } from "../repositories/user-repository.js";
-import { preferencesService } from "../services/preferences-service.js";
-import type { PreferenceData } from "../services/preferences-service.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
 import { redis } from "../core/redis.js";
-import { formatSurnameNameDot } from "../utils/string-utils.js";
 import { escapeHtml } from "./admin/utils.js";
-import { AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
 import {
     readCanonicalPreferenceDays,
     saveCanonicalPreference,
@@ -21,7 +17,19 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 
-
+/**
+ * Флоу месячных пожеланий: календарь → «Перевір і збережи» → запись в вебапп.
+ *
+ * Только для активного штата и только через канонический API вебаппа. Ветки,
+ * которых здесь больше нет, и почему:
+ * - запись в Google Sheets — флаг AWS_PREFERENCES_CANONICAL_WRITE_ENABLED в
+ *   проде включён, выключенная ветка не выполнялась;
+ * - кандидаты первой смены (два месяца подряд и автоприём в штат) — статуса
+ *   AWAITING_FIRST_SHIFT на проде нет ни у одного кандидата, найм идёт через
+ *   вебапп (проверено 27.09.2026);
+ * - «🚫 Не буду заповнювати» и «✏️ Змінити побажання» — первую убрали 22.08,
+ *   вторую рисовала только ветка Sheets. Старые нажатия ловит `pref_*` в конце.
+ */
 export const preferencesHandlers = new Composer<MyContext>();
 
 function getKyivNow() {
@@ -31,32 +39,6 @@ function getKyivNow() {
 
 function getMonthName(date: Date) {
     return date.toLocaleString('uk-UA', { month: 'long' });
-}
-
-function isFirstShiftCandidate(user: any) {
-    return user?.candidate?.currentStep === "FIRST_SHIFT" && user?.candidate?.status === "AWAITING_FIRST_SHIFT";
-}
-
-function getPreferenceTableName(user: any, fallback = "Фотограф") {
-    const profile = user?.staffProfile;
-    if (profile?.surnameNameDot) return profile.surnameNameDot;
-
-    const fullName = profile?.fullName || user?.candidate?.fullName || fallback;
-    return formatSurnameNameDot(fullName) || fullName || fallback;
-}
-
-/**
- * The month a reminder broadcast is asking active staff about: after the 23rd
- * it is next month (mirrors startPreferencesFlow's monthOffset for active
- * staff), otherwise the current month. Used when a photographer opts out via
- * the broadcast button directly, without ever opening the calendar flow —
- * `ctx.session.preferencesData` is empty in that case, so there is no month to
- * read from session.
- */
-function getActiveStaffTargetMonthDate(kyivNow: Date) {
-    const isLateInMonth = kyivNow.getDate() >= 23;
-    const monthOffset = isLateInMonth ? 1 : 0;
-    return new Date(kyivNow.getFullYear(), kyivNow.getMonth() + monthOffset, 1);
 }
 
 /** Предел `comment` в API вебаппа (`@MaxLength(500)` в DTO пожеланий). */
@@ -72,6 +54,9 @@ function supportKeyboard() {
     return new InlineKeyboard().text(STAFF_TEXTS["staff-preferences-btn-support"], "open_support_dialog");
 }
 
+/** Чем закончилось открытие формы: календарь или экран, где заполнять нечего. */
+type FlowStart = "CALENDAR" | "NOT_NEEDED" | "CLOSED" | "UNAVAILABLE";
+
 /**
  * Кнопка формы нажата, а формы в сессии уже нет.
  *
@@ -81,25 +66,38 @@ function supportKeyboard() {
  * человек оставался перед мёртвым экраном. Теперь форма открывается заново:
  * `startPreferencesFlow` сам подставит уже поданные дни и проверит, открыт ли
  * сбор.
+ *
+ * Тост «Форму оновлено» — только если открылся календарь: над экраном
+ * «збір закрито» он противоречил бы тому, что человек видит.
  */
 async function restartIfSessionLost(ctx: MyContext): Promise<boolean> {
     if (ctx.session.preferencesData) return false;
-    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-session-restarted"]);
-    await startPreferencesFlow(ctx);
+    let started: FlowStart | undefined;
+    try {
+        started = await startPreferencesFlow(ctx);
+    } finally {
+        await ctx
+            .answerCallbackQuery(started === "CALENDAR" ? STAFF_TEXTS["staff-preferences-session-restarted"] : undefined)
+            .catch(() => { });
+    }
     return true;
 }
 
 /**
- * Открыт ли сбор на месяц. При сбое API — «открыт», как и кнопка в меню
- * (`shouldShowPreferencesButton`): бэкенд всё равно откажет при записи, если
- * окно закрыто, а ложное «закрито» отняло бы форму у того, кто успевал.
+ * Открыт ли сбор для этого человека. С сотрудником ответ учитывает и личное
+ * окно («Reopen for …» у владельца) — без него переоткрытого человека форма
+ * встречала бы «збір закрито», хотя запись его пропустила бы.
+ *
+ * При сбое API — «открыт», как и кнопка в меню (`shouldShowPreferencesButton`):
+ * запись всё равно откажет, если окно закрыто, а ложное «закрито» отняло бы
+ * форму у того, кто успевал.
  */
-async function isCollectionOpen(canonicalMonth: string): Promise<boolean> {
+async function isCollectionOpen(canonicalMonth: string, employeePublicId: string | null): Promise<boolean> {
     try {
-        const window = await awsBusinessClient.schedulePreferenceWindow(canonicalMonth);
-        return window.open;
+        const schedule = await awsBusinessClient.schedulePreferenceSchedule(canonicalMonth, employeePublicId ?? undefined);
+        return schedule.open;
     } catch (error) {
-        logger.warn({ err: error, month: canonicalMonth }, "Preference collection window unavailable; opening the form");
+        logger.warn({ err: error, month: canonicalMonth }, "Preference collection schedule unavailable; opening the form");
         return true;
     }
 }
@@ -124,7 +122,6 @@ async function ensureActiveStaffTargetsNextMonth(ctx: MyContext) {
         selectedDays: [],
         comment: "",
         step: 'CALENDAR',
-        forceNextMonth: false
     };
 
     return true;
@@ -138,82 +135,6 @@ preferencesHandlers.callbackQuery("staff_start_prefs", async (ctx) => {
 preferencesHandlers.callbackQuery("pref_fill", async (ctx) => {
     await ctx.answerCallbackQuery();
     await startPreferencesFlow(ctx);
-});
-
-preferencesHandlers.callbackQuery("pref_force_edit", async (ctx) => {
-    await ctx.answerCallbackQuery();
-    ctx.session.preferencesData = { step: 'CALENDAR', forceEdit: true };
-    await startPreferencesFlow(ctx);
-});
-
-/**
- * Кнопки, которая сюда ведёт, больше нет — `buildBroadcastKeyboard` её не рисует
- * (см. комментарий там о том, почему). Обработчик остаётся НАМЕРЕННО: рассылки,
- * ушедшие до этого изменения, лежат в чатах у людей вместе со своей клавиатурой,
- * и Telegram отдаст этот callback, когда по ней нажмут. Удалить обработчик —
- * значит превратить старую кнопку в тихий отказ у человека, который просто хотел
- * выключить напоминания.
- *
- * Удалять можно, когда пройдёт месяц сбора и старые сообщения перестанут быть
- * актуальными.
- */
-preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
-    const userId = ctx.from?.id;
-    if (!userId) return ctx.answerCallbackQuery();
-
-    // Mark all pending preference replies as declined → stops pinger
-    await pendingReplyRepository.updateMany(
-        { userId: BigInt(userId), status: "pending" },
-        { status: "declined", respondedAt: new Date() }
-    );
-
-    try {
-        const user = await userRepository.findWithProfilesByTelegramId(BigInt(userId));
-
-        if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) {
-            const sessionData = ctx.session.preferencesData;
-            const targetDate = getActiveStaffTargetMonthDate(getKyivNow());
-            const month = sessionData?.month ?? getMonthName(targetDate);
-            const year = sessionData?.year ?? targetDate.getFullYear();
-            const canonicalMonth = toCanonicalMonth(month, year);
-            const staffId = user?.staffProfile?.id;
-            if (!canonicalMonth || !staffId) {
-                logger.error({ userId, month, year }, "Preference month could not be converted to YYYY-MM");
-                await ctx.answerCallbackQuery();
-                await ctx.reply(STAFF_TEXTS["staff-preferences-save-failed"]);
-                return;
-            }
-            const saved = await saveCanonicalPreference({
-                staffId,
-                month: canonicalMonth,
-                selectedDays: [],
-                comment: null,
-                telegramId: String(userId),
-                declined: true
-            });
-            if (!saved.ok) {
-                await ctx.answerCallbackQuery();
-                await ctx.reply(preferenceSaveFailureText(saved.reasonCode, month));
-                return;
-            }
-        } else {
-            // Log opt-out to Google Sheets so admin sees who refused
-            const fullName = getPreferenceTableName(user, "Невідомий");
-            const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
-
-            await preferencesService.savePreference({
-                timestamp,
-                fullNameDot: fullName,
-                unworkableDays: "🚫 Відмовилась заповнювати",
-                comment: ""
-            });
-        }
-    } catch (e) {
-        logger.error({ err: e, userId }, "Failed to log pref opt-out");
-    }
-
-    await ctx.answerCallbackQuery("🚫 Нагадування вимкнено.");
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
 });
 
 async function readWorksUntil(
@@ -231,88 +152,52 @@ async function readWorksUntil(
     }
 }
 
-export async function startPreferencesFlow(ctx: MyContext) {
+export async function startPreferencesFlow(ctx: MyContext): Promise<FlowStart> {
     const telegramId = ctx.from?.id;
-    if (!telegramId) return;
+    if (!telegramId) return "UNAVAILABLE";
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
-    const isActiveStaff = user?.staffProfile?.isActive === true;
-    const isNewCandidate = !isActiveStaff && isFirstShiftCandidate(user);
-    const isEligible = isActiveStaff || isNewCandidate;
-
-    if (!isEligible) {
-        return ctx.reply("❌ Ця функція поки що недоступна.");
+    const staff = user?.staffProfile;
+    if (staff?.isActive !== true) {
+        await ctx.reply("❌ Ця функція поки що недоступна.");
+        return "UNAVAILABLE";
     }
 
+    // После 23-го собираем на следующий месяц, до — на текущий.
     const kyivNow = getKyivNow();
-    const isLateInMonth = kyivNow.getDate() >= 23;
-
-    // Active staff after 23rd → jump straight to next month
-    // New candidates after 23rd → start with current month, then chain to next
-    const monthOffset = (!isNewCandidate && isLateInMonth) ? 1 : 0;
+    const monthOffset = kyivNow.getDate() >= 23 ? 1 : 0;
     const targetMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + monthOffset, 1);
-
-    const fullName = user?.staffProfile?.fullName || user?.candidate?.fullName || "";
-
-    // Check if photographer already filled preferences — offer to update.
-    // Legacy-only: the canonical PUT is idempotent per month, so this
-    // pre-check is unnecessary (and would need a canonical read) once the
-    // flag is on.
-    if (!AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && !isNewCandidate && fullName) {
-        const alreadyFilled = await preferencesService.hasExistingPreference(fullName);
-        if (alreadyFilled && !ctx.session.preferencesData?.forceEdit) {
-            const kb = new InlineKeyboard()
-                .text("✏️ Змінити побажання", "pref_force_edit")
-                .text("⬅️ Назад", "staff_hub_nav");
-            await ScreenManager.renderScreen(ctx,
-                `✅ <b>Ти вже заповнила побажання на цей місяць!</b>\n\nЯкщо хочеш змінити — натисни кнопку нижче.`,
-                kb, { forceNew: true });
-            return;
-        }
-    }
-    delete ctx.session.preferencesData?.forceEdit;
-
     const monthName = getMonthName(targetMonthDate);
     const targetYear = targetMonthDate.getFullYear();
     const canonicalMonth = toCanonicalMonth(monthName, targetYear);
+    const employeePublicId = staff.awsEmployeePublicId ?? null;
 
     // Сбор закрыт — говорим сразу, а не после заполнения. Кнопка в меню в этот
     // момент уже скрыта, но «Заповнити графік» в приглашении и «Заповнити зараз»
     // в напоминании лежат в чате и ведут сюда: человек отмечал бы дни, чтобы на
-    // «Зберегти» узнать, что всё зря. Кандидатов первой смены это не касается —
-    // их пожелания идут не через окно сбора.
-    if (isActiveStaff && AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && canonicalMonth && !(await isCollectionOpen(canonicalMonth))) {
+    // «Зберегти» узнать, что всё зря.
+    if (canonicalMonth && !(await isCollectionOpen(canonicalMonth, employeePublicId))) {
         delete ctx.session.preferencesData;
         const kb = supportKeyboard().row().text("⬅️ Назад", "staff_hub_nav");
         await ScreenManager.renderScreen(ctx, STAFF_TEXTS["staff-preferences-window-closed"]({ monthName }), kb, { forceNew: true });
-        return;
+        return "CLOSED";
     }
 
     // Останній робочий день тих, хто доопрацьовує, щоб клавіатура не
     // пропонувала дні, коли людини вже не буде. Збій читання не має ламати
     // весь флоу: без дати календар просто лишається повним, як раніше.
-    const worksUntil = await readWorksUntil(
-        user?.staffProfile?.awsEmployeePublicId ?? null,
-        canonicalMonth,
-        String(telegramId),
-    );
+    const worksUntil = await readWorksUntil(employeePublicId, canonicalMonth, String(telegramId));
 
-    // Уже отмеченные дни подставляются в календарь при повторном заходе.
-    //
-    // Раньше человек, зашедший второй раз, попадал в ПУСТОЙ календарь и не
-    // видел, что именно подал: приходилось либо заполнять заново по памяти,
-    // либо не трогать вовсе, не зная текущего состояния. Проверка «ты уже
-    // заполнила» существовала только в legacy-ветке, а с каноническим
-    // флагом — который включён — не работала вовсе.
+    // Уже отмеченные дни подставляются в календарь при повторном заходе: иначе
+    // человек, зашедший второй раз, видел пустой календарь и не знал, что подал.
     //
     // `undefined` (не замаплен, бэкенд недоступен, отказ) оставляет пустой
     // календарь: показать «ты ничего не отмечала» при сбое сети значило бы
     // соврать, а промолчать — всего лишь вернуть прежнее поведение.
     let prefilledDays: number[] = [];
-    const staffId = user?.staffProfile?.id;
-    if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && staffId && !isNewCandidate && canonicalMonth) {
+    if (canonicalMonth && staff.id) {
         const existing = await readCanonicalPreferenceDays({
-            staffId,
+            staffId: staff.id,
             month: canonicalMonth,
             telegramId: String(telegramId),
         });
@@ -326,11 +211,11 @@ export async function startPreferencesFlow(ctx: MyContext) {
         selectedDays: prefilledDays,
         comment: "",
         step: 'CALENDAR',
-        forceNextMonth: isNewCandidate && isLateInMonth,
         prefilled: prefilledDays.length > 0
     };
 
     await renderCalendar(ctx);
+    return ctx.session.preferencesData ? "CALENDAR" : "NOT_NEEDED";
 }
 
 async function renderCalendar(ctx: MyContext) {
@@ -433,10 +318,10 @@ async function renderCalendar(ctx: MyContext) {
  * рабочего).
  *
  * Раньше у неё был callback `none` без обработчика. Его ловил щит устаревших
- * кнопок (`handlers/index.ts`): «⚠️ This button is outdated», удаление
- * календаря и выброс в главное меню — по промаху пальцем мимо числа. `none`
- * отвечается тихо: такие календари ещё лежат в чатах, и та же заглушка стоит
- * в списке тикетов у админов.
+ * кнопок (`handlers/index.ts`): тост, удаление календаря и выброс в главное
+ * меню — по промаху пальцем мимо числа. `none` отвечается тихо: такие
+ * календари ещё лежат в чатах, и та же заглушка стоит в списке тикетов у
+ * админов.
  */
 preferencesHandlers.callbackQuery("pref_noop", (ctx) =>
     ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-day-unavailable"]),
@@ -508,9 +393,24 @@ preferencesHandlers.callbackQuery("pref_add_comment", async (ctx) => {
     if (!ctx.session.preferencesData) return;
     ctx.session.preferencesData.step = 'COMMENT';
     ctx.session.preferencesData.commentRequestedAt = Date.now();
-    const text = `💬 Напиши коментар одним повідомленням (до ${COMMENT_MAX_LENGTH} символів) — наприклад, «хочу більше змін» або «можу на іншій локації».\n\nПотім повернешся до перевірки й збережеш.`;
-    const kb = new InlineKeyboard().text("⬅️ Без коментаря", "pref_skip_comment");
+    const current = ctx.session.preferencesData.comment;
+    const text = `💬 Напиши коментар одним повідомленням (до ${COMMENT_MAX_LENGTH} символів) — наприклад, «хочу більше змін» або «можу на іншій локації».\n\n` +
+        (current ? `Зараз: «${escapeHtml(current)}».\n\n` : "") +
+        `Потім повернешся до перевірки й збережеш.`;
+    // «Назад» не трогает комментарий: раньше единственным выходом был
+    // «Без коментаря», и кто открыл экран просто посмотреть, терял написанное.
+    const kb = new InlineKeyboard().text("⬅️ Назад", "pref_comment_back");
+    if (current) kb.row().text("🗑 Прибрати коментар", "pref_skip_comment");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
+    await ctx.answerCallbackQuery();
+});
+
+preferencesHandlers.callbackQuery("pref_comment_back", async (ctx) => {
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
+    ctx.session.preferencesData.step = 'CONFIRM';
+    delete ctx.session.preferencesData.commentRequestedAt;
+    await renderConfirmation(ctx);
     await ctx.answerCallbackQuery();
 });
 
@@ -522,6 +422,11 @@ preferencesHandlers.callbackQuery("pref_back_calendar", async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
+/**
+ * Убрать комментарий. Тот же callback был у «⏩ Без коментаря» старого шага
+ * комментария — там комментарий и так был пуст, так что старые кнопки в чатах
+ * ведут себя как прежде.
+ */
 preferencesHandlers.callbackQuery("pref_skip_comment", async (ctx) => {
     if (await restartIfSessionLost(ctx)) return;
     if (!ctx.session.preferencesData) return;
@@ -531,6 +436,7 @@ preferencesHandlers.callbackQuery("pref_skip_comment", async (ctx) => {
     }
     ctx.session.preferencesData.comment = "";
     ctx.session.preferencesData.step = 'CONFIRM';
+    delete ctx.session.preferencesData.commentRequestedAt;
     await renderConfirmation(ctx);
     await ctx.answerCallbackQuery();
 });
@@ -540,8 +446,6 @@ preferencesHandlers.callbackQuery("pref_cancel_flow", async (ctx) => {
     delete ctx.session.preferencesData;
     ctx.session.step = "idle";
 
-    // Instead of importing showStaffHub, we just show the hub menu
-    // User can click /start or we can show a "Back to Menu" button
     await ScreenManager.renderScreen(ctx, "Дію скасовано. Ти можеш повернутися до головного меню: 👇", "staff-main", { forceNew: true });
 });
 
@@ -571,23 +475,6 @@ async function renderConfirmation(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
 }
 
-/**
- * Кнопка «🔄 Спочатку» убрана с экрана подтверждения: рядом со «Скасувати» она
- * читалась как второй способ отменить, хотя сбрасывала выбор и возвращала в
- * календарь. Её место занял «✏️ Змінити дні», который НЕ теряет отмеченное.
- *
- * Обработчик остаётся: экраны подтверждения, отрисованные до деплоя, всё ещё
- * висят у людей в чатах со старой клавиатурой.
- */
-preferencesHandlers.callbackQuery("pref_restart_flow", async (ctx) => {
-    if (await restartIfSessionLost(ctx)) return;
-    if (!ctx.session.preferencesData) return;
-    ctx.session.preferencesData.selectedDays = [];
-    ctx.session.preferencesData.comment = "";
-    ctx.session.preferencesData.step = 'CALENDAR';
-    await renderCalendar(ctx);
-    await ctx.answerCallbackQuery();
-});
 
 preferencesHandlers.callbackQuery("open_support_dialog", async (ctx) => {
     await ctx.answerCallbackQuery();
@@ -664,11 +551,21 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     }
     if (await restartIfSessionLost(ctx)) return;
     if (!ctx.session.preferencesData) return;
+
+    // Сохраняется только то, что человек видел на «Перевір і збережи». Кнопка
+    // старого экрана подтверждения, нажатая из календаря или шага комментария,
+    // записала бы выбор, который ещё правят, — вместо записи показываем сводку.
+    if (ctx.session.preferencesData.step !== 'CONFIRM') {
+        ctx.session.preferencesData.step = 'CONFIRM';
+        await renderConfirmation(ctx);
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-check-before-save"]);
+    }
+
     if (await ensureActiveStaffTargetsNextMonth(ctx)) {
         await renderCalendar(ctx);
         return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
     }
-    const { selectedDays, comment, month } = ctx.session.preferencesData;
+    const { selectedDays, comment, month, year } = ctx.session.preferencesData;
     const telegramId = ctx.from?.id;
 
     if (telegramId !== undefined && !saveDedupe.tryAcquire(`pref-save:${telegramId}`)) {
@@ -685,188 +582,60 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
 
     let waitMessageId: number | undefined;
-    const waitMsg = await ctx.reply("⏳ Зберігаю...");
-    waitMessageId = waitMsg.message_id;
     try {
+        const waitMsg = await ctx.reply("⏳ Зберігаю...");
+        waitMessageId = waitMsg.message_id;
+
         const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId!));
-        const staffNameForTable = getPreferenceTableName(user);
-        const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає побажань";
-        const timestamp = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' });
-        const wasNewCandidate = !user?.staffProfile?.isActive && isFirstShiftCandidate(user);
-        let createdStaffProfile = false;
-
-        const kyivNow = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-        const currentMonthName = kyivNow.toLocaleString('uk-UA', { month: 'long' });
-        const isCurrentMonth = (month || "").toLowerCase() === currentMonthName.toLowerCase();
-        const shouldMoveToNext = !!ctx.session.preferencesData.forceNextMonth && isCurrentMonth;
-        const shouldPersist = !wasNewCandidate || !shouldMoveToNext;
-
-        if (shouldPersist) {
-            // A brand-new candidate has no StaffProfile yet; both the sheet
-            // write and the canonical write (which resolves staffId →
-            // awsEmployeePublicId) need one to attribute the submission to.
-            let staffProfileId = user?.staffProfile?.id;
-            if (wasNewCandidate && !staffProfileId && user?.candidate) {
-                const { staffRepository } = await import("../repositories/staff-repository.js");
-                const createData: any = {
-                    user: { connect: { id: user.id } },
-                    fullName: user.candidate.fullName || "Фотограф",
-                    isActive: true
-                };
-                if (user.candidate.locationId) createData.location = { connect: { id: user.candidate.locationId } };
-                const newProfile = await staffRepository.create(createData);
-                staffProfileId = newProfile.id;
-                createdStaffProfile = true;
-            }
-
-            if (AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) {
-                const canonicalMonth = toCanonicalMonth(month, ctx.session.preferencesData.year);
-                if (!canonicalMonth || !staffProfileId) {
-                    logger.error({ telegramId, month, year: ctx.session.preferencesData.year }, "Preference month could not be converted to YYYY-MM");
-                    await failSave(ctx, waitMessageId);
-                    return;
-                }
-                const saved = await saveCanonicalPreference({
-                    staffId: staffProfileId,
-                    month: canonicalMonth,
-                    selectedDays: selectedDays ?? [],
-                    comment: comment || null,
-                    telegramId: String(telegramId),
-                    declined: false
-                });
-                if (!saved.ok) {
-                    logger.error({ telegramId, month: canonicalMonth, reasonCode: saved.reasonCode }, "Canonical preference save failed");
-                    // Закрытое окно — не сбой, а конец сбора: повторять нечего,
-                    // поэтому экран подтверждения не возвращается.
-                    await failSave(
-                        ctx,
-                        waitMessageId,
-                        preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"),
-                        saved.reasonCode !== "SCHEDULE_PREFERENCES_CLOSED",
-                    );
-                    return;
-                }
-            } else {
-                const prefData: PreferenceData = {
-                    timestamp,
-                    fullNameDot: staffNameForTable,
-                    unworkableDays: daysStr,
-                    comment: comment || ""
-                };
-
-                try {
-                    const { preferencesQueue } = await import("../core/queue.js");
-                    await preferencesQueue.add('save-pref', prefData, { attempts: 5, backoff: { type: 'exponential', delay: 10000 } });
-                } catch {
-                    await preferencesService.savePreference(prefData);
-                }
-            }
-        } else {
-            logger.info({ telegramId, month }, "Skipping preference write for candidate current-month preferences; admin notification only");
+        const staffId = user?.staffProfile?.id;
+        const canonicalMonth = toCanonicalMonth(month, year);
+        if (!canonicalMonth || !staffId) {
+            logger.error({ telegramId, month, year }, "Preference month or staff profile unresolved");
+            await failSave(ctx, waitMessageId);
+            return;
         }
 
-        // Mark pending reply as confirmed → stops pinger reminders
+        const saved = await saveCanonicalPreference({
+            staffId,
+            month: canonicalMonth,
+            selectedDays: selectedDays ?? [],
+            comment: comment || null,
+            telegramId: String(telegramId),
+            declined: false
+        });
+        if (!saved.ok) {
+            logger.error({ telegramId, month: canonicalMonth, reasonCode: saved.reasonCode }, "Canonical preference save failed");
+            // Закрытое окно — не сбой, а конец сбора: повторять нечего,
+            // поэтому экран подтверждения не возвращается.
+            await failSave(
+                ctx,
+                waitMessageId,
+                preferenceSaveFailureText(saved.reasonCode, month ?? "наступний місяць"),
+                saved.reasonCode !== "SCHEDULE_PREFERENCES_CLOSED",
+            );
+            return;
+        }
+
+        // Ожидание ответа закрыто → пингер перестаёт напоминать.
         await pendingReplyRepository.updateMany(
             { userId: BigInt(telegramId!), status: "pending" },
             { status: "confirmed", respondedAt: new Date() }
         );
 
-        // Mark this user as having filled preferences for this month → broadcast will skip them
-        const prefFilledKey = `pref_filled:${telegramId}:${month}`;
-        await redis.set(prefFilledKey, "1", "EX", 40 * 24 * 60 * 60); // 40 days TTL
+        // Запасная отметка «подал» для рассылки: `resolveAlreadyFilledCheck`
+        // читает её, когда `/missing` вебаппа недоступен.
+        await redis.set(`pref_filled:${telegramId}:${month}`, "1", "EX", 40 * 24 * 60 * 60);
 
-        await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
+        await ctx.api.deleteMessage(ctx.chat!.id, waitMessageId).catch(() => { });
         waitMessageId = undefined;
         // Экран «Перевір і збережи» больше не правда — его место займёт
         // «успішно збережені».
         await ctx.deleteMessage().catch(() => { });
         if (telegramId !== undefined) lastSavedAt.set(telegramId, Date.now());
 
-        if (shouldMoveToNext) {
-            const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
-            const nextMonthName = nextMonthDate.toLocaleString('uk-UA', { month: 'long' });
-
-            ctx.session.preferencesData = {
-                month: nextMonthName,
-                year: nextMonthDate.getFullYear(),
-                selectedDays: [],
-                comment: "",
-                step: 'CALENDAR',
-                forceNextMonth: false
-            };
-
-            await ScreenManager.renderScreen(ctx, `✅ <b>Вихідні на ${month} збережені.</b>\n\nТепер давай заповнимо на <b>${nextMonthName}</b>, щоб ми могли скласти повний графік! ✨`, undefined, { forceNew: true });
-            await renderCalendar(ctx);
-        } else {
-            delete ctx.session.preferencesData;
-            ctx.session.step = "idle";
-
-            if (wasNewCandidate && user?.candidate) {
-                const hireUser = user;
-                const candidate = hireUser.candidate!;
-                // Auto-hire: create StaffProfile + flip role, but DON'T send "schedule ready" yet.
-                // The real welcome ("Графік готовий!") comes later when admin syncs shifts.
-                try {
-                    const { staffRepository } = await import("../repositories/staff-repository.js");
-                    const { candidateRepository } = await import("../repositories/candidate-repository.js");
-                    const { accessService } = await import("../services/access-service.js");
-
-                    // Create StaffProfile (isWelcomeSent defaults to false)
-                    if (!hireUser.staffProfile && !createdStaffProfile) {
-                        const createData: any = {
-                            user: { connect: { id: hireUser.id } },
-                            fullName: candidate.fullName || "Фотограф",
-                            isActive: true
-                        };
-                        if (candidate.locationId) createData.location = { connect: { id: candidate.locationId } };
-                        await staffRepository.create(createData);
-                    }
-
-                    // Update candidate status to HIRED + flip role to STAFF
-                    await candidateRepository.update(candidate.id, { status: 'HIRED' as any });
-                    await userRepository.update(hireUser.id, { role: 'STAFF' as any });
-
-                    // Sync channel access
-                    await accessService.syncUserAccess(hireUser.telegramId, "Auto-hire after onboarding").catch(() => { });
-
-                    logger.debug({ userId: hireUser.id }, "Auto-hire completed; waiting for schedule sync");
-                } catch (hireErr) {
-                    logger.error({ err: hireErr, userId: hireUser.id }, "Auto-hire failed; candidate remains awaiting first shift");
-                }
-
-                // Always show "schedule is being prepared" screen
-                const welcomeText = `<b>Вітаємо в команді PlayPhoto</b>\n\n` +
-                    `⏳ <b>Твій графік готується</b>\n\n` +
-                    `Ми вже створюємо твої перші робочі зміни.\n` +
-                    `Щойно графік буде готовий — напишемо тут.`;
-                // Персональне посилання приходить окремим повідомленням від
-                // accessService — зашивати спільний інвайт сюди не можна.
-                const welcomeKb = new InlineKeyboard()
-                    .text(STAFF_TEXTS["channel-btn-get-link"], "staff_channel_link").row()
-                    .text("🚀 Відкрити Хаб", "staff_hub_nav");
-                await ScreenManager.renderScreen(ctx, welcomeText, welcomeKb, { forceNew: true });
-            } else {
-                await ScreenManager.renderScreen(ctx, "✅ <b>Твої побажання успішно збережені!</b>", "staff-main", { forceNew: true });
-            }
-        }
-
-        // Only notify admin for new candidates (auto-hire), not for regular staff filling monthly preferences
-        if (wasNewCandidate) {
-            const { ADMIN_IDS } = await import("../config.js");
-            if (ADMIN_IDS.length > 0) {
-                const adminNotifyText = `📅 <b>New Schedule Preferences!</b>\n\n` +
-                    `👤 Staff: <b>${escapeHtml(staffNameForTable)}</b>\n` +
-                    `📅 Month: <b>${escapeHtml(month || "—")}</b>\n` +
-                    `🚫 Weekends: <b>${escapeHtml(daysStr)}</b>\n` +
-                    `💬 Comment: ${escapeHtml(comment || 'none')}\n\n` +
-                    (shouldMoveToNext ? `⏳ Waiting for the next month to be filled...` :
-                        `✅ Auto-hired! Please add shifts to the schedule.`);
-
-                await ctx.api.sendMessage(ADMIN_IDS[0]!, adminNotifyText, {
-                    parse_mode: "HTML"
-                });
-            }
-        }
+        delete ctx.session.preferencesData;
+        ctx.session.step = "idle";
+        await ScreenManager.renderScreen(ctx, "✅ <b>Твої побажання успішно збережені!</b>", "staff-main", { forceNew: true });
     } catch (e: any) {
         logger.error({ err: e }, "Preferences save failed");
         // «⏳ Зберігаю...» удаляется и здесь: без этого экран продолжал уверять,
@@ -876,9 +645,21 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         // Окно гасит дребезг, пока запись ИДЁТ. После успеха оно держалось ещё
         // до 10 секунд: человек, который сразу открыл форму заново и поправил
         // день, получал «⏳ Зберігаю…» — и не сохранялось ничего. Повторные
-        // нажатия на старый экран после успеха ловит `restartIfSessionLost`.
+        // нажатия на старый экран после успеха ловит `lastSavedAt`.
         if (telegramId !== undefined) saveDedupe.release(`pref-save:${telegramId}`);
     }
+});
+
+/**
+ * Любая другая `pref_*`-кнопка — из старых сообщений: «🚫 Не буду заповнювати»,
+ * «✏️ Змінити побажання», «🔄 Спочатку». Щит устаревших кнопок пропускает
+ * `pref_*` дальше, не отвечая, и без этого обработчика у человека висел бы
+ * бесконечный спиннер. Отвечаем свежей формой — это и было нужно по любой
+ * из этих кнопок.
+ */
+preferencesHandlers.callbackQuery(/^pref_/, async (ctx) => {
+    delete ctx.session.preferencesData;
+    await restartIfSessionLost(ctx);
 });
 
 export async function handlePreferenceComment(ctx: MyContext) {

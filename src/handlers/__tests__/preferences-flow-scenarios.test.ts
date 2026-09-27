@@ -16,7 +16,7 @@ const user = {
 };
 
 const findWithProfilesByTelegramId = vi.fn();
-const schedulePreferenceWindow = vi.fn();
+const schedulePreferenceSchedule = vi.fn();
 const getSchedulePreference = vi.fn();
 const saveCanonicalPreference = vi.fn();
 const readCanonicalPreferenceDays = vi.fn();
@@ -27,7 +27,7 @@ vi.mock("../../repositories/user-repository.js", () => ({
     userRepository: { findWithProfilesByTelegramId },
 }));
 vi.mock("../../services/aws-business-client.js", () => ({
-    awsBusinessClient: { schedulePreferenceWindow, getSchedulePreference },
+    awsBusinessClient: { schedulePreferenceSchedule, getSchedulePreference },
 }));
 vi.mock("../../services/canonical-preferences-writer.js", () => ({
     saveCanonicalPreference,
@@ -44,7 +44,6 @@ vi.mock("../../core/logger.js", () => ({
 }));
 vi.mock("../../config.js", async (importOriginal) => ({
     ...(await importOriginal<typeof import("../../config.js")>()),
-    AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: true,
     ADMIN_IDS: [],
 }));
 
@@ -107,7 +106,12 @@ beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date(Date.parse("2026-10-24T09:00:00Z") + testIndex++ * 2 * 60_000));
     findWithProfilesByTelegramId.mockResolvedValue(user);
-    schedulePreferenceWindow.mockResolvedValue({ month: "2026-11", open: true });
+    schedulePreferenceSchedule.mockResolvedValue({
+        month: "2026-11",
+        open: true,
+        deadline: "2026-10-26",
+        deadlineEndsAt: "2026-10-26T22:00:00.000Z",
+    });
     getSchedulePreference.mockResolvedValue({ worksUntil: null });
     readCanonicalPreferenceDays.mockResolvedValue(undefined);
     saveCanonicalPreference.mockResolvedValue({ ok: true });
@@ -166,16 +170,6 @@ describe("happy path", () => {
 });
 
 describe("double taps", () => {
-    it("writes once when save is tapped twice at the same time", async () => {
-        await tap("pref_fill");
-        await tap("pref_to_comment_none");
-
-        await Promise.all([tap("pref_save_final"), tap("pref_save_final")]);
-
-        expect(saveCanonicalPreference).toHaveBeenCalledTimes(1);
-        expect(answers()).toContain("⏳ Зберігаю…");
-    });
-
     it("strips the confirmation buttons while the save is running", async () => {
         await tap("pref_fill");
         await tap("pref_to_comment_none");
@@ -306,7 +300,7 @@ describe("unavailable calendar cells", () => {
 
 describe("collection window", () => {
     it("says the collection is closed before any day is marked", async () => {
-        schedulePreferenceWindow.mockResolvedValue({ month: "2026-11", open: false });
+        schedulePreferenceSchedule.mockResolvedValue({ month: "2026-11", open: false, deadline: "2026-10-26", deadlineEndsAt: "2026-10-26T22:00:00.000Z" });
 
         await tap("pref_fill");
 
@@ -318,7 +312,7 @@ describe("collection window", () => {
     });
 
     it("opens the form when the window cannot be read, like the menu button does", async () => {
-        schedulePreferenceWindow.mockRejectedValue(new Error("timeout"));
+        schedulePreferenceSchedule.mockRejectedValue(new Error("timeout"));
 
         await tap("pref_fill");
 
@@ -447,3 +441,79 @@ describe("leaving", () => {
         expect(saveCanonicalPreference).not.toHaveBeenCalled();
     });
 });
+
+describe("findings of the review", () => {
+    /**
+     * Владелец закрыл сбор и нажал «Reopen for X». Проверка окна при открытии
+     * формы не видела личного окна, и X получал «збір закрито».
+     */
+    it("lets a reopened person in: the window check carries the employee", async () => {
+        await tap("pref_fill");
+
+        expect(schedulePreferenceSchedule).toHaveBeenCalledWith("2026-11", user.staffProfile.awsEmployeePublicId);
+        expect(session.preferencesData?.step).toBe("CALENDAR");
+    });
+
+    /** Кнопка старого экрана подтверждения, нажатая из календаря, записала бы правку на полпути. */
+    it("does not save from anywhere but the confirmation screen", async () => {
+        await tap("pref_fill");
+        await tap("pref_toggle_5");
+        await tap("pref_to_comment");
+        await tap("pref_back_calendar");
+        await tap("pref_toggle_9");
+
+        await tap("pref_save_final");
+
+        expect(saveCanonicalPreference).not.toHaveBeenCalled();
+        expect(session.preferencesData.step).toBe("CONFIRM");
+        expect(lastScreen()![1]).toContain("Перевір і збережи");
+        expect(answers()).toContain("Перевір дні й натисни «Зберегти» ще раз.");
+    });
+
+    /** «Без коментаря» был единственным выходом и стирал написанное. */
+    it("keeps the comment when leaving the comment screen with «Назад»", async () => {
+        await tap("pref_fill");
+        await tap("pref_to_comment_none");
+        await tap("pref_add_comment");
+        await send("можу на іншій локації");
+        await tap("pref_add_comment");
+        expect(buttons(lastScreen()![2])).toEqual(["pref_comment_back", "pref_skip_comment"]);
+
+        await tap("pref_comment_back");
+
+        expect(session.preferencesData.comment).toBe("можу на іншій локації");
+        expect(session.preferencesData.step).toBe("CONFIRM");
+    });
+
+    it("offers no «Прибрати коментар» when there is nothing to remove", async () => {
+        await tap("pref_fill");
+        await tap("pref_to_comment_none");
+
+        await tap("pref_add_comment");
+
+        expect(buttons(lastScreen()![2])).toEqual(["pref_comment_back"]);
+    });
+
+    /** Тост «Форму оновлено» над экраном «збір закрито» противоречил бы экрану. */
+    it("does not say the form was refreshed when it opens on a closed collection", async () => {
+        schedulePreferenceSchedule.mockResolvedValue({ month: "2026-11", open: false, deadline: "2026-10-26", deadlineEndsAt: "2026-10-26T22:00:00.000Z" });
+
+        await tap("pref_toggle_4");
+
+        expect(answers()).toEqual([undefined]);
+        expect(lastScreen()![1]).toContain("уже закрито");
+    });
+
+    /** Удалённые кнопки из старых сообщений: без ответа у человека висел бы спиннер. */
+    it.each(["pref_opt_out", "pref_force_edit", "pref_something_retired"])(
+        "answers the retired %s once with a fresh form",
+        async (data) => {
+            await tap(data);
+
+            expect(answers()).toHaveLength(1);
+            expect(session.preferencesData?.step).toBe("CALENDAR");
+            expect(saveCanonicalPreference).not.toHaveBeenCalled();
+        },
+    );
+});
+

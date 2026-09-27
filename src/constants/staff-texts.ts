@@ -727,6 +727,7 @@ Please check bot permissions (Manage Topics).`,
 
   "staff-preferences-session-restarted": `Форму оновлено — перевір дні ще раз.`,
   "staff-preferences-already-saved": `Побажання вже збережені.`,
+  "staff-preferences-check-before-save": `Перевір дні й натисни «Зберегти» ще раз.`,
   "staff-preferences-day-unavailable": `Цей день не можна вибрати.`,
   "staff-preferences-comment-too-long": (p: { max: number; length: number }) => `Коментар задовгий: ${p.length} символів, а можна до ${p.max}. Скороти й надішли ще раз.`,
 

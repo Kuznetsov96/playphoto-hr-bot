@@ -81,8 +81,6 @@ export interface SessionData {
         year?: number;
         selectedDays?: number[];
         comment?: string;
-        forceNextMonth?: boolean;
-        forceEdit?: boolean;
         // Останній робочий день (`YYYY-MM-DD`) для тих, хто доопрацьовує.
         worksUntil?: string | null;
         /**

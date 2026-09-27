@@ -101,16 +101,20 @@ describe("приглашение заполнить пожелания", () => {
 });
 
 describe("окно напоминаний", () => {
-    it("дедлайн рассылки совпадает с тем, до которого пингуют", () => {
-        // Один и тот же `deadlineDate` идёт и в текст сообщения, и в
-        // `pingUntil`. Разойдись они — бот назвал бы одну дату, а замолчал
-        // в другую, и человек не понял бы, верить ли написанному.
+    /**
+     * Срок хранит вебапп. Бот называет его в приглашении и спрашивает заново
+     * перед каждым напоминанием — своего числа 26 у бота больше нет, иначе
+     * перенос срока владельцем бот бы не заметил.
+     */
+    it("берёт срок из вебаппа, а не из своего числа", () => {
         const source = readFileSync(
             new URL("../monthly-preferences-trigger.ts", import.meta.url),
             "utf8",
         );
 
-        expect(source).toContain("pingUntil: deadlineDate");
-        expect(source).toContain("deadline: formatDeadline(deadlineDate)");
+        expect(source).toContain("awsBusinessClient.schedulePreferenceSchedule(targetMonth)");
+        expect(source).toContain("deadline: formatLocalDate(schedule.deadline)");
+        expect(source).toContain("targetMonth,");
+        expect(source).not.toMatch(/DEADLINE_DAY_OF_MONTH|kyivDeadline|pingUntil:/u);
     });
 });

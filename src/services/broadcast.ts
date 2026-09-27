@@ -8,7 +8,7 @@ import { userRepository } from "../repositories/user-repository.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
 import { broadcastDeliveryRepository } from "../repositories/broadcast-delivery-repository.js";
-import { TEAM_CHATS, AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
+import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
@@ -228,7 +228,6 @@ function redisAlreadyFilledCheck(prefMonthName: string): AlreadyFilledCheck {
  */
 async function resolveAlreadyFilledCheck(prefMonthName: string, prefMonthYear: number): Promise<AlreadyFilledCheck> {
     const redisFallback = redisAlreadyFilledCheck(prefMonthName);
-    if (!AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) return redisFallback;
 
     const canonicalMonth = toCanonicalMonth(prefMonthName, prefMonthYear);
     if (!canonicalMonth) {
@@ -345,7 +344,7 @@ export const broadcastService = {
         };
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -435,6 +434,7 @@ export const broadcastService = {
         // закрытия окна — она отвечает «збір закрито», а он повторяет каждые
         // четыре часа, пока человек не заблокирует бота.
         const pingUntil = pingOptions?.pingUntil ?? null;
+        const targetMonth = pingOptions?.targetMonth ?? null;
         const repeatInterval = pingOptions?.repeatIntervalMs || null;
         const buttonType = pingOptions?.buttonType || 'default';
 
@@ -464,7 +464,8 @@ export const broadcastService = {
                         nextPingAt: new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
                         pingUntil,
-                        buttonType
+                        buttonType,
+                        targetMonth
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
@@ -513,7 +514,8 @@ export const broadcastService = {
                         nextPingAt: new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
                         pingUntil,
-                        buttonType
+                        buttonType,
+                        targetMonth
                     });
                     await pendingReplyRepository.create({
                         trackedMessage: { connect: { id: tracked.id } },

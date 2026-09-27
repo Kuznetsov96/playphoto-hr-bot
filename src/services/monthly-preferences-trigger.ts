@@ -5,13 +5,17 @@ import logger from "../core/logger.js";
 import { redis } from "../core/redis.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { formatDeadline, kyivDeadline } from "../utils/format-deadline.js";
+import { formatLocalDate } from "../utils/format-deadline.js";
+import { awsBusinessClient } from "./aws-business-client.js";
+import { monthNameFromCanonical, nextCanonicalMonth } from "./preference-month.js";
 
 /**
- * Service to handle monthly schedule preference collection.
+ * Рассылка 23-го: приглашение подать пожелания на следующий месяц.
+ *
+ * Срок сбора своего у бота больше нет — он хранится в вебаппе (26-е по
+ * умолчанию, владелец может перенести) и приходит из `collection-schedule`.
+ * Напоминания тоже спрашивают его заново перед каждой отправкой (pinger.ts).
  */
-/** До какого числа принимаются пожелания. Рассылка уходит 23-го. */
-const DEADLINE_DAY_OF_MONTH = 26;
 
 export class MonthlyPreferencesTrigger {
     /**
@@ -22,8 +26,8 @@ export class MonthlyPreferencesTrigger {
         const now = new Date();
         // Use Kyiv time for month name
         const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
-        const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
-        const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
+        const targetMonth = nextCanonicalMonth(now);
+        const monthName = monthNameFromCanonical(targetMonth) ?? targetMonth;
 
         const triggerKey = `monthly_pref_triggered:${kyivNow.getFullYear()}-${kyivNow.getMonth() + 1}`;
         
@@ -46,16 +50,23 @@ export class MonthlyPreferencesTrigger {
             return;
         }
 
-        // Дедлайн — 26-е число текущего месяца, через три дня после рассылки.
-        // Дата, а не «2 дні»: относительный срок каждый считает по-своему,
-        // а день недели выводится из самой даты и потому не разойдётся с ней.
-        const deadlineDate = kyivDeadline(now, DEADLINE_DAY_OF_MONTH);
-        const messageText = STAFF_TEXTS["staff-preferences-invite"]({
-            monthName,
-            deadline: formatDeadline(deadlineDate),
-        });
-
         try {
+            // Срок — из вебаппа. Недоступен API — рассылка не уходит, а ключ
+            // освобождается (catch ниже): следующий тик через минуту повторит.
+            // Разослать с угаданной датой хуже, чем на минуту позже.
+            const schedule = await awsBusinessClient.schedulePreferenceSchedule(targetMonth);
+            if (!schedule.open) {
+                // Владелец закрыл сбор раньше рассылки — звать некуда.
+                logger.warn({ targetMonth }, "[MonthlyPref] Collection already closed, invites not sent");
+                return;
+            }
+            // Дата, а не «2 дні»: относительный срок каждый считает по-своему,
+            // а день недели выводится из самой даты и потому не разойдётся с ней.
+            const messageText = STAFF_TEXTS["staff-preferences-invite"]({
+                monthName,
+                deadline: formatLocalDate(schedule.deadline),
+            });
+
             // Queue the broadcast after acquiring the distributed monthly lock.
             const totalSent = await broadcastService.createBroadcast(
                 bot.api,
@@ -71,9 +82,10 @@ export class MonthlyPreferencesTrigger {
                     // шестичасовой шаг даёт два напоминания в день вместо трёх —
                     // достаточно, чтобы достучаться до забывчивого.
                     repeatIntervalMs: 6 * 60 * 60 * 1000,    // 6 hours
-                    // Напоминания смолкают вместе с окном: после дедлайна
-                    // форма отвечает «збір закрито», и звать в неё — издевка.
-                    pingUntil: deadlineDate,
+                    // Без `pingUntil`: срок и «сбор открыт» пингер спрашивает
+                    // у вебаппа по месяцу перед каждым напоминанием. Зашитый
+                    // в строку срок не узнал бы ни о переносе, ни о закрытии.
+                    targetMonth,
                     buttonType: 'preferences'
                 }
             );

@@ -4,6 +4,7 @@ const findToPing = vi.fn();
 const stopTracking = vi.fn();
 const trackedUpdate = vi.fn();
 const pendingDeleteMany = vi.fn();
+const schedulePreferenceSchedule = vi.fn();
 
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -16,6 +17,7 @@ vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany },
 }));
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: {} }));
+vi.mock("../aws-business-client.js", () => ({ awsBusinessClient: { schedulePreferenceSchedule } }));
 vi.mock("../../repositories/candidate-repository.js", () => ({ candidateRepository: {} }));
 vi.mock("../../repositories/user-repository.js", () => ({ userRepository: {} }));
 vi.mock("../schedule-sync.js", () => ({ scheduleSyncService: {} }));
@@ -43,7 +45,8 @@ function trackedMessage(broadcastAgeMs: number) {
         pingIntervalMs: 4 * 60 * 60 * 1000,
         broadcastId: 7,
         buttonType: "preferences",
-        pingUntil: new Date("2026-08-26T20:59:00Z"),
+        targetMonth: "2026-09",
+        pingUntil: null,
         broadcast: {
             id: 7,
             createdAt: new Date(Date.now() - broadcastAgeMs),
@@ -65,6 +68,13 @@ function fakeBot() {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    // Сбор открыт, срок — 26 серпня (конец дня по Киеву = 26.08 21:00 UTC).
+    schedulePreferenceSchedule.mockResolvedValue({
+        month: "2026-09",
+        open: true,
+        deadline: "2026-08-26",
+        deadlineEndsAt: "2026-08-26T21:00:00.000Z",
+    });
     // Полдень по Киеву: тесты потолка не должны зависеть от того, ночь ли
     // сейчас на самом деле — иначе они падали бы половину суток.
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -165,3 +175,80 @@ describe("pinger reminder kind", () => {
         expect(buttons.map((button: any) => button.callback_data)).toEqual(["broadcast_confirm_ok_7"]);
     });
 });
+
+describe("pinger reads the collection schedule from the web app", () => {
+    /** Владелец перенёс срок — напоминание называет новую дату, а не зашитое 26-е. */
+    it("names the deadline the owner moved", async () => {
+        vi.setSystemTime(new Date("2026-08-28T11:00:00Z"));
+        schedulePreferenceSchedule.mockResolvedValue({
+            month: "2026-09",
+            open: true,
+            deadline: "2026-08-29",
+            deadlineEndsAt: "2026-08-29T21:00:00.000Z",
+        });
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(bot.api.sendMessage.mock.calls[0]![1]).toContain("Останній день — 29 серпня, субота");
+    });
+
+    /** Закрыли сбор 25-го — раньше бот пинговал до зашитого 26-го. */
+    it("stops for good once collection is closed", async () => {
+        vi.setSystemTime(new Date("2026-08-25T11:00:00Z"));
+        schedulePreferenceSchedule.mockResolvedValue({
+            month: "2026-09",
+            open: false,
+            deadline: "2026-08-26",
+            deadlineEndsAt: "2026-08-26T21:00:00.000Z",
+        });
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+        expect(stopTracking).toHaveBeenCalledWith(1);
+    });
+
+    /** Срок прошёл, но его ещё могут продлить: не бросаем, а проверяем через час. */
+    it("waits an hour after the deadline instead of giving up", async () => {
+        vi.setSystemTime(new Date("2026-08-27T09:00:00Z"));
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+        expect(stopTracking).not.toHaveBeenCalled();
+        const next = trackedUpdate.mock.calls[0]?.[1]?.nextPingAt as Date;
+        expect(next.toISOString()).toBe("2026-08-27T10:00:00.000Z");
+    });
+
+    it("stops once the schedule month itself is over", async () => {
+        vi.setSystemTime(new Date("2026-10-01T09:00:00Z"));
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+
+        await runPingerForTest(fakeBot());
+
+        expect(stopTracking).toHaveBeenCalledWith(1);
+    });
+
+    /** Вебапп недоступен — ни угаданной даты, ни остановки: повтор на следующем тике. */
+    it("sends nothing and keeps the reminder queued when the web app is down", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        schedulePreferenceSchedule.mockRejectedValue(new Error("timeout"));
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000), { ...trackedMessage(60 * 60 * 1000), id: 2 }]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+        expect(stopTracking).not.toHaveBeenCalled();
+        expect(trackedUpdate).not.toHaveBeenCalled();
+        // Один запрос на прогон, а не на каждую строку.
+        expect(schedulePreferenceSchedule).toHaveBeenCalledTimes(1);
+    });
+});
+

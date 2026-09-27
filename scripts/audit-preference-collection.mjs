@@ -47,12 +47,18 @@ async function main() {
     const { awsBusinessClient } = await import("/app/dist/services/aws-business-client.js");
     const missing = await awsBusinessClient.missingSchedulePreferences(MONTH);
 
-    // Рассылка месяца — та, у чьих строк трекинга есть `pingUntil`: его ставит
-    // только сбор пожеланий. Окно по дате создания отсекает прошлые месяцы.
+    // Рассылка месяца: у новых строк трекинга стоит `targetMonth`, у рассылок
+    // до него (октябрь 2026 и раньше) — `pingUntil`, который ставил только сбор
+    // пожеланий. Окно по дате создания отсекает прошлые месяцы для старых.
     const from = new Date(Date.UTC(year, monthNumber - 2, 15));
     const to = new Date(Date.UTC(year, monthNumber - 1, 1));
     const broadcasts = await prisma.broadcast.findMany({
-        where: { createdAt: { gte: from, lt: to }, trackedMessages: { some: { pingUntil: { not: null } } } },
+        where: {
+            OR: [
+                { trackedMessages: { some: { targetMonth: MONTH } } },
+                { createdAt: { gte: from, lt: to }, trackedMessages: { some: { pingUntil: { not: null } } } },
+            ],
+        },
         select: { id: true, createdAt: true, messageText: true },
         orderBy: { createdAt: "asc" },
     });

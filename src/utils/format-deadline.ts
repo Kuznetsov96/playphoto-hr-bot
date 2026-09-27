@@ -24,35 +24,6 @@ const MONTHS_UK_GENITIVE = [
     "грудня",
 ] as const;
 
-const MONTHS_UK_NOMINATIVE = [
-    "січень",
-    "лютий",
-    "березень",
-    "квітень",
-    "травень",
-    "червень",
-    "липень",
-    "серпень",
-    "вересень",
-    "жовтень",
-    "листопад",
-    "грудень",
-] as const;
-
-/**
- * «жовтень» для дедлайна 26 вересня: пожелания собираются на месяц, СЛЕДУЮЩИЙ
- * за месяцем дедлайна.
- *
- * Напоминанию неоткуда больше взять месяц: у строки трекинга есть только её
- * `pingUntil`, а он и есть дедлайн — тот же `deadlineDate`, что назван в
- * приглашении. Месяц берётся в киевской зоне по той же причине, что и в
- * `formatDeadline`: 23:59 по Киеву в UTC может быть уже другим числом.
- */
-export function preferencesMonthName(deadline: Date, timeZone = "Europe/Kyiv"): string {
-    const local = new Date(deadline.toLocaleString("en-US", { timeZone }));
-    return MONTHS_UK_NOMINATIVE[(local.getMonth() + 1) % 12]!;
-}
-
 /**
  * «26 серпня, середа».
  *
@@ -66,7 +37,22 @@ export function preferencesMonthName(deadline: Date, timeZone = "Europe/Kyiv"): 
  */
 export function formatDeadline(deadline: Date, timeZone = "Europe/Kyiv"): string {
     const local = new Date(deadline.toLocaleString("en-US", { timeZone }));
-    return `${local.getDate()} ${MONTHS_UK_GENITIVE[local.getMonth()]}, ${WEEKDAYS_UK[local.getDay()]}`;
+    return formatCalendarDay(local.getFullYear(), local.getMonth(), local.getDate());
+}
+
+/**
+ * «26 жовтня, понеділок» для календарной даты `YYYY-MM-DD` — в таком виде срок
+ * сбора приходит из вебаппа. Зона не нужна: это уже день, а не момент.
+ */
+export function formatLocalDate(localDate: string): string {
+    const [year, month, day] = localDate.split("-").map(Number) as [number, number, number];
+    return formatCalendarDay(year, month - 1, day);
+}
+
+function formatCalendarDay(year: number, monthIndex: number, day: number): string {
+    // Полдень UTC: день недели не съедет ни в какой зоне сервера.
+    const weekday = new Date(Date.UTC(year, monthIndex, day, 12)).getUTCDay();
+    return `${day} ${MONTHS_UK_GENITIVE[monthIndex]}, ${WEEKDAYS_UK[weekday]}`;
 }
 
 /**
@@ -86,36 +72,6 @@ export function kyivDateStr(instant: Date, timeZone = "Europe/Kyiv"): string {
     return `${year}-${month}-${day}`;
 }
 
-/**
- * Момент, когда закрывается сбор: заданное число месяца, 23:59 по Киеву.
- *
- * Собирать через `new Date(y, m, d, 23, 59)` нельзя: этот конструктор читает
- * компоненты в таймзоне СЕРВЕРА, а в контейнере `TZ` не задан, то есть UTC.
- * Получалось 23:59 UTC — уже 27-е число в Киеве, и сообщение называло бы
- * «27 серпня, четвер» вместо «26 серпня, середа», противореча само себе.
- *
- * Считается от полуночи UTC того же дня: смещение зоны берётся на месте, так
- * что летнее и зимнее время различаются сами собой.
- */
-export function kyivDeadline(now: Date, dayOfMonth: number, timeZone = "Europe/Kyiv"): Date {
-    const local = new Date(now.toLocaleString("en-US", { timeZone }));
-    const wallClockMs = Date.UTC(local.getFullYear(), local.getMonth(), dayOfMonth, 23, 59);
-
-    // Смещение измеряется в САМ искомый час, а не в полночь: в день перевода
-    // часов они разные, и замер в полночь сдвигал бы результат на час. Для
-    // 29 марта 2026 это давало «30 березня» — та же ошибка «сообщение
-    // противоречит себе», ради которой функция и написана.
-    //
-    // Две итерации: первая берёт смещение по догадке, вторая — уже по
-    // найденному моменту. Этого достаточно, потому что перевод часов сдвигает
-    // время на час, а не на сутки.
-    let utcMs = wallClockMs;
-    for (let pass = 0; pass < 2; pass += 1) {
-        utcMs = wallClockMs - offsetAt(new Date(utcMs), timeZone);
-    }
-    return new Date(utcMs);
-}
-
 /** Насколько зона опережает UTC в этот момент. */
 function offsetAt(instant: Date, timeZone: string): number {
     return (
@@ -126,7 +82,7 @@ function offsetAt(instant: Date, timeZone: string): number {
 
 /**
  * Момент дедлайна завдання (workDate + deadlineTime "HH:MM") як конкретна
- * мить у Києві — тим самим прийомом, що й kyivDeadline: беремо календарну
+ * мить у Києві: беремо календарну
  * дату в Києві, будуємо wall-clock у UTC-мілісекундах, тоді віднімаємо
  * київський офсет у САМ шуканий момент (дві ітерації — досить, бо перехід
  * на літній/зимовий час зсуває час максимум на годину).

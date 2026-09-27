@@ -14,7 +14,9 @@ import { handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { isQuietHour, nextAllowedPingTime } from "../utils/quiet-hours.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { formatDeadline, preferencesMonthName } from "../utils/format-deadline.js";
+import { formatLocalDate } from "../utils/format-deadline.js";
+import { awsBusinessClient, type SchedulePreferenceSchedule } from "./aws-business-client.js";
+import { monthNameFromCanonical } from "./preference-month.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -204,10 +206,40 @@ export function startPingerLoop(bot: Bot<MyContext>) {
  */
 export const runPingerForTest = (bot: Bot<MyContext>) => runPinger(bot);
 
+/** Как часто после срока проверять, не продлил ли его владелец. */
+const DEADLINE_RECHECK_MS = 60 * 60 * 1000;
+
+/** Первое число месяца после `YYYY-MM` (UTC, ms): позже сбор на этот месяц не нужен. */
+function monthAfter(month: string): number {
+    const [year, monthNumber] = month.split("-").map(Number) as [number, number];
+    return Date.UTC(year, monthNumber, 1);
+}
+
+/**
+ * Срок и «сбор открыт» для месяца — из вебаппа, один запрос на прогон.
+ * `null` — вебапп недоступен: напоминание этого тика не уходит, строка
+ * остаётся в очереди и повторится на следующем.
+ */
+async function preferencesScheduleFor(
+    month: string,
+    cache: Map<string, SchedulePreferenceSchedule | null>,
+): Promise<SchedulePreferenceSchedule | null> {
+    if (cache.has(month)) return cache.get(month)!;
+    let schedule: SchedulePreferenceSchedule | null = null;
+    try {
+        schedule = await awsBusinessClient.schedulePreferenceSchedule(month);
+    } catch (error) {
+        logger.warn({ err: error, month }, "Preference collection schedule unavailable; reminders wait for the next tick");
+    }
+    cache.set(month, schedule);
+    return schedule;
+}
+
 async function runPinger(bot: Bot<MyContext>) {
     try {
         const now = new Date();
         const messagesToPing = await trackedMessageRepository.findToPing(now);
+        const schedules = new Map<string, SchedulePreferenceSchedule | null>();
 
         for (const msg of messagesToPing) {
             const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
@@ -261,11 +293,31 @@ async function runPinger(bot: Bot<MyContext>) {
             // «Ознайомлена», и нажатие на неё глушило пинги без подачи.
             const isPreferences = msg.buttonType === "preferences";
 
-            if (isPrivate && isPreferences && msg.pingUntil) {
-                // Тот же дедлайн, что в приглашении: `pingUntil` — это он и есть.
+            if (isPrivate && isPreferences && msg.targetMonth) {
+                // Срок спрашивается перед КАЖДЫМ напоминанием: владелец мог его
+                // перенести или закрыть сбор. Раньше напоминания шли до
+                // зашитого 26-го, даже если сбор закрыли 25-го.
+                const schedule = await preferencesScheduleFor(msg.targetMonth, schedules);
+                if (schedule === null) continue;
+                // Закрытие необратимо (личное окно открывает «Reopen», а не
+                // рассылка) — напоминания кончаются насовсем. Как и с концом
+                // самого месяца графика: позже срок не переносится.
+                if (!schedule.open || now.getTime() >= monthAfter(msg.targetMonth)) {
+                    await trackedMessageRepository.stopTracking(msg.id);
+                    continue;
+                }
+                // Срок прошёл, но владелец ещё может его продлить — проверяем
+                // раз в час, а не бросаем: остановленное напоминание после
+                // продления уже не проснулось бы.
+                if (now.getTime() >= new Date(schedule.deadlineEndsAt).getTime()) {
+                    await trackedMessageRepository.update(msg.id, {
+                        nextPingAt: new Date(now.getTime() + DEADLINE_RECHECK_MS),
+                    });
+                    continue;
+                }
                 text = STAFF_TEXTS["staff-preferences-reminder"]({
-                    monthName: preferencesMonthName(msg.pingUntil),
-                    deadline: formatDeadline(msg.pingUntil),
+                    monthName: monthNameFromCanonical(msg.targetMonth) ?? "наступний місяць",
+                    deadline: formatLocalDate(schedule.deadline),
                 });
             } else if (isPrivate && isPreferences) {
                 text = STAFF_TEXTS["staff-preferences-reminder-undated"];
