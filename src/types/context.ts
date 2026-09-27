@@ -81,8 +81,6 @@ export interface SessionData {
         year?: number;
         selectedDays?: number[];
         comment?: string;
-        forceNextMonth?: boolean;
-        forceEdit?: boolean;
         // Останній робочий день (`YYYY-MM-DD`) для тих, хто доопрацьовує.
         worksUntil?: string | null;
         /**
@@ -91,6 +89,12 @@ export interface SessionData {
          * чужие на вид отметки читаются как сбой.
          */
         prefilled?: boolean;
+        /**
+         * Когда нажата «💬 Додати коментар» (ms). Шаг 'COMMENT' перехватывает
+         * следующее сообщение — но только недолго: брошенный на этом шаге
+         * флоу иначе съел бы сообщение в підтримку, написанное через день.
+         */
+        commentRequestedAt?: number;
     };
 
     slotBuilder?: {

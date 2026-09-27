@@ -7,20 +7,19 @@ const source = readFileSync(
     "utf8"
 );
 
+/**
+ * Флаг AWS_PREFERENCES_CANONICAL_WRITE_ENABLED в проде включён, выключенная
+ * ветка (Google Sheets) не выполнялась — она удалена вместе с флагом.
+ */
 describe("preferences flow canonical write", () => {
-    it("routes the save through the canonical writer behind the flag", () => {
-        expect(source).toContain("AWS_PREFERENCES_CANONICAL_WRITE_ENABLED");
+    it("saves through the canonical writer only", () => {
         expect(source).toContain("saveCanonicalPreference");
+        expect(source).not.toMatch(/preferencesService|preferencesQueue|AWS_PREFERENCES_CANONICAL_WRITE_ENABLED\b(?! в)/u);
     });
 
-    it("keeps the Google Sheet write only as the rollback path", () => {
-        expect(source).toContain("preferencesService.savePreference");
-    });
-
-    it("never performs both writes in the same branch", () => {
-        expect(source).not.toMatch(
-            /saveCanonicalPreference[\s\S]{0,400}?await\s+preferencesService\.savePreference/u
-        );
+    /** Кандидатов первой смены на проде нет: автоприём в штат из формы удалён. */
+    it("no longer hires anyone from the preferences form", () => {
+        expect(source).not.toMatch(/isFirstShiftCandidate|forceNextMonth|candidateRepository|HIRED/u);
     });
 });
 
@@ -71,9 +70,13 @@ describe("preferences flow confirmation actions", () => {
         expect(source).not.toMatch(/text\("🔄 Спочатку"/u);
     });
 
-    /** Старые экраны в чатах всё ещё шлют этот callback. */
-    it("keeps handling the retired restart button", () => {
-        expect(source).toContain('callbackQuery("pref_restart_flow"');
+    /**
+     * Старые экраны в чатах всё ещё шлют «🔄 Спочатку», «🚫 Не буду заповнювати»,
+     * «✏️ Змінити побажання». Щит устаревших кнопок пропускает `pref_*` не
+     * отвечая — без общего обработчика был бы бесконечный спиннер.
+     */
+    it("answers every retired pref_ button with a fresh form", () => {
+        expect(source).toContain("preferencesHandlers.callbackQuery(/^pref_/");
     });
 });
 
@@ -140,5 +143,48 @@ describe("preferences flow double submit", () => {
      */
     it("frees the debounce so the offered retry actually works", () => {
         expect(source).toMatch(/async function failSave[\s\S]{0,600}saveDedupe\.release/u);
+    });
+});
+
+/**
+ * Шаг комментария стоял между «Готово» и «Зберегти» и выглядел как конец:
+ * человек выбирал дни, видел «Вибрані вихідні: …» и уходил. Пожелания жили
+ * только в сессии и никуда не доходили (так потерялись пожелания на жовтень).
+ */
+describe("preferences flow reaches save in one step", () => {
+    it("goes from the calendar straight to the confirmation", () => {
+        expect(source).toMatch(
+            /callbackQuery\(\["pref_to_comment", "pref_to_comment_none"\][\s\S]{0,1200}step = 'CONFIRM';\s*await renderConfirmation\(ctx\)/u,
+        );
+        expect(source).not.toContain("Надішли повідомлення</b> або натисни кнопку");
+    });
+
+    it("says on the confirmation that nothing has been sent yet", () => {
+        expect(source).toContain("Побажання ще не надіслані — натисни «Зберегти»");
+    });
+
+    it("puts save first and the comment behind its own button", () => {
+        expect(source).toMatch(
+            /\.text\("✅ Зберегти", "pref_save_final"\)\s*\.row\(\)\s*\.text\(comment \? "💬 Змінити коментар" : "💬 Додати коментар", "pref_add_comment"\)/u,
+        );
+    });
+
+    it("captures free text as a comment only after that button", () => {
+        // Перехват на экране подтверждения съел бы сообщение в підтримку от
+        // того, кто бросил форму: сессия живёт до сохранения или выхода.
+        expect(source).toMatch(/preferencesData\.step !== 'COMMENT'\) return false;/u);
+        expect(source).toMatch(/callbackQuery\("pref_add_comment"[\s\S]{0,300}step = 'COMMENT'/u);
+    });
+});
+
+
+/**
+ * Брошенный на «💬 Додати коментар» флоу переживал /start: следующее сообщение
+ * — чаще всего в підтримку — уходило в пожелания комментарием и исчезало из чата.
+ */
+describe("/start resets the preferences form", () => {
+    it("drops preferencesData in the global /start breakout", () => {
+        const bot = readFileSync(fileURLToPath(new URL("../../core/bot.ts", import.meta.url)), "utf8");
+        expect(bot).toMatch(/hasCommand\("start"\)[\s\S]{0,1600}delete ctx\.session\.preferencesData;/u);
     });
 });

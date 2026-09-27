@@ -13,6 +13,10 @@ import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { isQuietHour, nextAllowedPingTime } from "../utils/quiet-hours.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { formatLocalDate } from "../utils/format-deadline.js";
+import { awsBusinessClient, type SchedulePreferenceSchedule } from "./aws-business-client.js";
+import { monthNameFromCanonical } from "./preference-month.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -202,10 +206,63 @@ export function startPingerLoop(bot: Bot<MyContext>) {
  */
 export const runPingerForTest = (bot: Bot<MyContext>) => runPinger(bot);
 
+/** Как часто после срока проверять, не продлил ли его владелец. */
+const DEADLINE_RECHECK_MS = 60 * 60 * 1000;
+
+/** Первое число месяца после `YYYY-MM` (UTC, ms): позже сбор на этот месяц не нужен. */
+function monthAfter(month: string): number {
+    const [year, monthNumber] = month.split("-").map(Number) as [number, number];
+    return Date.UTC(year, monthNumber, 1);
+}
+
+/**
+ * Срок и «сбор открыт» для месяца — из вебаппа, один запрос на прогон.
+ * `null` — вебапп недоступен: напоминание этого тика не уходит, строка
+ * остаётся в очереди и повторится на следующем.
+ */
+async function preferencesScheduleFor(
+    month: string,
+    cache: Map<string, SchedulePreferenceSchedule | null>,
+): Promise<SchedulePreferenceSchedule | null> {
+    if (cache.has(month)) return cache.get(month)!;
+    let schedule: SchedulePreferenceSchedule | null = null;
+    try {
+        schedule = await awsBusinessClient.schedulePreferenceSchedule(month);
+    } catch (error) {
+        logger.warn({ err: error, month }, "Preference collection schedule unavailable; reminders wait for the next tick");
+    }
+    cache.set(month, schedule);
+    return schedule;
+}
+
+/**
+ * Кто на месяц ещё не подал — по вебаппу, один запрос на прогон. `null` —
+ * вебапп недоступен. Нужен, потому что подать можно и мимо бота: владелец
+ * вписывает пожелания за человека на экране Availability, а ожидание ответа в
+ * боте об этом не знает и напоминание пришло бы тому, у кого всё уже подано.
+ */
+async function missingFor(
+    month: string,
+    cache: Map<string, Set<string> | null>,
+): Promise<Set<string> | null> {
+    if (cache.has(month)) return cache.get(month)!;
+    let missing: Set<string> | null = null;
+    try {
+        const result = await awsBusinessClient.missingSchedulePreferences(month);
+        missing = new Set(result.items.map((item) => item.telegramId));
+    } catch (error) {
+        logger.warn({ err: error, month }, "Missing-preferences list unavailable; reminders wait for the next tick");
+    }
+    cache.set(month, missing);
+    return missing;
+}
+
 async function runPinger(bot: Bot<MyContext>) {
     try {
         const now = new Date();
         const messagesToPing = await trackedMessageRepository.findToPing(now);
+        const schedules = new Map<string, SchedulePreferenceSchedule | null>();
+        const missingByMonth = new Map<string, Set<string> | null>();
 
         for (const msg of messagesToPing) {
             const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
@@ -252,10 +309,58 @@ async function runPinger(bot: Bot<MyContext>) {
             // 2. Format ping message
             let text = "";
             const isPrivate = Number(msg.chatId) > 0;
-            const isPreferences = msg.broadcast?.messageText?.includes("Побажання");
+            // По полю, а не по тексту рассылки. Раньше здесь было
+            // `messageText.includes("Побажання")`, и когда 21.08 приглашение
+            // стало начинаться с «Графік на …», сбор пожеланий перестал
+            // узнаваться: напоминание уходило как обычная рассылка, с кнопкой
+            // «Ознайомлена», и нажатие на неё глушило пинги без подачи.
+            const isPreferences = msg.buttonType === "preferences";
 
-            if (isPrivate && isPreferences) {
-                text = `🔔 <b>Нагадування!</b>\nТи ще не заповнив побажання по графіку. Натисни кнопку нижче 👇`;
+            if (isPrivate && isPreferences && msg.targetMonth) {
+                // Срок спрашивается перед КАЖДЫМ напоминанием: владелец мог его
+                // перенести или закрыть сбор. Раньше напоминания шли до
+                // зашитого 26-го, даже если сбор закрыли 25-го.
+                // Конец месяца графика — раньше запроса к вебаппу: иначе при
+                // лежащем вебаппе строка возвращалась бы каждую минуту вечно.
+                if (now.getTime() >= monthAfter(msg.targetMonth)) {
+                    await trackedMessageRepository.stopTracking(msg.id);
+                    continue;
+                }
+                const schedule = await preferencesScheduleFor(msg.targetMonth, schedules);
+                if (schedule === null) continue;
+                // Закрытие необратимо (личное окно открывает «Reopen», а не
+                // рассылка) — напоминания кончаются насовсем.
+                if (!schedule.open) {
+                    await trackedMessageRepository.stopTracking(msg.id);
+                    continue;
+                }
+                // Срок прошёл, но владелец ещё может его продлить — проверяем
+                // раз в час, а не бросаем: остановленное напоминание после
+                // продления уже не проснулось бы.
+                if (now.getTime() >= new Date(schedule.deadlineEndsAt).getTime()) {
+                    await trackedMessageRepository.update(msg.id, {
+                        nextPingAt: new Date(now.getTime() + DEADLINE_RECHECK_MS),
+                    });
+                    continue;
+                }
+                const missing = await missingFor(msg.targetMonth, missingByMonth);
+                if (missing === null) continue;
+                // Подано мимо бота (владелец вписал) — закрываем ожидание, как
+                // это сделало бы сохранение в боте, и больше не напоминаем.
+                if (!missing.has(String(msg.chatId))) {
+                    await pendingReplyRepository.updateMany(
+                        { trackedMessageId: msg.id, status: "pending" },
+                        { status: "confirmed", respondedAt: now },
+                    );
+                    await trackedMessageRepository.stopTracking(msg.id);
+                    continue;
+                }
+                text = STAFF_TEXTS["staff-preferences-reminder"]({
+                    monthName: monthNameFromCanonical(msg.targetMonth) ?? "наступний місяць",
+                    deadline: formatLocalDate(schedule.deadline),
+                });
+            } else if (isPrivate && isPreferences) {
+                text = STAFF_TEXTS["staff-preferences-reminder-undated"];
             } else if (isPrivate) {
                 text = `🔔 <b>Нагадування!</b>\nНатисни кнопку «Підтвердити» у повідомленні вище 👆`;
             } else {

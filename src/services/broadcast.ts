@@ -8,14 +8,14 @@ import { userRepository } from "../repositories/user-repository.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
 import { broadcastDeliveryRepository } from "../repositories/broadcast-delivery-repository.js";
-import { TEAM_CHATS, AWS_PREFERENCES_CANONICAL_WRITE_ENABLED } from "../config.js";
+import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import fs from "fs";
 import type { BroadcastMediaItem } from "../types/context.js";
 import { awsBusinessClient } from "./aws-business-client.js";
-import { toCanonicalMonth } from "./preference-month.js";
+import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "./preference-month.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
 
@@ -37,6 +37,26 @@ export interface BroadcastTarget {
 }
 
 type BroadcastMediaInput = BroadcastMediaItem | BroadcastMediaItem[];
+
+/**
+ * Месяц сбора и предел напоминаний для строки трекинга.
+ *
+ * Ручная рассылка с кнопкой пожеланий (админка) месяца не передаёт. Без месяца
+ * пингер не знает ни срока, ни «сбор закрыт» и напоминал бы вечно — сохранить
+ * после закрытия уже нельзя, остановить нечем. Месяц берётся по тому же
+ * правилу, что у формы, с пределом в его конце. `pingUntil` из очереди
+ * приходит строкой (BullMQ сериализует JSON) — Prisma принимает и её.
+ */
+export function preferencesPingWindow(
+    pingOptions: { buttonType?: string; targetMonth?: string; pingUntil?: Date | string } | undefined,
+    now: Date,
+): { targetMonth: string | null; pingUntil: Date | string | null } {
+    const isPreferences = pingOptions?.buttonType === 'preferences';
+    const targetMonth = pingOptions?.targetMonth ?? (isPreferences ? collectionCanonicalMonth(now) : null);
+    const pingUntil = pingOptions?.pingUntil
+        ?? (isPreferences && targetMonth ? firstDayAfterMonth(targetMonth) : null);
+    return { targetMonth, pingUntil };
+}
 
 function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
     const kb = new InlineKeyboard();
@@ -228,7 +248,6 @@ function redisAlreadyFilledCheck(prefMonthName: string): AlreadyFilledCheck {
  */
 async function resolveAlreadyFilledCheck(prefMonthName: string, prefMonthYear: number): Promise<AlreadyFilledCheck> {
     const redisFallback = redisAlreadyFilledCheck(prefMonthName);
-    if (!AWS_PREFERENCES_CANONICAL_WRITE_ENABLED) return redisFallback;
 
     const canonicalMonth = toCanonicalMonth(prefMonthName, prefMonthYear);
     if (!canonicalMonth) {
@@ -345,7 +364,7 @@ export const broadcastService = {
         };
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -434,9 +453,9 @@ export const broadcastService = {
         // Докуда напоминать. Без этого пингер звал бы заполнить форму и после
         // закрытия окна — она отвечает «збір закрито», а он повторяет каждые
         // четыре часа, пока человек не заблокирует бота.
-        const pingUntil = pingOptions?.pingUntil ?? null;
-        const repeatInterval = pingOptions?.repeatIntervalMs || null;
         const buttonType = pingOptions?.buttonType || 'default';
+        const { targetMonth, pingUntil } = preferencesPingWindow(pingOptions, new Date());
+        const repeatInterval = pingOptions?.repeatIntervalMs || null;
 
         const send = async (chatId: number | bigint, isGroup: boolean) => {
             const numericChatId = Number(chatId);
@@ -463,7 +482,9 @@ export const broadcastService = {
                         messageId: sentMsg.message_id,
                         nextPingAt: new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
-                        pingUntil
+                        pingUntil,
+                        buttonType,
+                        targetMonth
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
@@ -511,7 +532,9 @@ export const broadcastService = {
                         messageId: sentMsg.message_id,
                         nextPingAt: new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
-                        pingUntil
+                        pingUntil,
+                        buttonType,
+                        targetMonth
                     });
                     await pendingReplyRepository.create({
                         trackedMessage: { connect: { id: tracked.id } },

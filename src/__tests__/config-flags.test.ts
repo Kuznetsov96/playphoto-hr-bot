@@ -6,7 +6,6 @@ describe('canonical replacement flags', () => {
     expect(config.AWS_REPLACEMENTS_SHADOW_ENABLED).toBe(false);
     expect(config.AWS_REPLACEMENTS_CANONICAL_ENABLED).toBe(false);
     expect(config.AWS_REMINDERS_CANONICAL_READ_ENABLED).toBe(false);
-    expect(config.AWS_PREFERENCES_CANONICAL_WRITE_ENABLED).toBe(false);
     expect(config.AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED).toBe(false);
   });
 

@@ -8,18 +8,20 @@ vi.mock("../../repositories/user-repository.js", () => ({
     userRepository: { findWithProfilesByTelegramId: (...a: unknown[]) => findWithProfilesByTelegramId(...a) },
 }));
 vi.mock("../../services/aws-business-client.js", () => ({
-    awsBusinessClient: { getSchedulePreference: (...a: unknown[]) => getSchedulePreference(...a) },
+    awsBusinessClient: {
+        getSchedulePreference: (...a: unknown[]) => getSchedulePreference(...a),
+        schedulePreferenceSchedule: vi.fn().mockResolvedValue({ open: true }),
+    },
 }));
 vi.mock("../../utils/screen-manager.js", () => ({
     ScreenManager: { renderScreen: (...a: unknown[]) => renderScreen(...a) },
 }));
-vi.mock("../../services/preferences-service.js", () => ({
-    preferencesService: { hasExistingPreference: vi.fn().mockResolvedValue(false), savePreference: vi.fn() },
-}));
-vi.mock("../../config.js", () => ({ AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: true }));
 vi.mock("../../core/redis.js", () => ({ redis: {} }));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({ pendingReplyRepository: {} }));
-vi.mock("../../services/canonical-preferences-writer.js", () => ({ saveCanonicalPreference: vi.fn() }));
+vi.mock("../../services/canonical-preferences-writer.js", () => ({
+    saveCanonicalPreference: vi.fn(),
+    readCanonicalPreferenceDays: vi.fn().mockResolvedValue(undefined),
+}));
 
 const { startPreferencesFlow } = await import("../preferences-flow.js");
 

@@ -6,7 +6,6 @@ import { broadcastService } from '../services/broadcast.js';
 import { Bot } from 'grammy';
 import process from 'process';
 import { sendDailyIncomeReport } from '../services/finance-report.js';
-import { preferencesService } from '../services/preferences-service.js';
 import { logBusinessEvent } from '../core/log-events.js';
 
 const connection = redis;
@@ -67,20 +66,7 @@ export const startWorkers = () => {
         }
     }, { connection });
 
-    const preferencesWorker = new Worker(QUEUES.PREFERENCES, async job => {
-        logger.info({ jobId: job.id, name: job.name }, 'Processing preference save');
-        try {
-            if (job.name === 'save-pref') {
-                await preferencesService.savePreference(job.data);
-            }
-            logger.info({ jobId: job.id }, '✅ Preference job done');
-        } catch (e) {
-            logger.error({ err: e }, '❌ Preference job failed');
-            throw e;
-        }
-    }, { connection });
-
-    const workers = [defaultWorker, broadcastWorker, reportsWorker, preferencesWorker];
+    const workers = [defaultWorker, broadcastWorker, reportsWorker];
 
     workers.forEach(worker => {
         worker.on('completed', job => {

@@ -75,6 +75,13 @@ model TrackedMessage {
   pingUntil      DateTime?
   lastPingMsgId  Int?
   pingIntervalMs Int?
+  /// Какую кнопку несёт рассылка: 'default' (подтвердить) или 'preferences'.
+  /// Пингер решает по этому полю, какое напоминание слать, — не по тексту.
+  buttonType     String         @default("default")
+  /// Месяц сбора пожеланий (`YYYY-MM`) — только у рассылки пожеланий. По нему
+  /// пингер перед каждым напоминанием спрашивает у вебаппа срок и открыт ли
+  /// сбор: перенос срока и закрытие действуют без выката бота.
+  targetMonth    String?
   pendingReplies PendingReply[]
   broadcast      Broadcast      @relation(fields: [broadcastId], references: [id])
 
