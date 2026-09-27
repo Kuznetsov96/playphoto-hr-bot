@@ -42,10 +42,12 @@ function trackedMessage(broadcastAgeMs: number) {
         lastPingMsgId: null,
         pingIntervalMs: 4 * 60 * 60 * 1000,
         broadcastId: 7,
+        buttonType: "preferences",
+        pingUntil: new Date("2026-08-26T20:59:00Z"),
         broadcast: {
             id: 7,
             createdAt: new Date(Date.now() - broadcastAgeMs),
-            messageText: "📢 Побажання на вересень",
+            messageText: "📅 <b>Графік на вересень</b>\n\nПривіт! Збираємо побажання на наступний місяць.",
         },
         pendingReplies: [{ id: 11, userId: 12345n, status: "pending", user: { telegramId: 12345n } }],
     };
@@ -127,3 +129,39 @@ describe("pinger quiet hours", () => {
 function kyivHourOf(date: Date): number {
     return Number(date.toLocaleString("en-US", { timeZone: "Europe/Kyiv", hour: "2-digit", hour12: false }));
 }
+
+describe("pinger reminder kind", () => {
+    /**
+     * Тип рассылки берётся из строки трекинга, а не из текста. Пингер искал
+     * «Побажання» в тексте; приглашение с 21.08 начинается с «Графік на …», и
+     * напоминание уходило как обычная рассылка — с кнопкой «Ознайомлена»,
+     * нажатие на которую глушило пинги без поданных пожеланий.
+     */
+    it("reminds about preferences with the fill button, whatever the invite says", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z")); // 14:00 Kyiv
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        const [, text, options] = bot.api.sendMessage.mock.calls[0]!;
+        expect(text).toContain("Нагадуємо про побажання на вересень");
+        expect(text).toContain("Останній день — 26 серпня, середа");
+        const buttons = options.reply_markup.inline_keyboard.flat();
+        expect(buttons.map((button: any) => button.callback_data)).toEqual(["pref_fill"]);
+    });
+
+    it("keeps the confirm button for an ordinary broadcast", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        findToPing.mockResolvedValue([
+            { ...trackedMessage(60 * 60 * 1000), buttonType: "default", pingUntil: null },
+        ]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        const [, , options] = bot.api.sendMessage.mock.calls[0]!;
+        const buttons = options.reply_markup.inline_keyboard.flat();
+        expect(buttons.map((button: any) => button.callback_data)).toEqual(["broadcast_confirm_ok_7"]);
+    });
+});

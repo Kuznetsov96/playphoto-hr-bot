@@ -75,6 +75,9 @@ model TrackedMessage {
   pingUntil      DateTime?
   lastPingMsgId  Int?
   pingIntervalMs Int?
+  /// Какую кнопку несёт рассылка: 'default' (подтвердить) или 'preferences'.
+  /// Пингер решает по этому полю, какое напоминание слать, — не по тексту.
+  buttonType     String         @default("default")
   pendingReplies PendingReply[]
   broadcast      Broadcast      @relation(fields: [broadcastId], references: [id])
 

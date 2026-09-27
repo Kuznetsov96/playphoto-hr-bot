@@ -13,6 +13,8 @@ import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { isQuietHour, nextAllowedPingTime } from "../utils/quiet-hours.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { formatDeadline, preferencesMonthName } from "../utils/format-deadline.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
 const ACTIVE_CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -252,10 +254,21 @@ async function runPinger(bot: Bot<MyContext>) {
             // 2. Format ping message
             let text = "";
             const isPrivate = Number(msg.chatId) > 0;
-            const isPreferences = msg.broadcast?.messageText?.includes("Побажання");
+            // По полю, а не по тексту рассылки. Раньше здесь было
+            // `messageText.includes("Побажання")`, и когда 21.08 приглашение
+            // стало начинаться с «Графік на …», сбор пожеланий перестал
+            // узнаваться: напоминание уходило как обычная рассылка, с кнопкой
+            // «Ознайомлена», и нажатие на неё глушило пинги без подачи.
+            const isPreferences = msg.buttonType === "preferences";
 
-            if (isPrivate && isPreferences) {
-                text = `🔔 <b>Нагадування!</b>\nТи ще не заповнив побажання по графіку. Натисни кнопку нижче 👇`;
+            if (isPrivate && isPreferences && msg.pingUntil) {
+                // Тот же дедлайн, что в приглашении: `pingUntil` — это он и есть.
+                text = STAFF_TEXTS["staff-preferences-reminder"]({
+                    monthName: preferencesMonthName(msg.pingUntil),
+                    deadline: formatDeadline(msg.pingUntil),
+                });
+            } else if (isPrivate && isPreferences) {
+                text = STAFF_TEXTS["staff-preferences-reminder-undated"];
             } else if (isPrivate) {
                 text = `🔔 <b>Нагадування!</b>\nНатисни кнопку «Підтвердити» у повідомленні вище 👆`;
             } else {

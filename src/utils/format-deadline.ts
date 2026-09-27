@@ -24,6 +24,35 @@ const MONTHS_UK_GENITIVE = [
     "грудня",
 ] as const;
 
+const MONTHS_UK_NOMINATIVE = [
+    "січень",
+    "лютий",
+    "березень",
+    "квітень",
+    "травень",
+    "червень",
+    "липень",
+    "серпень",
+    "вересень",
+    "жовтень",
+    "листопад",
+    "грудень",
+] as const;
+
+/**
+ * «жовтень» для дедлайна 26 вересня: пожелания собираются на месяц, СЛЕДУЮЩИЙ
+ * за месяцем дедлайна.
+ *
+ * Напоминанию неоткуда больше взять месяц: у строки трекинга есть только её
+ * `pingUntil`, а он и есть дедлайн — тот же `deadlineDate`, что назван в
+ * приглашении. Месяц берётся в киевской зоне по той же причине, что и в
+ * `formatDeadline`: 23:59 по Киеву в UTC может быть уже другим числом.
+ */
+export function preferencesMonthName(deadline: Date, timeZone = "Europe/Kyiv"): string {
+    const local = new Date(deadline.toLocaleString("en-US", { timeZone }));
+    return MONTHS_UK_NOMINATIVE[(local.getMonth() + 1) % 12]!;
+}
+
 /**
  * «26 серпня, середа».
  *

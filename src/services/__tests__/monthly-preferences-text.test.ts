@@ -35,19 +35,53 @@ describe("приглашение заполнить пожелания", () => {
         expect(invite).not.toMatch(/заповнила|побачила|готова|змогла/u);
     });
 
-    it("напоминание называет последствие конкретно", () => {
+    /**
+     * Генератор вебаппа не ставит смены тому, кто не ответил. Прежнее
+     * «зміни можуть випасти на незручні дні» обещало место в графике, которого
+     * не будет, — и молчать выглядело безопасно.
+     */
+    it("напоминание называет последствие, которое случится на деле", () => {
         const reminder = STAFF_TEXTS["staff-preferences-reminder"]({
             monthName: "вересень",
             deadline: formatDeadline(new Date("2026-08-26T12:00:00.000Z")),
         });
 
-        expect(reminder).toContain("зміни можуть випасти на незручні дні");
+        expect(reminder).toContain("у графіку на вересень тебе не буде");
+        expect(reminder).toContain("26 серпня, середа");
+        expect(reminder).not.toContain("незручні дні");
     });
 
-    it("закрытое окно говорит, что делать дальше, а не «помилка»", () => {
+    it("напоминание даёт выход тому, у кого нет ограничений", () => {
+        const reminder = STAFF_TEXTS["staff-preferences-reminder"]({
+            monthName: "вересень",
+            deadline: formatDeadline(new Date("2026-08-26T12:00:00.000Z")),
+        });
+
+        expect(reminder).toContain("«Готово»");
+    });
+
+    it("напоминание без эмодзи и родовых форм: это графік", () => {
+        const texts = [
+            STAFF_TEXTS["staff-preferences-reminder"]({ monthName: "вересень", deadline: "26 серпня, середа" }),
+            STAFF_TEXTS["staff-preferences-reminder-undated"],
+        ];
+
+        for (const text of texts) {
+            expect(text).not.toMatch(/\p{Extended_Pictographic}/u);
+            expect(text).not.toMatch(/заповнив|заповнила/u);
+        }
+    });
+
+    /**
+     * Сюда попадает и опоздавший: графика у него не будет, и обещать ему
+     * «підміну прямо в графіку» — неправда.
+     */
+    it("закрытое окно говорит, что делать дальше, и не обещает график", () => {
         const closed = STAFF_TEXTS["staff-preferences-window-closed"]({ monthName: "вересень" });
 
-        expect(closed).toContain("попросити підміну");
+        expect(closed).toContain("напиши в підтримку");
+        expect(closed).not.toContain("надішлемо його тобі");
+        expect(closed).not.toContain("підміну");
         expect(closed).not.toContain("помилка");
     });
 
@@ -56,6 +90,7 @@ describe("приглашение заполнить пожелания", () => {
         // расхождение читается как речь о другой сущности.
         const all = [
             invite,
+            STAFF_TEXTS["staff-preferences-reminder"]({ monthName: "вересень", deadline: "26 серпня, середа" }),
             STAFF_TEXTS["staff-preferences-window-closed"]({ monthName: "вересень" }),
         ].join("\n");
 

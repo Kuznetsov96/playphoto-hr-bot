@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDeadline, kyivDeadline, isTaskUrgent, URGENT_DEADLINE_WINDOW_HOURS } from "../format-deadline.js";
+import { formatDeadline, kyivDeadline, isTaskUrgent, preferencesMonthName, URGENT_DEADLINE_WINDOW_HOURS } from "../format-deadline.js";
 
 describe("formatDeadline", () => {
     it("выводит день недели из самой даты, а не из шаблона", () => {
@@ -25,6 +25,22 @@ describe("formatDeadline", () => {
         // 2026-08-30 — воскресенье. В JS getDay() для него 0, и наивная
         // индексация массива, начинающегося с понедельника, дала бы пятницу.
         expect(formatDeadline(new Date("2026-08-30T12:00:00.000Z"))).toBe("30 серпня, неділя");
+    });
+});
+
+describe("preferencesMonthName", () => {
+    it("names the month after the deadline month", () => {
+        expect(preferencesMonthName(kyivDeadline(new Date("2026-09-23T09:00:00.000Z"), 26))).toBe("жовтень");
+    });
+
+    it("rolls a December deadline over to January", () => {
+        expect(preferencesMonthName(kyivDeadline(new Date("2026-12-23T09:00:00.000Z"), 26))).toBe("січень");
+    });
+
+    it("reads the deadline in Kyiv, not in UTC", () => {
+        // 00:30 1 вересня по Киеву — в UTC ещё 31 серпня. Месяц дедлайна
+        // киевский, значит собираем на жовтень, а не на вересень.
+        expect(preferencesMonthName(new Date("2026-08-31T21:30:00.000Z"))).toBe("жовтень");
     });
 });
 

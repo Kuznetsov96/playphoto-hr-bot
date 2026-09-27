@@ -463,7 +463,8 @@ export const broadcastService = {
                         messageId: sentMsg.message_id,
                         nextPingAt: new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
-                        pingUntil
+                        pingUntil,
+                        buttonType
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
@@ -511,7 +512,8 @@ export const broadcastService = {
                         messageId: sentMsg.message_id,
                         nextPingAt: new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
-                        pingUntil
+                        pingUntil,
+                        buttonType
                     });
                     await pendingReplyRepository.create({
                         trackedMessage: { connect: { id: tracked.id } },
