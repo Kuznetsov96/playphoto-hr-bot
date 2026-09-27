@@ -19,7 +19,6 @@ import {
 import { formatWorksUntil, lastSelectableDay } from "../utils/last-working-day.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { toCanonicalMonth, UKRAINIAN_MONTH_INDEX } from "../services/preference-month.js";
-import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 
 
@@ -58,6 +57,51 @@ function getActiveStaffTargetMonthDate(kyivNow: Date) {
     const isLateInMonth = kyivNow.getDate() >= 23;
     const monthOffset = isLateInMonth ? 1 : 0;
     return new Date(kyivNow.getFullYear(), kyivNow.getMonth() + monthOffset, 1);
+}
+
+/** Предел `comment` в API вебаппа (`@MaxLength(500)` в DTO пожеланий). */
+const COMMENT_MAX_LENGTH = 500;
+
+/**
+ * Сколько шаг 'COMMENT' ждёт сообщения. Дольше — значит, человек ушёл, и его
+ * следующее сообщение адресовано не форме (чаще всего — в підтримку).
+ */
+const COMMENT_CAPTURE_MS = 30 * 60 * 1000;
+
+function supportKeyboard() {
+    return new InlineKeyboard().text(STAFF_TEXTS["staff-preferences-btn-support"], "open_support_dialog");
+}
+
+/**
+ * Кнопка формы нажата, а формы в сессии уже нет.
+ *
+ * Сессия живёт 24 часа с последнего действия и удаляется при сохранении или
+ * выходе, а кнопки старых экранов остаются в чате навсегда. Раньше такое
+ * нажатие отвечало «Сесія застаріла.», «Помилка.» или не отвечало вовсе —
+ * человек оставался перед мёртвым экраном. Теперь форма открывается заново:
+ * `startPreferencesFlow` сам подставит уже поданные дни и проверит, открыт ли
+ * сбор.
+ */
+async function restartIfSessionLost(ctx: MyContext): Promise<boolean> {
+    if (ctx.session.preferencesData) return false;
+    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-session-restarted"]);
+    await startPreferencesFlow(ctx);
+    return true;
+}
+
+/**
+ * Открыт ли сбор на месяц. При сбое API — «открыт», как и кнопка в меню
+ * (`shouldShowPreferencesButton`): бэкенд всё равно откажет при записи, если
+ * окно закрыто, а ложное «закрито» отняло бы форму у того, кто успевал.
+ */
+async function isCollectionOpen(canonicalMonth: string): Promise<boolean> {
+    try {
+        const window = await awsBusinessClient.schedulePreferenceWindow(canonicalMonth);
+        return window.open;
+    } catch (error) {
+        logger.warn({ err: error, month: canonicalMonth }, "Preference collection window unavailable; opening the form");
+        return true;
+    }
 }
 
 async function ensureActiveStaffTargetsNextMonth(ctx: MyContext) {
@@ -136,7 +180,7 @@ preferencesHandlers.callbackQuery("pref_opt_out", async (ctx) => {
             if (!canonicalMonth || !staffId) {
                 logger.error({ userId, month, year }, "Preference month could not be converted to YYYY-MM");
                 await ctx.answerCallbackQuery();
-                await ctx.reply(CANDIDATE_TEXTS["preferences-save-failed"]);
+                await ctx.reply(STAFF_TEXTS["staff-preferences-save-failed"]);
                 return;
             }
             const saved = await saveCanonicalPreference({
@@ -232,6 +276,18 @@ export async function startPreferencesFlow(ctx: MyContext) {
     const targetYear = targetMonthDate.getFullYear();
     const canonicalMonth = toCanonicalMonth(monthName, targetYear);
 
+    // Сбор закрыт — говорим сразу, а не после заполнения. Кнопка в меню в этот
+    // момент уже скрыта, но «Заповнити графік» в приглашении и «Заповнити зараз»
+    // в напоминании лежат в чате и ведут сюда: человек отмечал бы дни, чтобы на
+    // «Зберегти» узнать, что всё зря. Кандидатов первой смены это не касается —
+    // их пожелания идут не через окно сбора.
+    if (isActiveStaff && AWS_PREFERENCES_CANONICAL_WRITE_ENABLED && canonicalMonth && !(await isCollectionOpen(canonicalMonth))) {
+        delete ctx.session.preferencesData;
+        const kb = supportKeyboard().row().text("⬅️ Назад", "staff_hub_nav");
+        await ScreenManager.renderScreen(ctx, STAFF_TEXTS["staff-preferences-window-closed"]({ monthName }), kb, { forceNew: true });
+        return;
+    }
+
     // Останній робочий день тих, хто доопрацьовує, щоб клавіатура не
     // пропонувала дні, коли людини вже не буде. Збій читання не має ламати
     // весь флоу: без дати календар просто лишається повним, як раніше.
@@ -326,7 +382,7 @@ async function renderCalendar(ctx: MyContext) {
 
         if (isTodayOrPast || isAfterLastDay) {
             // Block today, past days, and days after the last working one
-            kb.text(`·`, `none`);
+            kb.text(`·`, `pref_noop`);
         } else {
             // Future days are selectable
             kb.text(isSelected ? `✅ ${d}` : `${d}`, `pref_toggle_${d}`);
@@ -372,8 +428,24 @@ async function renderCalendar(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
 }
 
+/**
+ * Недоступная клетка календаря («·»: прошедший день или после последнего
+ * рабочего).
+ *
+ * Раньше у неё был callback `none` без обработчика. Его ловил щит устаревших
+ * кнопок (`handlers/index.ts`): «⚠️ This button is outdated», удаление
+ * календаря и выброс в главное меню — по промаху пальцем мимо числа. `none`
+ * отвечается тихо: такие календари ещё лежат в чатах, и та же заглушка стоит
+ * в списке тикетов у админов.
+ */
+preferencesHandlers.callbackQuery("pref_noop", (ctx) =>
+    ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-day-unavailable"]),
+);
+preferencesHandlers.callbackQuery("none", (ctx) => ctx.answerCallbackQuery());
+
 preferencesHandlers.callbackQuery(/^pref_toggle_(\d+)$/, async (ctx) => {
-    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
     const day = parseInt(ctx.match![1]!);
 
     // Кнопка на екрані вже заглушена, але старе повідомлення в чаті могло
@@ -385,6 +457,12 @@ preferencesHandlers.callbackQuery(/^pref_toggle_(\d+)$/, async (ctx) => {
     if (day > lastSelectableDay(worksUntil, pYearValue, pMonthIndex, pDaysInMonth)) {
         return ctx.answerCallbackQuery("Цей день уже після твого останнього робочого.");
     }
+    // Тот же довод для прошедших дней: календарь текущего месяца, открытый
+    // вчера, ещё держит кнопку вчерашнего числа.
+    const kyivToday = getKyivNow();
+    if (pMonthIndex === kyivToday.getMonth() && pYearValue === kyivToday.getFullYear() && day <= kyivToday.getDate()) {
+        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-day-unavailable"]);
+    }
 
     const selected = new Set(ctx.session.preferencesData.selectedDays);
     if (selected.has(day)) selected.delete(day);
@@ -395,7 +473,8 @@ preferencesHandlers.callbackQuery(/^pref_toggle_(\d+)$/, async (ctx) => {
 });
 
 preferencesHandlers.callbackQuery(["pref_to_comment", "pref_to_comment_none"], async (ctx) => {
-    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
     if (await ensureActiveStaffTargetsNextMonth(ctx)) {
         await renderCalendar(ctx);
         return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
@@ -425,23 +504,27 @@ preferencesHandlers.callbackQuery(["pref_to_comment", "pref_to_comment_none"], a
  * включается только этим нажатием и выключается первым же сообщением.
  */
 preferencesHandlers.callbackQuery("pref_add_comment", async (ctx) => {
-    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
     ctx.session.preferencesData.step = 'COMMENT';
-    const text = `💬 Напиши коментар одним повідомленням — наприклад, «хочу більше змін» або «можу на іншій локації».\n\nПотім повернешся до перевірки й збережеш.`;
+    ctx.session.preferencesData.commentRequestedAt = Date.now();
+    const text = `💬 Напиши коментар одним повідомленням (до ${COMMENT_MAX_LENGTH} символів) — наприклад, «хочу більше змін» або «можу на іншій локації».\n\nПотім повернешся до перевірки й збережеш.`;
     const kb = new InlineKeyboard().text("⬅️ Без коментаря", "pref_skip_comment");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
     await ctx.answerCallbackQuery();
 });
 
 preferencesHandlers.callbackQuery("pref_back_calendar", async (ctx) => {
-    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery();
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
     ctx.session.preferencesData.step = 'CALENDAR';
     await renderCalendar(ctx);
     await ctx.answerCallbackQuery();
 });
 
 preferencesHandlers.callbackQuery("pref_skip_comment", async (ctx) => {
-    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery();
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
     if (await ensureActiveStaffTargetsNextMonth(ctx)) {
         await renderCalendar(ctx);
         return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
@@ -497,6 +580,7 @@ async function renderConfirmation(ctx: MyContext) {
  * висят у людей в чатах со старой клавиатурой.
  */
 preferencesHandlers.callbackQuery("pref_restart_flow", async (ctx) => {
+    if (await restartIfSessionLost(ctx)) return;
     if (!ctx.session.preferencesData) return;
     ctx.session.preferencesData.selectedDays = [];
     ctx.session.preferencesData.comment = "";
@@ -523,6 +607,17 @@ preferencesHandlers.callbackQuery("open_support_dialog", async (ctx) => {
 const saveDedupe = new ActionDedupeWindow(10_000);
 
 /**
+ * Когда у человека последний раз прошло сохранение (ms).
+ *
+ * Апдейты одного человека идут строго по очереди (`sequentialize` в
+ * core/bot.ts), поэтому двойное нажатие «Зберегти» приходит ПОСЛЕ того, как
+ * первое уже записало и удалило сессию. Без этой отметки второе нажатие
+ * открывало бы форму заново поверх «успішно збережені».
+ */
+const lastSavedAt = new Map<number, number>();
+const JUST_SAVED_MS = 60_000;
+
+/**
  * Неудача сохранения возвращает человека на экран подтверждения с кнопками.
  *
  * Раньше здесь был `ctx.reply(...)` и `return`: экран подтверждения к этому
@@ -533,7 +628,7 @@ const saveDedupe = new ActionDedupeWindow(10_000);
 async function failSave(
     ctx: MyContext,
     waitMessageId: number | undefined,
-    text: string = CANDIDATE_TEXTS["preferences-save-failed"],
+    text: string = STAFF_TEXTS["staff-preferences-save-failed"],
     canRetry: boolean = true,
 ): Promise<void> {
     // Снимаем защиту от дребезга: она существует, чтобы гасить второе нажатие
@@ -544,7 +639,11 @@ async function failSave(
     if (waitMessageId !== undefined) {
         await ctx.api.deleteMessage(ctx.chat!.id, waitMessageId).catch(() => { });
     }
-    await ctx.reply(text);
+    // Без повтора человеку остаётся одно — підтримка, и кнопка ведёт туда сразу.
+    // Экран подтверждения (уже без кнопок) убирается: его «натисни «Зберегти»»
+    // рядом с «збір закрито» противоречило бы само себе.
+    if (!canRetry) await ctx.deleteMessage().catch(() => { });
+    await ctx.reply(text, canRetry ? {} : { reply_markup: supportKeyboard() });
 
     // Сессия не тронута — тот же выбор, та же клавиатура, кнопка «Зберегти»
     // снова доступна. Кроме случая, когда повторять нечего: закрытое окно
@@ -553,7 +652,18 @@ async function failSave(
 }
 
 preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
-    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Помилка.");
+    // Нет сессии: либо только что сохранили (двойное нажатие), либо форму
+    // бросили больше суток назад. Первое — подтверждаем и ничего не делаем;
+    // второе — открываем форму заново, поданные дни в ней будут отмечены.
+    const tappedBy = ctx.from?.id;
+    if (!ctx.session.preferencesData && tappedBy !== undefined) {
+        const savedAt = lastSavedAt.get(tappedBy);
+        if (savedAt !== undefined && Date.now() - savedAt < JUST_SAVED_MS) {
+            return ctx.answerCallbackQuery(STAFF_TEXTS["staff-preferences-already-saved"]);
+        }
+    }
+    if (await restartIfSessionLost(ctx)) return;
+    if (!ctx.session.preferencesData) return;
     if (await ensureActiveStaffTargetsNextMonth(ctx)) {
         await renderCalendar(ctx);
         return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
@@ -568,6 +678,11 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
     }
 
     await ctx.answerCallbackQuery();
+
+    // Кнопки экрана подтверждения снимаются на время записи: иначе после
+    // успеха в чате остаётся «✅ Зберегти» под текстом «ще не надіслані». При
+    // неудаче `failSave` перерисует этот же экран — кнопки вернутся.
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
 
     let waitMessageId: number | undefined;
     const waitMsg = await ctx.reply("⏳ Зберігаю...");
@@ -662,6 +777,10 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
 
         await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(() => { });
         waitMessageId = undefined;
+        // Экран «Перевір і збережи» больше не правда — его место займёт
+        // «успішно збережені».
+        await ctx.deleteMessage().catch(() => { });
+        if (telegramId !== undefined) lastSavedAt.set(telegramId, Date.now());
 
         if (shouldMoveToNext) {
             const nextMonthDate = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
@@ -753,6 +872,12 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         // «⏳ Зберігаю...» удаляется и здесь: без этого экран продолжал уверять,
         // что запись идёт, рядом с сообщением о том, что она провалилась.
         await failSave(ctx, waitMessageId);
+    } finally {
+        // Окно гасит дребезг, пока запись ИДЁТ. После успеха оно держалось ещё
+        // до 10 секунд: человек, который сразу открыл форму заново и поправил
+        // день, получал «⏳ Зберігаю…» — и не сохранялось ничего. Повторные
+        // нажатия на старый экран после успеха ловит `restartIfSessionLost`.
+        if (telegramId !== undefined) saveDedupe.release(`pref-save:${telegramId}`);
     }
 });
 
@@ -760,8 +885,28 @@ export async function handlePreferenceComment(ctx: MyContext) {
     if (!ctx.session.preferencesData || ctx.session.preferencesData.step !== 'COMMENT') return false;
     const text = ctx.message?.text;
     if (!text) return false;
-    ctx.session.preferencesData.comment = text;
+    // Команда — не комментарий: «/start» на этом шаге ушёл бы в пожелания.
+    if (text.startsWith("/")) return false;
+
+    // Шаг брошен: сообщение, пришедшее через полчаса, адресовано не форме.
+    // Форма остаётся на подтверждении, сообщение идёт дальше — в підтримку.
+    const requestedAt = ctx.session.preferencesData.commentRequestedAt ?? 0;
+    if (Date.now() - requestedAt > COMMENT_CAPTURE_MS) {
+        ctx.session.preferencesData.step = 'CONFIRM';
+        return false;
+    }
+
+    // API принимает до 500 символов и отвечает 400 на длиннее — сохранение
+    // падало бы при каждой попытке с «спробуй ще раз», без объяснения.
+    const trimmed = text.trim();
+    if (trimmed.length > COMMENT_MAX_LENGTH) {
+        await ctx.reply(STAFF_TEXTS["staff-preferences-comment-too-long"]({ max: COMMENT_MAX_LENGTH, length: trimmed.length }));
+        return true;
+    }
+
+    ctx.session.preferencesData.comment = trimmed;
     ctx.session.preferencesData.step = 'CONFIRM';
+    delete ctx.session.preferencesData.commentRequestedAt;
     await ctx.deleteMessage().catch(() => { });
     await renderConfirmation(ctx);
     return true;
@@ -770,9 +915,9 @@ export async function handlePreferenceComment(ctx: MyContext) {
 /**
  * Что сказать человеку, когда пожелания не сохранились.
  *
- * Закрытое окно — не сбой: «Спробуй ще раз за хвилину» отправило бы
- * опоздавшего повторять то, что не сработает никогда. Ему нужно знать, что
- * дальше — через підміну.
+ * Закрытое окно — не сбой: «Спробуй ще раз» отправило бы опоздавшего
+ * повторять то, что не сработает никогда. Ему нужно знать, что дальше —
+ * підтримка.
  */
 function preferenceSaveFailureText(
     reasonCode: CanonicalPreferenceReasonCode,
@@ -780,5 +925,5 @@ function preferenceSaveFailureText(
 ): string {
     return reasonCode === "SCHEDULE_PREFERENCES_CLOSED"
         ? STAFF_TEXTS["staff-preferences-window-closed"]({ monthName })
-        : CANDIDATE_TEXTS["preferences-save-failed"];
+        : STAFF_TEXTS["staff-preferences-save-failed"];
 }

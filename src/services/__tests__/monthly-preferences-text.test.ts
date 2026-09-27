@@ -81,7 +81,7 @@ describe("приглашение заполнить пожелания", () => {
     it("закрытое окно говорит, что делать дальше, и не обещает график", () => {
         const closed = STAFF_TEXTS["staff-preferences-window-closed"]({ monthName: "вересень" });
 
-        expect(closed).toContain("напиши в підтримку");
+        expect(closed).toContain("звернись у підтримку");
         expect(closed).not.toContain("надішлемо його тобі");
         expect(closed).not.toContain("підміну");
         expect(closed).not.toContain("помилка");
