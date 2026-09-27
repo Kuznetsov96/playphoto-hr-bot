@@ -65,9 +65,18 @@ export class ScreenManager {
             const menuId = manualMenuId || (typeof reply_markup === 'string' ? reply_markup : (reply_markup as any)?.id);
 
             if (typeof menuId !== 'string') {
-                logger.warn(
-                    { step: ctx.session?.step },
-                    "renderScreen: pushToStack ignored — screen has no keyboard to navigate back to"
+                // Две разные ситуации. Экран без клавиатуры с pushToStack — ошибка
+                // вызывающего кода (так три шага анкеты выпадали из истории).
+                // Экран с обычной InlineKeyboard без id меню — норма: у таких
+                // экранов своя кнопка «🏠 Меню», вернуться на них «Назад» нельзя
+                // по устройству стека. Раньше warn стоял на оба, и настоящую
+                // ошибку было не найти среди штатных экранов.
+                const hasKeyboard = reply_markup !== undefined && reply_markup !== null;
+                logger[hasKeyboard ? "debug" : "warn"](
+                    { step: ctx.session?.step, callbackData: ctx.callbackQuery?.data },
+                    hasKeyboard
+                        ? "renderScreen: pushToStack skipped — inline keyboard has no menu id"
+                        : "renderScreen: pushToStack ignored — screen has no keyboard to navigate back to"
                 );
             } else {
                 const lastEntry = ctx.session.navStack[ctx.session.navStack.length - 1];
