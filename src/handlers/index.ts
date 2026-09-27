@@ -93,7 +93,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
         if (user?.staffProfile?.isActive) {
             logger.debug({ telegramId, data }, "Staff shield intercepted stale callback");
-            await ctx.answerCallbackQuery("⚠️ This button is outdated. Updating menu... ✨");
+            await ctx.answerCallbackQuery(STAFF_TEXTS["stale-button-popup"]);
 
             // Apple Style: Auto-cleanup of stale context
             try {
@@ -110,7 +110,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
         // Fired staff (staffProfile exists but isActive=false): silently discard stale callbacks
         if (user?.staffProfile && !user.staffProfile.isActive) {
             logger.debug({ telegramId, data }, "Staff shield discarded callback for inactive staff");
-            await ctx.answerCallbackQuery("Твій акаунт деактивовано. Зверніться до адміністратора. 🌸").catch(() => { });
+            await ctx.answerCallbackQuery(STAFF_TEXTS["stale-button-deactivated-popup"]).catch(() => { });
             return;
         }
     }

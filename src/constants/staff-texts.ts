@@ -661,6 +661,13 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-ans-confirmed": `Дякуємо! Підтвердження записали 💛`,
   "schedule-notif-ans-declined": `Дякуємо, відповідь записали. Щоб змінити цю зміну, напиши в підтримку.`,
   "schedule-notif-ans-expired": `Це сповіщення вже неактуальне.`,
+
+  // Щит устаревших кнопок (handlers/index.ts). Было по-английски — «This
+  // button is outdated. Updating menu... ✨» — посреди украинского бота.
+  // Спливашка узкая, поэтому действие идёт первым (docs/tone-of-voice.md, §4).
+  "stale-button-popup": `Відкриваю актуальне меню — ця кнопка вже застаріла.`,
+  // Было «Зверніться … 🌸»: «ви» посреди «ти» и эмодзи в отказе (§1, §3).
+  "stale-button-deactivated-popup": `Твій акаунт деактивовано. Якщо це помилка — звернись до адміністратора.`,
   "schedule-notif-ans-unavailable": `Спробуй ще раз за хвилину.`,
   /** Плашка з кнопкою «ОК» — місця більше, тому тут і куди звертатися. */
   "schedule-notif-ans-unavailable-alert": `Не вдалося зберегти відповідь.
