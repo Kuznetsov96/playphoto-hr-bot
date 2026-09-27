@@ -401,15 +401,34 @@ preferencesHandlers.callbackQuery(["pref_to_comment", "pref_to_comment_none"], a
         return ctx.answerCallbackQuery("Оновлено на наступний місяць.");
     }
     if (ctx.callbackQuery?.data === "pref_to_comment_none") ctx.session.preferencesData.selectedDays = [];
+
+    // Сразу подтверждение, без отдельного шага комментария.
+    //
+    // Шаг комментария стоял между «Готово» и «Зберегти» и выглядел как конец:
+    // «Надішли повідомлення або натисни кнопку» и первой кнопкой «⬅️ Назад».
+    // Люди выбирали дни, видели «Вибрані вихідні: …» и уходили, считая, что
+    // всё отправлено, — а пожелания жили только в сессии и не доходили никуда.
+    // Комментарий теперь — необязательная кнопка на экране подтверждения, где
+    // главная кнопка — «Зберегти».
+    ctx.session.preferencesData.step = 'CONFIRM';
+    await renderConfirmation(ctx);
+    await ctx.answerCallbackQuery();
+});
+
+/**
+ * Комментарий — по явной кнопке, а не перехватом любого текста на экране
+ * подтверждения.
+ *
+ * `preferencesData` живёт в сессии, пока человек не сохранит или не выйдет. Кто
+ * бросил форму на подтверждении, через день пишет в підтримку — и перехват
+ * съел бы это сообщение как комментарий, удалив его из чата. Шаг 'COMMENT'
+ * включается только этим нажатием и выключается первым же сообщением.
+ */
+preferencesHandlers.callbackQuery("pref_add_comment", async (ctx) => {
+    if (!ctx.session.preferencesData) return ctx.answerCallbackQuery("Сесія застаріла.");
     ctx.session.preferencesData.step = 'COMMENT';
-
-    const daysStr = ctx.session.preferencesData.selectedDays!.length > 0
-        ? ctx.session.preferencesData.selectedDays!.sort((a, b) => a - b).join(", ")
-        : "Немає (працюю у будь-який день)";
-
-    const text = `🗓 <b>Вибрані вихідні:</b> ${daysStr}\n\nНапиши коментар або додаткові побажання.\n\n👇 <b>Надішли повідомлення</b> або натисни кнопку:`;
-    const kb = new InlineKeyboard().text("⬅️ Назад", "pref_back_calendar").row().text("⏩ Без коментаря", "pref_skip_comment");
-
+    const text = `💬 Напиши коментар одним повідомленням — наприклад, «хочу більше змін» або «можу на іншій локації».\n\nПотім повернешся до перевірки й збережеш.`;
+    const kb = new InlineKeyboard().text("⬅️ Без коментаря", "pref_skip_comment");
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true, manualMenuId: "staff-preferences" });
     await ctx.answerCallbackQuery();
 });
@@ -450,13 +469,17 @@ async function renderConfirmation(ctx: MyContext) {
     const name = user?.staffProfile?.fullName || user?.candidate?.fullName || "Фотограф";
     const daysStr = selectedDays && selectedDays.length > 0 ? selectedDays.sort((a, b) => a - b).join(", ") : "Немає";
 
-    const summary = `📝 <b>Підтвердження:</b>\n\n👤 Ім'я: <b>${escapeHtml(name)}</b>\n📅 Місяць: <b>${escapeHtml(month || "—")} ${year}</b>\n🚫 Вихідні: <b>${escapeHtml(daysStr)}</b>\n💬 Коментар: ${escapeHtml(comment || 'відсутній')}`;
+    // Экран говорит прямо, что пожелания ещё НЕ отправлены: без этой строки
+    // сводка «Вихідні: …» читается как квитанция, и человек уходит, не нажав.
+    const summary = `📝 <b>Перевір і збережи</b>\n\n👤 Ім'я: <b>${escapeHtml(name)}</b>\n📅 Місяць: <b>${escapeHtml(month || "—")} ${year}</b>\n🚫 Вихідні: <b>${escapeHtml(daysStr)}</b>\n💬 Коментар: ${escapeHtml(comment || 'відсутній')}\n\nПобажання ще не надіслані — натисни «Зберегти».`;
     // «🔄 Спочатку» и «✖️ Скасувати» стояли рядом, и разница между ними была
     // неочевидна: обе выглядели как «отменить». Теперь каждая называет, что
     // именно произойдёт, — HIG требует называть последствие, а не намерение.
     // «Вийти без збереження» вдобавок предупреждает, что работа пропадёт.
     const kb = new InlineKeyboard()
         .text("✅ Зберегти", "pref_save_final")
+        .row()
+        .text(comment ? "💬 Змінити коментар" : "💬 Додати коментар", "pref_add_comment")
         .row()
         .text("✏️ Змінити дні", "pref_back_calendar")
         .row()

@@ -142,3 +142,35 @@ describe("preferences flow double submit", () => {
         expect(source).toMatch(/async function failSave[\s\S]{0,600}saveDedupe\.release/u);
     });
 });
+
+/**
+ * Шаг комментария стоял между «Готово» и «Зберегти» и выглядел как конец:
+ * человек выбирал дни, видел «Вибрані вихідні: …» и уходил. Пожелания жили
+ * только в сессии и никуда не доходили (так потерялись пожелания на жовтень).
+ */
+describe("preferences flow reaches save in one step", () => {
+    it("goes from the calendar straight to the confirmation", () => {
+        expect(source).toMatch(
+            /callbackQuery\(\["pref_to_comment", "pref_to_comment_none"\][\s\S]{0,1200}step = 'CONFIRM';\s*await renderConfirmation\(ctx\)/u,
+        );
+        expect(source).not.toContain("Надішли повідомлення</b> або натисни кнопку");
+    });
+
+    it("says on the confirmation that nothing has been sent yet", () => {
+        expect(source).toContain("Побажання ще не надіслані — натисни «Зберегти»");
+    });
+
+    it("puts save first and the comment behind its own button", () => {
+        expect(source).toMatch(
+            /\.text\("✅ Зберегти", "pref_save_final"\)\s*\.row\(\)\s*\.text\(comment \? "💬 Змінити коментар" : "💬 Додати коментар", "pref_add_comment"\)/u,
+        );
+    });
+
+    it("captures free text as a comment only after that button", () => {
+        // Перехват на экране подтверждения съел бы сообщение в підтримку от
+        // того, кто бросил форму: сессия живёт до сохранения или выхода.
+        expect(source).toMatch(/preferencesData\.step !== 'COMMENT'\) return false;/u);
+        expect(source).toMatch(/callbackQuery\("pref_add_comment"[\s\S]{0,300}step = 'COMMENT'/u);
+    });
+});
+
