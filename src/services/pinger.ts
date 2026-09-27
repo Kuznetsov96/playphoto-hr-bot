@@ -235,11 +235,34 @@ async function preferencesScheduleFor(
     return schedule;
 }
 
+/**
+ * Кто на месяц ещё не подал — по вебаппу, один запрос на прогон. `null` —
+ * вебапп недоступен. Нужен, потому что подать можно и мимо бота: владелец
+ * вписывает пожелания за человека на экране Availability, а ожидание ответа в
+ * боте об этом не знает и напоминание пришло бы тому, у кого всё уже подано.
+ */
+async function missingFor(
+    month: string,
+    cache: Map<string, Set<string> | null>,
+): Promise<Set<string> | null> {
+    if (cache.has(month)) return cache.get(month)!;
+    let missing: Set<string> | null = null;
+    try {
+        const result = await awsBusinessClient.missingSchedulePreferences(month);
+        missing = new Set(result.items.map((item) => item.telegramId));
+    } catch (error) {
+        logger.warn({ err: error, month }, "Missing-preferences list unavailable; reminders wait for the next tick");
+    }
+    cache.set(month, missing);
+    return missing;
+}
+
 async function runPinger(bot: Bot<MyContext>) {
     try {
         const now = new Date();
         const messagesToPing = await trackedMessageRepository.findToPing(now);
         const schedules = new Map<string, SchedulePreferenceSchedule | null>();
+        const missingByMonth = new Map<string, Set<string> | null>();
 
         for (const msg of messagesToPing) {
             const activePendingReplies = await pruneNonMembersFromPending(msg, bot);
@@ -318,6 +341,18 @@ async function runPinger(bot: Bot<MyContext>) {
                     await trackedMessageRepository.update(msg.id, {
                         nextPingAt: new Date(now.getTime() + DEADLINE_RECHECK_MS),
                     });
+                    continue;
+                }
+                const missing = await missingFor(msg.targetMonth, missingByMonth);
+                if (missing === null) continue;
+                // Подано мимо бота (владелец вписал) — закрываем ожидание, как
+                // это сделало бы сохранение в боте, и больше не напоминаем.
+                if (!missing.has(String(msg.chatId))) {
+                    await pendingReplyRepository.updateMany(
+                        { trackedMessageId: msg.id, status: "pending" },
+                        { status: "confirmed", respondedAt: now },
+                    );
+                    await trackedMessageRepository.stopTracking(msg.id);
                     continue;
                 }
                 text = STAFF_TEXTS["staff-preferences-reminder"]({

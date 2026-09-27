@@ -15,7 +15,7 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import fs from "fs";
 import type { BroadcastMediaItem } from "../types/context.js";
 import { awsBusinessClient } from "./aws-business-client.js";
-import { toCanonicalMonth } from "./preference-month.js";
+import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "./preference-month.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
 
@@ -37,6 +37,26 @@ export interface BroadcastTarget {
 }
 
 type BroadcastMediaInput = BroadcastMediaItem | BroadcastMediaItem[];
+
+/**
+ * Месяц сбора и предел напоминаний для строки трекинга.
+ *
+ * Ручная рассылка с кнопкой пожеланий (админка) месяца не передаёт. Без месяца
+ * пингер не знает ни срока, ни «сбор закрыт» и напоминал бы вечно — сохранить
+ * после закрытия уже нельзя, остановить нечем. Месяц берётся по тому же
+ * правилу, что у формы, с пределом в его конце. `pingUntil` из очереди
+ * приходит строкой (BullMQ сериализует JSON) — Prisma принимает и её.
+ */
+export function preferencesPingWindow(
+    pingOptions: { buttonType?: string; targetMonth?: string; pingUntil?: Date | string } | undefined,
+    now: Date,
+): { targetMonth: string | null; pingUntil: Date | string | null } {
+    const isPreferences = pingOptions?.buttonType === 'preferences';
+    const targetMonth = pingOptions?.targetMonth ?? (isPreferences ? collectionCanonicalMonth(now) : null);
+    const pingUntil = pingOptions?.pingUntil
+        ?? (isPreferences && targetMonth ? firstDayAfterMonth(targetMonth) : null);
+    return { targetMonth, pingUntil };
+}
 
 function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
     const kb = new InlineKeyboard();
@@ -433,10 +453,9 @@ export const broadcastService = {
         // Докуда напоминать. Без этого пингер звал бы заполнить форму и после
         // закрытия окна — она отвечает «збір закрито», а он повторяет каждые
         // четыре часа, пока человек не заблокирует бота.
-        const pingUntil = pingOptions?.pingUntil ?? null;
-        const targetMonth = pingOptions?.targetMonth ?? null;
-        const repeatInterval = pingOptions?.repeatIntervalMs || null;
         const buttonType = pingOptions?.buttonType || 'default';
+        const { targetMonth, pingUntil } = preferencesPingWindow(pingOptions, new Date());
+        const repeatInterval = pingOptions?.repeatIntervalMs || null;
 
         const send = async (chatId: number | bigint, isGroup: boolean) => {
             const numericChatId = Number(chatId);

@@ -5,6 +5,8 @@ const stopTracking = vi.fn();
 const trackedUpdate = vi.fn();
 const pendingDeleteMany = vi.fn();
 const schedulePreferenceSchedule = vi.fn();
+const missingSchedulePreferences = vi.fn();
+const pendingUpdateMany = vi.fn();
 
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -14,10 +16,12 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
     },
 }));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
-    pendingReplyRepository: { deleteMany: pendingDeleteMany },
+    pendingReplyRepository: { deleteMany: pendingDeleteMany, updateMany: pendingUpdateMany },
 }));
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: {} }));
-vi.mock("../aws-business-client.js", () => ({ awsBusinessClient: { schedulePreferenceSchedule } }));
+vi.mock("../aws-business-client.js", () => ({
+    awsBusinessClient: { schedulePreferenceSchedule, missingSchedulePreferences },
+}));
 vi.mock("../../repositories/candidate-repository.js", () => ({ candidateRepository: {} }));
 vi.mock("../../repositories/user-repository.js", () => ({ userRepository: {} }));
 vi.mock("../schedule-sync.js", () => ({ scheduleSyncService: {} }));
@@ -74,6 +78,11 @@ beforeEach(() => {
         open: true,
         deadline: "2026-08-26",
         deadlineEndsAt: "2026-08-26T21:00:00.000Z",
+    });
+    // Человек из заготовки (tg 12345) ещё не подал.
+    missingSchedulePreferences.mockResolvedValue({
+        month: "2026-09",
+        items: [{ employeePublicId: "4a1c4f32-2b37-4f0c-9d0c-2d1f7a0c3e11", telegramId: "12345" }],
     });
     // Полдень по Киеву: тесты потолка не должны зависеть от того, ночь ли
     // сейчас на самом деле — иначе они падали бы половину суток.
@@ -261,6 +270,38 @@ describe("pinger reads the collection schedule from the web app", () => {
         expect(trackedUpdate).not.toHaveBeenCalled();
         // Один запрос на прогон, а не на каждую строку.
         expect(schedulePreferenceSchedule).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("pinger checks who has already submitted", () => {
+    /** Владелец вписал пожелания за человека в вебаппе — бот об этом не знал и напоминал. */
+    it("closes the wait and stops for someone who submitted outside the bot", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        missingSchedulePreferences.mockResolvedValue({ month: "2026-09", items: [] });
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+        expect(pendingUpdateMany).toHaveBeenCalledWith(
+            { trackedMessageId: 1, status: "pending" },
+            expect.objectContaining({ status: "confirmed" }),
+        );
+        expect(stopTracking).toHaveBeenCalledWith(1);
+    });
+
+    it("waits for the next tick when the list cannot be read", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        missingSchedulePreferences.mockRejectedValue(new Error("timeout"));
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+        expect(stopTracking).not.toHaveBeenCalled();
+        expect(pendingUpdateMany).not.toHaveBeenCalled();
     });
 });
 

@@ -148,6 +148,8 @@ describe("happy path", () => {
         expect(lastScreen()![1]).toContain("успішно збережені");
         expect(session.preferencesData).toBeUndefined();
         expect(pendingUpdateMany).toHaveBeenCalledTimes(1);
+        // Подача закрывает только ожидание по рассылке пожеланий, не любое висящее.
+        expect(pendingUpdateMany.mock.calls[0]![0]).toMatchObject({ trackedMessage: { buttonType: "preferences" } });
     });
 
     it("saves 'no wishes' as an empty submission", async () => {

@@ -154,3 +154,30 @@ describe("broadcast delivery reliability", () => {
         expect(deliveryClaimPending).not.toHaveBeenCalled();
     });
 });
+
+describe("preferencesPingWindow", () => {
+    /** Ручная рассылка с кнопкой пожеланий без месяца напоминала бы вечно. */
+    it("gives an admin preferences broadcast the form's month and a month-end cap", async () => {
+        const { preferencesPingWindow } = await import("../broadcast.js");
+
+        const window = preferencesPingWindow({ buttonType: "preferences" }, new Date("2026-10-24T09:00:00Z"));
+
+        expect(window.targetMonth).toBe("2026-11");
+        expect((window.pingUntil as Date).toISOString()).toBe("2026-12-01T00:00:00.000Z");
+    });
+
+    it("keeps what the monthly trigger passed", async () => {
+        const { preferencesPingWindow } = await import("../broadcast.js");
+
+        expect(
+            preferencesPingWindow({ buttonType: "preferences", targetMonth: "2026-11", pingUntil: "2026-12-01T00:00:00.000Z" }, new Date()),
+        ).toEqual({ targetMonth: "2026-11", pingUntil: "2026-12-01T00:00:00.000Z" });
+    });
+
+    it("leaves an ordinary broadcast without a month or a cap", async () => {
+        const { preferencesPingWindow } = await import("../broadcast.js");
+
+        expect(preferencesPingWindow({ buttonType: "default" }, new Date())).toEqual({ targetMonth: null, pingUntil: null });
+        expect(preferencesPingWindow(undefined, new Date())).toEqual({ targetMonth: null, pingUntil: null });
+    });
+});

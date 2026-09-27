@@ -44,3 +44,21 @@ export function nextCanonicalMonth(now: Date, timeZone = "Europe/Kyiv"): string 
     const next = new Date(local.getFullYear(), local.getMonth() + 1, 1);
     return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
 }
+
+/**
+ * Месяц, на который форма собирает пожелания сейчас — то же правило, что в
+ * `startPreferencesFlow`: с 23-го следующий, до — текущий. `2026-10`.
+ */
+export function collectionCanonicalMonth(now: Date, timeZone = "Europe/Kyiv"): string {
+    const local = new Date(now.toLocaleString("en-US", { timeZone }));
+    const offset = local.getDate() >= 23 ? 1 : 0;
+    const target = new Date(local.getFullYear(), local.getMonth() + offset, 1);
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Первое число после месяца `YYYY-MM` (полночь UTC): позже сбор на него не нужен. */
+export function firstDayAfterMonth(month: string): Date {
+    const [year, monthNumber] = month.split("-").map(Number) as [number, number];
+    return new Date(Date.UTC(year, monthNumber, 1));
+}
+

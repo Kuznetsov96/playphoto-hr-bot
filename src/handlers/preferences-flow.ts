@@ -612,9 +612,11 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
             return;
         }
 
-        // Ожидание ответа закрыто → пингер перестаёт напоминать.
+        // Ожидание ответа закрыто → пингер перестаёт напоминать. Только по
+        // рассылкам пожеланий: раньше подача «подтверждала» и любую другую
+        // висящую рассылку — объявление, которое человек не читал.
         await pendingReplyRepository.updateMany(
-            { userId: BigInt(telegramId!), status: "pending" },
+            { userId: BigInt(telegramId!), status: "pending", trackedMessage: { buttonType: "preferences" } },
             { status: "confirmed", respondedAt: new Date() }
         );
 

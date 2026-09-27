@@ -7,7 +7,7 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { formatLocalDate } from "../utils/format-deadline.js";
 import { awsBusinessClient } from "./aws-business-client.js";
-import { monthNameFromCanonical, nextCanonicalMonth } from "./preference-month.js";
+import { firstDayAfterMonth, monthNameFromCanonical, nextCanonicalMonth } from "./preference-month.js";
 
 /**
  * Рассылка 23-го: приглашение подать пожелания на следующий месяц.
@@ -18,15 +18,11 @@ import { monthNameFromCanonical, nextCanonicalMonth } from "./preference-month.j
  */
 
 /**
- * Жёсткий предел напоминаний — первое число после месяца графика. Позже срок
- * не переносится, а без предела строка без ответа пинговалась бы вечно: при
- * откате на старый код (он пингует «до ответа», если `pingUntil` пуст) или
- * если вебапп так и не ответит.
+ * Жёсткий предел напоминаний — первое число после месяца графика
+ * (`firstDayAfterMonth`). Позже срок не переносится, а без предела строка без
+ * ответа пинговалась бы вечно: при откате на старый код (он пингует «до
+ * ответа», если `pingUntil` пуст) или если вебапп так и не ответит.
  */
-function firstDayAfter(month: string): Date {
-    const [year, monthNumber] = month.split("-").map(Number) as [number, number];
-    return new Date(Date.UTC(year, monthNumber, 1));
-}
 
 /** Сбой вебаппа повторяется каждую минуту — в журнал он пишется раз в полчаса. */
 const FAILURE_LOG_EVERY_MS = 30 * 60 * 1000;
@@ -49,19 +45,9 @@ export class MonthlyPreferencesTrigger {
         // Atomically acquire the monthly trigger so parallel instances cannot enqueue twice.
         const acquired = await redis.set(triggerKey, "true", "EX", 32 * 24 * 60 * 60, "NX");
         if (acquired !== "OK") {
+            // Только debug: с 23-го до конца месяца сюда приходят каждую
+            // минуту, и бизнес-событие на каждый тик — тысячи строк в месяц.
             logger.debug(`[MonthlyPref] Already triggered for ${monthName}, skipping.`);
-            logBusinessEvent({
-                event: "staff.preferences_monthly_trigger.skipped",
-                actorType: "system",
-                actorRole: "system",
-                result: "skipped",
-                reasonCode: "ALREADY_TRIGGERED",
-                module: "monthly-preferences-trigger",
-                operation: "trigger",
-                safeContext: {
-                    monthName,
-                },
-            });
             return;
         }
 
@@ -109,7 +95,7 @@ export class MonthlyPreferencesTrigger {
                     // бы ни о переносе, ни о закрытии. `pingUntil` — только
                     // предел на крайний случай, конец месяца графика.
                     targetMonth,
-                    pingUntil: firstDayAfter(targetMonth),
+                    pingUntil: firstDayAfterMonth(targetMonth),
                     buttonType: 'preferences'
                 }
             );

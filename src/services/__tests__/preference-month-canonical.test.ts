@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { monthNameFromCanonical, nextCanonicalMonth } from "../preference-month.js";
+import { collectionCanonicalMonth, firstDayAfterMonth, monthNameFromCanonical, nextCanonicalMonth } from "../preference-month.js";
 
 describe("monthNameFromCanonical", () => {
     it("names the month of a YYYY-MM", () => {
@@ -28,3 +28,20 @@ describe("nextCanonicalMonth", () => {
         expect(nextCanonicalMonth(new Date("2026-10-31T22:30:00.000Z"))).toBe("2026-12");
     });
 });
+
+describe("collectionCanonicalMonth", () => {
+    /** То же правило, что у формы: до 23-го — текущий месяц, с 23-го — следующий. */
+    it("is the current month before the 23rd and the next one from it", () => {
+        expect(collectionCanonicalMonth(new Date("2026-10-22T09:00:00.000Z"))).toBe("2026-10");
+        expect(collectionCanonicalMonth(new Date("2026-10-23T09:00:00.000Z"))).toBe("2026-11");
+        expect(collectionCanonicalMonth(new Date("2026-12-23T09:00:00.000Z"))).toBe("2027-01");
+    });
+});
+
+describe("firstDayAfterMonth", () => {
+    it("is midnight UTC on the first of the next month", () => {
+        expect(firstDayAfterMonth("2026-11").toISOString()).toBe("2026-12-01T00:00:00.000Z");
+        expect(firstDayAfterMonth("2026-12").toISOString()).toBe("2027-01-01T00:00:00.000Z");
+    });
+});
+
