@@ -725,7 +725,6 @@ Please check bot permissions (Manage Topics).`,
   // «Спробуйте» было из словаря кандидатов: флоу пожеланий везде на «ти».
   "staff-preferences-save-failed": `Не вдалося зберегти побажання. Спробуй ще раз — якщо не вийде, звернись у підтримку.`,
 
-  "staff-preferences-session-restarted": `Форму оновлено — перевір дні ще раз.`,
   "staff-preferences-already-saved": `Побажання вже збережені.`,
   "staff-preferences-check-before-save": `Перевір дні й натисни «Зберегти» ще раз.`,
   "staff-preferences-day-unavailable": `Цей день не можна вибрати.`,

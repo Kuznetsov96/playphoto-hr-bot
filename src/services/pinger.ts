@@ -297,12 +297,17 @@ async function runPinger(bot: Bot<MyContext>) {
                 // Срок спрашивается перед КАЖДЫМ напоминанием: владелец мог его
                 // перенести или закрыть сбор. Раньше напоминания шли до
                 // зашитого 26-го, даже если сбор закрыли 25-го.
+                // Конец месяца графика — раньше запроса к вебаппу: иначе при
+                // лежащем вебаппе строка возвращалась бы каждую минуту вечно.
+                if (now.getTime() >= monthAfter(msg.targetMonth)) {
+                    await trackedMessageRepository.stopTracking(msg.id);
+                    continue;
+                }
                 const schedule = await preferencesScheduleFor(msg.targetMonth, schedules);
                 if (schedule === null) continue;
                 // Закрытие необратимо (личное окно открывает «Reopen», а не
-                // рассылка) — напоминания кончаются насовсем. Как и с концом
-                // самого месяца графика: позже срок не переносится.
-                if (!schedule.open || now.getTime() >= monthAfter(msg.targetMonth)) {
+                // рассылка) — напоминания кончаются насовсем.
+                if (!schedule.open) {
                     await trackedMessageRepository.stopTracking(msg.id);
                     continue;
                 }

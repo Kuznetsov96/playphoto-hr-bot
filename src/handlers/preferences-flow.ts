@@ -67,19 +67,15 @@ type FlowStart = "CALENDAR" | "NOT_NEEDED" | "CLOSED" | "UNAVAILABLE";
  * `startPreferencesFlow` сам подставит уже поданные дни и проверит, открыт ли
  * сбор.
  *
- * Тост «Форму оновлено» — только если открылся календарь: над экраном
- * «збір закрито» он противоречил бы тому, что человек видит.
+ * Ответ на нажатие — сразу и без текста. Открытие формы — до трёх запросов к
+ * вебаппу; ответ после них при медленном API опоздал бы за ~15 секунд Telegram,
+ * и у человека висел бы спиннер. А тост «Форму оновлено» над экраном
+ * «збір закрито» противоречил бы тому, что человек видит, — экран говорит сам.
  */
 async function restartIfSessionLost(ctx: MyContext): Promise<boolean> {
     if (ctx.session.preferencesData) return false;
-    let started: FlowStart | undefined;
-    try {
-        started = await startPreferencesFlow(ctx);
-    } finally {
-        await ctx
-            .answerCallbackQuery(started === "CALENDAR" ? STAFF_TEXTS["staff-preferences-session-restarted"] : undefined)
-            .catch(() => { });
-    }
+    await ctx.answerCallbackQuery().catch(() => { });
+    await startPreferencesFlow(ctx);
     return true;
 }
 

@@ -17,6 +17,21 @@ import { monthNameFromCanonical, nextCanonicalMonth } from "./preference-month.j
  * Напоминания тоже спрашивают его заново перед каждой отправкой (pinger.ts).
  */
 
+/**
+ * Жёсткий предел напоминаний — первое число после месяца графика. Позже срок
+ * не переносится, а без предела строка без ответа пинговалась бы вечно: при
+ * откате на старый код (он пингует «до ответа», если `pingUntil` пуст) или
+ * если вебапп так и не ответит.
+ */
+function firstDayAfter(month: string): Date {
+    const [year, monthNumber] = month.split("-").map(Number) as [number, number];
+    return new Date(Date.UTC(year, monthNumber, 1));
+}
+
+/** Сбой вебаппа повторяется каждую минуту — в журнал он пишется раз в полчаса. */
+const FAILURE_LOG_EVERY_MS = 30 * 60 * 1000;
+let lastFailureLoggedAt = 0;
+
 export class MonthlyPreferencesTrigger {
     /**
      * Triggers the monthly broadcast to all active staff.
@@ -60,6 +75,13 @@ export class MonthlyPreferencesTrigger {
                 logger.warn({ targetMonth }, "[MonthlyPref] Collection already closed, invites not sent");
                 return;
             }
+            // Срок уже прошёл — приглашать поздно. Попытки идут с 23-го до конца
+            // месяца (вебапп мог лежать весь день), и без этой проверки выкат
+            // бота после срока с пустым Redis разослал бы приглашение повторно.
+            if (Date.now() >= new Date(schedule.deadlineEndsAt).getTime()) {
+                logger.warn({ targetMonth, deadline: schedule.deadline }, "[MonthlyPref] Deadline passed, invites not sent");
+                return;
+            }
             // Дата, а не «2 дні»: относительный срок каждый считает по-своему,
             // а день недели выводится из самой даты и потому не разойдётся с ней.
             const messageText = STAFF_TEXTS["staff-preferences-invite"]({
@@ -82,10 +104,12 @@ export class MonthlyPreferencesTrigger {
                     // шестичасовой шаг даёт два напоминания в день вместо трёх —
                     // достаточно, чтобы достучаться до забывчивого.
                     repeatIntervalMs: 6 * 60 * 60 * 1000,    // 6 hours
-                    // Без `pingUntil`: срок и «сбор открыт» пингер спрашивает
-                    // у вебаппа по месяцу перед каждым напоминанием. Зашитый
-                    // в строку срок не узнал бы ни о переносе, ни о закрытии.
+                    // Срок и «сбор открыт» пингер спрашивает у вебаппа по месяцу
+                    // перед каждым напоминанием: зашитый в строку срок не узнал
+                    // бы ни о переносе, ни о закрытии. `pingUntil` — только
+                    // предел на крайний случай, конец месяца графика.
                     targetMonth,
+                    pingUntil: firstDayAfter(targetMonth),
                     buttonType: 'preferences'
                 }
             );
@@ -103,8 +127,12 @@ export class MonthlyPreferencesTrigger {
                 },
             });
         } catch (e: any) {
-            logger.error({ err: e }, "Monthly preferences trigger failed");
-            logBusinessEvent({
+            // Ключ освобождается всегда — повтор через минуту. Журнал — нет:
+            // лежащий вебапп иначе давал бы сотни ошибок за день.
+            const shouldLog = Date.now() - lastFailureLoggedAt >= FAILURE_LOG_EVERY_MS;
+            if (shouldLog) lastFailureLoggedAt = Date.now();
+            if (shouldLog) logger.error({ err: e }, "Monthly preferences trigger failed");
+            if (shouldLog) logBusinessEvent({
                 event: "staff.preferences_monthly_trigger.completed",
                 level: "error",
                 actorType: "system",
@@ -126,15 +154,17 @@ export class MonthlyPreferencesTrigger {
     }
 
     /**
-     * Checks if it's the 23rd and triggers the broadcast if it hasn't been sent yet today.
+     * From the 23rd on, triggers the broadcast if it has not been sent this month.
      */
     static async checkAndTrigger(bot: Bot<MyContext>) {
         const now = new Date();
         // Use Kyiv time for consistent date checking
         const kyivDate = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
         
-        // Catch up after 10:00 if the service was restarting at the exact scheduled minute.
-        if (kyivDate.getDate() === 23 && kyivDate.getHours() >= 10) {
+        // С 23-го до конца месяца, после 10:00: рассылка уходит один раз (ключ
+        // месяца в Redis), но если вебапп лежал весь 23-й, она уйдёт 24-го, а
+        // не пропадёт на месяц. После срока `trigger` сам откажется.
+        if (kyivDate.getDate() >= 23 && kyivDate.getHours() >= 10) {
             await this.trigger(bot);
         }
     }

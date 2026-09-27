@@ -206,8 +206,10 @@ const schedulePreferenceScheduleSchema = z
         open: z.boolean(),
         deadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
         deadlineEndsAt: z.string().datetime(),
-    })
-    .strict();
+    });
+// Не `.strict()`, в отличие от соседних схем: лишнее поле в будущем ответе
+// уронило бы и рассылку, и все напоминания — ровно та ловушка, из-за которой
+// этот ответ живёт на отдельном роуте. Неизвестные поля просто отбрасываются.
 
 export type SchedulePreferenceSchedule = z.infer<typeof schedulePreferenceScheduleSchema>;
 

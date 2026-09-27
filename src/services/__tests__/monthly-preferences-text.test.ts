@@ -115,6 +115,8 @@ describe("окно напоминаний", () => {
         expect(source).toContain("awsBusinessClient.schedulePreferenceSchedule(targetMonth)");
         expect(source).toContain("deadline: formatLocalDate(schedule.deadline)");
         expect(source).toContain("targetMonth,");
-        expect(source).not.toMatch(/DEADLINE_DAY_OF_MONTH|kyivDeadline|pingUntil:/u);
+        // `pingUntil` — только предел на крайний случай, конец месяца графика.
+        expect(source).toContain("pingUntil: firstDayAfter(targetMonth)");
+        expect(source).not.toMatch(/DEADLINE_DAY_OF_MONTH|kyivDeadline/u);
     });
 });

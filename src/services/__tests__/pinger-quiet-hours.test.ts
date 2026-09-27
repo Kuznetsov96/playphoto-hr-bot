@@ -235,6 +235,18 @@ describe("pinger reads the collection schedule from the web app", () => {
         expect(stopTracking).toHaveBeenCalledWith(1);
     });
 
+    /** Иначе при лежащем вебаппе строка возвращалась бы каждую минуту вечно. */
+    it("stops at month end even when the web app is down", async () => {
+        vi.setSystemTime(new Date("2026-10-01T09:00:00Z"));
+        schedulePreferenceSchedule.mockRejectedValue(new Error("404"));
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+
+        await runPingerForTest(fakeBot());
+
+        expect(stopTracking).toHaveBeenCalledWith(1);
+        expect(schedulePreferenceSchedule).not.toHaveBeenCalled();
+    });
+
     /** Вебапп недоступен — ни угаданной даты, ни остановки: повтор на следующем тике. */
     it("sends nothing and keeps the reminder queued when the web app is down", async () => {
         vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));

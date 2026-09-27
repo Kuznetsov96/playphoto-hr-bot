@@ -203,10 +203,12 @@ describe("double taps", () => {
         await tap("pref_save_final");
         vi.advanceTimersByTime(61_000);
 
+        calls = [];
         await tap("pref_save_final");
 
         expect(saveCanonicalPreference).toHaveBeenCalledTimes(1);
-        expect(answers()).toContain("Форму оновлено — перевір дні ще раз.");
+        // Ответ сразу и без текста — открытие формы может занять дольше 15 секунд Telegram.
+        expect(answers()).toEqual([undefined]);
         expect(lastScreen()![1]).toContain("Побажання (листопад)");
     });
 });
@@ -238,7 +240,8 @@ describe("stale buttons", () => {
         async (data) => {
             await tap(data);
 
-            expect(answers()).toContain("Форму оновлено — перевір дні ще раз.");
+            // Ответ сразу и без текста — открытие формы может занять дольше 15 секунд Telegram.
+            expect(answers()).toEqual([undefined]);
             expect(session.preferencesData?.step).toBe("CALENDAR");
             expect(saveCanonicalPreference).not.toHaveBeenCalled();
         },
