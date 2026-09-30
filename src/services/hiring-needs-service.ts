@@ -477,19 +477,5 @@ export const hiringNeedsService = {
             state[locationId] = next;
         }
         await writeMetaState(state);
-    },
-
-    async adjustNeededCount(locationId: string, delta: number): Promise<number> {
-        const current = await prisma.location.findUnique({
-            where: { id: locationId },
-            select: { neededCount: true }
-        });
-        const currentCount = Math.max(0, current?.neededCount || 0);
-        const nextCount = Math.max(0, currentCount + delta);
-        await prisma.location.update({
-            where: { id: locationId },
-            data: { neededCount: nextCount }
-        });
-        return nextCount;
     }
 };

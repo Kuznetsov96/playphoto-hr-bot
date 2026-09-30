@@ -24,6 +24,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 const SNAPSHOT_SHRINK_LIMIT = 0.7;
 
+/**
+ * Ёмкость локации из вебаппа. До 30.09.2026 `neededCount` правился только
+ * руками в админке бота, а владелец задаёт цель штата в карточке локации
+ * вебаппа — анкета решала «есть место / очередь» по второй, забытой правде.
+ * Старый бэкенд поле не шлёт — тогда счётчик не трогаем.
+ */
+function hiringNeed(location: { hiringDeficit?: number | undefined }): { neededCount?: number } {
+    return location.hiringDeficit === undefined ? {} : { neededCount: location.hiringDeficit };
+}
+
 /** Where each successful pass records its result, and the baseline for the next one. */
 const LAST_SYNC_STATE_KEY = "aws-business-sync:last";
 // The backend rejects a `links` payload larger than 500 entries outright.
@@ -346,6 +356,7 @@ export class AwsBusinessSyncService {
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
                             isHiddenFromCandidates: location.isHiddenFromCandidates,
+                            ...hiringNeed(location),
                         },
                         select: { id: true },
                     })
@@ -361,6 +372,7 @@ export class AwsBusinessSyncService {
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
                             isHiddenFromCandidates: location.isHiddenFromCandidates,
+                            ...hiringNeed(location),
                         },
                         select: { id: true },
                     });

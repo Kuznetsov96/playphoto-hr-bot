@@ -226,3 +226,39 @@ describe("AwsBusinessSyncService — locations missing from the snapshot", () =>
         });
     });
 });
+
+describe("AwsBusinessSyncService — hiring deficit from the web app", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    async function syncWith(location: Record<string, unknown>) {
+        const transaction = transactionStub();
+        prismaMock.$transaction.mockImplementation((callback: (tx: ReturnType<typeof transactionStub>) => unknown) =>
+            callback(transaction));
+        const base = snapshot([{ telegramId: "486213975" }]);
+        awsBusinessClientMock.snapshot.mockResolvedValue({ ...base, locations: [{ ...base.locations[0], ...location }] });
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+        await new AwsBusinessSyncService().syncAll();
+        return transaction;
+    }
+
+    it("writes the web app's deficit into neededCount — one truth for the questionnaire", async () => {
+        const transaction = await syncWith({ hiringDeficit: 2 });
+
+        expect(transaction.location.create).toHaveBeenCalledWith(expect.objectContaining({
+            data: expect.objectContaining({ neededCount: 2 }),
+        }));
+    });
+
+    it("leaves neededCount alone when an older backend omits the field", async () => {
+        const transaction = await syncWith({});
+
+        const data = transaction.location.create.mock.calls[0]?.[0]?.data;
+        expect(data).not.toHaveProperty("neededCount");
+    });
+});

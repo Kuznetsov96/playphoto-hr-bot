@@ -5,6 +5,7 @@ import { getUserAdminRole } from "../../middleware/role-check.js";
 import { hasAnyRole } from "../../config/roles.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { locationRepository } from "../../repositories/location-repository.js";
+import { LOCATION_LEVERS_IN_WEBAPP } from "./system.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { scheduleSyncService } from "../../services/schedule-sync.js";
 import { createKyivDate } from "../../utils/bot-utils.js";
@@ -68,33 +69,19 @@ adminStepHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) 
 
 // --- Individual Handlers ---
 
-async function handleSetNeeded(ctx: MyContext, step: string, text: string) {
-    const locId = step.replace("set_needed_", "");
-    const count = parseInt(text.trim());
-    if (isNaN(count)) return ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-prompt-number"], undefined);
-
-    await locationRepository.update(locId, { neededCount: count });
-    // HR-хаб прибрано, тож повертаємось у меню локацій — саме звідти цей крок і запускають.
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-success-need-updated"]({ count }), "admin-locations");
+async function handleSetNeeded(ctx: MyContext, _step: string, _text: string) {
+    // Потреба приходить з вебаппа (ціль штату мінус ті, хто лишається);
+    // ручне число жило б до наступного синку. Крок лишився для сесій, що
+    // застали старий екран.
     ctx.session.step = "idle";
-    if (ctx.session.adminFlow === "LOCATIONS") {
-        delete ctx.session.adminFlow;
-    }
+    delete ctx.session.adminFlow;
+    await ScreenManager.renderScreen(ctx, LOCATION_LEVERS_IN_WEBAPP, "admin-locations");
 }
 
-async function handleEditCity(ctx: MyContext, step: string, text: string) {
-    const locId = step.replace("edit_city_", "");
-    const newCity = text.trim();
-
-    await locationRepository.update(locId, { city: newCity });
-    await ctx.reply(ADMIN_TEXTS["admin-success-city-updated"]({ city: newCity }));
-
+async function handleEditCity(ctx: MyContext, _step: string, _text: string) {
     ctx.session.step = "idle";
-    if (ctx.session.adminFlow === "LOCATIONS") {
-        delete ctx.session.adminFlow;
-    }
-    // Повертаємось до списку міст
-    await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-cities", { forceNew: true });
+    delete ctx.session.adminFlow;
+    await ScreenManager.renderScreen(ctx, LOCATION_LEVERS_IN_WEBAPP, "admin-locations");
 }
 
 
