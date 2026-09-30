@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../../core/logger.js", () => ({
     default: {
@@ -120,19 +120,48 @@ describe("resolveScreeningStatus", () => {
     });
 });
 
+let storedCandidate: any = null;
+
 describe("finishScreening: защита от двойного тапа", () => {
+    beforeEach(() => {
+        storedCandidate = {
+            status: "SCREENING",
+            currentStep: "INITIAL_TEST",
+            notificationSent: false,
+            fullName: "Анна Коваль",
+            gender: "female",
+            birthDate: new Date("2005-01-01"),
+            city: "Lviv",
+            locationId: "loc-1",
+            additionalLocationIds: [],
+            appearance: null,
+            source: null,
+        };
+    });
+
     function makeCtx(overrides: Record<string, any> = {}) {
         return {
             session: {
                 step: "screening_source",
-                candidateData: { source: "Instagram", ...overrides },
+                candidateData: {
+                    fullName: "Анна Коваль",
+                    gender: "female",
+                    birthDate: "2005-01-01T00:00:00.000Z",
+                    city: "Lviv",
+                    locationIds: ["loc-1"],
+                    source: "Instagram",
+                    ...overrides,
+                },
             },
             from: { id: 1 },
             update: { update_id: 1 },
             di: {
                 locationRepository: { findById: vi.fn() },
                 candidateRepository: { upsert: vi.fn(async () => ({})) },
-                userRepository: { upsert: vi.fn(async () => ({ id: "u1" })) },
+                userRepository: {
+                    upsert: vi.fn(async () => ({ id: "u1" })),
+                    findWithCandidateProfileByTelegramId: vi.fn(async () => ({ candidate: storedCandidate })),
+                },
             },
         } as any;
     }
@@ -174,6 +203,63 @@ describe("finishScreening: защита от двойного тапа", () => {
 
         await finishScreening(ctx, "Без особливостей");
 
+        expect(ctx.session.step).toBe("screening_source");
+    });
+});
+
+describe("finishScreening: вход после конца анкеты и после потери сессии", () => {
+    beforeEach(() => {
+        storedCandidate = {
+            status: "SCREENING",
+            currentStep: "INITIAL_TEST",
+            notificationSent: false,
+            fullName: "Анна Коваль",
+            gender: "female",
+            birthDate: new Date("2005-01-01"),
+            city: "Lviv",
+            locationId: "loc-1",
+            additionalLocationIds: ["loc-2"],
+            appearance: null,
+            tattooPhotoId: null,
+            source: null,
+        };
+    });
+
+    function ctxWithSession(candidateData: Record<string, any>, step?: string) {
+        return {
+            session: { step, candidateData },
+            from: { id: 1 },
+            update: { update_id: 1 },
+            di: {
+                locationRepository: { findById: vi.fn() },
+                candidateRepository: { upsert: vi.fn(async () => ({})) },
+                userRepository: {
+                    upsert: vi.fn(async () => ({ id: "u1" })),
+                    findWithCandidateProfileByTelegramId: vi.fn(async () => ({ candidate: storedCandidate })),
+                },
+            },
+        } as any;
+    }
+
+    it("записанная на интервью не пересчитывает статус старой кнопкой анкеты", async () => {
+        const { finishScreening } = await import("../index.js");
+        storedCandidate = { ...storedCandidate, status: "INTERVIEW_SCHEDULED", currentStep: "INTERVIEW", source: "Instagram" };
+        const ctx = ctxWithSession({}, undefined);
+
+        await finishScreening(ctx, "Без особливостей");
+
+        expect(ctx.di.candidateRepository.upsert).not.toHaveBeenCalled();
+        expect(ctx.session.step).toBe("idle");
+    });
+
+    it("после потери сессии поднимает ответы из базы, включая доп. точки, и спрашивает источник", async () => {
+        const { finishScreening } = await import("../index.js");
+        const ctx = ctxWithSession({}, undefined);
+
+        await finishScreening(ctx, "Без особливостей");
+
+        expect(ctx.session.candidateData.birthDate).toBe("2005-01-01T00:00:00.000Z");
+        expect(ctx.session.candidateData.locationIds).toEqual(["loc-1", "loc-2"]);
         expect(ctx.session.step).toBe("screening_source");
     });
 });

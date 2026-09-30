@@ -8,6 +8,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
 import { buildSignedCallback } from "./signed-callback.js";
 import { formatLocation } from "./location-label.js";
+import { isQuestionnaireOpen } from "./screening-state.js";
 
 function getCandidateAge(birthDate?: Date | string | null): number | null {
     if (!birthDate) return null;
@@ -88,13 +89,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
     switch (status) {
         case CandidateStatus.SCREENING: {
-            const { FunnelStep } = await import("@prisma/client");
-            const isFinished = candidate.currentStep === FunnelStep.INTERVIEW ||
-                candidate.currentStep === FunnelStep.TRAINING ||
-                candidate.notificationSent ||
-                !!candidate.source;
-
-            if (isFinished) {
+            // Те саме правило, що в нагадуванні й кнопці «Продовжити анкету».
+            if (!isQuestionnaireOpen(candidate)) {
                 text = CANDIDATE_TEXTS["candidate-success-screening"];
                 if (canContactStaff) kb.text("Написати нам", "contact_hr");
             } else {

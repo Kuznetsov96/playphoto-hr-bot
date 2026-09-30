@@ -4,6 +4,7 @@ import { candidateRepository, type CandidateWithRelations } from "../repositorie
 import { getBirthDateRejection, type CandidateAgeLocation } from "../utils/candidate-age.js";
 import { appearanceNeedsReview } from "../utils/appearance-value.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
+import { isScreeningComplete } from "../utils/screening-state.js";
 
 type ReactivationLocation = (NonNullable<CandidateAgeLocation> & Partial<Pick<Location, "neededCount" | "isHidden" | "isHiddenFromCandidates">>) | null | undefined;
 
@@ -30,18 +31,6 @@ export type UnderageReactivationDecision = {
     mode: UnderageReactivationMode;
     patch: Prisma.CandidateUpdateInput;
 };
-
-function hasCompletedScreening(candidate: UnderageReactivationCandidate): boolean {
-    return Boolean(
-        candidate.fullName &&
-        candidate.gender &&
-        candidate.birthDate &&
-        candidate.city &&
-        candidate.locationId &&
-        candidate.appearance &&
-        candidate.source
-    );
-}
 
 function needsManualAppearanceReview(candidate: UnderageReactivationCandidate): boolean {
     if (candidate.tattooPhotoId) return true;
@@ -77,7 +66,7 @@ export function getUnderageReactivationDecision(candidate: UnderageReactivationC
         hasUnreadMessage: false,
     } satisfies Prisma.CandidateUpdateInput;
 
-    if (!hasCompletedScreening(candidate)) {
+    if (!isScreeningComplete(candidate)) {
         return {
             mode: "RESUME_SCREENING",
             patch: {
