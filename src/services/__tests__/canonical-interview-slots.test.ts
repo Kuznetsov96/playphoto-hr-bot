@@ -171,6 +171,20 @@ describe("flag ON: the web API is canonical", () => {
         expect(sessionCreate).not.toHaveBeenCalled();
     });
 
+    it("releases the web slot when the local booking is rejected", async () => {
+        // Без отката веб-слот оставался занятым, хотя записи не было.
+        bookSlot.mockResolvedValue(webSlot);
+        slotFindUnique.mockResolvedValue({ id: "local-mirror-1", isBooked: false });
+        const rejected = new Error("SCREENING_INCOMPLETE");
+        bookInterviewSlotLocal.mockRejectedValue(rejected);
+        releaseSlot.mockResolvedValue({ released: true });
+
+        const { bookInterviewSlot } = await import("../canonical-interview-slots.js");
+        await expect(bookInterviewSlot(1164289764, webSlot.publicId, "olena")).rejects.toBe(rejected);
+
+        expect(releaseSlot).toHaveBeenCalledWith("1164289764", "booking_rejected");
+    });
+
     it("release calls the web API with the telegramId as digits and the reason", async () => {
         releaseSlot.mockResolvedValue({ released: true });
 

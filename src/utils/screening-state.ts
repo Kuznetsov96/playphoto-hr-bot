@@ -49,3 +49,38 @@ export function isQuestionnaireOpen(candidate: ScreeningStateCandidate): boolean
     if (candidate.notificationSent) return false;
     return !isScreeningComplete(candidate);
 }
+
+export type InterviewStateCandidate = {
+    status: CandidateStatus;
+    currentStep?: FunnelStep | null;
+    notificationSent?: boolean | null;
+    interviewSlotId?: string | null;
+};
+
+const RESCHEDULING_STATUSES: ReadonlySet<CandidateStatus> = new Set([
+    CandidateStatus.SCREENING,
+    CandidateStatus.WAITLIST_HR,
+    CandidateStatus.WAITLIST,
+]);
+
+/**
+ * Може обрати час співбесіди: запрошена (SCREENING + notificationSent) або
+ * вже була в записі й шукає новий час — скасувала, переносить, не знайшла
+ * вікна (currentStep INTERVIEW). Кнопки старого запрошення після скидання
+ * через 48 год («місце перейшло іншому») сюди не проходять.
+ */
+export function canScheduleInterview(candidate: InterviewStateCandidate): boolean {
+    if (candidate.interviewSlotId) return false;
+    if (candidate.status === CandidateStatus.SCREENING && candidate.notificationSent) return true;
+    return candidate.currentStep === FunnelStep.INTERVIEW && RESCHEDULING_STATUSES.has(candidate.status);
+}
+
+/**
+ * Має чинний запис на співбесіду, яким можна керувати: змінити час,
+ * скасувати, відмовитися. Після співбесіди слот лишається прив'язаним, тож
+ * сам слот нічого не доводить — вирішує статус.
+ */
+export function hasActiveInterviewBooking(candidate: InterviewStateCandidate, slotId: string): boolean {
+    if (candidate.status !== CandidateStatus.INTERVIEW_SCHEDULED) return false;
+    return slotId === "none" || candidate.interviewSlotId === slotId;
+}

@@ -232,6 +232,7 @@ describe("booking decline invite", () => {
         findByTelegramId.mockResolvedValue({
             id: "cand-cancel",
             fullName: "Jane",
+            status: "INTERVIEW_SCHEDULED",
             interviewSlotId: "slot-cancel",
         });
 
@@ -266,6 +267,7 @@ describe("booking decline invite", () => {
         findByTelegramId.mockResolvedValue({
             id: "cand-withdraw",
             fullName: "Jane",
+            status: "INTERVIEW_SCHEDULED",
             interviewSlotId: "slot-withdraw",
         });
 
@@ -288,6 +290,31 @@ describe("booking decline invite", () => {
                 googleMeetLink: null,
             })
         );
+    });
+
+    it("старая кнопка отмены после интервью не возвращает кандидатку в очередь", async () => {
+        // Слот остаётся привязанным после автозавершения интервью; без проверки
+        // статуса кнопка из подтверждения брони переводила кандидатку с решением
+        // HR в WAITLIST_HR, и оффер или отказ ей уже не уходил.
+        findByTelegramId.mockResolvedValue({
+            id: "cand-done",
+            fullName: "Jane",
+            status: "INTERVIEW_COMPLETED",
+            interviewSlotId: "slot-done",
+        });
+
+        const ctx = {
+            from: { id: 555666 },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback(buildSignedCallback("ccb", "slot-done"), ctx);
+
+        expect(cancelInterviewSlot).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Цей запис уже неактуальний");
     });
 
     it("cancels a mentor-stage booking without rejecting the candidate", async () => {

@@ -605,7 +605,8 @@ export const hrService = {
                 status: CandidateStatus.SCREENING,
                 isWaitlisted: false,
                 interviewWaitlistReason: null,
-                interviewInvitedAt: new Date()
+                interviewInvitedAt: new Date(),
+                interviewInviteReminderSentAt: null
             });
 
             audit({
@@ -1146,7 +1147,8 @@ export const hrService = {
                     isWaitlisted: false,
                     notificationSent: true,
                     interviewWaitlistReason: null,
-                    interviewInvitedAt: new Date()
+                    interviewInvitedAt: new Date(),
+                    interviewInviteReminderSentAt: null
                 });
                 successCount++;
             } catch (e: any) {

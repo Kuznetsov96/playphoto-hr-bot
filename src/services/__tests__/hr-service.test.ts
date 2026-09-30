@@ -353,7 +353,8 @@ describe('hrService', () => {
                 isWaitlisted: false,
                 notificationSent: true,
                 interviewWaitlistReason: null,
-                interviewInvitedAt: expect.any(Date)
+                interviewInvitedAt: expect.any(Date),
+                interviewInviteReminderSentAt: null
             });
         });
 
