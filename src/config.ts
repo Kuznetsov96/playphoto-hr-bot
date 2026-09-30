@@ -20,7 +20,6 @@ const envSchema = z.object({
     AWS_REPLACEMENTS_SHADOW_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_REPLACEMENTS_CANONICAL_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_REMINDERS_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
-    AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED: z.enum(["true", "false"]).default("false"),
     // Диспетчер очереди отзыва/восстановления доступа (Task 6). Флаг, а не
     // мгновенное подключение: новый фоновый цикл должен выключаться переменной
@@ -149,7 +148,6 @@ export const AWS_SCHEDULE_NOTIFICATIONS_ENABLED = env.AWS_SCHEDULE_NOTIFICATIONS
 export const AWS_REPLACEMENTS_SHADOW_ENABLED = env.AWS_REPLACEMENTS_SHADOW_ENABLED === "true";
 export const AWS_REPLACEMENTS_CANONICAL_ENABLED = env.AWS_REPLACEMENTS_CANONICAL_ENABLED === "true";
 export const AWS_REMINDERS_CANONICAL_READ_ENABLED = env.AWS_REMINDERS_CANONICAL_READ_ENABLED === "true";
-export const AWS_PREFERENCES_CANONICAL_WRITE_ENABLED = env.AWS_PREFERENCES_CANONICAL_WRITE_ENABLED === "true";
 export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED === "true";
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
 export const AWS_RECRUITING_MIRROR_ENABLED = env.AWS_RECRUITING_MIRROR_ENABLED === "true";

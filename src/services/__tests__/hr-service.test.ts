@@ -317,6 +317,21 @@ describe('hrService', () => {
     });
 
     describe('notifyWaitlist', () => {
+        it('с waitlistedBefore зовёт только тех, для кого самый новый слот действительно новый', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([] as any);
+            const since = new Date('2026-09-30T10:00:00.000Z');
+
+            await hrService.notifyWaitlist({ sendMessage: vi.fn() }, { waitlistedBefore: since });
+
+            expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
+                expect.any(Array),
+                expect.objectContaining({
+                    interviewSlotId: null,
+                    AND: [{ OR: [{ interviewWaitlistedAt: null }, { interviewWaitlistedAt: { lt: since } }] }],
+                }),
+            );
+        });
+
         it('should invite candidates who need interview slots and make them visible to invite reminders', async () => {
             vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
                 {
@@ -338,6 +353,7 @@ describe('hrService', () => {
                 {
                     gender: "female",
                     currentStep: FunnelStep.INTERVIEW,
+                    interviewSlotId: null,
                     OR: [
                         { isWaitlisted: true },
                         {
@@ -348,12 +364,16 @@ describe('hrService', () => {
                     ]
                 }
             );
+            // Остаётся в поиске времени до записи и не попадает под 48-часовой
+            // сброс приглашения: места ей никто не давал и не забирал.
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
                 status: CandidateStatus.SCREENING,
                 isWaitlisted: false,
                 notificationSent: true,
-                interviewWaitlistReason: null,
-                interviewInvitedAt: expect.any(Date)
+                interviewWaitlistReason: 'NO_SLOTS_AVAILABLE',
+                interviewWaitlistedAt: expect.any(Date),
+                interviewInvitedAt: null,
+                interviewInviteReminderSentAt: null
             });
         });
 

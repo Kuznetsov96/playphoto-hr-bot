@@ -81,8 +81,6 @@ export interface SessionData {
         year?: number;
         selectedDays?: number[];
         comment?: string;
-        forceNextMonth?: boolean;
-        forceEdit?: boolean;
         // Останній робочий день (`YYYY-MM-DD`) для тих, хто доопрацьовує.
         worksUntil?: string | null;
         /**
@@ -91,6 +89,12 @@ export interface SessionData {
          * чужие на вид отметки читаются как сбой.
          */
         prefilled?: boolean;
+        /**
+         * Когда нажата «💬 Додати коментар» (ms). Шаг 'COMMENT' перехватывает
+         * следующее сообщение — но только недолго: брошенный на этом шаге
+         * флоу иначе съел бы сообщение в підтримку, написанное через день.
+         */
+        commentRequestedAt?: number;
     };
 
     slotBuilder?: {
@@ -166,6 +170,13 @@ export interface SessionData {
         fileIds: string[];
         startedAt: number;
         lastPhotoAt?: number;
+        /**
+         * Сообщения бота, несущие кнопки «Готово»/«Скасувати». Их несколько:
+         * приглашение и по одному на каждое принятое фото. Завершение гасит
+         * клавиатуры во всех, иначе в чате остаются рабочие кнопки поверх уже
+         * сданной посылки.
+         */
+        promptMessageIds?: number[];
     };
     parcelPhotoCancelledDraft?: {
         parcelId: string;

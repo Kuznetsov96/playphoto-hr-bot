@@ -187,6 +187,10 @@ bot.use(async (ctx, next) => {
             delete ctx.session.broadcastId;
             delete ctx.session.supportData?.step;
             delete ctx.session.supportData?.replyingToUserId;
+            // Без этого брошенный на «💬 Додати коментар» флоу пережил бы
+            // /start, и следующее сообщение — чаще всего в підтримку —
+            // ушло бы в пожелания комментарием и исчезло из чата.
+            delete ctx.session.preferencesData;
         }
     }
     await next();

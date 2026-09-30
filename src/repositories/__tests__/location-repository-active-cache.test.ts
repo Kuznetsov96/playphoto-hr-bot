@@ -89,3 +89,31 @@ describe("locationRepository.findAllActive — TTL cache", () => {
         expect(result).toHaveLength(3);
     });
 });
+
+describe("locationRepository — candidate questionnaire order", () => {
+    beforeEach(() => {
+        findMany.mockReset();
+        findMany.mockResolvedValue(SAMPLE_LOCATIONS);
+    });
+
+    it("asks for cities in a fixed order", async () => {
+        const locationRepository = await freshRepository();
+
+        await locationRepository.findAllCities(true, true);
+
+        expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { city: "asc" } }));
+    });
+
+    it("asks for a city's locations in a fixed order", async () => {
+        // Button positions must survive between render and tap: the menu plugin
+        // answers "Menu was outdated" when the label under the tapped position changed.
+        const locationRepository = await freshRepository();
+
+        await locationRepository.findByCity("Lviv", true);
+
+        expect(findMany).toHaveBeenCalledWith({
+            where: { city: "Lviv", isHiddenFromCandidates: false },
+            orderBy: [{ name: "asc" }, { branch: "asc" }, { id: "asc" }],
+        });
+    });
+});

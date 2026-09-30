@@ -17,6 +17,7 @@ import {
 } from "../../../utils/candidate-age.js";
 import { buildBirthDate } from "../../../utils/birth-date-picker.js";
 import { appearanceNeedsReview } from "../../../utils/appearance-value.js";
+import { isQuestionnaireOpen } from "../../../utils/screening-state.js";
 
 // --- HELPERS ---
 /**
@@ -32,6 +33,56 @@ function getLocationIds(candidateData: any): string[] {
     // Fallback: Try to use single locationId if it exists
     if (candidateData.locationId) return [candidateData.locationId];
     return [];
+}
+
+/**
+ * Відповіді анкети з бази у вигляді сесії. Один збирач на всі входи:
+ * «Продовжити анкету», реактивацію в /start і відновлення після того, як
+ * сесія (Redis, 24 год) зникла посеред анкети. Раніше кожен вхід збирав
+ * сесію сам і губив додаткові локації та фото тату.
+ */
+export function candidateDataFromRecord(candidate: any) {
+    return {
+        fullName: candidate.fullName ?? undefined,
+        gender: candidate.gender ?? undefined,
+        birthDate: candidate.birthDate ? new Date(candidate.birthDate).toISOString() : undefined,
+        city: candidate.city ?? undefined,
+        locationIds: [candidate.locationId, ...(candidate.additionalLocationIds ?? [])].filter(Boolean),
+        appearance: candidate.appearance ?? undefined,
+        tattooPhotoId: candidate.tattooPhotoId ?? undefined,
+        source: candidate.source ?? undefined,
+        clickSource: candidate.clickSource ?? undefined,
+    } as any;
+}
+
+async function loadStoredCandidate(ctx: MyContext) {
+    if (!ctx.from?.id) return null;
+    const user = await ctx.di.userRepository.findWithCandidateProfileByTelegramId(BigInt(ctx.from.id));
+    return user?.candidate ?? null;
+}
+
+/**
+ * Ранні кроки анкети (стать, ім'я, дата, місто, локація) пишуть у базу через
+ * upsert повз funnel-guard. Стара кнопка такого кроку в чаті записаної чи
+ * відхиленої кандидатки інакше переписала б її анкету — аж до скидання точки.
+ * Повертає true, коли анкету вже не заповнюють і показано статус.
+ */
+export async function questionnaireClosed(ctx: MyContext): Promise<boolean> {
+    const stored = await loadStoredCandidate(ctx);
+    if (!stored || isQuestionnaireOpen(stored)) return false;
+    await showStatusInsteadOfQuestions(ctx, stored);
+    return true;
+}
+
+/**
+ * Кнопка анкети натиснута, коли анкету вже не заповнюють: закінчена й чекає
+ * запрошення, запис на співбесіду, відмова. Показуємо статус замість питань —
+ * інакше фінал анкети перерахував би статус наново повз funnel-guard.
+ */
+async function showStatusInsteadOfQuestions(ctx: MyContext, candidate: any) {
+    ctx.session.step = "idle";
+    const { showCandidateStatus } = await import("../../../utils/candidate-ui.js");
+    await showCandidateStatus(ctx, candidate);
 }
 
 function getAgeRejectionMeta(age: number, location?: CandidateAgeLocation) {
@@ -155,7 +206,30 @@ function withPendingNotice(ctx: MyContext, text: string): string {
     return `${notice}\n\n${text}`;
 }
 
+/**
+ * Відповіді про місто й локацію, які анкета більше не пропонує, — не
+ * відповіді. Місто могли записати кирилицею до переходу довідника на
+ * латиницю («Львів» проти «Lviv») або точку закрили, поки анкета лежала
+ * недозаповненою. Раніше такий крок показував порожній список з одною
+ * кнопкою «Назад», а закрита точка тихо доходила до фіналу.
+ */
+async function dropUnavailableLocationAnswers(ctx: MyContext) {
+    const data = ctx.session.candidateData;
+    if (!data?.city) return;
+    const offered = await ctx.di.locationRepository.findByCity(data.city, true);
+    if (offered.length === 0) {
+        data.city = undefined as any;
+        data.locationIds = [];
+        delete (data as any).locationId;
+        return;
+    }
+    const offeredIds = new Set(offered.map((location: any) => location.id));
+    data.locationIds = getLocationIds(data).filter((id) => offeredIds.has(id));
+    delete (data as any).locationId;
+}
+
 export async function startScreening(ctx: MyContext) {
+    await dropUnavailableLocationAnswers(ctx);
     const candidateData = ctx.session.candidateData;
     logger.info({
         event: "candidate.screening.started",
@@ -228,6 +302,7 @@ async function renderLocationSelection(ctx: MyContext) {
 }
 
 export async function handleNoVacancies(ctx: MyContext, city: string) {
+    if (await questionnaireClosed(ctx)) return;
     const bdStr = ctx.session.candidateData.birthDate;
     const birthDate = bdStr ? new Date(bdStr) : new Date();
 
@@ -237,6 +312,8 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
             birthDate,
             gender: ctx.session.candidateData.gender,
             city,
+            locationId: null,
+            additionalLocationIds: [],
             status: CandidateStatus.REJECTED,
             isWaitlisted: false
         });
@@ -252,6 +329,8 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
         birthDate,
         gender: ctx.session.candidateData.gender,
         city,
+        locationId: null,
+        additionalLocationIds: [],
         status: ageMeta.status,
         isWaitlisted: ageMeta.isWaitlisted,
         hrDecision: ageMeta.hrDecision
@@ -301,27 +380,15 @@ async function triggerPrompt(ctx: MyContext, step: string) {
 export const candidateHandlers = new Composer<MyContext>();
 
 candidateHandlers.callbackQuery("resume_screening", async (ctx) => {
-    const { userRepository, candidateRepository } = ctx.di;
-    const userId = ctx.from?.id;
-    if (!userId) return;
-
-    const user = await userRepository.findWithCandidateProfileByTelegramId(BigInt(userId));
-    if (!user?.candidate) return;
-
     await ctx.answerCallbackQuery();
+    const candidate = await loadStoredCandidate(ctx);
+    if (!candidate) return startScreening(ctx);
 
-    // Fill session with existing data
-    ctx.session.candidateData = {
-        fullName: user.candidate.fullName,
-        gender: user.candidate.gender,
-        birthDate: user.candidate.birthDate?.toISOString(),
-        city: user.candidate.city,
-        locationIds: user.candidate.locationId ? [user.candidate.locationId] : [],
-        appearance: user.candidate.appearance,
-        source: user.candidate.source,
-        clickSource: user.candidate.clickSource
-    } as any;
+    // Кнопка живе в чаті довго: у нагадуванні, у привітанні з днем народження.
+    // Натиснута після фіналу анкети, вона не повинна знову питати джерело.
+    if (!isQuestionnaireOpen(candidate)) return showStatusInsteadOfQuestions(ctx, candidate);
 
+    ctx.session.candidateData = candidateDataFromRecord(candidate);
     await startScreening(ctx);
 });
 
@@ -351,13 +418,23 @@ candidateHandlers.callbackQuery("restart_screening_confirm", async (ctx) => {
     const user = await userRepository.findWithCandidateProfileByTelegramId(BigInt(userId));
 
     if (user?.candidate) {
+        // Стерти анкету можна лише ту, яку ще заповнюють: стара кнопка
+        // підтвердження інакше скидала б у SCREENING будь-який статус.
+        if (!isQuestionnaireOpen(user.candidate)) {
+            await ctx.answerCallbackQuery();
+            return showStatusInsteadOfQuestions(ctx, user.candidate);
+        }
         await candidateRepository.update(user.candidate.id, {
             fullName: null,
             gender: null,
             birthDate: null,
             city: null,
             location: { disconnect: true },
+            additionalLocationIds: [],
             appearance: null,
+            // Старе фото тату інакше пережило б «спочатку»: пішло б у вебапп
+            // і відправило б нову анкету на ручний огляд.
+            tattooPhotoId: null,
             source: null,
             clickSource: null,
             status: CandidateStatus.SCREENING,
@@ -392,33 +469,21 @@ candidateHandlers.callbackQuery("candidate_start_screening", async (ctx) => {
 
     const user = await userRepository.findWithCandidateProfileByTelegramId(BigInt(userId));
 
-    // GUARD: If candidate already passed screening, don't allow reset via old buttons
+    // Стара кнопка «почати анкету». Скидати можна лише анкету, яку ще
+    // заповнюють; раніше вона «оживляла» й відхилених.
     if (user?.candidate) {
-        const protectedStatuses: CandidateStatus[] = [
-            CandidateStatus.ACCEPTED,
-            CandidateStatus.INTERVIEW_SCHEDULED,
-            CandidateStatus.INTERVIEW_COMPLETED,
-            CandidateStatus.TRAINING_SCHEDULED,
-            CandidateStatus.TRAINING_COMPLETED,
-            CandidateStatus.OFFLINE_STAGING,
-            CandidateStatus.AWAITING_FIRST_SHIFT,
-            CandidateStatus.HIRED
-        ];
-
-        if (protectedStatuses.includes(user.candidate.status)) {
-            await ctx.answerCallbackQuery("Вашу анкету вже взято в роботу — оновлювати її не потрібно.");
-            const { showCandidateStatus } = await import("../../../utils/candidate-ui.js");
-            await showCandidateStatus(ctx, user.candidate);
-            return;
+        if (!isQuestionnaireOpen(user.candidate)) {
+            await ctx.answerCallbackQuery();
+            return showStatusInsteadOfQuestions(ctx, user.candidate);
         }
-
-        // Allow reset only for new or rejected candidates
         await candidateRepository.update(user.candidate.id, {
             currentStep: FunnelStep.INITIAL_TEST,
             fullName: null,
             city: null,
             location: { disconnect: true },
-            appearance: null
+            additionalLocationIds: [],
+            appearance: null,
+            tattooPhotoId: null,
         });
     }
 
@@ -435,6 +500,7 @@ candidateHandlers.on("message:text", async (ctx, next) => {
     await ctx.deleteMessage().catch(() => { });
 
     if (step === "screening_name") {
+        if (await questionnaireClosed(ctx)) return;
         const val = CandidateSchema.shape.fullName.safeParse(ctx.message.text);
         if (val.success) {
             ctx.session.candidateData.fullName = val.data;
@@ -493,6 +559,7 @@ candidateHandlers.on("message:photo", async (ctx) => {
  * застаріти між рендером клавіатури й натисканням.
  */
 export async function handleBirthDateSelected(ctx: MyContext, day: number) {
+    if (await questionnaireClosed(ctx)) return;
     const { birthYear, birthMonth } = ctx.session.candidateData;
     const date = buildBirthDate(birthYear, birthMonth, day);
 
@@ -535,6 +602,7 @@ async function askBirthYearAgain(ctx: MyContext) {
 }
 
 export async function handleLocationSelected(ctx: MyContext, targetLoc: any, city: string) {
+    if (await questionnaireClosed(ctx)) return;
     const { fullName, birthDate: bdStr, gender } = ctx.session.candidateData;
     const birthDate = bdStr ? new Date(bdStr) : new Date(0);
     const finalLocationId = getLocationIds(ctx.session.candidateData)[0];
@@ -584,9 +652,38 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
 const FINISHING_STEP = "screening_finishing";
 
 export async function finishScreening(ctx: MyContext, appearance: string, tattooPhotoId?: string) {
+    const stored = await loadStoredCandidate(ctx);
+    if (stored && !isQuestionnaireOpen(stored)) return showStatusInsteadOfQuestions(ctx, stored);
+
+    // Сесія (Redis, 24 год) могла зникнути посеред анкети, а меню зовнішності
+    // лишилось у чаті. Без відповідей із бази фінал рахував вік від порожньої
+    // дати й падав на кожному тапі — вийти можна було лише через /start.
+    if (stored) {
+        const fromRecord = candidateDataFromRecord(stored);
+        for (const [key, value] of Object.entries(fromRecord)) {
+            const current = (ctx.session.candidateData as any)[key];
+            const missing = current === undefined || current === null || (Array.isArray(current) && current.length === 0);
+            if (missing && value !== undefined) (ctx.session.candidateData as any)[key] = value;
+        }
+    }
+
     ctx.session.candidateData.appearance = appearance;
     if (tattooPhotoId) ctx.session.candidateData.tattooPhotoId = tattooPhotoId;
     await persistCandidate(ctx, { appearance, ...(tattooPhotoId ? { tattooPhotoId } : {}) });
+
+    // Тап під час фіналу — нічого не робимо. «idle» тут не ознака: це ще й крок
+    // сесії за замовчуванням, тобто в кандидатки, чия сесія зникла посеред
+    // анкети. Повторний тап після фіналу ловить перевірка стану анкети в базі.
+    if (ctx.session.step === FINISHING_STEP) return;
+
+    await dropUnavailableLocationAnswers(ctx);
+
+    const { fullName, gender, birthDate, city } = ctx.session.candidateData;
+    if (!fullName || !gender || !birthDate || !city || getLocationIds(ctx.session.candidateData).length === 0) {
+        // Бракує ранніх відповідей — повертаємо до першого пропущеного питання.
+        await startScreening(ctx);
+        return;
+    }
 
     if (!ctx.session.candidateData.source) {
         ctx.session.step = "screening_source";
@@ -596,7 +693,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
 
     // Прапорець ставиться до першого await у фіналізації, тож два апдейти,
     // що прийшли підряд, не пройдуть обидва.
-    if (ctx.session.step === FINISHING_STEP || ctx.session.step === "idle") return;
+    if (ctx.session.step === FINISHING_STEP) return;
     ctx.session.step = FINISHING_STEP;
 
     try {

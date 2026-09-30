@@ -9,9 +9,12 @@ import { logBusinessEvent } from "../../../core/log-events.js";
 import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../../utils/logistics-formatters.js";
 import { buildSignedCallback, readCallbackPayload } from "../../../utils/signed-callback.js";
+import { canAcceptParcel } from "../../../services/parcel-status-transition.js";
 import {
     getManualProxyConfirmationText,
+    getParcelPhotoAlreadySubmittedText,
     getParcelRejectConfirmationText,
+    isParcelPhotoAlreadySubmitted,
     isDuplicateParcelAccept,
     isDuplicateParcelReject,
     shouldEscalateRejectedParcel,
@@ -69,6 +72,28 @@ function getDraftParcelId(ctx: MyContext): string | null {
     return ctx.session.parcelPhotoDraft?.parcelId || null;
 }
 
+function rememberParcelPhotoPrompt(ctx: MyContext, messageId: number | undefined) {
+    const draft = ctx.session.parcelPhotoDraft;
+    if (!draft || !messageId) return;
+
+    const ids = draft.promptMessageIds ??= [];
+    if (!ids.includes(messageId)) ids.push(messageId);
+}
+
+/**
+ * Снимает кнопки со всех сообщений черновика: каждое принятое фото добавляет
+ * ещё одну пару «Готово»/«Скасувати», и после завершения они остаются живыми.
+ */
+async function clearParcelPhotoPromptKeyboards(ctx: MyContext) {
+    const draft = ctx.session.parcelPhotoDraft;
+    const chatId = ctx.chat?.id;
+    if (!draft?.promptMessageIds?.length || chatId === undefined) return;
+
+    await Promise.all(draft.promptMessageIds.map((messageId) =>
+        ctx.api.editMessageReplyMarkup(chatId, messageId).catch(() => { })
+    ));
+}
+
 function getParcelPhotoReminderKey(ctx: MyContext) {
     const rawKey = ctx.chat?.id ?? ctx.from?.id;
     return rawKey !== undefined ? String(rawKey) : null;
@@ -103,6 +128,8 @@ function scheduleParcelPhotoReminder(ctx: MyContext, parcelId: string) {
         void ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_reminder(draft.fileIds.length), {
             parse_mode: 'HTML',
             reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
+        }).then((reminder) => {
+            rememberParcelPhotoPrompt(ctx, reminder.message_id);
         }).catch((err) => {
             logger.warn({ err, parcelId, telegramId: ctx.from?.id }, "Failed to send parcel photo upload reminder");
         });
@@ -285,6 +312,28 @@ async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
     if (!access) return;
     const draft = ctx.session.parcelPhotoDraft;
     if (!draft || draft.parcelId !== parcelId || draft.fileIds.length === 0) {
+        // Кнопка «Готово» живёт в каждом сообщении о принятом фото, поэтому после
+        // успешной отправки в чате остаётся несколько рабочих кнопок. Повторный тап
+        // приходит уже по очищенному черновику, и без этой проверки бот просил бы
+        // фото заново, хотя они у саппорта (прод 20.09.2026, 17:24).
+        if (isParcelPhotoAlreadySubmitted(access.parcel.status, access.parcel.contentPhotoIds)) {
+            const photoCount = access.parcel.contentPhotoIds.length;
+            logBusinessEvent({
+                event: "logistics.parcel.photo_upload_done_after_submit",
+                actorType: "staff",
+                actorRole: "staff",
+                telegramId: ctx.from?.id,
+                result: "ignored",
+                module: "staff-logistics-handler",
+                operation: "finalizeParcelPhotoDraft",
+                safeContext: { parcelId, photoCount },
+            });
+            await ctx.answerCallbackQuery("Фото вже передано сапорту.");
+            await clearCallbackKeyboard(ctx);
+            await editOrReplyText(ctx, getParcelPhotoAlreadySubmittedText(photoCount));
+            return;
+        }
+
         logBusinessEvent({
             event: "logistics.parcel.photo_upload_done_without_photos",
             actorType: "staff",
@@ -348,6 +397,8 @@ async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
             }
         });
 
+        // Раньше сброса черновика: список сообщений с кнопками живёт в нём.
+        await clearParcelPhotoPromptKeyboards(ctx);
         resetParcelPhotoDraft(ctx);
 
         await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_received(mergedPhotoIds.length));
@@ -442,6 +493,14 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             return;
         }
 
+        // Закрытая посылка (переадресована на новую накладную, отменена или уже
+        // подтверждена): кнопка из старого сообщения не должна её переоткрывать —
+        // иначе посылка ушла бы в PICKUP_IN_PROGRESS и снова в напоминания.
+        if (!canAcceptParcel(parcel.status)) {
+            await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.parcel_no_longer_active(parcel.ttn));
+            return;
+        }
+
         if (parcel.status === 'DELIVERED') {
             const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcelId));
             const locationName = parcel.location?.name || 'локації';
@@ -465,7 +524,9 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
                 where: {
                     id: parcelId,
                     responsibleStaffId: null,
-                    status: { not: 'DELIVERED' },
+                    // Та же граница, что у проверки выше, но в самом UPDATE: между чтением
+                    // и записью трекинг мог закрыть посылку.
+                    status: { notIn: ['DELIVERED', 'CANCELLED', 'COMPLETED', 'VERIFYING'] },
                 },
                 data: {
                     responsibleStaffId: user.staffProfile.id,
@@ -656,10 +717,11 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
         safeContext: { parcelId },
     });
     scheduleParcelPhotoReminder(ctx, parcelId);
-    await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_prompt, {
+    const prompt = await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_prompt, {
         parse_mode: 'HTML',
         reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
     });
+    rememberParcelPhotoPrompt(ctx, prompt.message_id);
     await ctx.answerCallbackQuery();
 });
 
@@ -704,6 +766,7 @@ staffLogisticsHandlers.on("callback_query:data", async (ctx, next) => {
             photoCount: draft.fileIds.length,
         },
     });
+    await clearParcelPhotoPromptKeyboards(ctx);
     resetParcelPhotoDraft(ctx, { cancelled: true });
     await ctx.answerCallbackQuery("Скасовано.");
     await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled, buildParcelPhotoRestartKeyboard(parcelId));
@@ -716,6 +779,7 @@ staffLogisticsHandlers.callbackQuery("parcel_photo_cancel", async (ctx) => {
         return;
     }
 
+    await clearParcelPhotoPromptKeyboards(ctx);
     resetParcelPhotoDraft(ctx, { cancelled: true });
     await ctx.answerCallbackQuery("Скасовано.");
     await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.photo_upload_cancelled, buildParcelPhotoRestartKeyboard(parcelId));
@@ -799,15 +863,17 @@ staffLogisticsHandlers.on("message", async (ctx, next) => {
             });
             scheduleParcelPhotoReminder(ctx, parcelId);
 
-            await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_progress(currentDraft.fileIds.length), {
+            const progress = await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_progress(currentDraft.fileIds.length), {
                 parse_mode: 'HTML',
                 reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
             });
+            rememberParcelPhotoPrompt(ctx, progress.message_id);
         } else {
-            await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_waiting, {
+            const waiting = await ctx.reply(LOGISTICS_TEXTS_STAFF.photo_upload_waiting, {
                 parse_mode: 'HTML',
                 reply_markup: buildParcelPhotoDraftKeyboard(parcelId)
             });
+            rememberParcelPhotoPrompt(ctx, waiting.message_id);
         }
         return;
     }

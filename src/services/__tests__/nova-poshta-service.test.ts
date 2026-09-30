@@ -4,7 +4,8 @@ const fetchMock = vi.fn();
 const loggerMock = {
     error: vi.fn(),
     warn: vi.fn(),
-    info: vi.fn()
+    info: vi.fn(),
+    debug: vi.fn()
 };
 
 vi.mock('node-fetch', () => ({
@@ -178,3 +179,64 @@ describe('NovaPoshtaService.createTrustee', () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });
+
+/**
+ * Трекинг без телефона — штатный режим: у посылок сети разные получатели. НП
+ * отвечает на это предупреждением по каждой посылке, и в warn оно прятало
+ * настоящие предупреждения рядом.
+ */
+describe('NovaPoshtaService warnings', () => {
+    const PHONE = 'Please enter a valid phone number from the express invoice to show full information';
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.resetModules();
+    });
+
+    it('keeps the tracking result and does not warn about tracking without a phone', async () => {
+        fetchMock.mockResolvedValueOnce({
+            json: async () => ({
+                success: true,
+                data: [{ Number: '20450000000001', StatusCode: '7' }],
+                errors: [],
+                warnings: [{ ID_20450000000001: PHONE }, { ID_20450000000002: PHONE }],
+                info: [],
+            }),
+        });
+        const { NovaPoshtaService } = await import('../nova-poshta-service.js');
+
+        const result = await new NovaPoshtaService().trackParcels([{ DocumentNumber: '20450000000001', Phone: '' }]);
+
+        expect(result).toEqual([{ Number: '20450000000001', StatusCode: '7' }]);
+        expect(loggerMock.warn).not.toHaveBeenCalled();
+    });
+
+    it('still warns about anything else, without the expected ones', async () => {
+        fetchMock.mockResolvedValueOnce({
+            json: async () => ({
+                success: true,
+                data: [],
+                errors: [],
+                warnings: [{ ID_1: PHONE }, { ID_2: 'Document not found' }],
+                info: [],
+            }),
+        });
+        const { NovaPoshtaService } = await import('../nova-poshta-service.js');
+
+        await new NovaPoshtaService().trackParcels([{ DocumentNumber: '1', Phone: '' }]);
+
+        expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+        const [context] = loggerMock.warn.mock.calls[0]!;
+        expect(context.safeContext).toMatchObject({ warningsCount: 1, warnings: [{ ID_2: 'Document not found' }] });
+    });
+
+    it('recognises the expected warning in both shapes NP uses', async () => {
+        const { isExpectedNpWarning } = await import('../nova-poshta-service.js');
+
+        expect(isExpectedNpWarning({ ID_1: PHONE })).toBe(true);
+        expect(isExpectedNpWarning(PHONE)).toBe(true);
+        expect(isExpectedNpWarning({ ID_1: 'Document not found' })).toBe(false);
+        expect(isExpectedNpWarning({})).toBe(false);
+    });
+});
+

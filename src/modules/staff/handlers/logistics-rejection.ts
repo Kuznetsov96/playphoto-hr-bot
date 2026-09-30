@@ -38,6 +38,25 @@ export function getParcelRejectConfirmationText(alreadyProcessed: boolean) {
     return `✅ <b>Відмову зафіксовано.</b>\n\nПосилка залишається у списку локації, її зможе забрати інша фотографиня. Повторно натискати не потрібно.`;
 }
 
+/**
+ * Посылка уже сдана: фото ушли саппорту, черновик очищен.
+ *
+ * Читается из самой посылки, а не из сессии: после успешного «Готово» черновик
+ * удаляется, поэтому пустой черновик сам по себе ничего не говорит — он выглядит
+ * одинаково и когда фото не присылали, и когда их только что приняли. Состояние
+ * посылки переживает и очистку черновика, и потерю сессии в Redis.
+ */
+export function isParcelPhotoAlreadySubmitted(
+    status: string | null | undefined,
+    contentPhotoIds: string[] | null | undefined,
+) {
+    return status === "VERIFYING" && (contentPhotoIds?.length ?? 0) > 0;
+}
+
+export function getParcelPhotoAlreadySubmittedText(photoCount: number) {
+    return `✅ Фото вже передано сапорту: <b>${photoCount}</b>.\n\nПовторно надсилати не потрібно — чекай підтвердження. ✨`;
+}
+
 export function isDuplicateManualProxyRequest(
     lastAttemptAt: Date | string | null | undefined,
     trusteeError: string | null | undefined,

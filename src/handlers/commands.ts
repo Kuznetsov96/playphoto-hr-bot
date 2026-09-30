@@ -12,7 +12,7 @@ import { staffService } from "../modules/staff/services/index.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { requireRole, getUserAdminRole } from "../middleware/role-check.js";
 import { updateUserCommands } from "../utils/command-manager.js";
-import { startScreening } from "../modules/candidate/handlers/index.js";
+import { candidateDataFromRecord, startScreening } from "../modules/candidate/handlers/index.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
@@ -287,16 +287,7 @@ commandHandlers.command("start", async (ctx) => {
                 candidate = underageReactivation.candidate;
 
                 if (underageReactivation.mode === "RESUME_SCREENING") {
-                    ctx.session.candidateData = {
-                        fullName: candidate.fullName,
-                        gender: candidate.gender,
-                        birthDate: candidate.birthDate?.toISOString(),
-                        city: candidate.city,
-                        locationIds: candidate.locationId ? [candidate.locationId] : [],
-                        appearance: candidate.appearance,
-                        source: candidate.source,
-                        clickSource: candidate.clickSource
-                    } as any;
+                    ctx.session.candidateData = candidateDataFromRecord(candidate);
                     await startScreening(ctx);
                     return;
                 }
@@ -571,7 +562,7 @@ commandHandlers.command("set_step", async (ctx) => {
 
     const step = ctx.match?.trim().toUpperCase();
     if (!step) {
-        return ctx.reply("Usage: /set_step STEP_NAME\nAvailable: FULL_NAME, BIRTH_DATE, PHONE, EMAIL, PASSPORT_FRONT, PASSPORT_BACK, PASSPORT_ANNEX, IBAN, INSTAGRAM, NDA, PREFS");
+        return ctx.reply("Usage: /set_step STEP_NAME\nAvailable: FULL_NAME, BIRTH_DATE, PHONE, EMAIL, PASSPORT_FRONT, PASSPORT_BACK, PASSPORT_ANNEX, IBAN, INSTAGRAM, NDA");
     }
 
     const STEPS: Record<string, { session: string, status?: CandidateStatus, funnel?: FunnelStep }> = {
@@ -585,7 +576,6 @@ commandHandlers.command("set_step", async (ctx) => {
         IBAN: { session: 'ONB_IBAN', status: CandidateStatus.TRAINING_COMPLETED, funnel: FunnelStep.TRAINING },
         INSTAGRAM: { session: 'ONB_INSTAGRAM', status: CandidateStatus.TRAINING_COMPLETED, funnel: FunnelStep.TRAINING },
         NDA: { session: 'AWAITING_NDA', status: CandidateStatus.TRAINING_COMPLETED, funnel: FunnelStep.TRAINING },
-        PREFS: { session: 'SELECT_PREFS', status: CandidateStatus.AWAITING_FIRST_SHIFT, funnel: FunnelStep.FIRST_SHIFT }
     };
 
     const target = STEPS[step];
@@ -610,7 +600,7 @@ commandHandlers.command("set_step", async (ctx) => {
             } as any);
 
             // If we are testing final steps, allow re-triggering welcome message
-            if (step === 'PREFS' || step === 'NDA' || step === 'INSTAGRAM') {
+            if (step === 'NDA' || step === 'INSTAGRAM') {
                 const staff = await staffRepository.findByUserId(candidate.userId);
                 if (staff) {
                     await staffRepository.update(staff.id, { isWelcomeSent: false });

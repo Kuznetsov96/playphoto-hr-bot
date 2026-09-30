@@ -2,6 +2,27 @@ import fetch from 'node-fetch';
 import { NOVA_POSHTA_API_KEY } from '../config.js';
 import logger from '../core/logger.js';
 
+/**
+ * Предупреждения НП, которые означают не сбой, а известное ограничение.
+ *
+ * «Please enter a valid phone number…» НП отдаёт на КАЖДУЮ посылку, которую
+ * отслеживают без телефона получателя (`trackParcels` шлёт `Phone: ""`: у
+ * посылок сети разные получатели, общего телефона нет). Статус (`StatusCode`)
+ * при этом приходит, а больше бот из ответа не читает, — теряется только ФИО и
+ * адрес получателя. В warn это давало строку на 77 посылок при каждой смене
+ * состава активных, пряча настоящие предупреждения рядом.
+ */
+const EXPECTED_NP_WARNINGS = [/enter a valid phone number from the express invoice/i];
+
+export function isExpectedNpWarning(warning: unknown): boolean {
+    const texts = typeof warning === 'string'
+        ? [warning]
+        : warning && typeof warning === 'object'
+            ? Object.values(warning).map(String)
+            : [];
+    return texts.length > 0 && texts.every(text => EXPECTED_NP_WARNINGS.some(pattern => pattern.test(text)));
+}
+
 export interface NPTrackingResult {
     Number: string;
     Status: string;
@@ -13,6 +34,16 @@ export interface NPTrackingResult {
     ScheduledDeliveryDate: string;
     ActualDeliveryDate: string;
     RecipientDateTime: string;
+    /**
+     * Накладная, созданная НП на основании этой: при `Redirecting` коробка уехала под новым
+     * номером. Приходит в расширенном ответе (с телефоном получателя).
+     */
+    LastCreatedOnTheBasisDocumentType?: string;
+    LastCreatedOnTheBasisNumber?: string;
+    /** «2026-09-27 14:35:14» — когда создана связанная накладная. */
+    LastCreatedOnTheBasisDateTime?: string;
+    /** «27-09-2026 14:35:14» — когда создана эта накладная. */
+    DateCreated?: string;
 }
 
 export type NPTrusteeErrorCode = 'SHIPMENT_LOCKED' | 'NOT_DOCUMENT_OWNER' | 'API_ERROR';
@@ -133,17 +164,23 @@ export class NovaPoshtaService {
                 };
             }
 
-            if (data.warnings && data.warnings.length > 0) {
+            // Ожидаемые предупреждения — в debug, остальные — в warn, как раньше.
+            const unexpectedWarnings = (data.warnings || []).filter((warning: unknown) => !isExpectedNpWarning(warning));
+            const expectedCount = (data.warnings?.length || 0) - unexpectedWarnings.length;
+            if (expectedCount > 0) {
+                logger.debug({ modelName, calledMethod, expectedCount }, 'Nova Poshta API returned expected warnings');
+            }
+            if (unexpectedWarnings.length > 0) {
                 const signatureKey = `${modelName}:${calledMethod}`;
-                const signature = JSON.stringify(data.warnings);
+                const signature = JSON.stringify(unexpectedWarnings);
                 const isRepeat = this.lastWarningSignatures.get(signatureKey) === signature;
                 this.lastWarningSignatures.set(signatureKey, signature);
                 logger[isRepeat ? 'debug' : 'warn']({
                     modelName,
                     calledMethod,
                     safeContext: {
-                        warningsCount: data.warnings.length,
-                        warnings: data.warnings.slice(0, 3),
+                        warningsCount: unexpectedWarnings.length,
+                        warnings: unexpectedWarnings.slice(0, 3),
                         info: (data.info || []).slice(0, 3)
                     }
                 }, 'Nova Poshta API returned warnings');

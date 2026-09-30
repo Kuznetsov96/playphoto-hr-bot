@@ -6,10 +6,12 @@
  * бота и таймеров.
  */
 
+import { isQuestionnaireOpen, type ScreeningStateCandidate } from "../utils/screening-state.js";
+
 /** Сколько молчания считаем брошенной анкетой. */
 export const ABANDONED_SCREENING_AFTER_MS = 24 * 60 * 60 * 1000;
 
-export type AbandonedScreeningRow = {
+export type AbandonedScreeningRow = ScreeningStateCandidate & {
     pipelineTouchedAt: Date;
     screeningReminderSentAt: Date | null;
 };
@@ -33,6 +35,10 @@ export function selectAbandonedScreeningCandidates<T extends AbandonedScreeningR
 ): T[] {
     return rows.filter((row) => {
         if (row.screeningReminderSentAt !== null) return false;
+        // SCREENING — это ещё и законченная анкета, ждущая приглашения, и
+        // приглашённая, что не записалась. Напоминать «лишилося кілька питань»
+        // можно только тем, кто анкету действительно не дозаполнил.
+        if (!isQuestionnaireOpen(row)) return false;
         return now.getTime() - row.pipelineTouchedAt.getTime() >= ABANDONED_SCREENING_AFTER_MS;
     });
 }

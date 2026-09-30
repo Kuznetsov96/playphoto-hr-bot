@@ -8,6 +8,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
 import { buildSignedCallback } from "./signed-callback.js";
 import { formatLocation } from "./location-label.js";
+import { canScheduleInterview, isQuestionnaireOpen } from "./screening-state.js";
 
 function getCandidateAge(birthDate?: Date | string | null): number | null {
     if (!birthDate) return null;
@@ -63,7 +64,7 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
     // Dashboard logic: Show info for Accepted and beyond
     const isAcceptedOrBeyond = [
         CandidateStatus.INTERVIEW_COMPLETED, CandidateStatus.DECISION_PENDING,
-        CandidateStatus.ACCEPTED, CandidateStatus.DISCOVERY_SCHEDULED,
+        CandidateStatus.ACCEPTED, CandidateStatus.MENTOR_MANUAL, CandidateStatus.DISCOVERY_SCHEDULED,
         CandidateStatus.DISCOVERY_COMPLETED, CandidateStatus.TRAINING_SCHEDULED,
         CandidateStatus.TRAINING_COMPLETED, CandidateStatus.OFFLINE_STAGING,
         CandidateStatus.AWAITING_FIRST_SHIFT, CandidateStatus.HIRED,
@@ -88,14 +89,20 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
     switch (status) {
         case CandidateStatus.SCREENING: {
-            const { FunnelStep } = await import("@prisma/client");
-            const isFinished = candidate.currentStep === FunnelStep.INTERVIEW ||
-                candidate.currentStep === FunnelStep.TRAINING ||
-                candidate.notificationSent ||
-                !!candidate.source;
-
-            if (isFinished) {
-                text = CANDIDATE_TEXTS["candidate-success-screening"];
+            // Те саме правило, що в нагадуванні й кнопці «Продовжити анкету».
+            if (!isQuestionnaireOpen(candidate)) {
+                // Запрошена або та, що чекає нового вікна, має бачити, як обрати
+                // час: раніше /start показував їй «розглянемо анкету» без кнопки,
+                // і записатися можна було лише зі старого повідомлення.
+                const { FunnelStep } = await import("@prisma/client");
+                if (canScheduleInterview(candidate)) {
+                    text = candidate.currentStep === FunnelStep.INTERVIEW
+                        ? CANDIDATE_TEXTS["candidate-waitlist-slots"]("співбесіди")
+                        : CANDIDATE_TEXTS["candidate-interview-invitation"](candidate.location ? formatLocation(candidate.location, "listing") : (candidate.city || ""));
+                    kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row();
+                } else {
+                    text = CANDIDATE_TEXTS["candidate-success-screening"];
+                }
                 if (canContactStaff) kb.text("Написати нам", "contact_hr");
             } else {
                 text = CANDIDATE_TEXTS["candidate-screening-unfinished"]();
@@ -150,6 +157,9 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         // знайомство, навчання, NDA й оформлення ведуться у вебзастосунку,
         // а власник спілкується з нею особисто. Лишається один екран статусу
         // й можливість написати — повідомлення дзеркалиться в її анкету.
+        // MENTOR_MANUAL — оффер надіслано (worker після рішення HR). Раніше
+        // для нього не було гілки, і прийнята бачила «Анкета на розгляді».
+        case CandidateStatus.MENTOR_MANUAL:
         case CandidateStatus.ACCEPTED:
         case CandidateStatus.DISCOVERY_SCHEDULED:
         case CandidateStatus.DISCOVERY_COMPLETED:

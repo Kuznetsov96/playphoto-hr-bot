@@ -125,21 +125,24 @@ async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
     delete ctx.session.supportData?.replyingToUserId;
 
     const displayName = formatLocation({ ...l, city }, "sentence");
-    const kb = new InlineKeyboard()
-        .text(l.isHiddenFromCandidates ? '🔓 Show to Candidates' : '🔒 Hide from Candidates', `toggle_visibility_${l.id}`).row()
-        .text("🏙️ Change City", `edit_city_${l.id}`);
-    
+
+    // Лише перегляд. Видимість, місто й потребу задає картка локації у
+    // вебаппі, а синк кожні 5 хвилин переписує їх звідти: правка тут жила до
+    // наступного проходу й створювала другу, тимчасову правду.
     const text = `<b>Location:</b> ${displayName}\n` +
                  `<b>City:</b> ${l.city}\n` +
                  `<b>Current Need:</b> ${l.neededCount}\n` +
                  `───────────────────\n` +
                  `<b>Candidate Status:</b> ${l.isHiddenFromCandidates ? 'Hidden (🔒)' : 'Visible (🔓)'}\n\n` +
-                 `<i>To change need, write a number.</i>\n` +
-                 `<i>To change city or visibility, use buttons:</i>`;
+                 `<i>${LOCATION_LEVERS_IN_WEBAPP}</i>`;
 
-    await ScreenManager.renderScreen(ctx, text, kb);
-    ctx.session.step = `set_needed_${l.id}`;
+    // Під текстом — список локацій міста: це й «назад», і перехід до сусідньої.
+    await ScreenManager.renderScreen(ctx, text, "admin-locations");
+    ctx.session.step = "idle";
+    delete ctx.session.adminFlow;
 }
+
+export const LOCATION_LEVERS_IN_WEBAPP = "Видимість для кандидаток, місто й потреба змінюються в картці локації у вебаппі.";
 
 // --- CITY SELECTION FOR UPDATE ---
 export const selectCityForLocMenu = new Menu<MyContext>("admin-select-city-for-loc");
@@ -150,8 +153,8 @@ selectCityForLocMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>)
 
     cities.forEach((city: string) => {
         range.text(normalizeCity(city), async (ctx: MyContext) => {
-            await locationRepository.update(locId, { city });
-            await ctx.answerCallbackQuery(`City changed to ${normalizeCity(city)} ✅`).catch(() => { });
+            // Місто задає вебапп; меню лишилось лише для старих повідомлень.
+            await ctx.answerCallbackQuery({ text: LOCATION_LEVERS_IN_WEBAPP, show_alert: true }).catch(() => { });
             if (ctx.session.adminFlow === "LOCATIONS") {
                 delete ctx.session.adminFlow;
             }
@@ -171,37 +174,12 @@ selectCityForLocMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>)
 
 export const adminSystemHandlers = new Composer<MyContext>();
 
+// Кнопки зі старих екранів локації: правки тут більше немає.
 adminSystemHandlers.callbackQuery(/^toggle_visibility_(.+)$/, async (ctx: MyContext) => {
-    const locId = ctx.match?.[1];
-    if (!locId) return;
-    const loc = await locationRepository.findById(locId);
-    if (!loc) return ctx.answerCallbackQuery("Location not found").catch(() => { });
-
-    const newHidden = !loc.isHiddenFromCandidates;
-    // Update ONLY isHiddenFromCandidates. The rest of the system is unaffected.
-    const updatedLoc = await locationRepository.update(locId, { isHiddenFromCandidates: newHidden });
-    
-    await ctx.answerCallbackQuery(newHidden ? "Location HIDDEN for candidates 🔒" : "Location VISIBLE for candidates 🔓").catch(() => { });
-    
-    // Re-render screen to update UI
-    if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
-    const city = ctx.session.candidateData.city || updatedLoc.city;
-    await renderLocationDetails(ctx, updatedLoc, city);
+    await ctx.answerCallbackQuery({ text: LOCATION_LEVERS_IN_WEBAPP, show_alert: true }).catch(() => { });
 });
 
 adminSystemHandlers.callbackQuery(/^edit_city_(.+)$/, async (ctx: MyContext) => {
-    const locId = ctx.match?.[1];
-    if (!locId) return;
-    
-    await ctx.answerCallbackQuery().catch(() => { });
-    ctx.session.adminFlow = "LOCATIONS";
-    ctx.session.selectedLocationId = locId; // Store ID for menu context
-    ctx.session.step = `edit_city_${locId}`;
-    
-    await ScreenManager.renderScreen(
-        ctx, 
-        "🏙️ <b>Select new city or type a new name:</b>\n\n<i>(Type name to create new city or pick from list)</i>", 
-        "admin-select-city-for-loc", 
-        { pushToStack: true }
-    );
+    await ctx.answerCallbackQuery({ text: LOCATION_LEVERS_IN_WEBAPP, show_alert: true }).catch(() => { });
 });
+

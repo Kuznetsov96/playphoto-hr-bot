@@ -75,6 +75,13 @@ model TrackedMessage {
   pingUntil      DateTime?
   lastPingMsgId  Int?
   pingIntervalMs Int?
+  /// Какую кнопку несёт рассылка: 'default' (подтвердить) или 'preferences'.
+  /// Пингер решает по этому полю, какое напоминание слать, — не по тексту.
+  buttonType     String         @default("default")
+  /// Месяц сбора пожеланий (`YYYY-MM`) — только у рассылки пожеланий. По нему
+  /// пингер перед каждым напоминанием спрашивает у вебаппа срок и открыт ли
+  /// сбор: перенос срока и закрытие действуют без выката бота.
+  targetMonth    String?
   pendingReplies PendingReply[]
   broadcast      Broadcast      @relation(fields: [broadcastId], references: [id])
 
@@ -131,6 +138,12 @@ model Candidate {
   notificationSent        Boolean         @default(false)
   stagingNotifiedAt       DateTime?
   interviewInvitedAt      DateTime?
+  /// Когда ушло напоминание «запрошення ще діє». Держит его однократным:
+  /// вокер крутится каждые 5 минут, окна по времени для этого мало.
+  interviewInviteReminderSentAt DateTime?
+  /// С какого момента ждёт время собеседования. Уведомление о новых слотах
+  /// уходит, когда появился слот новее этого момента.
+  interviewWaitlistedAt   DateTime?
   interviewWaitlistReason String?
   // Момент, когда кандидатка нажала "start_scheduling" и активных слотов не
   // нашлось вообще (не "не подошёл день" — тот случай в interviewWaitlistReason).

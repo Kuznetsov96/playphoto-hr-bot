@@ -76,6 +76,15 @@ export const locationSchema = z.object({
      * поле уронило бы валидацию всего снимка вместе с синком расписания.
      */
     isHiddenFromCandidates: z.boolean().optional().default(false),
+    /**
+     * Скільки людей бракує: ціль штату з картки локації мінус ті, хто
+     * лишається (той самий розрахунок, що екран потреби найму у вебаппі).
+     * Анкета за ним вирішує, кликати на співбесіду чи ставити в чергу.
+     *
+     * Optional, бо бот викочується раніше за бекенд, а схема .strict().
+     * Відсутнє поле — старий бекенд: тоді neededCount не чіпаємо.
+     */
+    hiringDeficit: z.number().int().min(0).optional(),
 }).strict();
 
 const assignmentSchema = z.object({
@@ -199,6 +208,19 @@ const schedulePreferenceReadSchema = z.union([
 const schedulePreferenceWindowSchema = z
     .object({ month: z.string().min(1), open: z.boolean() })
     .strict();
+
+const schedulePreferenceScheduleSchema = z
+    .object({
+        month: z.string().regex(/^\d{4}-\d{2}$/u),
+        open: z.boolean(),
+        deadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+        deadlineEndsAt: z.string().datetime(),
+    });
+// Не `.strict()`, в отличие от соседних схем: лишнее поле в будущем ответе
+// уронило бы и рассылку, и все напоминания — ровно та ловушка, из-за которой
+// этот ответ живёт на отдельном роуте. Неизвестные поля просто отбрасываются.
+
+export type SchedulePreferenceSchedule = z.infer<typeof schedulePreferenceScheduleSchema>;
 
 const missingPreferencesSchema = z
     .object({
@@ -1185,6 +1207,22 @@ export class AwsBusinessClient {
             { method: "GET" },
         );
         return schedulePreferenceWindowSchema.parse(body);
+    }
+
+    /**
+     * Открыт ли сбор и до какого дня — срок хранит вебапп, владелец может его
+     * перенести. Бот читает это в рассылке 23-го и перед каждым напоминанием;
+     * своего числа 26 у бота больше нет.
+     */
+    async schedulePreferenceSchedule(month: string, employeePublicId?: string): Promise<SchedulePreferenceSchedule> {
+        // С сотрудником `open` учитывает и личное окно («Reopen for …» у
+        // владельца): без него переоткрытого человека форма не пускала бы.
+        const query = new URLSearchParams({ month, ...(employeePublicId ? { employeePublicId } : {}) });
+        const body = await this.request(
+            `/schedule-preferences/collection-schedule?${query.toString()}`,
+            { method: "GET" },
+        );
+        return schedulePreferenceScheduleSchema.parse(body);
     }
 
     async getSchedulePreference(

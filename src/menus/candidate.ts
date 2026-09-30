@@ -16,14 +16,16 @@ menuRegistry.register(candidateGenderMenu);
 
 candidateGenderMenu
     .text(CANDIDATE_TEXTS["candidate-btn-gender-female"], async (ctx) => {
+        const { persistCandidate, questionnaireClosed } = await import("../modules/candidate/handlers/index.js");
+        if (await questionnaireClosed(ctx)) return;
         ctx.session.candidateData.gender = "female";
-        const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
         await persistCandidate(ctx, { gender: "female" });
         await askBirthYear(ctx);
     })
     .text(CANDIDATE_TEXTS["candidate-btn-gender-male"], async (ctx) => {
+        const { persistCandidate, questionnaireClosed } = await import("../modules/candidate/handlers/index.js");
+        if (await questionnaireClosed(ctx)) return;
         ctx.session.candidateData.gender = "male";
-        const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
         await persistCandidate(ctx, { gender: "male" });
         await askBirthYear(ctx);
     })
@@ -150,10 +152,13 @@ candidateCityMenu.dynamic(async (ctx, range) => {
     const cities = await locationRepository.findAllCities(true, true);
     cities.forEach((city, i) => {
         range.text(city, async (ctx) => {
+            const { persistCandidate, questionnaireClosed } = await import("../modules/candidate/handlers/index.js");
+            if (await questionnaireClosed(ctx)) return;
             ctx.session.candidateData.city = city;
             ctx.session.candidateData.locationIds = [];
-            const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
-            await persistCandidate(ctx, { city });
+            // Нове місто скидає точки старого: інакше покинута на цьому кроці
+            // анкета лишалась «Львів + київська точка».
+            await persistCandidate(ctx, { city, locationId: null, additionalLocationIds: [] });
 
             const locations = await locationRepository.findByCity(city, true);
             if (locations.length === 0) {
