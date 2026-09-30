@@ -193,7 +193,30 @@ function withPendingNotice(ctx: MyContext, text: string): string {
     return `${notice}\n\n${text}`;
 }
 
+/**
+ * Відповіді про місто й локацію, які анкета більше не пропонує, — не
+ * відповіді. Місто могли записати кирилицею до переходу довідника на
+ * латиницю («Львів» проти «Lviv») або точку закрили, поки анкета лежала
+ * недозаповненою. Раніше такий крок показував порожній список з одною
+ * кнопкою «Назад», а закрита точка тихо доходила до фіналу.
+ */
+async function dropUnavailableLocationAnswers(ctx: MyContext) {
+    const data = ctx.session.candidateData;
+    if (!data?.city) return;
+    const offered = await ctx.di.locationRepository.findByCity(data.city, true);
+    if (offered.length === 0) {
+        data.city = undefined as any;
+        data.locationIds = [];
+        delete (data as any).locationId;
+        return;
+    }
+    const offeredIds = new Set(offered.map((location: any) => location.id));
+    data.locationIds = getLocationIds(data).filter((id) => offeredIds.has(id));
+    delete (data as any).locationId;
+}
+
 export async function startScreening(ctx: MyContext) {
+    await dropUnavailableLocationAnswers(ctx);
     const candidateData = ctx.session.candidateData;
     logger.info({
         event: "candidate.screening.started",
@@ -275,6 +298,8 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
             birthDate,
             gender: ctx.session.candidateData.gender,
             city,
+            locationId: null,
+            additionalLocationIds: [],
             status: CandidateStatus.REJECTED,
             isWaitlisted: false
         });
@@ -290,6 +315,8 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
         birthDate,
         gender: ctx.session.candidateData.gender,
         city,
+        locationId: null,
+        additionalLocationIds: [],
         status: ageMeta.status,
         isWaitlisted: ageMeta.isWaitlisted,
         hrDecision: ageMeta.hrDecision
@@ -629,6 +656,8 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
 
     // Повторний тап після фіналу чи під час нього — нічого не робимо.
     if (ctx.session.step === FINISHING_STEP || ctx.session.step === "idle") return;
+
+    await dropUnavailableLocationAnswers(ctx);
 
     const { fullName, gender, birthDate, city } = ctx.session.candidateData;
     if (!fullName || !gender || !birthDate || !city || getLocationIds(ctx.session.candidateData).length === 0) {

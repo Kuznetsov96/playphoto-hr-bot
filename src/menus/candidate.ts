@@ -153,7 +153,9 @@ candidateCityMenu.dynamic(async (ctx, range) => {
             ctx.session.candidateData.city = city;
             ctx.session.candidateData.locationIds = [];
             const { persistCandidate } = await import("../modules/candidate/handlers/index.js");
-            await persistCandidate(ctx, { city });
+            // Нове місто скидає точки старого: інакше покинута на цьому кроці
+            // анкета лишалась «Львів + київська точка».
+            await persistCandidate(ctx, { city, locationId: null, additionalLocationIds: [] });
 
             const locations = await locationRepository.findByCity(city, true);
             if (locations.length === 0) {

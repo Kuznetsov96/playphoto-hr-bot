@@ -156,7 +156,7 @@ describe("finishScreening: защита от двойного тапа", () => {
             from: { id: 1 },
             update: { update_id: 1 },
             di: {
-                locationRepository: { findById: vi.fn() },
+                locationRepository: { findById: vi.fn(), findByCity: vi.fn(async () => [{ id: "loc-1" }, { id: "loc-2" }]) },
                 candidateRepository: { upsert: vi.fn(async () => ({})) },
                 userRepository: {
                     upsert: vi.fn(async () => ({ id: "u1" })),
@@ -231,7 +231,7 @@ describe("finishScreening: вход после конца анкеты и пос
             from: { id: 1 },
             update: { update_id: 1 },
             di: {
-                locationRepository: { findById: vi.fn() },
+                locationRepository: { findById: vi.fn(), findByCity: vi.fn(async () => [{ id: "loc-1" }, { id: "loc-2" }]) },
                 candidateRepository: { upsert: vi.fn(async () => ({})) },
                 userRepository: {
                     upsert: vi.fn(async () => ({ id: "u1" })),
@@ -261,5 +261,37 @@ describe("finishScreening: вход после конца анкеты и пос
         expect(ctx.session.candidateData.birthDate).toBe("2005-01-01T00:00:00.000Z");
         expect(ctx.session.candidateData.locationIds).toEqual(["loc-1", "loc-2"]);
         expect(ctx.session.step).toBe("screening_source");
+    });
+});
+
+describe("startScreening: ответы про город и точку, которых анкета больше не предлагает", () => {
+    function ctxFor(candidateData: Record<string, any>, offered: Array<{ id: string }>) {
+        return {
+            session: { candidateData },
+            from: { id: 1 },
+            update: { update_id: 1 },
+            di: { locationRepository: { findByCity: vi.fn(async () => offered) } },
+        } as any;
+    }
+    const base = { fullName: "Анна Коваль", gender: "female", birthDate: "2005-01-01T00:00:00.000Z" };
+
+    it("город кириллицей без точек — снова спрашивает город, а не показывает пустой список", async () => {
+        const { startScreening } = await import("../index.js");
+        const ctx = ctxFor({ ...base, city: "Львів", locationIds: [] }, []);
+
+        await startScreening(ctx);
+
+        expect(ctx.session.step).toBe("screening_city");
+        expect(ctx.session.candidateData.city).toBeUndefined();
+    });
+
+    it("закрытая точка выпадает из ответа — снова спрашивает точку", async () => {
+        const { startScreening } = await import("../index.js");
+        const ctx = ctxFor({ ...base, city: "Zaporizhzhia", locationIds: ["closed"] }, [{ id: "open" }]);
+
+        await startScreening(ctx);
+
+        expect(ctx.session.candidateData.locationIds).toEqual([]);
+        expect(ctx.session.step).toBe("screening_location");
     });
 });
