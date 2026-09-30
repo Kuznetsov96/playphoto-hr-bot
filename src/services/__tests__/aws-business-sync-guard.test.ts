@@ -25,6 +25,7 @@ function transactionStub() {
             update: vi.fn(),
             create: vi.fn().mockResolvedValue({ id: "location-1" }),
             findMany: vi.fn().mockResolvedValue([]),
+            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
         locationOpeningHours: {
             deleteMany: vi.fn().mockResolvedValue({ count: 0 }),

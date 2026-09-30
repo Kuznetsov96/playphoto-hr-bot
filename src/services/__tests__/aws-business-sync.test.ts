@@ -26,6 +26,7 @@ function transactionStub() {
             update: vi.fn(),
             create: vi.fn().mockResolvedValue({ id: "location-1" }),
             findMany: vi.fn().mockResolvedValue([]),
+            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
         locationOpeningHours: {
             deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -189,5 +190,39 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         await new AwsBusinessSyncService().syncAll();
 
         expect(awsBusinessClientMock.reportTelegramLinks).not.toHaveBeenCalled();
+    });
+});
+
+describe("AwsBusinessSyncService — locations missing from the snapshot", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    it("hides every location the complete snapshot no longer carries", async () => {
+        // The web app sends only ACTIVE locations, so a closed venue simply stops
+        // arriving. Without this it stayed in the questionnaire forever: three closed
+        // Zaporizhzhia Volklands were still offered to candidates in September 2026.
+        const transaction = transactionStub();
+        prismaMock.$transaction.mockImplementation((callback: (tx: ReturnType<typeof transactionStub>) => unknown) =>
+            callback(transaction));
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(transaction.location.updateMany).toHaveBeenCalledWith({
+            where: {
+                OR: [
+                    { awsPublicId: null },
+                    { awsPublicId: { notIn: ["22222222-2222-4222-8222-222222222200"] } },
+                ],
+                NOT: { isHidden: true, isHiddenFromCandidates: true },
+            },
+            data: { isHidden: true, isHiddenFromCandidates: true },
+        });
     });
 });

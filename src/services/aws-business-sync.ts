@@ -385,6 +385,28 @@ export class AwsBusinessSyncService {
             }
 
             /**
+             * The snapshot is complete and carries only ACTIVE locations, so a venue the owner
+             * closed simply stops arriving. Left alone it kept its last flags and the
+             * questionnaire went on offering it: in September 2026 candidates were still
+             * picking three closed Zaporizhzhia Volklands. Hide whatever the snapshot no longer
+             * carries; a reopened venue comes back through the upsert above, which resets both
+             * flags. The shrink guard has already rejected a truncated snapshot by this point.
+             */
+            const closed = await transaction.location.updateMany({
+                where: {
+                    OR: [
+                        { awsPublicId: null },
+                        { awsPublicId: { notIn: snapshot.locations.map((location) => location.publicId) } },
+                    ],
+                    NOT: { isHidden: true, isHiddenFromCandidates: true },
+                },
+                data: { isHidden: true, isHiddenFromCandidates: true },
+            });
+            if (closed.count > 0) {
+                logger.info({ count: closed.count }, "hid locations missing from the AWS snapshot");
+            }
+
+            /**
              * Shift labels omit the city, which is safe only while every venue sharing a name
              * with another carries a distinguishing `branch`. That is maintained in the canonical
              * catalogue, not here, so verify it on each snapshot instead of assuming it holds.

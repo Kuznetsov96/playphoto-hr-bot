@@ -79,7 +79,8 @@ export class LocationRepository {
                 // candidateOnly means we filter for the candidate questionnaire
                 where: (onlyVisible && candidateOnly) ? { isHiddenFromCandidates: false } : {},
                 select: { city: true },
-                distinct: ['city']
+                distinct: ['city'],
+                orderBy: { city: 'asc' }
             });
             return locations.map(l => l.city);
         });
@@ -139,7 +140,11 @@ export class LocationRepository {
             if (candidateOnly) {
                 where.isHiddenFromCandidates = false;
             }
-            return prisma.location.findMany({ where });
+            // Порядок явний. Без нього Postgres віддає рядки як лежать на диску, а
+            // синк переписує кожну локацію на кожному проході — кнопки міняються
+            // місцями між показом і тапом, і плагін меню відповідає кандидатці
+            // «Menu was outdated» замість вибору.
+            return prisma.location.findMany({ where, orderBy: [{ name: 'asc' }, { branch: 'asc' }] });
         });
     }
 
