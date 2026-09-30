@@ -170,9 +170,29 @@ describe("observeNpTracking", () => {
         expect(
             observeNpTracking({
                 StatusCode: "9",
+                DateCreated: "11-09-2026 13:26:02",
                 LastCreatedOnTheBasisDocumentType: "Redirecting",
+                LastCreatedOnTheBasisDateTime: "2026-09-27 14:35:14",
             }),
         ).toBe("REDIRECTED");
+    });
+
+    /* 30.09.2026: у живой накладной ссылка указывает НАЗАД, на ту, из которой её создали. */
+    it("keeps the live waybill whose basis link points back to the old one", () => {
+        expect(
+            observeNpTracking({
+                StatusCode: "8",
+                DateCreated: "27-09-2026 14:35:14",
+                LastCreatedOnTheBasisDocumentType: "Redirecting",
+                LastCreatedOnTheBasisDateTime: "2026-09-11 13:26:02",
+            }),
+        ).toBe("ARRIVED");
+    });
+
+    it("does not guess the direction without dates", () => {
+        expect(
+            observeNpTracking({ StatusCode: "8", LastCreatedOnTheBasisDocumentType: "Redirecting" }),
+        ).toBe("ARRIVED");
     });
 
     it("ignores other basis documents, such as a return", () => {

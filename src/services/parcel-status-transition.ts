@@ -97,9 +97,46 @@ export function mapNpStatusCode(statusCode: string): NpTrackingObservation {
 export function observeNpTracking(doc: {
     StatusCode: string;
     LastCreatedOnTheBasisDocumentType?: string;
+    LastCreatedOnTheBasisDateTime?: string;
+    DateCreated?: string;
 }): NpTrackingObservation {
-    if (doc.LastCreatedOnTheBasisDocumentType === 'Redirecting') return 'REDIRECTED';
+    if (isRedirectedAway(doc)) return 'REDIRECTED';
     return mapNpStatusCode(doc.StatusCode);
+}
+
+/**
+ * Эта накладная переадресована — коробка уехала под НОВОЙ.
+ *
+ * Ссылка `LastCreatedOnTheBasis*` связывает накладные цепочки в обе стороны: у старой она
+ * называет новую, а у новой — ту, из которой её создали. 30.09.2026 это приняли за переадресацию
+ * и закрыли живую посылку (59001787984510). Направление — по датам: переадресована, если
+ * связанную накладную создали ПОЗЖЕ этой. Нет дат — не гадаем, посылка живая.
+ */
+function isRedirectedAway(doc: {
+    LastCreatedOnTheBasisDocumentType?: string;
+    LastCreatedOnTheBasisDateTime?: string;
+    DateCreated?: string;
+}): boolean {
+    if (doc.LastCreatedOnTheBasisDocumentType !== 'Redirecting') return false;
+    const created = npTime(doc.DateCreated);
+    const basisCreated = npTime(doc.LastCreatedOnTheBasisDateTime);
+    if (created === null || basisCreated === null) return false;
+    return basisCreated > created;
+}
+
+/** «2026-09-27 14:35:14» и «27-09-2026 14:35:14» (НП пишет оба) → сравнимое число; иначе null. */
+function npTime(value: string | undefined): number | null {
+    if (value === undefined) return null;
+    const iso = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(value.trim());
+    const dmy = /^(\d{2})[.-](\d{2})[.-](\d{4})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(value.trim());
+    const parts = iso
+        ? [iso[1], iso[2], iso[3], iso[4], iso[5], iso[6]]
+        : dmy
+          ? [dmy[3], dmy[2], dmy[1], dmy[4], dmy[5], dmy[6]]
+          : null;
+    if (parts === null) return null;
+    const [year, month, day, hour, minute, second] = parts;
+    return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second ?? 0));
 }
 
 /**

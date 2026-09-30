@@ -40,6 +40,10 @@ export interface NPTrackingResult {
      */
     LastCreatedOnTheBasisDocumentType?: string;
     LastCreatedOnTheBasisNumber?: string;
+    /** «2026-09-27 14:35:14» — когда создана связанная накладная. */
+    LastCreatedOnTheBasisDateTime?: string;
+    /** «27-09-2026 14:35:14» — когда создана эта накладная. */
+    DateCreated?: string;
 }
 
 export type NPTrusteeErrorCode = 'SHIPMENT_LOCKED' | 'NOT_DOCUMENT_OWNER' | 'API_ERROR';
