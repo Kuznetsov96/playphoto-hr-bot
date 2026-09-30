@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getJson = vi.fn();
 const setJson = vi.fn();
@@ -136,5 +136,83 @@ describe("checkScheduleMirrorFreshness", () => {
         });
 
         expect(result).toMatchObject({ stale: true });
+    });
+});
+
+/**
+ * Who the alert reaches and in what language is part of its contract: an alert
+ * the owner cannot read, or that lands in a group nobody watches, is an alert
+ * that does not exist.
+ */
+describe("startScheduleMirrorWatch — delivery", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    async function runWatchOnce(adminIds: number[]) {
+        getJson.mockImplementation((key: string) =>
+            Promise.resolve(
+                key === "aws-business-sync:last" ? lastSync(minutesAgo(45)) : null,
+            ));
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { startScheduleMirrorWatch } = await import("../stale-schedule-mirror.js");
+
+        const timer = startScheduleMirrorWatch({ sendMessage }, adminIds);
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        clearInterval(timer);
+        return sendMessage;
+    }
+
+    it("alerts the first admin id and nobody else", async () => {
+        // ADMIN_IDS[0] is the owner by the convention the rest of the bot already
+        // follows. Fanning an operational alert out to every admin trains all of
+        // them to swipe it away.
+        const sendMessage = await runWatchOnce([107794048, 222222222, 333333333]);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0]?.[0]).toBe(107794048);
+    });
+
+    it("writes the alert in English", async () => {
+        // Admin-facing text is English by project rule; Ukrainian is for staff and
+        // candidates. This one was written in Ukrainian and slipped the rule.
+        const sendMessage = await runWatchOnce([107794048]);
+
+        const text = String(sendMessage.mock.calls[0]?.[1] ?? "");
+        expect(text).not.toMatch(/[а-яіїєґ]/iu);
+        expect(text).toMatch(/schedule/i);
+    });
+
+    it("says how long it has been stale and as of when photographers are seeing data", async () => {
+        // Without both numbers the alert says only "something is wrong", which
+        // leaves the reader to go digging in logs before they can judge urgency.
+        const sendMessage = await runWatchOnce([107794048]);
+
+        const text = String(sendMessage.mock.calls[0]?.[1] ?? "");
+        // 45 minutes stale when the watch was armed, plus the 10 the timer advanced.
+        expect(text).toMatch(/55 min/);
+        // 11:15 UTC rendered in Kyiv time, which is what the reader's clock shows.
+        expect(text).toMatch(/14:15/);
+        expect(text).not.toMatch(/\dT\d|Z\b/);
+    });
+
+    it("sends nothing at all while the sync is healthy", async () => {
+        getJson.mockImplementation((key: string) =>
+            Promise.resolve(
+                key === "aws-business-sync:last" ? lastSync(minutesAgo(2)) : null,
+            ));
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { startScheduleMirrorWatch } = await import("../stale-schedule-mirror.js");
+
+        const timer = startScheduleMirrorWatch({ sendMessage }, [107794048]);
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        clearInterval(timer);
+
+        expect(sendMessage).not.toHaveBeenCalled();
     });
 });
