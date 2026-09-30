@@ -10,6 +10,8 @@ import { buildSignedCallback } from '../utils/signed-callback.js';
 import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logistics-rejection.js';
 import {
     canMarkParcelPickedUpManually,
+    initialParcelStatus,
+    mapNpStatusCode,
     resolveParcelStatusTransition,
     selectTtnsClosedForTracking,
 } from './parcel-status-transition.js';
@@ -137,7 +139,7 @@ export class LogisticsService {
                     (await prisma.parcel.create({
                         data: {
                             ttn: parcel.ttn,
-                            status: this.mapNPStatusToParcelStatus(statusDoc.StatusCode),
+                            status: initialParcelStatus(mapNpStatusCode(statusDoc.StatusCode)),
                             locationId: parcel.locationId,
                             deliveryType: parcel.npAddress ? 'Warehouse' : 'Address',
                             npCity: parcel.npCity,
@@ -146,7 +148,7 @@ export class LogisticsService {
                         }
                     }));
 
-                const npStatus = this.mapNPStatusToParcelStatus(statusDoc.StatusCode);
+                const npStatus = mapNpStatusCode(statusDoc.StatusCode);
                 const newStatus = resolveParcelStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
                 if (localParcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
@@ -540,21 +542,6 @@ export class LogisticsService {
                     logger.error({ err, telegramId: user.telegramId, parcelId }, 'Logistics staff notification failed');
                 });
             }
-        }
-    }
-
-    private mapNPStatusToParcelStatus(statusCode: string): ParcelStatus {
-        switch (statusCode) {
-            case '1': return 'EXPECTED';
-            case '4':
-            case '5':
-            case '6': return 'IN_TRANSIT';
-            case '7':
-            case '8': return 'ARRIVED';
-            case '9': return 'DELIVERED';
-            case '10':
-            case '11': return 'COMPLETED';
-            default: return 'EXPECTED';
         }
     }
 

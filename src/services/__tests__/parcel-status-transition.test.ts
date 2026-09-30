@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    canAcceptParcel,
     canMarkParcelPickedUpManually,
+    initialParcelStatus,
     isParcelClosedForTracking,
+    mapNpStatusCode,
     resolveParcelStatusTransition,
     selectTtnsClosedForTracking,
 } from "../parcel-status-transition.js";
@@ -109,5 +112,50 @@ describe("canMarkParcelPickedUpManually", () => {
 
     it("still marks a parcel the photographer has taken on", () => {
         expect(canMarkParcelPickedUpManually("PICKUP_IN_PROGRESS")).toBe(true);
+    });
+});
+
+/**
+ * Переадресация НП, прод 30.09.2026: коробка 20400546955468 дважды сменила адрес
+ * (→ 59001770706919 → 59001787984510). Код 104 «Змінено адресу» бот не знал и
+ * превращал в EXPECTED: переадресованная накладная откатывалась из «прибыла» в
+ * «ожидается», а смене уходило «очікується посилка» по коробке, которой в том
+ * отделении уже нет.
+ */
+describe("Nova Poshta redirect (code 104)", () => {
+    it("reads 104 as a redirect, not as EXPECTED", () => {
+        expect(mapNpStatusCode("104")).toBe("REDIRECTED");
+    });
+
+    it("reads an unknown code as unknown", () => {
+        expect(mapNpStatusCode("999")).toBeNull();
+    });
+
+    it.each(["EXPECTED", "IN_TRANSIT", "ARRIVED", "DELIVERED", "PICKUP_IN_PROGRESS"] as const)(
+        "closes a %s parcel once it is redirected",
+        (current) => {
+            expect(resolveParcelStatusTransition(current, "REDIRECTED", "Warehouse")).toBe("CANCELLED");
+        },
+    );
+
+    it.each(["VERIFYING", "COMPLETED"] as const)("keeps %s: the conversation is already done", (current) => {
+        expect(resolveParcelStatusTransition(current, "REDIRECTED", "Warehouse")).toBe(current);
+    });
+
+    it("keeps the current status on an unknown code instead of rolling it back", () => {
+        expect(resolveParcelStatusTransition("ARRIVED", null, "Warehouse")).toBe("ARRIVED");
+    });
+
+    it("opens a card for an already redirected waybill closed", () => {
+        expect(initialParcelStatus("REDIRECTED")).toBe("CANCELLED");
+        expect(initialParcelStatus(null)).toBe("EXPECTED");
+        expect(initialParcelStatus("ARRIVED")).toBe("ARRIVED");
+    });
+
+    it("does not let an old «Так, заберу» button reopen a closed parcel", () => {
+        expect(canAcceptParcel("CANCELLED")).toBe(false);
+        expect(canAcceptParcel("COMPLETED")).toBe(false);
+        expect(canAcceptParcel("VERIFYING")).toBe(false);
+        expect(canAcceptParcel("ARRIVED")).toBe(true);
     });
 });
