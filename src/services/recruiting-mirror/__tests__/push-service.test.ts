@@ -42,6 +42,26 @@ describe("enqueueCandidateMirrorPush", () => {
     });
 });
 
+describe("enqueueCandidateMirrorPush delay", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.resetModules();
+        vi.doMock("../../../core/queue.js", () => ({ defaultQueue: { add: queueAdd } }));
+        vi.doMock("../../../config.js", () => ({ AWS_RECRUITING_MIRROR_ENABLED: true }));
+    });
+
+    it("відстрочка з транзакції доходить до BullMQ", async () => {
+        const { enqueueCandidateMirrorPush } = await import("../push-service.js");
+        await enqueueCandidateMirrorPush("cand-1", { delayMs: 15000 });
+
+        expect(queueAdd).toHaveBeenCalledWith(
+            "recruiting-mirror-push",
+            { candidateId: "cand-1" },
+            expect.objectContaining({ delay: 15000 }),
+        );
+    });
+});
+
 describe("processCandidateMirrorPush", () => {
     const pushRecruitingCandidate = vi.fn();
     const findUnique = vi.fn();
