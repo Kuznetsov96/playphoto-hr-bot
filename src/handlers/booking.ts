@@ -23,7 +23,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
-import { canScheduleInterview, hasActiveInterviewBooking } from "../utils/screening-state.js";
+import { canScheduleInterview, hasActiveInterviewBooking, hasLiveInterviewInvitation } from "../utils/screening-state.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 // Ім'я кандидатки їде в сповіщення менторам з parse_mode:"HTML", а
@@ -83,6 +83,7 @@ function formatSlotButton(slot: SlotButton) {
  * підходить жоден, тому потрібна не довша сторінка, а інші дати.
  */
 const SLOT_KEYBOARD_LIMIT = 12;
+const NO_TIME_FITS_LABEL = "Не бачу зручного часу";
 
 function buildSlotSelectionKeyboard(
     slots: SlotButton[],
@@ -100,7 +101,7 @@ function buildSlotSelectionKeyboard(
         keyboard.text(formatSlotButton(slot), `${bookCallbackPrefix}${slot.id}`).row();
     });
 
-    keyboard.text("Не бачу зручного часу", noFitCallback).row();
+    keyboard.text(NO_TIME_FITS_LABEL, noFitCallback).row();
     return keyboard;
 }
 
@@ -165,7 +166,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     // Actions that are step-specific
     // "decline_invite" покриває префіксом і decline_invite_confirm/_cancel —
     // гард має стерегти обидва кроки підтвердження, а не лише перший.
-    const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite"];
+    // "no_slots_fit" теж тут: у відхиленої кандидатки він падав на забороні
+    // переходу REJECTED → SCREENING і показував «Ой, щось пішло не так».
+    const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite", "no_slots_fit"];
     const trainingActions = ["book_training_slot_", "reschedule_training_", "start_training_scheduling", "cancel_training_"];
     // send_nda_/confirm_nda_/start_quiz прибрані разом з етапами NDA й тесту:
     // обробників для них не було вже давно, гард стеріг неіснуючі кнопки.
@@ -255,7 +258,17 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         // та кнопки після співбесіди бронювали далі: гард пропускав WAITLIST_HR.
         // Відмова від запрошення — теж дія запрошеної: зі старого повідомлення
         // вона переводила в REJECTED навіть прийняту кандидатку.
-        const isSchedulingAction = data === "start_scheduling" || data.startsWith("book_slot_") || data.startsWith("decline_invite");
+        // Відмова — лише від чинного запрошення. Старе нагадування з червоною
+        // кнопкою висить у чаті й тоді, коли кандидатка вже сама чекає нових
+        // вікон; тап по ньому закривав заявку (30.09.2026).
+        if ((data === "decline_invite" || data === "decline_invite_confirm") && !hasLiveInterviewInvitation(candidate)) {
+            await ctx.answerCallbackQuery("Це запрошення вже неактуальне");
+            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+            await showCandidateStatus(ctx, candidate);
+            return;
+        }
+
+        const isSchedulingAction = data === "start_scheduling" || data.startsWith("book_slot_") || data.startsWith("decline_invite") || data === "no_slots_fit";
         if (isSchedulingAction && !canScheduleInterview(candidate)) {
             await ctx.answerCallbackQuery("Запис зараз недоступний");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
@@ -713,9 +726,14 @@ bookingHandlers.callbackQuery("decline_invite", async (ctx) => {
         CANDIDATE_TEXTS["candidate-decline-invite-confirm"],
         {
             parse_mode: "HTML",
+            // «Не бачу зручного часу» — першою: кандидатка, якій просто не
+            // підійшов час, раніше мала тут лише «Так» і «Назад» і обирала
+            // «Так». Руйнівна кнопка — остання, щоб після редагування на
+            // місці «Обрати час» не опинилося «Так, завершити заявку».
             reply_markup: new InlineKeyboard()
-                .text(CANDIDATE_TEXTS["candidate-btn-decline-confirm"], "decline_invite_confirm").danger().row()
-                .text(CANDIDATE_TEXTS["candidate-btn-restart-cancel"], "decline_invite_cancel"),
+                .text(NO_TIME_FITS_LABEL, "no_slots_fit").row()
+                .text(CANDIDATE_TEXTS["candidate-btn-restart-cancel"], "decline_invite_cancel").row()
+                .text(CANDIDATE_TEXTS["candidate-btn-decline-confirm"], "decline_invite_confirm").danger(),
         },
     );
 });

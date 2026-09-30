@@ -55,6 +55,7 @@ export type InterviewStateCandidate = {
     currentStep?: FunnelStep | null;
     notificationSent?: boolean | null;
     interviewSlotId?: string | null;
+    interviewInvitedAt?: Date | string | null;
 };
 
 const RESCHEDULING_STATUSES: ReadonlySet<CandidateStatus> = new Set([
@@ -73,6 +74,23 @@ export function canScheduleInterview(candidate: InterviewStateCandidate): boolea
     if (candidate.interviewSlotId) return false;
     if (candidate.status === CandidateStatus.SCREENING && candidate.notificationSent) return true;
     return candidate.currentStep === FunnelStep.INTERVIEW && RESCHEDULING_STATUSES.has(candidate.status);
+}
+
+/**
+ * Чинне запрошення на співбесіду — те саме, що invite-reminder вважає
+ * запрошенням, яке чекає запису. Лише з нього можна відмовитися кнопкою
+ * «Не планую продовжувати».
+ *
+ * Кнопка живе в запрошенні й нагадуванні, а ці повідомлення лишаються в чаті
+ * назавжди. 30.09.2026 кандидатка, яка вже чекала нових вікон (розсилка
+ * «нові вікна» знімає interviewInvitedAt), натиснула її на нагадуванні
+ * добової давності й закрила собі заявку.
+ */
+export function hasLiveInterviewInvitation(candidate: InterviewStateCandidate): boolean {
+    return candidate.status === CandidateStatus.SCREENING &&
+        Boolean(candidate.notificationSent) &&
+        Boolean(candidate.interviewInvitedAt) &&
+        !candidate.interviewSlotId;
 }
 
 /**

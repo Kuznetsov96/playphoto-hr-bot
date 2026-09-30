@@ -216,6 +216,59 @@ describe("interview booking over canonical slots", () => {
         expect(next).toHaveBeenCalled();
     });
 
+    // 30.09.2026: кандидатка ждала новых окон, тапнула «Не планую продовжувати»
+    // на напоминании суточной давности и закрыла себе заявку.
+    it.each(["decline_invite", "decline_invite_confirm"])(
+        "гард: %s со старого напоминания у ждущей окна не проходит",
+        async (data) => {
+            findByTelegramId.mockResolvedValue({
+                id: "cand-1", status: "SCREENING", gender: "female",
+                currentStep: "INTERVIEW", notificationSent: true,
+                interviewInvitedAt: null, interviewSlotId: null,
+            });
+            const ctx = makeCtx(111020);
+            ctx.callbackQuery = { data };
+            const next = vi.fn();
+
+            await (bookingHandlers as any).onHandlers[0](ctx, next);
+
+            expect(next).not.toHaveBeenCalled();
+            expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Це запрошення вже неактуальне");
+        },
+    );
+
+    it("гард: отказ из действующего приглашения проходит", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "SCREENING", gender: "female",
+            currentStep: "INITIAL_TEST", notificationSent: true,
+            interviewInvitedAt: new Date(), interviewSlotId: null,
+        });
+        const ctx = makeCtx(111021);
+        ctx.callbackQuery = { data: "decline_invite_confirm" };
+        const next = vi.fn();
+
+        await (bookingHandlers as any).onHandlers[0](ctx, next);
+
+        expect(next).toHaveBeenCalled();
+    });
+
+    // Там же через 5 секунд: «Не бачу зручного часу» у уже отклонённой падал
+    // на запрете перехода REJECTED → SCREENING и показывал «Ой, щось пішло не так».
+    it("гард: «не бачу зручного часу» у отклонённой показывает статус, а не падает", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "REJECTED", gender: "female",
+            currentStep: "INTERVIEW", notificationSent: true, interviewSlotId: null,
+        });
+        const ctx = makeCtx(111022);
+        ctx.callbackQuery = { data: "no_slots_fit" };
+        const next = vi.fn();
+
+        await (bookingHandlers as any).onHandlers[0](ctx, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(updateMany).not.toHaveBeenCalled();
+    });
+
     it("«не підходить час» теж ставить noSlotsAt — рекрутёр видит её в секции «потребує вікон»", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", status: "SCREENING", gender: "female" });
         updateMany.mockResolvedValue({ count: 1 });

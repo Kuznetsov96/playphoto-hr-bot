@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { canScheduleInterview, hasActiveInterviewBooking, isQuestionnaireOpen, isScreeningComplete } from "../screening-state.js";
+import { canScheduleInterview, hasActiveInterviewBooking, hasLiveInterviewInvitation, isQuestionnaireOpen, isScreeningComplete } from "../screening-state.js";
 
 const complete = {
     status: CandidateStatus.SCREENING,
@@ -62,5 +62,27 @@ describe("interview state", () => {
         expect(hasActiveInterviewBooking(booked, "s2")).toBe(false);
         expect(hasActiveInterviewBooking({ ...booked, status: CandidateStatus.INTERVIEW_COMPLETED }, "s1")).toBe(false);
         expect(hasActiveInterviewBooking({ ...booked, status: CandidateStatus.ACCEPTED }, "s1")).toBe(false);
+    });
+
+    it("отказаться можно только от действующего приглашения", () => {
+        const invited = {
+            status: CandidateStatus.SCREENING,
+            currentStep: FunnelStep.INITIAL_TEST,
+            notificationSent: true,
+            interviewInvitedAt: new Date("2026-09-29T10:00:00Z"),
+            interviewSlotId: null,
+        };
+        expect(hasLiveInterviewInvitation(invited)).toBe(true);
+
+        // 30.09.2026: рассылка «нові вікна» снимает interviewInvitedAt, а
+        // напоминание суточной давности с красной кнопкой висит в чате.
+        // Кандидатка ждала окна, тапнула его — и заявка закрылась.
+        expect(hasLiveInterviewInvitation({ ...invited, currentStep: FunnelStep.INTERVIEW, interviewInvitedAt: null })).toBe(false);
+        // «Не бачу зручного часу» — ждёт окна, приглашения нет.
+        expect(hasLiveInterviewInvitation({ ...invited, notificationSent: false })).toBe(false);
+        // Переносит время — WAITLIST_HR, отметка приглашения старая.
+        expect(hasLiveInterviewInvitation({ ...invited, status: CandidateStatus.WAITLIST_HR })).toBe(false);
+        // Записалась — отказ идёт через кнопки брони, не приглашения.
+        expect(hasLiveInterviewInvitation({ ...invited, interviewSlotId: "s1" })).toBe(false);
     });
 });
