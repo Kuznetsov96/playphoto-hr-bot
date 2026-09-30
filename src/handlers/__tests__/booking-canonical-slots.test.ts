@@ -216,6 +216,25 @@ describe("interview booking over canonical slots", () => {
         expect(next).toHaveBeenCalled();
     });
 
+    it("«не підходить час» теж ставить noSlotsAt — рекрутёр видит её в секции «потребує вікон»", async () => {
+        findByTelegramId.mockResolvedValue({ id: "cand-1", status: "SCREENING", gender: "female" });
+        updateMany.mockResolvedValue({ count: 1 });
+        const { interviewRepository } = await import("../../repositories/interview-repository.js");
+        vi.mocked(interviewRepository.findActiveSlots).mockResolvedValue([] as any);
+
+        const ctx = makeCtx(111011);
+        await bookingHandlers.__runCallback("no_slots_fit", ctx);
+
+        expect(updateMany).toHaveBeenCalledWith(
+            { user: { telegramId: 111011n } },
+            expect.objectContaining({
+                interviewWaitlistReason: "NO_DATE_FITS",
+                noSlotsAt: expect.any(Date),
+                interviewWaitlistedAt: expect.any(Date),
+            }),
+        );
+    });
+
     it("start_scheduling lists slots through the canonical-or-local switch", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", status: "SCREENING", gender: "female" });
         findAvailableInterviewSlots.mockResolvedValue([

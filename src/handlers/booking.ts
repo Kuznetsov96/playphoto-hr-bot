@@ -594,7 +594,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         if (slots.length === 0) {
             if (candidate) {
                 await candidateRepository.update(candidate.id, {
-                    interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
+                    interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS,
+                    noSlotsAt: new Date()
                 });
             }
             await editWithContactButton(
@@ -686,9 +687,12 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     const availableSlots = await interviewRepository.findActiveSlots();
     logger.info({ telegramId, availableSlotCount: availableSlots.length }, "Interview scheduling no-slots-fit selected");
 
+    // noSlotsAt — сигнал секції «потребує вікон» у вебі. Раніше його ставив
+    // лише випадок «слотів немає зовсім», і кандидатка, якій не підійшов
+    // жоден час, для рекрутерки просто зникала.
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
+        { ...buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS), noSlotsAt: new Date() }
     );
 
     await editWithContactButton(ctx, telegramId, `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
