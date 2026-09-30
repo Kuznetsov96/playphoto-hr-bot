@@ -600,6 +600,9 @@ export class CandidateRepository {
                 currentStep: FunnelStep.INTERVIEW,
                 isWaitlisted: true,
                 statusChangedAt: new Date(),
+                // Мимо touchPipeline — отметку ставим сами: по ней сверка
+                // дзеркала бачить, що вебапп ще не підтвердив цей стан.
+                pipelineTouchedAt: new Date(),
             },
             include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
@@ -691,6 +694,9 @@ export class CandidateRepository {
                 currentStep: FunnelStep.INTERVIEW,
                 isWaitlisted: true,
                 statusChangedAt: new Date(),
+                // Мимо touchPipeline — отметку ставим сами: по ней сверка
+                // дзеркала бачить, що вебапп ще не підтвердив цей стан.
+                pipelineTouchedAt: new Date(),
             },
             include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;

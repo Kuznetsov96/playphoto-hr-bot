@@ -194,6 +194,7 @@ model Candidate {
   quizAnswers              String? // JSON string of answers
   statusChangedAt          DateTime? // When status last changed
   pipelineTouchedAt        DateTime                  @default(now()) // Any meaningful candidate pipeline action
+  mirroredAt               DateTime? // pipelineTouchedAt, який вебапп підтвердив останнім пушем дзеркала
   applications             Application[]
   interviewSlot            InterviewSlot?            @relation(fields: [interviewSlotId], references: [id])
   location                 Location?                 @relation(fields: [locationId], references: [id])

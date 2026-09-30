@@ -65,6 +65,13 @@ export async function processCandidateMirrorPush(candidateId: string): Promise<v
 
     try {
         const ack = await awsBusinessClient.pushRecruitingCandidate(snapshot);
+        // Підтверджено саме той стан, що ми прочитали. Умова в where не дає
+        // пізнішому, але повільнішому пушу старшого стану відкотити відмітку.
+        const touched = candidate.pipelineTouchedAt;
+        await prisma.candidate.updateMany({
+            where: { id: candidateId, OR: [{ mirroredAt: null }, { mirroredAt: { lt: touched } }] },
+            data: { mirroredAt: touched },
+        });
         logBusinessEvent({
             event: "recruiting_mirror.push.completed",
             candidateId,
@@ -93,4 +100,33 @@ export async function processCandidateMirrorPush(candidateId: string): Promise<v
         });
         throw error;
     }
+}
+
+/**
+ * Сверка дзеркала: кандидатки, чий стан змінювався після останнього
+ * підтвердження вебаппа (pipelineTouchedAt > mirroredAt, або підтвердження ще
+ * не було). Свіжі першими — вони потрібні рекрутерці зараз; решту доганяють
+ * наступні тіки. Послідовно, без черги: темп задає розмір порції, а прод-API
+ * (2 CPU) від паралельності не виграє.
+ */
+export async function runRecruitingMirrorSweep(limit: number): Promise<{ selected: number; pushed: number; failed: number }> {
+    const { default: prisma } = await import("../../db/core.js");
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Candidate"
+        WHERE "mirroredAt" IS NULL OR "pipelineTouchedAt" > "mirroredAt"
+        ORDER BY "pipelineTouchedAt" DESC
+        LIMIT ${limit}`;
+
+    let pushed = 0;
+    let failed = 0;
+    for (const row of rows) {
+        try {
+            await processCandidateMirrorPush(row.id);
+            pushed++;
+        } catch {
+            // Уже залоговано в processCandidateMirrorPush; наступний тік повторить.
+            failed++;
+        }
+    }
+    return { selected: rows.length, pushed, failed };
 }

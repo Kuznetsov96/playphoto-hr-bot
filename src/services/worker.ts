@@ -6,7 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, MENTOR_NAME, ADMIN_IDS, MENTOR_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED, AWS_RECRUITING_MIRROR_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
@@ -847,6 +847,50 @@ export function startRecruitingCommandDispatcher(bot: Bot<MyContext>) {
             logger.error({ err: error }, "Recruiting command dispatcher iteration failed");
         });
     }, RECRUITING_COMMAND_POLL_MS);
+}
+
+const RECRUITING_MIRROR_SWEEP_MS = 5 * 60 * 1000;
+/** ~100 пушів за 5 хв: 3600 кандидаток без підтвердження доганяються за ~3 год. */
+const RECRUITING_MIRROR_SWEEP_BATCH = 100;
+const RECRUITING_MIRROR_SWEEP_LEASE = "worker:recruiting-mirror-sweep:lease";
+
+/**
+ * Сверка дзеркала кандидаток із вебаппом — страховка доставки поверх черги
+ * (див. runRecruitingMirrorSweep). Лиза в Redis — щоб два інстанси не пушили
+ * ту саму порцію. Вимкнено разом із самим дзеркалом.
+ */
+export function startRecruitingMirrorSweep() {
+    if (!AWS_RECRUITING_MIRROR_ENABLED) return undefined;
+
+    return setInterval(async () => {
+        const token = `${process.pid}:${Date.now()}`;
+        try {
+            const acquired = await redis.set(RECRUITING_MIRROR_SWEEP_LEASE, token, "PX", RECRUITING_MIRROR_SWEEP_MS, "NX");
+            if (acquired !== "OK") return;
+            const { runRecruitingMirrorSweep } = await import("./recruiting-mirror/push-service.js");
+            const result = await runRecruitingMirrorSweep(RECRUITING_MIRROR_SWEEP_BATCH);
+            if (result.selected > 0) {
+                logBusinessEvent({
+                    event: "recruiting_mirror.sweep.completed",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: result.failed > 0 ? "failed" : "success",
+                    module: "worker",
+                    operation: "startRecruitingMirrorSweep",
+                    safeContext: result,
+                });
+            }
+        } catch (error) {
+            logger.error({ err: error }, "Recruiting mirror sweep iteration failed");
+        } finally {
+            await redis.eval(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                1,
+                RECRUITING_MIRROR_SWEEP_LEASE,
+                token,
+            ).catch(() => {});
+        }
+    }, RECRUITING_MIRROR_SWEEP_MS);
 }
 
 type AlertState = {
