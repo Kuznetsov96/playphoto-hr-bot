@@ -145,7 +145,8 @@ export function buildInterviewSlotNeededPatch(reason: string) {
         isWaitlisted: false,
         currentStep: FunnelStep.INTERVIEW,
         notificationSent: false,
-        interviewWaitlistReason: reason
+        interviewWaitlistReason: reason,
+        interviewWaitlistedAt: new Date()
     };
 }
 
@@ -239,7 +240,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             CandidateStatus.KNOWLEDGE_TEST,
             CandidateStatus.STAGING_SETUP,
             CandidateStatus.STAGING_ACTIVE,
-            CandidateStatus.READY_FOR_HIRE
+            CandidateStatus.READY_FOR_HIRE,
+            CandidateStatus.MENTOR_MANUAL
         ];
         if (forbiddenStatuses.includes(candidate.status)) {
             await ctx.answerCallbackQuery("Цей етап уже пройдено");
@@ -251,7 +253,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         // Вибір часу — лише для запрошеної або тієї, що вже шукає новий час.
         // Кнопки запрошення, скинутого через 48 год («місце перейшло іншому»),
         // та кнопки після співбесіди бронювали далі: гард пропускав WAITLIST_HR.
-        const isSchedulingAction = data === "start_scheduling" || data.startsWith("book_slot_");
+        // Відмова від запрошення — теж дія запрошеної: зі старого повідомлення
+        // вона переводила в REJECTED навіть прийняту кандидатку.
+        const isSchedulingAction = data === "start_scheduling" || data.startsWith("book_slot_") || data.startsWith("decline_invite");
         if (isSchedulingAction && !canScheduleInterview(candidate)) {
             await ctx.answerCallbackQuery("Запис зараз недоступний");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
@@ -470,6 +474,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 candidateDecision: null,
                 notificationSent: false,
                 interviewWaitlistReason: null,
+                interviewWaitlistedAt: new Date(),
                 interviewSlot: { disconnect: true },
                 googleMeetLink: null
             });
@@ -578,6 +583,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 currentStep: FunnelStep.INTERVIEW,
                 candidateDecision: null,
                 notificationSent: false,
+                interviewWaitlistedAt: new Date(),
                 interviewSlot: { disconnect: true },
                 googleMeetLink: null
             });

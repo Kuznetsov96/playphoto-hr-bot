@@ -11,3 +11,17 @@ UPDATE "Candidate"
 SET "interviewInviteReminderSentAt" = now()
 WHERE "interviewInvitedAt" IS NOT NULL
   AND "interviewInvitedAt" <= now() - interval '24 hours';
+
+-- С какого момента кандидатка ждёт время собеседования (нет слотов, не
+-- подошло время, отменила или переносит запись). Уведомление о новых слотах
+-- уходит, только когда появился слот новее этого момента: до 30.09.2026
+-- обещанное «надішлемо сповіщення» не отправлял никто.
+ALTER TABLE "Candidate" ADD COLUMN "interviewWaitlistedAt" TIMESTAMP(3);
+
+-- Уже ждущим — момент выката: первый же слот, который бот увидит после
+-- него, для них новый, и обещанное уведомление наконец дойдёт.
+UPDATE "Candidate"
+SET "interviewWaitlistedAt" = now()
+WHERE "currentStep" = 'INTERVIEW'
+  AND "interviewSlotId" IS NULL
+  AND "status" IN ('SCREENING', 'WAITLIST_HR', 'WAITLIST');

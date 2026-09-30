@@ -1122,16 +1122,26 @@ export const hrService = {
     },
 
 
-    async notifyWaitlist(api: any, city?: string) {
+    /**
+     * Сповіщає тих, хто чекає часу співбесіди, що вікна з'явились.
+     * `waitlistedBefore` — момент, коли бот уперше побачив найновіший вільний
+     * слот: сповіщення отримує лише та, хто почала чекати раніше, тобто для
+     * кого цей слот справді новий. Одноразово — після відправки кандидатка
+     * вже запрошена, і далі нею займається invite-reminder.
+     */
+    async notifyWaitlist(api: any, options: { city?: string; waitlistedBefore?: Date } = {}) {
+        const { city, waitlistedBefore } = options;
         const candidates = await candidateRepository.findByStatusWithUser(
             HR_INTERVIEW_SLOT_STATUSES, {
             gender: "female",
             currentStep: FunnelStep.INTERVIEW,
+            interviewSlotId: null,
             OR: [
                 { isWaitlisted: true },
                 { status: CandidateStatus.SCREENING, isWaitlisted: false, interviewWaitlistReason: { in: HR_INTERVIEW_WAITLIST_REASON_VALUES } }
             ],
-            ...(city ? { city } : {})
+            ...(city ? { city } : {}),
+            ...(waitlistedBefore ? { interviewWaitlistedAt: { lt: waitlistedBefore } } : {})
         });
 
         let successCount = 0;
@@ -1148,7 +1158,8 @@ export const hrService = {
                     notificationSent: true,
                     interviewWaitlistReason: null,
                     interviewInvitedAt: new Date(),
-                    interviewInviteReminderSentAt: null
+                    interviewInviteReminderSentAt: null,
+                    interviewWaitlistedAt: null
                 });
                 successCount++;
             } catch (e: any) {
