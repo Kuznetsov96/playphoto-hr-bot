@@ -216,13 +216,16 @@ describe("AwsBusinessSyncService — locations missing from the snapshot", () =>
 
         expect(transaction.location.updateMany).toHaveBeenCalledWith({
             where: {
-                OR: [
-                    { awsPublicId: null },
-                    { awsPublicId: { notIn: ["22222222-2222-4222-8222-222222222200"] } },
-                ],
+                awsPublicId: { not: null, notIn: ["22222222-2222-4222-8222-222222222200"] },
                 NOT: { isHidden: true, isHiddenFromCandidates: true },
             },
             data: { isHidden: true, isHiddenFromCandidates: true },
+        });
+        // Строки, которых вебапп не знает вовсе, прячутся только от кандидаток:
+        // закрытыми их назвать нельзя, логистика и справочники их видят.
+        expect(transaction.location.updateMany).toHaveBeenCalledWith({
+            where: { awsPublicId: null, isHiddenFromCandidates: false },
+            data: { isHiddenFromCandidates: true },
         });
     });
 });

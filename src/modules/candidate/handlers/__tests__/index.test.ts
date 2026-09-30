@@ -181,17 +181,15 @@ describe("finishScreening: защита от двойного тапа", () => {
         expect(ScreenManager.renderScreen).not.toHaveBeenCalled();
     });
 
-    it("после завершения анкеты (idle) повторный тап тоже игнорируется", async () => {
+    it("после завершения анкеты повторный тап показывает статус и ничего не пишет", async () => {
         const { finishScreening } = await import("../index.js");
-        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
         const ctx = makeCtx();
-
-        ctx.session.step = "idle";
-        vi.mocked(ScreenManager.renderScreen).mockClear();
+        storedCandidate = { ...storedCandidate, source: "Instagram", appearance: "Без особливостей" };
 
         await finishScreening(ctx, "Без особливостей");
 
-        expect(ScreenManager.renderScreen).not.toHaveBeenCalled();
+        expect(ctx.di.candidateRepository.upsert).not.toHaveBeenCalled();
+        expect(ctx.session.step).toBe("idle");
     });
 
     it("без выбранного источника ведёт на вопрос об источнике, а не финализирует", async () => {
@@ -253,8 +251,10 @@ describe("finishScreening: вход после конца анкеты и пос
     });
 
     it("после потери сессии поднимает ответы из базы, включая доп. точки, и спрашивает источник", async () => {
+        // Новая сессия получает step "idle" по умолчанию (core/session.ts) —
+        // раньше именно на нём финал молча выходил, и тап ничего не делал.
         const { finishScreening } = await import("../index.js");
-        const ctx = ctxWithSession({}, undefined);
+        const ctx = ctxWithSession({}, "idle");
 
         await finishScreening(ctx, "Без особливостей");
 
@@ -293,5 +293,30 @@ describe("startScreening: ответы про город и точку, кото
 
         expect(ctx.session.candidateData.locationIds).toEqual([]);
         expect(ctx.session.step).toBe("screening_location");
+    });
+});
+
+describe("ранние шаги анкеты у законченной анкеты", () => {
+    it("старая кнопка точки не переписывает записанную кандидатку", async () => {
+        const { handleLocationSelected } = await import("../index.js");
+        const ctx = {
+            session: { step: "idle", candidateData: { city: "Lviv", locationIds: ["loc-2"] } },
+            from: { id: 1 },
+            update: { update_id: 1 },
+            di: {
+                locationRepository: { findByCity: vi.fn(async () => []) },
+                candidateRepository: { upsert: vi.fn(async () => ({})) },
+                userRepository: {
+                    upsert: vi.fn(async () => ({ id: "u1" })),
+                    findWithCandidateProfileByTelegramId: vi.fn(async () => ({
+                        candidate: { status: "INTERVIEW_SCHEDULED", currentStep: "INTERVIEW", source: "Instagram" },
+                    })),
+                },
+            },
+        } as any;
+
+        await handleLocationSelected(ctx, { id: "loc-2", name: "Drive City" }, "Lviv");
+
+        expect(ctx.di.candidateRepository.upsert).not.toHaveBeenCalled();
     });
 });

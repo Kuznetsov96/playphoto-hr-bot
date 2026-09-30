@@ -144,7 +144,7 @@ export class LocationRepository {
             // синк переписує кожну локацію на кожному проході — кнопки міняються
             // місцями між показом і тапом, і плагін меню відповідає кандидатці
             // «Menu was outdated» замість вибору.
-            return prisma.location.findMany({ where, orderBy: [{ name: 'asc' }, { branch: 'asc' }] });
+            return prisma.location.findMany({ where, orderBy: [{ name: 'asc' }, { branch: 'asc' }, { id: 'asc' }] });
         });
     }
 

@@ -325,7 +325,10 @@ describe('hrService', () => {
 
             expect(candidateRepository.findByStatusWithUser).toHaveBeenCalledWith(
                 expect.any(Array),
-                expect.objectContaining({ interviewSlotId: null, interviewWaitlistedAt: { lt: since } }),
+                expect.objectContaining({
+                    interviewSlotId: null,
+                    AND: [{ OR: [{ interviewWaitlistedAt: null }, { interviewWaitlistedAt: { lt: since } }] }],
+                }),
             );
         });
 
@@ -361,14 +364,16 @@ describe('hrService', () => {
                     ]
                 }
             );
+            // Остаётся в поиске времени до записи и не попадает под 48-часовой
+            // сброс приглашения: места ей никто не давал и не забирал.
             expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
                 status: CandidateStatus.SCREENING,
                 isWaitlisted: false,
                 notificationSent: true,
-                interviewWaitlistReason: null,
-                interviewInvitedAt: expect.any(Date),
-                interviewInviteReminderSentAt: null,
-                interviewWaitlistedAt: null
+                interviewWaitlistReason: 'NO_SLOTS_AVAILABLE',
+                interviewWaitlistedAt: expect.any(Date),
+                interviewInvitedAt: null,
+                interviewInviteReminderSentAt: null
             });
         });
 

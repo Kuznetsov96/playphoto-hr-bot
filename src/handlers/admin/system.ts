@@ -136,8 +136,10 @@ async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
                  `<b>Candidate Status:</b> ${l.isHiddenFromCandidates ? 'Hidden (🔒)' : 'Visible (🔓)'}\n\n` +
                  `<i>${LOCATION_LEVERS_IN_WEBAPP}</i>`;
 
-    await ScreenManager.renderScreen(ctx, text, new InlineKeyboard());
+    // Під текстом — список локацій міста: це й «назад», і перехід до сусідньої.
+    await ScreenManager.renderScreen(ctx, text, "admin-locations");
     ctx.session.step = "idle";
+    delete ctx.session.adminFlow;
 }
 
 export const LOCATION_LEVERS_IN_WEBAPP = "Видимість для кандидаток, місто й потреба змінюються в картці локації у вебаппі.";

@@ -82,5 +82,8 @@ export function canScheduleInterview(candidate: InterviewStateCandidate): boolea
  */
 export function hasActiveInterviewBooking(candidate: InterviewStateCandidate, slotId: string): boolean {
     if (candidate.status !== CandidateStatus.INTERVIEW_SCHEDULED) return false;
-    return slotId === "none" || candidate.interviewSlotId === slotId;
+    // «none» — екран статусу записаної без слота; при живому слоті такий
+    // payload означав би відмову без звільнення слота.
+    if (slotId === "none") return !candidate.interviewSlotId;
+    return candidate.interviewSlotId === slotId;
 }

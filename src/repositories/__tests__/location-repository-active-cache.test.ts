@@ -113,7 +113,7 @@ describe("locationRepository — candidate questionnaire order", () => {
 
         expect(findMany).toHaveBeenCalledWith({
             where: { city: "Lviv", isHiddenFromCandidates: false },
-            orderBy: [{ name: "asc" }, { branch: "asc" }],
+            orderBy: [{ name: "asc" }, { branch: "asc" }, { id: "asc" }],
         });
     });
 });

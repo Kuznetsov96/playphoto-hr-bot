@@ -62,6 +62,19 @@ async function loadStoredCandidate(ctx: MyContext) {
 }
 
 /**
+ * Ранні кроки анкети (стать, ім'я, дата, місто, локація) пишуть у базу через
+ * upsert повз funnel-guard. Стара кнопка такого кроку в чаті записаної чи
+ * відхиленої кандидатки інакше переписала б її анкету — аж до скидання точки.
+ * Повертає true, коли анкету вже не заповнюють і показано статус.
+ */
+export async function questionnaireClosed(ctx: MyContext): Promise<boolean> {
+    const stored = await loadStoredCandidate(ctx);
+    if (!stored || isQuestionnaireOpen(stored)) return false;
+    await showStatusInsteadOfQuestions(ctx, stored);
+    return true;
+}
+
+/**
  * Кнопка анкети натиснута, коли анкету вже не заповнюють: закінчена й чекає
  * запрошення, запис на співбесіду, відмова. Показуємо статус замість питань —
  * інакше фінал анкети перерахував би статус наново повз funnel-guard.
@@ -289,6 +302,7 @@ async function renderLocationSelection(ctx: MyContext) {
 }
 
 export async function handleNoVacancies(ctx: MyContext, city: string) {
+    if (await questionnaireClosed(ctx)) return;
     const bdStr = ctx.session.candidateData.birthDate;
     const birthDate = bdStr ? new Date(bdStr) : new Date();
 
@@ -486,6 +500,7 @@ candidateHandlers.on("message:text", async (ctx, next) => {
     await ctx.deleteMessage().catch(() => { });
 
     if (step === "screening_name") {
+        if (await questionnaireClosed(ctx)) return;
         const val = CandidateSchema.shape.fullName.safeParse(ctx.message.text);
         if (val.success) {
             ctx.session.candidateData.fullName = val.data;
@@ -544,6 +559,7 @@ candidateHandlers.on("message:photo", async (ctx) => {
  * застаріти між рендером клавіатури й натисканням.
  */
 export async function handleBirthDateSelected(ctx: MyContext, day: number) {
+    if (await questionnaireClosed(ctx)) return;
     const { birthYear, birthMonth } = ctx.session.candidateData;
     const date = buildBirthDate(birthYear, birthMonth, day);
 
@@ -586,6 +602,7 @@ async function askBirthYearAgain(ctx: MyContext) {
 }
 
 export async function handleLocationSelected(ctx: MyContext, targetLoc: any, city: string) {
+    if (await questionnaireClosed(ctx)) return;
     const { fullName, birthDate: bdStr, gender } = ctx.session.candidateData;
     const birthDate = bdStr ? new Date(bdStr) : new Date(0);
     const finalLocationId = getLocationIds(ctx.session.candidateData)[0];
@@ -654,8 +671,10 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
     if (tattooPhotoId) ctx.session.candidateData.tattooPhotoId = tattooPhotoId;
     await persistCandidate(ctx, { appearance, ...(tattooPhotoId ? { tattooPhotoId } : {}) });
 
-    // Повторний тап після фіналу чи під час нього — нічого не робимо.
-    if (ctx.session.step === FINISHING_STEP || ctx.session.step === "idle") return;
+    // Тап під час фіналу — нічого не робимо. «idle» тут не ознака: це ще й крок
+    // сесії за замовчуванням, тобто в кандидатки, чия сесія зникла посеред
+    // анкети. Повторний тап після фіналу ловить перевірка стану анкети в базі.
+    if (ctx.session.step === FINISHING_STEP) return;
 
     await dropUnavailableLocationAnswers(ctx);
 
@@ -674,7 +693,7 @@ export async function finishScreening(ctx: MyContext, appearance: string, tattoo
 
     // Прапорець ставиться до першого await у фіналізації, тож два апдейти,
     // що прийшли підряд, не пройдуть обидва.
-    if (ctx.session.step === FINISHING_STEP || ctx.session.step === "idle") return;
+    if (ctx.session.step === FINISHING_STEP) return;
     ctx.session.step = FINISHING_STEP;
 
     try {

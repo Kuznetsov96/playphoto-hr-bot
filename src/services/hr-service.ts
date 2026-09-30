@@ -1141,7 +1141,9 @@ export const hrService = {
                 { status: CandidateStatus.SCREENING, isWaitlisted: false, interviewWaitlistReason: { in: HR_INTERVIEW_WAITLIST_REASON_VALUES } }
             ],
             ...(city ? { city } : {}),
-            ...(waitlistedBefore ? { interviewWaitlistedAt: { lt: waitlistedBefore } } : {})
+            // null — чекає з невідомого моменту (шляхи, що ставлять у пошук часу
+            // без позначки, і всі, хто чекав до 30.09.2026): для неї новий будь-який слот.
+            ...(waitlistedBefore ? { AND: [{ OR: [{ interviewWaitlistedAt: null }, { interviewWaitlistedAt: { lt: waitlistedBefore } }] }] } : {})
         });
 
         let successCount = 0;
@@ -1152,14 +1154,20 @@ export const hrService = {
 
                 await api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
 
+                // Лишається в пошуку часу, доки не запишеться: наступна пачка
+                // вікон сповістить її знову. interviewInvitedAt не ставимо —
+                // інакше через 48 год вона отримала б «місце перейшло іншому»
+                // й пішла в резерв, хоча місця їй ніхто не давав і не забирав.
                 await candidateRepository.update(cand.id, {
                     status: CandidateStatus.SCREENING,
                     isWaitlisted: false,
                     notificationSent: true,
-                    interviewWaitlistReason: null,
-                    interviewInvitedAt: new Date(),
-                    interviewInviteReminderSentAt: null,
-                    interviewWaitlistedAt: null
+                    interviewWaitlistReason: cand.interviewWaitlistReason ?? HR_INTERVIEW_WAITLIST_REASONS.NO_SLOTS_AVAILABLE,
+                    interviewWaitlistedAt: new Date(),
+                    // Стара дата запрошення (кандидатку запрошували раніше) разом
+                    // з notificationSent одразу підхопив би 48-годинний скид.
+                    interviewInvitedAt: null,
+                    interviewInviteReminderSentAt: null
                 });
                 successCount++;
             } catch (e: any) {

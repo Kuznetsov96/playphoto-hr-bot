@@ -406,16 +406,20 @@ export class AwsBusinessSyncService {
              */
             const closed = await transaction.location.updateMany({
                 where: {
-                    OR: [
-                        { awsPublicId: null },
-                        { awsPublicId: { notIn: snapshot.locations.map((location) => location.publicId) } },
-                    ],
+                    awsPublicId: { not: null, notIn: snapshot.locations.map((location) => location.publicId) },
                     NOT: { isHidden: true, isHiddenFromCandidates: true },
                 },
                 data: { isHidden: true, isHiddenFromCandidates: true },
             });
-            if (closed.count > 0) {
-                logger.info({ count: closed.count }, "hid locations missing from the AWS snapshot");
+            // Рядки без awsPublicId вебапп не знає зовсім — службові чи старі
+            // ручні. Кандидаткам їх не пропонуємо, але решту бота (логістика,
+            // довідники) не чіпаємо: закритими їх назвати не можна.
+            const unknown = await transaction.location.updateMany({
+                where: { awsPublicId: null, isHiddenFromCandidates: false },
+                data: { isHiddenFromCandidates: true },
+            });
+            if (closed.count > 0 || unknown.count > 0) {
+                logger.info({ closed: closed.count, unknown: unknown.count }, "hid locations missing from the AWS snapshot");
             }
 
             /**
