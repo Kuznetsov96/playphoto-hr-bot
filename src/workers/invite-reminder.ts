@@ -1,4 +1,4 @@
-import { PrismaClient, CandidateStatus } from "@prisma/client";
+import { PrismaClient, CandidateStatus, FunnelStep } from "@prisma/client";
 import { InlineKeyboard } from "grammy";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
@@ -56,8 +56,13 @@ export async function processInviteReminders(bot: any) {
                 await candidateRepository.update(cand.id, {
                     status: CandidateStatus.WAITLIST_HR,
                     isWaitlisted: true,
+                    // Назад у резерв, а не в пошук часу: інакше екран статусу
+                    // знову пропонував би «Обрати час» тій, кому щойно написали,
+                    // що місце перейшло іншій.
+                    currentStep: FunnelStep.INITIAL_TEST,
                     notificationSent: false, // Reset to allow future invites
                     interviewInvitedAt: null, // Reset time
+                    interviewInviteReminderSentAt: null,
                 });
 
                 try {
@@ -70,31 +75,23 @@ export async function processInviteReminders(bot: any) {
                 resetCount += 1;
 
             }
-            // Check if older than 24 hours but NOT older than 48 hours -> Ping
-            // To avoid spamming ping, we need a flag. Wait, we don't have a specific `pingSent` flag in DB.
-            // But we can check if it's exactly between 24h and 25h, OR add a field.
-            // Since we didn't add pingSent, let's use a "time window" trick. Worker runs hourly.
-            else if (invitedTime <= pingThreshold.getTime() && invitedTime > pingThreshold.getTime() - 2 * 60 * 60 * 1000) {
-                // If it's between 24 and 26 hours ago
-                // To avoid sending multiple times, if worker runs hourly, this is safe if we mark it somehow.
-                // However, without a flag, we might send it twice if the worker runs twice within the 2-hour window.
-                // A safer way is to just send it if it hasn't been sent.
-
-                // Let's use the time window: 24h to 24h 59m
-                if (invitedTime <= pingThreshold.getTime() && invitedTime > pingThreshold.getTime() - 60 * 60 * 1000) {
-                    try {
-                        await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_24H_PING, {
-                            parse_mode: "HTML",
-                            reply_markup: new InlineKeyboard()
-                                .text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row()
-                                .text(CANDIDATE_TEXTS["candidate-btn-invite-decline"], "decline_invite").danger()
-                        });
-                    } catch (e: any) {
-                        if (isBotBlocked(e)) {
-                            await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
-                        }
-                    }
+            // Старше суток, но ещё не 48 часов: одно напоминание. Однократность
+            // держит отметка, а не окно по времени — вокер крутится каждые
+            // 5 минут, и часовое окно давало около 12 напоминаний подряд.
+            else if (invitedTime <= pingThreshold.getTime() && !cand.interviewInviteReminderSentAt) {
+                try {
+                    await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_24H_PING, {
+                        parse_mode: "HTML",
+                        reply_markup: new InlineKeyboard()
+                            .text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row()
+                            .text(CANDIDATE_TEXTS["candidate-btn-invite-decline"], "decline_invite").danger()
+                    });
+                    await candidateRepository.update(cand.id, { interviewInviteReminderSentAt: new Date() });
                     pingCount += 1;
+                } catch (e: any) {
+                    if (isBotBlocked(e)) {
+                        await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                    }
                 }
             }
         }

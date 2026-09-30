@@ -21,7 +21,7 @@ import { bookingService } from "./booking-service.js";
  */
 
 /** Причины освобождения — уходят в releasedReason вебаппа (контракт: ≤120). */
-export type CanonicalReleaseReason = "candidate_cancelled" | "candidate_withdrew" | "rescheduled";
+export type CanonicalReleaseReason = "candidate_cancelled" | "candidate_withdrew" | "rescheduled" | "booking_rejected";
 
 /** Минимум, который нужен клавиатуре выбора слота. */
 export interface AvailableInterviewSlot {
@@ -58,8 +58,21 @@ export async function bookInterviewSlot(
         return bookingService.bookInterviewSlot(telegramId, slotId, username);
     }
     const booked = await awsBusinessClient.bookRecruitingInterviewSlot(slotId, String(telegramId));
-    const mirror = await ensureLocalMirrorSlot(booked);
-    return bookingService.bookInterviewSlot(telegramId, mirror.id, username);
+    try {
+        const mirror = await ensureLocalMirrorSlot(booked);
+        return await bookingService.bookInterviewSlot(telegramId, mirror.id, username);
+    } catch (error) {
+        // Вебапп слот уже віддав, а локальна бронь відмовила (анкета не
+        // закінчена, вік, статус після співбесіди). Без відкату слот лишався
+        // зайнятим для всіх інших кандидаток, хоча запису не існувало.
+        await awsBusinessClient
+            .releaseRecruitingInterviewSlot(String(telegramId), "booking_rejected")
+            .catch((releaseError) => logger.error(
+                { err: releaseError, telegramId, webSlotPublicId: booked.publicId },
+                "Could not release the web interview slot after the local booking was rejected",
+            ));
+        throw error;
+    }
 }
 
 /**

@@ -39,3 +39,17 @@ describe("locationSchema.isHiddenFromCandidates", () => {
         expect(parsed.isHiddenFromCandidates).toBe(false);
     });
 });
+
+describe("locationSchema.hiringDeficit", () => {
+    it("старый бэкенд без поля — undefined, ёмкость в боте не трогаем", () => {
+        expect(locationSchema.parse(baseLocation).hiringDeficit).toBeUndefined();
+    });
+
+    it("принимает дефицит из вебаппа", () => {
+        expect(locationSchema.parse({ ...baseLocation, hiringDeficit: 2 }).hiringDeficit).toBe(2);
+    });
+
+    it("отрицательный дефицит — ошибка контракта", () => {
+        expect(() => locationSchema.parse({ ...baseLocation, hiringDeficit: -1 })).toThrow();
+    });
+});

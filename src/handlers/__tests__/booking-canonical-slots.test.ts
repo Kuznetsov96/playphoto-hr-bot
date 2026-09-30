@@ -186,6 +186,55 @@ describe("interview booking over canonical slots", () => {
         releaseCanonicalInterviewSlot.mockResolvedValue(undefined);
     });
 
+    it("гард: кнопки приглашения, сброшенного через 48 часов, больше не бронируют", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "WAITLIST_HR", gender: "female",
+            currentStep: "INITIAL_TEST", notificationSent: false, interviewSlotId: null,
+        });
+        const ctx = makeCtx(111009);
+        ctx.callbackQuery = { data: "start_scheduling" };
+        const next = vi.fn();
+
+        const guard = (bookingHandlers as any).onHandlers[0];
+        await guard(ctx, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Запис зараз недоступний");
+    });
+
+    it("гард: приглашённая проходит к выбору времени", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "SCREENING", gender: "female",
+            currentStep: "INITIAL_TEST", notificationSent: true, interviewSlotId: null,
+        });
+        const ctx = makeCtx(111010);
+        ctx.callbackQuery = { data: "start_scheduling" };
+        const next = vi.fn();
+
+        await (bookingHandlers as any).onHandlers[0](ctx, next);
+
+        expect(next).toHaveBeenCalled();
+    });
+
+    it("«не підходить час» теж ставить noSlotsAt — рекрутёр видит её в секции «потребує вікон»", async () => {
+        findByTelegramId.mockResolvedValue({ id: "cand-1", status: "SCREENING", gender: "female" });
+        updateMany.mockResolvedValue({ count: 1 });
+        const { interviewRepository } = await import("../../repositories/interview-repository.js");
+        vi.mocked(interviewRepository.findActiveSlots).mockResolvedValue([] as any);
+
+        const ctx = makeCtx(111011);
+        await bookingHandlers.__runCallback("no_slots_fit", ctx);
+
+        expect(updateMany).toHaveBeenCalledWith(
+            { user: { telegramId: 111011n } },
+            expect.objectContaining({
+                interviewWaitlistReason: "NO_DATE_FITS",
+                noSlotsAt: expect.any(Date),
+                interviewWaitlistedAt: expect.any(Date),
+            }),
+        );
+    });
+
     it("start_scheduling lists slots through the canonical-or-local switch", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", status: "SCREENING", gender: "female" });
         findAvailableInterviewSlots.mockResolvedValue([
@@ -261,7 +310,7 @@ describe("interview booking over canonical slots", () => {
     });
 
     it("cancel releases the canonical slot BEFORE the local cancel, reason candidate_cancelled", async () => {
-        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена" });
+        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
 
         const ctx = makeCtx(111004);
         await bookingHandlers.__runCallback(buildSignedCallback("ccb", "local-slot-1"), ctx);
@@ -273,7 +322,7 @@ describe("interview booking over canonical slots", () => {
     });
 
     it("withdraw releases the canonical slot with reason candidate_withdrew", async () => {
-        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена" });
+        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
 
         const ctx = makeCtx(111005);
         await bookingHandlers.__runCallback(buildSignedCallback("cwi", "local-slot-1"), ctx);
@@ -283,7 +332,7 @@ describe("interview booking over canonical slots", () => {
     });
 
     it("reschedule releases the canonical slot with reason rescheduled and lists through the switch", async () => {
-        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена" });
+        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
         findAvailableInterviewSlots.mockResolvedValue([
             { id: WEB_SLOT_ID, startTime: new Date("2026-09-02T10:00:00Z") },
         ]);
@@ -299,7 +348,7 @@ describe("interview booking over canonical slots", () => {
     });
 
     it("a failed canonical release blocks the local cancel — the web slot must not stay taken silently", async () => {
-        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена" });
+        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
         releaseCanonicalInterviewSlot.mockRejectedValue(new Error("HTTP 502"));
 
         const ctx = makeCtx(111007);

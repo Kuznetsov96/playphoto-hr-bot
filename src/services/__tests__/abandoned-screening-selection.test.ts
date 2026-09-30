@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { CandidateStatus, FunnelStep } from "@prisma/client";
+
 import { selectAbandonedScreeningCandidates } from "../abandoned-screening-selection.js";
 
 /**
@@ -16,14 +18,39 @@ import { selectAbandonedScreeningCandidates } from "../abandoned-screening-selec
 const DAY = 24 * 60 * 60 * 1000;
 const now = new Date("2026-09-03T11:00:00.000Z");
 
-const candidate = (over: Partial<{ id: string; pipelineTouchedAt: Date; screeningReminderSentAt: Date | null }>) => ({
+const candidate = (over: Partial<{ id: string; pipelineTouchedAt: Date; screeningReminderSentAt: Date | null; source: string | null; currentStep: FunnelStep }>) => ({
     id: "c1",
+    status: CandidateStatus.SCREENING,
+    currentStep: FunnelStep.INITIAL_TEST as FunnelStep,
+    notificationSent: false,
+    fullName: "Анна Коваль",
+    gender: "female",
+    birthDate: new Date("2005-01-01"),
+    city: "Lviv",
+    locationId: "loc-1",
+    appearance: "Без особливостей",
     pipelineTouchedAt: new Date(now.getTime() - 2 * DAY),
     screeningReminderSentAt: null,
+    source: null as string | null,
     ...over,
 });
 
 describe("selectAbandonedScreeningCandidates", () => {
+    it("не трогает законченную анкету — SCREENING у неё значит «ждёт приглашения»", () => {
+        // До 30.09.2026 напоминание «лишилося кілька питань» получали и те, кто
+        // анкету закончил: 252 из 515 за месяц. Кнопка «Продовжити анкету» в нём
+        // пересчитывала статус заново — вплоть до записанных на интервью.
+        const rows = [candidate({ id: "done", source: "Instagram" })];
+
+        expect(selectAbandonedScreeningCandidates(rows, now)).toEqual([]);
+    });
+
+    it("не трогает приглашённую, которая ещё не записалась", () => {
+        const rows = [candidate({ id: "invited", currentStep: FunnelStep.INTERVIEW })];
+
+        expect(selectAbandonedScreeningCandidates(rows, now)).toEqual([]);
+    });
+
     it("берёт того, кто молчит дольше суток", () => {
         const rows = [candidate({ id: "a", pipelineTouchedAt: new Date(now.getTime() - 2 * DAY) })];
 

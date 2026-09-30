@@ -138,6 +138,12 @@ model Candidate {
   notificationSent        Boolean         @default(false)
   stagingNotifiedAt       DateTime?
   interviewInvitedAt      DateTime?
+  /// Когда ушло напоминание «запрошення ще діє». Держит его однократным:
+  /// вокер крутится каждые 5 минут, окна по времени для этого мало.
+  interviewInviteReminderSentAt DateTime?
+  /// С какого момента ждёт время собеседования. Уведомление о новых слотах
+  /// уходит, когда появился слот новее этого момента.
+  interviewWaitlistedAt   DateTime?
   interviewWaitlistReason String?
   // Момент, когда кандидатка нажала "start_scheduling" и активных слотов не
   // нашлось вообще (не "не подошёл день" — тот случай в interviewWaitlistReason).

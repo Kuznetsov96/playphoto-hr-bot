@@ -87,6 +87,14 @@ export async function startWorker(bot: Bot<MyContext>) {
             // 0. Process HR Invites (24h ping / 48h reset)
             await processInviteReminders(bot);
 
+            // 0.1. Обіцяне «надішлемо сповіщення»: нові вікна співбесід тим, хто чекає.
+            try {
+                const { notifyWaitlistAboutNewSlots } = await import("./interview-slot-waitlist.js");
+                await notifyWaitlistAboutNewSlots(bot.api);
+            } catch (e) {
+                logger.error({ err: e }, "Interview waitlist notification failed");
+            }
+
             // 1. Process HR Decisions (6 hours delay)
             const sixHoursAgo = new Date(nowTime - 6 * 60 * 60 * 1000);
 

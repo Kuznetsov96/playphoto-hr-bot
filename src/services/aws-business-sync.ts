@@ -24,6 +24,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 const SNAPSHOT_SHRINK_LIMIT = 0.7;
 
+/**
+ * Ёмкость локации из вебаппа. До 30.09.2026 `neededCount` правился только
+ * руками в админке бота, а владелец задаёт цель штата в карточке локации
+ * вебаппа — анкета решала «есть место / очередь» по второй, забытой правде.
+ * Старый бэкенд поле не шлёт — тогда счётчик не трогаем.
+ */
+function hiringNeed(location: { hiringDeficit?: number | undefined }): { neededCount?: number } {
+    return location.hiringDeficit === undefined ? {} : { neededCount: location.hiringDeficit };
+}
+
 /** Where each successful pass records its result, and the baseline for the next one. */
 const LAST_SYNC_STATE_KEY = "aws-business-sync:last";
 // The backend rejects a `links` payload larger than 500 entries outright.
@@ -346,6 +356,7 @@ export class AwsBusinessSyncService {
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
                             isHiddenFromCandidates: location.isHiddenFromCandidates,
+                            ...hiringNeed(location),
                         },
                         select: { id: true },
                     })
@@ -361,6 +372,7 @@ export class AwsBusinessSyncService {
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
                             isHiddenFromCandidates: location.isHiddenFromCandidates,
+                            ...hiringNeed(location),
                         },
                         select: { id: true },
                     });
@@ -382,6 +394,32 @@ export class AwsBusinessSyncService {
                     });
                 }
                 locationIds.set(location.canonicalCode, saved.id);
+            }
+
+            /**
+             * The snapshot is complete and carries only ACTIVE locations, so a venue the owner
+             * closed simply stops arriving. Left alone it kept its last flags and the
+             * questionnaire went on offering it: in September 2026 candidates were still
+             * picking three closed Zaporizhzhia Volklands. Hide whatever the snapshot no longer
+             * carries; a reopened venue comes back through the upsert above, which resets both
+             * flags. The shrink guard has already rejected a truncated snapshot by this point.
+             */
+            const closed = await transaction.location.updateMany({
+                where: {
+                    awsPublicId: { not: null, notIn: snapshot.locations.map((location) => location.publicId) },
+                    NOT: { isHidden: true, isHiddenFromCandidates: true },
+                },
+                data: { isHidden: true, isHiddenFromCandidates: true },
+            });
+            // Рядки без awsPublicId вебапп не знає зовсім — службові чи старі
+            // ручні. Кандидаткам їх не пропонуємо, але решту бота (логістика,
+            // довідники) не чіпаємо: закритими їх назвати не можна.
+            const unknown = await transaction.location.updateMany({
+                where: { awsPublicId: null, isHiddenFromCandidates: false },
+                data: { isHiddenFromCandidates: true },
+            });
+            if (closed.count > 0 || unknown.count > 0) {
+                logger.info({ closed: closed.count, unknown: unknown.count }, "hid locations missing from the AWS snapshot");
             }
 
             /**

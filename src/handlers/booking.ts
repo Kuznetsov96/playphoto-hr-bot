@@ -23,6 +23,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
+import { canScheduleInterview, hasActiveInterviewBooking } from "../utils/screening-state.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 // Ім'я кандидатки їде в сповіщення менторам з parse_mode:"HTML", а
@@ -144,7 +145,8 @@ export function buildInterviewSlotNeededPatch(reason: string) {
         isWaitlisted: false,
         currentStep: FunnelStep.INTERVIEW,
         notificationSent: false,
-        interviewWaitlistReason: reason
+        interviewWaitlistReason: reason,
+        interviewWaitlistedAt: new Date()
     };
 }
 
@@ -238,10 +240,24 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             CandidateStatus.KNOWLEDGE_TEST,
             CandidateStatus.STAGING_SETUP,
             CandidateStatus.STAGING_ACTIVE,
-            CandidateStatus.READY_FOR_HIRE
+            CandidateStatus.READY_FOR_HIRE,
+            CandidateStatus.MENTOR_MANUAL
         ];
         if (forbiddenStatuses.includes(candidate.status)) {
             await ctx.answerCallbackQuery("Цей етап уже пройдено");
+            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+            await showCandidateStatus(ctx, candidate);
+            return;
+        }
+
+        // Вибір часу — лише для запрошеної або тієї, що вже шукає новий час.
+        // Кнопки запрошення, скинутого через 48 год («місце перейшло іншому»),
+        // та кнопки після співбесіди бронювали далі: гард пропускав WAITLIST_HR.
+        // Відмова від запрошення — теж дія запрошеної: зі старого повідомлення
+        // вона переводила в REJECTED навіть прийняту кандидатку.
+        const isSchedulingAction = data === "start_scheduling" || data.startsWith("book_slot_") || data.startsWith("decline_invite");
+        if (isSchedulingAction && !canScheduleInterview(candidate)) {
+            await ctx.answerCallbackQuery("Запис зараз недоступний");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
             await showCandidateStatus(ctx, candidate);
             return;
@@ -397,10 +413,28 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
     }
 });
 
+/**
+ * «Змінити час», «Скасувати запис», «Не планую продовжувати» — підписані
+ * кнопки з підтвердження броні, тож загальний гард за префіксами їх не бачить.
+ * Після співбесіди слот лишається прив'язаним, і стара кнопка переводила
+ * кандидатку з рішенням HR назад у чергу — оффер чи відмова їй уже не йшли.
+ */
+async function rejectStaleBookingAction(ctx: MyContext, slotId: string): Promise<boolean> {
+    const candidate = await candidateRepository.findByTelegramId(ctx.from!.id);
+    if (candidate && hasActiveInterviewBooking(candidate, slotId)) return false;
+    await ctx.answerCallbackQuery("Цей запис уже неактуальний");
+    if (candidate) {
+        const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+        await showCandidateStatus(ctx, candidate);
+    }
+    return true;
+}
+
 // 2. Скасування запису — крок 1: підтвердження
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cb" });
     if (!slotId) return next();
+    if (await rejectStaleBookingAction(ctx, slotId)) return;
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
@@ -419,6 +453,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ccb" });
     if (!slotId) return next();
+    if (await rejectStaleBookingAction(ctx, slotId)) return;
     if (isDuplicateBookingAction(`cancel-interview:${ctx.from.id}:${slotId}`)) {
         await ctx.answerCallbackQuery("Скасування вже обробляється");
         return;
@@ -439,6 +474,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 candidateDecision: null,
                 notificationSent: false,
                 interviewWaitlistReason: null,
+                interviewWaitlistedAt: new Date(),
                 interviewSlot: { disconnect: true },
                 googleMeetLink: null
             });
@@ -465,6 +501,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "wi" });
     if (!slotId) return next();
+    if (await rejectStaleBookingAction(ctx, slotId)) return;
     await ctx.answerCallbackQuery();
 
     const kb = new InlineKeyboard()
@@ -482,6 +519,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cwi" });
     if (!slotId) return next();
+    if (await rejectStaleBookingAction(ctx, slotId)) return;
     if (isDuplicateBookingAction(`withdraw-interview:${ctx.from.id}:${slotId}`)) {
         await ctx.answerCallbackQuery("Відмову вже зафіксовано");
         return;
@@ -526,6 +564,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rb" });
     if (!slotId) return next();
+    if (await rejectStaleBookingAction(ctx, slotId)) return;
     try {
         await ctx.answerCallbackQuery("Оберіть новий час");
 
@@ -544,6 +583,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
                 currentStep: FunnelStep.INTERVIEW,
                 candidateDecision: null,
                 notificationSent: false,
+                interviewWaitlistedAt: new Date(),
                 interviewSlot: { disconnect: true },
                 googleMeetLink: null
             });
@@ -554,7 +594,8 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         if (slots.length === 0) {
             if (candidate) {
                 await candidateRepository.update(candidate.id, {
-                    interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS
+                    interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS,
+                    noSlotsAt: new Date()
                 });
             }
             await editWithContactButton(
@@ -646,9 +687,12 @@ bookingHandlers.callbackQuery("no_slots_fit", async (ctx) => {
     const availableSlots = await interviewRepository.findActiveSlots();
     logger.info({ telegramId, availableSlotCount: availableSlots.length }, "Interview scheduling no-slots-fit selected");
 
+    // noSlotsAt — сигнал секції «потребує вікон» у вебі. Раніше його ставив
+    // лише випадок «слотів немає зовсім», і кандидатка, якій не підійшов
+    // жоден час, для рекрутерки просто зникала.
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
-        buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS)
+        { ...buildInterviewSlotNeededPatch(INTERVIEW_WAITLIST_REASON_NO_DATE_FITS), noSlotsAt: new Date() }
     );
 
     await editWithContactButton(ctx, telegramId, `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);

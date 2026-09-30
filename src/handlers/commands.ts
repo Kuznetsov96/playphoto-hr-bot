@@ -12,7 +12,7 @@ import { staffService } from "../modules/staff/services/index.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { requireRole, getUserAdminRole } from "../middleware/role-check.js";
 import { updateUserCommands } from "../utils/command-manager.js";
-import { startScreening } from "../modules/candidate/handlers/index.js";
+import { candidateDataFromRecord, startScreening } from "../modules/candidate/handlers/index.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
@@ -287,16 +287,7 @@ commandHandlers.command("start", async (ctx) => {
                 candidate = underageReactivation.candidate;
 
                 if (underageReactivation.mode === "RESUME_SCREENING") {
-                    ctx.session.candidateData = {
-                        fullName: candidate.fullName,
-                        gender: candidate.gender,
-                        birthDate: candidate.birthDate?.toISOString(),
-                        city: candidate.city,
-                        locationIds: candidate.locationId ? [candidate.locationId] : [],
-                        appearance: candidate.appearance,
-                        source: candidate.source,
-                        clickSource: candidate.clickSource
-                    } as any;
+                    ctx.session.candidateData = candidateDataFromRecord(candidate);
                     await startScreening(ctx);
                     return;
                 }

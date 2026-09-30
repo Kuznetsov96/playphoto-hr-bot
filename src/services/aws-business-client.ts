@@ -76,6 +76,15 @@ export const locationSchema = z.object({
      * поле уронило бы валидацию всего снимка вместе с синком расписания.
      */
     isHiddenFromCandidates: z.boolean().optional().default(false),
+    /**
+     * Скільки людей бракує: ціль штату з картки локації мінус ті, хто
+     * лишається (той самий розрахунок, що екран потреби найму у вебаппі).
+     * Анкета за ним вирішує, кликати на співбесіду чи ставити в чергу.
+     *
+     * Optional, бо бот викочується раніше за бекенд, а схема .strict().
+     * Відсутнє поле — старий бекенд: тоді neededCount не чіпаємо.
+     */
+    hiringDeficit: z.number().int().min(0).optional(),
 }).strict();
 
 const assignmentSchema = z.object({
