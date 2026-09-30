@@ -20,6 +20,7 @@ const slotFindUnique = vi.fn();
 const slotCreate = vi.fn();
 const slotUpdate = vi.fn();
 const sessionCreate = vi.fn();
+const candidateFindFirst = vi.fn();
 
 function mockModules(flagEnabled: boolean) {
     vi.doMock("../../config.js", () => ({ AWS_RECRUITING_SLOTS_ENABLED: flagEnabled }));
@@ -40,6 +41,7 @@ function mockModules(flagEnabled: boolean) {
         default: {
             interviewSlot: { findUnique: slotFindUnique, create: slotCreate, update: slotUpdate },
             interviewSession: { create: sessionCreate },
+            candidate: { findFirst: candidateFindFirst },
         },
     }));
 }
@@ -47,6 +49,7 @@ function mockModules(flagEnabled: boolean) {
 beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    candidateFindFirst.mockResolvedValue(null);
 });
 
 describe("flag OFF: the local flow is untouched", () => {
@@ -183,6 +186,25 @@ describe("flag ON: the web API is canonical", () => {
         await expect(bookInterviewSlot(1164289764, webSlot.publicId, "olena")).rejects.toBe(rejected);
 
         expect(releaseSlot).toHaveBeenCalledWith("1164289764", "booking_rejected");
+    });
+
+    // Перенос-обмін: вебапп book() уже відпустив старий слот разом із
+    // бронюванням нового. Якщо локальна бронь упала (скажімо, Google Calendar),
+    // відкат лише нового слота лишав кандидатку взагалі без запису у вебаппі,
+    // хоча локально старий запис живий.
+    it("on a failed reschedule returns the previous web slot to the candidate", async () => {
+        candidateFindFirst.mockResolvedValue({ interviewSlot: { webSlotPublicId: "prev-web-slot" } });
+        bookSlot.mockResolvedValue(webSlot);
+        slotFindUnique.mockResolvedValue({ id: "local-mirror-1", isBooked: false });
+        const failed = new Error("calendar down");
+        bookInterviewSlotLocal.mockRejectedValue(failed);
+        releaseSlot.mockResolvedValue({ released: true });
+
+        const { bookInterviewSlot } = await import("../canonical-interview-slots.js");
+        await expect(bookInterviewSlot(1164289764, webSlot.publicId, "olena")).rejects.toBe(failed);
+
+        expect(releaseSlot).toHaveBeenCalledWith("1164289764", "booking_rejected");
+        expect(bookSlot).toHaveBeenLastCalledWith("prev-web-slot", "1164289764");
     });
 
     it("release calls the web API with the telegramId as digits and the reason", async () => {

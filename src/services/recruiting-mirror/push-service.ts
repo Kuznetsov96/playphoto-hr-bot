@@ -13,14 +13,21 @@ export const RECRUITING_MIRROR_JOB_NAME = "recruiting-mirror-push";
  *
  * Джоб несёт только `candidateId`, не снимок: воркер перечитывает кандидата
  * свежим, так что ретрай после гонки записей пушит актуальное состояние.
+ *
+ * `delayMs` — для записей внутри транзакции: без отсрочки воркер читал бы
+ * кандидата до коммита и пушил старое состояние (см. mirrorCandidate).
  */
-export async function enqueueCandidateMirrorPush(candidateId: string): Promise<void> {
+export async function enqueueCandidateMirrorPush(candidateId: string, options: { delayMs?: number } = {}): Promise<void> {
     if (!AWS_RECRUITING_MIRROR_ENABLED) return;
     const { defaultQueue } = await import("../../core/queue.js");
     await defaultQueue.add(
         RECRUITING_MIRROR_JOB_NAME,
         { candidateId },
-        { attempts: 5, backoff: { type: "exponential", delay: 10000 } }
+        {
+            attempts: 5,
+            backoff: { type: "exponential", delay: 10000 },
+            ...(options.delayMs ? { delay: options.delayMs } : {}),
+        }
     );
 }
 
@@ -58,6 +65,13 @@ export async function processCandidateMirrorPush(candidateId: string): Promise<v
 
     try {
         const ack = await awsBusinessClient.pushRecruitingCandidate(snapshot);
+        // Підтверджено саме той стан, що ми прочитали. Умова в where не дає
+        // пізнішому, але повільнішому пушу старшого стану відкотити відмітку.
+        const touched = candidate.pipelineTouchedAt;
+        await prisma.candidate.updateMany({
+            where: { id: candidateId, OR: [{ mirroredAt: null }, { mirroredAt: { lt: touched } }] },
+            data: { mirroredAt: touched },
+        });
         logBusinessEvent({
             event: "recruiting_mirror.push.completed",
             candidateId,
@@ -86,4 +100,33 @@ export async function processCandidateMirrorPush(candidateId: string): Promise<v
         });
         throw error;
     }
+}
+
+/**
+ * Сверка дзеркала: кандидатки, чий стан змінювався після останнього
+ * підтвердження вебаппа (pipelineTouchedAt > mirroredAt, або підтвердження ще
+ * не було). Свіжі першими — вони потрібні рекрутерці зараз; решту доганяють
+ * наступні тіки. Послідовно, без черги: темп задає розмір порції, а прод-API
+ * (2 CPU) від паралельності не виграє.
+ */
+export async function runRecruitingMirrorSweep(limit: number): Promise<{ selected: number; pushed: number; failed: number }> {
+    const { default: prisma } = await import("../../db/core.js");
+    const rows = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Candidate"
+        WHERE "mirroredAt" IS NULL OR "pipelineTouchedAt" > "mirroredAt"
+        ORDER BY "pipelineTouchedAt" DESC
+        LIMIT ${limit}`;
+
+    let pushed = 0;
+    let failed = 0;
+    for (const row of rows) {
+        try {
+            await processCandidateMirrorPush(row.id);
+            pushed++;
+        } catch {
+            // Уже залоговано в processCandidateMirrorPush; наступний тік повторить.
+            failed++;
+        }
+    }
+    return { selected: rows.length, pushed, failed };
 }

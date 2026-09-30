@@ -62,6 +62,14 @@ export type CandidateWithRelations = Candidate & {
  * (findUnreadByScope, countUnreadByScope), роблять власні запити з
  * власними orderBy й take.
  */
+/**
+ * Отсрочка пуша дзеркала для записи внутри транзакции. Интерактивная
+ * транзакция Prisma живёт не дольше timeout (по умолчанию 5 с; транзакции,
+ * пишущие кандидата, его не переопределяют) — через 15 с она гарантированно
+ * закоммичена или откачена.
+ */
+const MIRROR_DELAY_AFTER_TRANSACTION_MS = 15_000;
+
 const CANDIDATE_RELATIONS = {
     user: true,
     location: true,
@@ -219,13 +227,42 @@ export class CandidateRepository {
      * Зеркалирование кандидата в вебапп — fire-and-forget вслед за успешной
      * записью, тем же приёмом, что и accessService.syncUserAccess: динамический
      * импорт + .catch, чтобы сбой очереди НИКОГДА не ломал основную запись.
-     * Сознательно не внутри транзакций: воркер перечитывает кандидата свежим,
-     * так что пуш всегда несёт то, что реально лежит в базе.
+     * Воркер перечитывает кандидата свежим, так что пуш несёт то, что реально
+     * лежит в базе — но лишь если читает ПОСЛЕ коммита. Запись внутри
+     * транзакции ставит джоб до коммита: воркер забирал его сразу, читал старое
+     * состояние и пушил его, а после коммита пуша уже не было. Так бронь
+     * співбесіди (транзакция вместе с Google Calendar) 30.09.2026 дошла до
+     * вебаппа через 19 часов, и рекрутёр пригласила записанную кандидатку.
+     * Поэтому из транзакции — с отсрочкой длиннее её жизни.
      */
-    private mirrorCandidate(candidateId: string) {
+    private mirrorCandidate(candidateId: string, tx?: Prisma.TransactionClient) {
+        const delayMs = tx ? MIRROR_DELAY_AFTER_TRANSACTION_MS : 0;
         import("../services/recruiting-mirror/push-service.js").then(({ enqueueCandidateMirrorPush }) => {
-            enqueueCandidateMirrorPush(candidateId).catch(() => { });
+            enqueueCandidateMirrorPush(candidateId, { delayMs }).catch(() => { });
         }).catch(() => { });
+    }
+
+    /**
+     * Чи пропустить guard воронки такий патч — перевірка ДО побічних ефектів.
+     * Повідомлення кандидатці не відкличеш: якщо запис стану потім упаде, вона
+     * вже отримала те, чого воронка не визнає (а повтор команди надішле ще раз).
+     * Повертає помилку guard або null; той самий validateFunnelPatch, що в update.
+     */
+    async checkFunnelPatch(id: string, data: Prisma.CandidateUpdateInput): Promise<InvalidCandidateTransitionError | null> {
+        const oldCandidate = await this.getFunnelSnapshot(prisma, id);
+        if (!oldCandidate) throw new Error(`Candidate ${id} not found`);
+        try {
+            this.validateFunnelPatch(oldCandidate, this.touchPipeline(data));
+            return null;
+        } catch (error) {
+            if (error instanceof InvalidCandidateTransitionError) return error;
+            throw error;
+        }
+    }
+
+    /** Пуш дзеркала без запису — коли вебапп, схоже, бачить застарілий стан. */
+    requestMirrorPush(candidateId: string) {
+        this.mirrorCandidate(candidateId);
     }
 
     private touchPipeline<T extends Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput>(data: T): T {
@@ -533,7 +570,7 @@ export class CandidateRepository {
             }).catch(() => { });
         }
 
-        this.mirrorCandidate(candidate.id);
+        this.mirrorCandidate(candidate.id, tx);
 
         return candidate;
     }
@@ -563,6 +600,9 @@ export class CandidateRepository {
                 currentStep: FunnelStep.INTERVIEW,
                 isWaitlisted: true,
                 statusChangedAt: new Date(),
+                // Мимо touchPipeline — отметку ставим сами: по ней сверка
+                // дзеркала бачить, що вебапп ще не підтвердив цей стан.
+                pipelineTouchedAt: new Date(),
             },
             include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
@@ -621,7 +661,7 @@ export class CandidateRepository {
             }).catch(() => { });
         }
 
-        this.mirrorCandidate(candidate.id);
+        this.mirrorCandidate(candidate.id, tx);
 
         return candidate;
     }
@@ -654,6 +694,9 @@ export class CandidateRepository {
                 currentStep: FunnelStep.INTERVIEW,
                 isWaitlisted: true,
                 statusChangedAt: new Date(),
+                // Мимо touchPipeline — отметку ставим сами: по ней сверка
+                // дзеркала бачить, що вебапп ще не підтвердив цей стан.
+                pipelineTouchedAt: new Date(),
             },
             include: CANDIDATE_RELATIONS
         }) as unknown as CandidateWithRelations;
@@ -710,7 +753,7 @@ export class CandidateRepository {
             }).catch(() => { });
         }
 
-        this.mirrorCandidate(candidate.id);
+        this.mirrorCandidate(candidate.id, tx);
 
         return candidate;
     }
@@ -945,9 +988,9 @@ export class CandidateRepository {
                 });
             }
 
-            // Зеркалирование здесь не дублируется: вложенный this.update сам
-            // ставит recruiting-mirror-push, а воркер перечитывает кандидата
-            // свежим уже после коммита транзакции.
+            // Зеркалирование здесь не дублируется: вложенный this.update(…, tx)
+            // сам ставит recruiting-mirror-push с отсрочкой, чтобы воркер
+            // прочитал кандидата уже после коммита транзакции.
             return this.update(candidateId, {
                 status: CandidateStatus.BLOCKER,
                 candidateDecision,

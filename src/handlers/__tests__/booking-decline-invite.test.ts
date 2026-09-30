@@ -48,7 +48,9 @@ vi.mock("grammy", () => {
     }
 
     class MockInlineKeyboard {
-        text() { return this; }
+        // Кнопки запам'ятовуються: екран підтвердження перевіряється за складом.
+        buttons: Array<{ label: string; data: string }> = [];
+        text(label: string, data: string) { this.buttons.push({ label, data }); return this; }
         row() { return this; }
         // grammy 1.45 має .danger() — стиль червоної кнопки. Мок без нього
         // падав би на будь-якому підтвердженні руйнівної дії.
@@ -165,6 +167,27 @@ describe("booking decline invite", () => {
             CANDIDATE_TEXTS["candidate-decline-invite-confirm"],
             expect.objectContaining({ parse_mode: "HTML" }),
         );
+    });
+
+    it("на підтвердженні відмови є вихід «не бачу зручного часу»", async () => {
+        const ctx = {
+            from: { id: 123457 },
+            callbackQuery: { data: "decline_invite" },
+            answerCallbackQuery: vi.fn(),
+            editMessageText: vi.fn(),
+            api: { sendMessage: vi.fn() },
+        };
+
+        await bookingHandlers.__runCallback("decline_invite", ctx);
+
+        // 30.09.2026 кандидатка, якій не підходив час, натиснула «Так,
+        // завершити заявку», а через 5 секунд — «Не бачу зручного часу».
+        // Текст радив «поверніться й оберіть інший», але кнопки не давав.
+        const buttons = ctx.editMessageText.mock.calls[0]![1].reply_markup.buttons as Array<{ label: string; data: string }>;
+        expect(buttons.map((b) => b.data)).toContain("no_slots_fit");
+        // Руйнівна кнопка — остання: після редагування на місці «Обрати час»
+        // не має опинитися «Так, завершити заявку».
+        expect(buttons.at(-1)!.data).toBe("decline_invite_confirm");
     });
 
     it("cancels existing interview slot and clears candidate state", async () => {

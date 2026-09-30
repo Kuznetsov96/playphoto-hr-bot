@@ -278,6 +278,16 @@ export const CANDIDATE_TEXTS = {
     "candidate-btn-choose-time": "Обрати час",
     "candidate-btn-choose-other-time": "Обрати інший час",
     "candidate-btn-reschedule": "Змінити час",
+    /**
+     * Після початку співбесіди — замість «Змінити час». Кандидатка, яка чекає
+     * HR, шукала саме цю дію, а знаходила перенос і втрачала запис (30.09.2026).
+     */
+    "candidate-btn-waiting-for-hr": "Я на зв’язку, HR ще немає",
+    "candidate-btn-keep-booking": "Лишити мій час",
+    "candidate-interview-started-hint": "Співбесіда вже почалася. Приєднуйтеся за посиланням — HR підключиться. Якщо чекаєте довше кількох хвилин, натисніть кнопку нижче.",
+    "candidate-waiting-for-hr-sent": "Передали HR, що ви на зв’язку. Залишайтеся за посиланням — до вас підключаться.",
+    "candidate-reschedule-pick": (current: string) => `Оберіть інший зручний час.\n\nПоки ви не оберете новий, за вами лишається <b>${current}</b>.\n\nЧас київський.`,
+    "candidate-reschedule-no-slots": (current: string) => `Інших вільних вікон зараз немає.\n\nЗа вами лишається <b>${current}</b>.`,
     "candidate-btn-invite-decline": "Не планую продовжувати",
 
     /**
@@ -285,7 +295,7 @@ export const CANDIDATE_TEXTS = {
      * час», а дія незворотна — це була єдина руйнівна дія воронки, що
      * спрацьовувала з першого тапу.
      */
-    "candidate-decline-invite-confirm": "<b>Завершити заявку?</b>\n\nМи закриємо вашу заявку. Якщо просто не підходить час — поверніться й оберіть інший.",
+    "candidate-decline-invite-confirm": "<b>Завершити заявку?</b>\n\nМи закриємо вашу заявку. Якщо просто не підходить час — натисніть «Не бачу зручного часу», і ми повідомимо про нові вікна.",
     "candidate-btn-decline-confirm": "Так, завершити заявку",
 
     /**

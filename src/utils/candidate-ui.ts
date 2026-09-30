@@ -6,9 +6,9 @@ import { HR_NAME, MENTOR_NAME } from "../config.js";
 import { getLocationDetails } from "./location-data-helper.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
-import { buildSignedCallback } from "./signed-callback.js";
 import { formatLocation } from "./location-label.js";
-import { canScheduleInterview, isQuestionnaireOpen } from "./screening-state.js";
+import { canScheduleInterview, hasInterviewStarted, isQuestionnaireOpen } from "./screening-state.js";
+import { buildBookedInterviewKeyboard } from "./interview-booking-keyboard.js";
 
 function getCandidateAge(birthDate?: Date | string | null): number | null {
     if (!birthDate) return null;
@@ -57,7 +57,7 @@ function getJobDetailsText(candidate: any) {
 export async function showCandidateStatus(ctx: MyContext, candidate: any) {
     const status = candidate.status;
     let text = "";
-    const kb = new InlineKeyboard();
+    let kb = new InlineKeyboard();
     const canContactStaff = candidate.gender !== "male";
     const canUseRecovery = isRecoveryEligibleCandidate(candidate);
 
@@ -142,14 +142,14 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         case CandidateStatus.INTERVIEW_SCHEDULED: {
             const slot = candidate.interviewSlot;
             if (slot) {
-                const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
+                // Дата — у київській зоні, як і час: без timeZone сервер в UTC
+                // показав би сусідній день для слота біля опівночі.
+                const dateStr = slot.startTime.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv' });
                 const timeStr = slot.startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' });
                 text = CANDIDATE_TEXTS["candidate-interview-scheduled"](dateStr, timeStr, candidate.googleMeetLink);
+                if (hasInterviewStarted(slot.startTime)) text += `\n${CANDIDATE_TEXTS["candidate-interview-started-hint"]}`;
             } else text = "Вас записано на співбесіду.";
-            kb.text(CANDIDATE_TEXTS["candidate-btn-reschedule"], buildSignedCallback("rb", candidate.interviewSlotId || "none")).row()
-                .text("Скасувати запис", buildSignedCallback("cb", candidate.interviewSlotId || "none")).danger().row()
-                .text("Не планую продовжувати", buildSignedCallback("wi", candidate.interviewSlotId || "none")).danger();
-            if (canContactStaff) kb.row().text("Написати нам", "contact_hr");
+            kb = buildBookedInterviewKeyboard(candidate.interviewSlotId || "none", slot?.startTime, { canContactStaff });
             break;
         }
 

@@ -55,6 +55,8 @@ export type InterviewStateCandidate = {
     currentStep?: FunnelStep | null;
     notificationSent?: boolean | null;
     interviewSlotId?: string | null;
+    interviewInvitedAt?: Date | string | null;
+    interviewSlot?: { startTime: Date | string } | null;
 };
 
 const RESCHEDULING_STATUSES: ReadonlySet<CandidateStatus> = new Set([
@@ -76,6 +78,23 @@ export function canScheduleInterview(candidate: InterviewStateCandidate): boolea
 }
 
 /**
+ * Чинне запрошення на співбесіду — те саме, що invite-reminder вважає
+ * запрошенням, яке чекає запису. Лише з нього можна відмовитися кнопкою
+ * «Не планую продовжувати».
+ *
+ * Кнопка живе в запрошенні й нагадуванні, а ці повідомлення лишаються в чаті
+ * назавжди. 30.09.2026 кандидатка, яка вже чекала нових вікон (розсилка
+ * «нові вікна» знімає interviewInvitedAt), натиснула її на нагадуванні
+ * добової давності й закрила собі заявку.
+ */
+export function hasLiveInterviewInvitation(candidate: InterviewStateCandidate): boolean {
+    return candidate.status === CandidateStatus.SCREENING &&
+        Boolean(candidate.notificationSent) &&
+        Boolean(candidate.interviewInvitedAt) &&
+        !candidate.interviewSlotId;
+}
+
+/**
  * Має чинний запис на співбесіду, яким можна керувати: змінити час,
  * скасувати, відмовитися. Після співбесіди слот лишається прив'язаним, тож
  * сам слот нічого не доводить — вирішує статус.
@@ -86,4 +105,20 @@ export function hasActiveInterviewBooking(candidate: InterviewStateCandidate, sl
     // payload означав би відмову без звільнення слота.
     if (slotId === "none") return !candidate.interviewSlotId;
     return candidate.interviewSlotId === slotId;
+}
+
+/**
+ * Співбесіда почалась: з моменту старту слота перенос і скасування вже не
+ * пропонуються. 30.09.2026 кандидатка чекала HR з 15:15, о 15:31 натиснула
+ * «Змінити час» — і зняла себе із запису, на який її от-от мали покликати.
+ */
+export function hasInterviewStarted(startTime: Date | string | null | undefined, now: Date = new Date()): boolean {
+    if (!startTime) return false;
+    return new Date(startTime).getTime() <= now.getTime();
+}
+
+/** Власний запис, що ще не почався: його можна обміняти на інший час. */
+export function canRescheduleInterview(candidate: InterviewStateCandidate, now: Date = new Date()): boolean {
+    if (candidate.status !== CandidateStatus.INTERVIEW_SCHEDULED || !candidate.interviewSlotId) return false;
+    return !hasInterviewStarted(candidate.interviewSlot?.startTime, now);
 }

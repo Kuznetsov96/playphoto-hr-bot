@@ -57,6 +57,14 @@ export async function bookInterviewSlot(
     if (!AWS_RECRUITING_SLOTS_ENABLED) {
         return bookingService.bookInterviewSlot(telegramId, slotId, username);
     }
+    // Перенос-обмін: вебапп book() відпускає попередній слот кандидатки разом
+    // із бронюванням нового. Запам'ятовуємо його, щоб повернути при відкаті.
+    const current = await prisma.candidate.findFirst({
+        where: { user: { telegramId: BigInt(telegramId) } },
+        select: { interviewSlot: { select: { webSlotPublicId: true } } },
+    });
+    const previousWebSlot = current?.interviewSlot?.webSlotPublicId ?? null;
+
     const booked = await awsBusinessClient.bookRecruitingInterviewSlot(slotId, String(telegramId));
     try {
         const mirror = await ensureLocalMirrorSlot(booked);
@@ -71,6 +79,16 @@ export async function bookInterviewSlot(
                 { err: releaseError, telegramId, webSlotPublicId: booked.publicId },
                 "Could not release the web interview slot after the local booking was rejected",
             ));
+        // Локально старий запис живий (транзакція відкотилась) — повертаємо
+        // його й у вебаппі, інакше там кандидатка лишилась би без запису.
+        if (previousWebSlot !== null && previousWebSlot !== booked.publicId) {
+            await awsBusinessClient
+                .bookRecruitingInterviewSlot(previousWebSlot, String(telegramId))
+                .catch((restoreError) => logger.error(
+                    { err: restoreError, telegramId, webSlotPublicId: previousWebSlot },
+                    "Could not restore the previous web interview slot after a failed reschedule",
+                ));
+        }
         throw error;
     }
 }
