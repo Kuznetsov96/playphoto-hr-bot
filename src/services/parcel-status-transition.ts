@@ -27,6 +27,17 @@ export function canMarkParcelPickedUpManually(status: ParcelStatus): boolean {
 }
 
 /**
+ * Можно ли взять посылку кнопкой «Так, заберу».
+ *
+ * Нельзя у закрытой (в том числе переадресованной — она закрыта в CANCELLED) и у
+ * той, по которой фото уже сданы: кнопка из старого сообщения переоткрыла бы её в
+ * PICKUP_IN_PROGRESS и вернула в напоминания.
+ */
+export function canAcceptParcel(status: ParcelStatus): boolean {
+    return !isParcelClosedForTracking(status) && status !== 'VERIFYING';
+}
+
+/**
  * ТТН, которые бот у себя уже закрыл, — их не нужно ни опрашивать в НП, ни
  * тем более переоткрывать.
  *
@@ -45,6 +56,49 @@ export function selectTtnsClosedForTracking(
 }
 
 /**
+ * Что сказал трекинг НП о накладной, в терминах бота.
+ *
+ * - `ParcelStatus` — обычный этап доставки;
+ * - `'REDIRECTED'` — код 104 «Змінено адресу»: НП завела на ту же коробку НОВУЮ
+ *   накладную, эта больше никуда не едет;
+ * - `null` — код, которого бот не знает.
+ *
+ * Отдельный тип, а не ParcelStatus: до 30.09.2026 незнакомый код (в том числе 104)
+ * превращался в EXPECTED, и переадресованная посылка откатывалась из «прибыла» в
+ * «ожидается» с сообщением смене — по коробке, которой в отделении уже нет
+ * (прод, ТТН 59001770706919 → 59001787984510).
+ */
+export type NpTrackingObservation = ParcelStatus | 'REDIRECTED' | null;
+
+export function mapNpStatusCode(statusCode: string): NpTrackingObservation {
+    switch (statusCode) {
+        case '1': return 'EXPECTED';
+        case '4':
+        case '5':
+        case '6': return 'IN_TRANSIT';
+        case '7':
+        case '8': return 'ARRIVED';
+        case '9': return 'DELIVERED';
+        case '10':
+        case '11': return 'COMPLETED';
+        case '104': return 'REDIRECTED';
+        default: return null;
+    }
+}
+
+/**
+ * Статус новой карточки. Незнакомый код — EXPECTED, как раньше: о карточке смене
+ * ничего не сообщается, а следующий опрос поправит статус. Переадресованная
+ * накладная заводится сразу закрытой: коробка едет под другим номером, и та
+ * накладная придёт в бот своей карточкой.
+ */
+export function initialParcelStatus(observation: NpTrackingObservation): ParcelStatus {
+    if (observation === null) return 'EXPECTED';
+    if (observation === 'REDIRECTED') return 'CANCELLED';
+    return observation;
+}
+
+/**
  * Разрешает переход статуса посылки по данным трекинга Новой Пошты.
  *
  * Охраняет состояние разговора от НП: трекинг ничего не знает про то, забрала ли
@@ -55,11 +109,13 @@ export function selectTtnsClosedForTracking(
  * - VERIFYING: фото сданы, ждём саппорта — заморозка;
  * - PICKUP_IN_PROGRESS: посылку забирают, НП DELIVERED означает факт выдачи;
  * - адресная доставка: DELIVERED от курьера открывает поток фото;
- * - отделение/почтомат: DELIVERED/COMPLETED от НП означает выдачу.
+ * - отделение/почтомат: DELIVERED/COMPLETED от НП означает выдачу;
+ * - переадресация (104): накладная закрывается, коробка едет под новой;
+ * - незнакомый код: статус не трогаем.
  */
 export function resolveParcelStatusTransition(
     currentStatus: ParcelStatus,
-    npStatus: ParcelStatus,
+    npStatus: NpTrackingObservation,
     deliveryType: string | null,
 ): ParcelStatus {
     // Закрытая посылка: приход и выдача в НП происходят ДО подтверждения
@@ -75,6 +131,20 @@ export function resolveParcelStatusTransition(
     // VERIFYING: photos uploaded, awaiting admin — freeze completely
     if (currentStatus === 'VERIFYING') {
         return currentStatus;
+    }
+
+    // Незнакомый код не повод что-то менять: раньше он становился EXPECTED и
+    // откатывал «прибыла» в «ожидается».
+    if (npStatus === null) {
+        return currentStatus;
+    }
+
+    // Переадресация: коробка уехала под новой накладной. Закрываем эту — в том
+    // числе у того, кто уже собрался её забирать (PICKUP_IN_PROGRESS): в старом
+    // отделении забирать нечего, а новая накладная придёт своей карточкой с
+    // обычным «прибыла». CANCELLED смене ничего не шлёт.
+    if (npStatus === 'REDIRECTED') {
+        return 'CANCELLED';
     }
 
     // PICKUP_IN_PROGRESS: staff accepted. Allow NP DELIVERED through —

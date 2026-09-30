@@ -9,6 +9,7 @@ import { logBusinessEvent } from "../../../core/log-events.js";
 import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../../utils/logistics-formatters.js";
 import { buildSignedCallback, readCallbackPayload } from "../../../utils/signed-callback.js";
+import { canAcceptParcel } from "../../../services/parcel-status-transition.js";
 import {
     getManualProxyConfirmationText,
     getParcelPhotoAlreadySubmittedText,
@@ -492,6 +493,14 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
             return;
         }
 
+        // Закрытая посылка (переадресована на новую накладную, отменена или уже
+        // подтверждена): кнопка из старого сообщения не должна её переоткрывать —
+        // иначе посылка ушла бы в PICKUP_IN_PROGRESS и снова в напоминания.
+        if (!canAcceptParcel(parcel.status)) {
+            await editOrReplyText(ctx, LOGISTICS_TEXTS_STAFF.parcel_no_longer_active(parcel.ttn));
+            return;
+        }
+
         if (parcel.status === 'DELIVERED') {
             const kb = new InlineKeyboard().text(LOGISTICS_TEXTS_STAFF.btn_photo, buildSignedCallback("pph", parcelId));
             const locationName = parcel.location?.name || 'локації';
@@ -515,7 +524,9 @@ staffLogisticsHandlers.callbackQuery(/^parcel_accept_(.+)$/, async (ctx) => {
                 where: {
                     id: parcelId,
                     responsibleStaffId: null,
-                    status: { not: 'DELIVERED' },
+                    // Та же граница, что у проверки выше, но в самом UPDATE: между чтением
+                    // и записью трекинг мог закрыть посылку.
+                    status: { notIn: ['DELIVERED', 'CANCELLED', 'COMPLETED', 'VERIFYING'] },
                 },
                 data: {
                     responsibleStaffId: user.staffProfile.id,
