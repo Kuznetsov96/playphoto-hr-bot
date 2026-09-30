@@ -483,7 +483,7 @@ export const hrService = {
         return true;
     },
 
-    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "state_write_failed" | "not_found" | "age_ineligible" | "gender_ineligible" }> {
+    async inviteCandidate(api: any, candId: string): Promise<{ ok: boolean; reason?: "bot_blocked" | "send_failed" | "state_write_failed" | "state_conflict" | "not_found" | "age_ineligible" | "gender_ineligible" }> {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return { ok: false, reason: "not_found" };
 
@@ -548,6 +548,36 @@ export const hrService = {
 
         const tid = Number(cand.user.telegramId);
 
+        // Стан перевіряється ДО відправки. 30.09.2026 вебапп зі стадією, що
+        // відстала на 19 годин, запросив кандидатку, вже записану на 15:15:
+        // повідомлення пішло, запис стану впав на guard, і кожен повтор
+        // команди слав «Анкету розглянуто, оберіть час» знову — тричі.
+        const invitePatch = {
+            notificationSent: true,
+            status: CandidateStatus.SCREENING,
+            isWaitlisted: false,
+            interviewWaitlistReason: null,
+            interviewInvitedAt: new Date(),
+            interviewInviteReminderSentAt: null
+        };
+        const blocked = await candidateRepository.checkFunnelPatch(candId, invitePatch);
+        if (blocked) {
+            logger.warn({ err: blocked, candId, tid, status: cand.status }, "inviteCandidate: funnel refuses the invitation, nothing sent");
+            audit({
+                event: "candidate_interview_invited",
+                result: "failed",
+                actorType: "admin",
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                error: blocked.message,
+                context: { locationId: cand.locationId, city: cand.city, reason: "STATE_CONFLICT", status: cand.status }
+            });
+            // Вебапп дозволив запрошення, бо бачив іншу стадію — наздоганяємо дзеркало.
+            candidateRepository.requestMirrorPush(cand.id);
+            return { ok: false, reason: "state_conflict" };
+        }
+
         // Доставка и запись состояния разведены по разным try. Раньше они делили
         // один блок, и падение записи возвращалось рекрутёру как send_failed —
         // сообщение уже у кандидата, а карточка винила Telegram. Диагностика по
@@ -600,14 +630,7 @@ export const hrService = {
 
         try {
             if (msg) await trackUserMessage(tid, msg.message_id);
-            await candidateRepository.update(candId, {
-                notificationSent: true,
-                status: CandidateStatus.SCREENING,
-                isWaitlisted: false,
-                interviewWaitlistReason: null,
-                interviewInvitedAt: new Date(),
-                interviewInviteReminderSentAt: null
-            });
+            await candidateRepository.update(candId, invitePatch);
 
             audit({
                 event: "candidate_interview_invited",

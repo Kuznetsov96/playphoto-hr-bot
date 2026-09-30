@@ -44,7 +44,9 @@ vi.mock('../../repositories/candidate-repository.js', () => ({
         findById: vi.fn(),
         update: vi.fn(),
         reopenNoShowCandidate: vi.fn(),
-        findByCityAndStatus: vi.fn()
+        findByCityAndStatus: vi.fn(),
+        checkFunnelPatch: vi.fn().mockResolvedValue(null),
+        requestMirrorPush: vi.fn()
     }
 }));
 
@@ -511,6 +513,26 @@ describe('hrService', () => {
 
             expect(api.sendMessage).toHaveBeenCalled();
             expect(result).toEqual({ ok: false, reason: 'state_write_failed' });
+        });
+
+        // 30.09.2026: вебапп (зі стадією на 19 годин позаду) надіслав запрошення
+        // кандидатці, яка вже була записана на 15:15. Бот спершу відправляв
+        // «Анкету розглянуто, оберіть час», а потім падав на записі стану —
+        // і кожен повтор команди слав те саме повідомлення знову (три рази).
+        it('does not send an invitation the funnel would refuse to record', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue(eligibleCandidate('cand-booked') as any);
+            vi.mocked(candidateRepository.checkFunnelPatch).mockResolvedValueOnce(
+                new Error('Transition INTERVIEW_SCHEDULED -> SCREENING is not allowed') as any,
+            );
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
+
+            const result = await hrService.inviteCandidate(api, 'cand-booked');
+
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).not.toHaveBeenCalled();
+            expect(result).toEqual({ ok: false, reason: 'state_conflict' });
+            // Вебапп бачив застарілу стадію — пуш дзеркала її виправляє.
+            expect(candidateRepository.requestMirrorPush).toHaveBeenCalledWith('cand-booked');
         });
     });
 

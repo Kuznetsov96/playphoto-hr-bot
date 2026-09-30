@@ -13,14 +13,21 @@ export const RECRUITING_MIRROR_JOB_NAME = "recruiting-mirror-push";
  *
  * Джоб несёт только `candidateId`, не снимок: воркер перечитывает кандидата
  * свежим, так что ретрай после гонки записей пушит актуальное состояние.
+ *
+ * `delayMs` — для записей внутри транзакции: без отсрочки воркер читал бы
+ * кандидата до коммита и пушил старое состояние (см. mirrorCandidate).
  */
-export async function enqueueCandidateMirrorPush(candidateId: string): Promise<void> {
+export async function enqueueCandidateMirrorPush(candidateId: string, options: { delayMs?: number } = {}): Promise<void> {
     if (!AWS_RECRUITING_MIRROR_ENABLED) return;
     const { defaultQueue } = await import("../../core/queue.js");
     await defaultQueue.add(
         RECRUITING_MIRROR_JOB_NAME,
         { candidateId },
-        { attempts: 5, backoff: { type: "exponential", delay: 10000 } }
+        {
+            attempts: 5,
+            backoff: { type: "exponential", delay: 10000 },
+            ...(options.delayMs ? { delay: options.delayMs } : {}),
+        }
     );
 }
 
