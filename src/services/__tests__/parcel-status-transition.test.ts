@@ -6,6 +6,7 @@ import {
     initialParcelStatus,
     isParcelClosedForTracking,
     mapNpStatusCode,
+    observeNpTracking,
     resolveParcelStatusTransition,
     selectTtnsClosedForTracking,
 } from "../parcel-status-transition.js";
@@ -157,5 +158,30 @@ describe("Nova Poshta redirect (code 104)", () => {
         expect(canAcceptParcel("COMPLETED")).toBe(false);
         expect(canAcceptParcel("VERIFYING")).toBe(false);
         expect(canAcceptParcel("ARRIVED")).toBe(true);
+    });
+});
+
+/**
+ * Прод 30.09.2026: у 6 из 8 переадресованных накладных НП к моменту опроса уже показывала 9 —
+ * тот же код, что у новой. По коду старая накладная открыла бы второй поток «завантаж фото».
+ */
+describe("observeNpTracking", () => {
+    it("reads a redirect from the basis link even when the code already says received", () => {
+        expect(
+            observeNpTracking({
+                StatusCode: "9",
+                LastCreatedOnTheBasisDocumentType: "Redirecting",
+            }),
+        ).toBe("REDIRECTED");
+    });
+
+    it("ignores other basis documents, such as a return", () => {
+        expect(
+            observeNpTracking({ StatusCode: "9", LastCreatedOnTheBasisDocumentType: "Return" }),
+        ).toBe("DELIVERED");
+    });
+
+    it("falls back to the status code without a basis link", () => {
+        expect(observeNpTracking({ StatusCode: "7" })).toBe("ARRIVED");
     });
 });

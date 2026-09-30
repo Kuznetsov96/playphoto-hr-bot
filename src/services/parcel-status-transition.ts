@@ -87,6 +87,22 @@ export function mapNpStatusCode(statusCode: string): NpTrackingObservation {
 }
 
 /**
+ * Что сказал трекинг о накладной, с учётом переадресации.
+ *
+ * Переадресацию выдаёт ссылка на новую накладную, а не код: 104 НП держит, только пока коробка
+ * едет под новым номером, а когда её забрали, старая накладная показывает тот же 9 «Отримано»,
+ * что и новая (прод 30.09.2026: 6 из 8 переадресованных накладных). По коду бот открыл бы по
+ * старой накладной второй поток «завантаж фото» на ту же коробку.
+ */
+export function observeNpTracking(doc: {
+    StatusCode: string;
+    LastCreatedOnTheBasisDocumentType?: string;
+}): NpTrackingObservation {
+    if (doc.LastCreatedOnTheBasisDocumentType === 'Redirecting') return 'REDIRECTED';
+    return mapNpStatusCode(doc.StatusCode);
+}
+
+/**
  * Статус новой карточки. Незнакомый код — EXPECTED, как раньше: о карточке смене
  * ничего не сообщается, а следующий опрос поправит статус. Переадресованная
  * накладная заводится сразу закрытой: коробка едет под другим номером, и та

@@ -34,6 +34,12 @@ export interface NPTrackingResult {
     ScheduledDeliveryDate: string;
     ActualDeliveryDate: string;
     RecipientDateTime: string;
+    /**
+     * Накладная, созданная НП на основании этой: при `Redirecting` коробка уехала под новым
+     * номером. Приходит в расширенном ответе (с телефоном получателя).
+     */
+    LastCreatedOnTheBasisDocumentType?: string;
+    LastCreatedOnTheBasisNumber?: string;
 }
 
 export type NPTrusteeErrorCode = 'SHIPMENT_LOCKED' | 'NOT_DOCUMENT_OWNER' | 'API_ERROR';

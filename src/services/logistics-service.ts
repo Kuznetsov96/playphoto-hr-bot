@@ -3,7 +3,7 @@ import { novaPoshtaService } from './nova-poshta-service.js';
 import logger from '../core/logger.js';
 import { ParcelStatus } from '@prisma/client';
 import { Bot, InlineKeyboard } from 'grammy';
-import { BOT_TOKEN, TEAM_CHATS, AWS_PARCELS_CANONICAL_READ_ENABLED } from '../config.js';
+import { BOT_TOKEN, TEAM_CHATS, AWS_PARCELS_CANONICAL_READ_ENABLED, NP_RECIPIENT_PHONE } from '../config.js';
 import { LOGISTICS_TEXTS_STAFF } from '../constants/logistics-constants.js';
 import { logBusinessEvent } from '../core/log-events.js';
 import { buildSignedCallback } from '../utils/signed-callback.js';
@@ -11,7 +11,7 @@ import { isDuplicateManualProxyRequest } from '../modules/staff/handlers/logisti
 import {
     canMarkParcelPickedUpManually,
     initialParcelStatus,
-    mapNpStatusCode,
+    observeNpTracking,
     resolveParcelStatusTransition,
     selectTtnsClosedForTracking,
 } from './parcel-status-transition.js';
@@ -115,7 +115,9 @@ export class LogisticsService {
 
         if (activeParcels.length === 0) return;
 
-        const trackingDocs = activeParcels.map(p => ({ DocumentNumber: p.ttn, Phone: "" }));
+        // С телефоном получателя НП отдаёт ссылку переадресации (observeNpTracking); без
+        // настроенного телефона — пустая строка, как раньше.
+        const trackingDocs = activeParcels.map(p => ({ DocumentNumber: p.ttn, Phone: NP_RECIPIENT_PHONE }));
         const statuses = await novaPoshtaService.trackParcels(trackingDocs);
 
         if (statuses && Array.isArray(statuses)) {
@@ -139,7 +141,7 @@ export class LogisticsService {
                     (await prisma.parcel.create({
                         data: {
                             ttn: parcel.ttn,
-                            status: initialParcelStatus(mapNpStatusCode(statusDoc.StatusCode)),
+                            status: initialParcelStatus(observeNpTracking(statusDoc)),
                             locationId: parcel.locationId,
                             deliveryType: parcel.npAddress ? 'Warehouse' : 'Address',
                             npCity: parcel.npCity,
@@ -148,7 +150,7 @@ export class LogisticsService {
                         }
                     }));
 
-                const npStatus = mapNpStatusCode(statusDoc.StatusCode);
+                const npStatus = observeNpTracking(statusDoc);
                 const newStatus = resolveParcelStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
                 if (localParcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
