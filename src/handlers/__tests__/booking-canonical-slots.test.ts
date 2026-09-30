@@ -96,7 +96,11 @@ vi.mock("../../services/aws-business-client.js", () => {
             this.name = "AwsBusinessApiError";
         }
     }
-    return { AwsBusinessApiError, RECRUITING_SLOT_TAKEN_CODE: "RECRUITING_SLOT_TAKEN" };
+    return {
+        AwsBusinessApiError,
+        RECRUITING_SLOT_TAKEN_CODE: "RECRUITING_SLOT_TAKEN",
+        awsBusinessClient: { pushIncomingRecruitingMessage: vi.fn().mockResolvedValue(undefined) },
+    };
 });
 
 vi.mock("../../services/booking-service.js", () => ({
@@ -384,20 +388,108 @@ describe("interview booking over canonical slots", () => {
         expect(cancelInterviewSlot).toHaveBeenCalledWith("local-slot-1", 111005);
     });
 
-    it("reschedule releases the canonical slot with reason rescheduled and lists through the switch", async () => {
-        findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
+    // 30.09.2026 дві кандидатки втратили запис однаково: «Змінити час» одразу
+    // звільняв слот, а підходящого нового не знайшлося. Тепер перенос — обмін:
+    // старий слот тримається, доки не обрано новий (вебапп book() міняє їх
+    // однією транзакцією).
+    it("перенос не звільняє поточний слот — лише показує інший час і «Лишити мій час»", async () => {
+        const startsIn2h = new Date(Date.now() + 2 * 3600e3);
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED",
+            interviewSlotId: "local-slot-1", interviewSlot: { startTime: startsIn2h },
+        });
         findAvailableInterviewSlots.mockResolvedValue([
-            { id: WEB_SLOT_ID, startTime: new Date("2026-09-02T10:00:00Z") },
+            { id: WEB_SLOT_ID, startTime: new Date(Date.now() + 26 * 3600e3) },
         ]);
 
         const ctx = makeCtx(111006);
         await bookingHandlers.__runCallback(buildSignedCallback("rb", "local-slot-1"), ctx);
 
-        expect(releaseCanonicalInterviewSlot).toHaveBeenCalledWith(111006, "rescheduled");
-        expect(cancelInterviewSlot).toHaveBeenCalledWith("local-slot-1", 111006);
+        expect(releaseCanonicalInterviewSlot).not.toHaveBeenCalled();
+        expect(cancelInterviewSlot).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
         expect(findAvailableInterviewSlots).toHaveBeenCalledTimes(1);
-        expect(releaseCanonicalInterviewSlot.mock.invocationCallOrder[0]!)
-            .toBeLessThan(cancelInterviewSlot.mock.invocationCallOrder[0]!);
+        expect(ctx.editMessageText).toHaveBeenCalled();
+    });
+
+    it("гард: записана може обрати новий слот до початку співбесіди — це перенос", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "INTERVIEW_SCHEDULED", gender: "female", currentStep: "INTERVIEW",
+            notificationSent: true, interviewSlotId: "local-slot-1",
+            interviewSlot: { startTime: new Date(Date.now() + 2 * 3600e3) },
+        });
+        const ctx = makeCtx(111030);
+        ctx.callbackQuery = { data: `book_slot_${WEB_SLOT_ID}` };
+        const next = vi.fn();
+
+        await (bookingHandlers as any).onHandlers[0](ctx, next);
+
+        expect(next).toHaveBeenCalled();
+    });
+
+    it("гард: «не бачу зручного часу» при переносі лишає запис як є", async () => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "INTERVIEW_SCHEDULED", gender: "female", currentStep: "INTERVIEW",
+            notificationSent: true, interviewSlotId: "local-slot-1",
+            interviewSlot: { startTime: new Date(Date.now() + 2 * 3600e3) },
+        });
+        const ctx = makeCtx(111031);
+        ctx.callbackQuery = { data: "no_slots_fit" };
+        const next = vi.fn();
+
+        await (bookingHandlers as any).onHandlers[0](ctx, next);
+
+        expect(next).not.toHaveBeenCalled();
+        expect(updateMany).not.toHaveBeenCalled();
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Ваш запис лишається без змін");
+    });
+
+    it("book_slot_ записаної бронює новий час через той самий шлях (обмін у вебаппі)", async () => {
+        findByTelegramId.mockResolvedValue({ id: "cand-1", userId: "user-1", interviewSlotId: "local-slot-1" });
+        bookInterviewSlotFlow.mockResolvedValue({
+            slot: { id: "local-mirror-2", startTime: new Date(Date.now() + 26 * 3600e3), candidate: { fullName: "Олена", userId: "user-1" } },
+            googleEvent: { meetLink: "https://meet.example/abc", eventId: "ev-2" },
+        });
+
+        const ctx = makeCtx(111032);
+        await bookingHandlers.__runCallback(`book_slot_${WEB_SLOT_ID}`, ctx);
+
+        expect(bookInterviewSlotFlow).toHaveBeenCalledWith(111032, WEB_SLOT_ID, "olena");
+    });
+
+    // Та сама пастка з іншого боку: о 15:31 кандидатка, яка чекала HR з 15:15,
+    // натиснула «Змінити час» і зняла себе із запису.
+    it.each(["rb", "cb", "wi"])("після початку співбесіди стара кнопка «%s» нічого не змінює", async (code) => {
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "INTERVIEW_SCHEDULED", gender: "female", currentStep: "INTERVIEW",
+            interviewSlotId: "local-slot-1", interviewSlot: { startTime: new Date(Date.now() - 16 * 60e3) },
+        });
+
+        const ctx = makeCtx(111033);
+        await bookingHandlers.__runCallback(buildSignedCallback(code, "local-slot-1"), ctx);
+
+        expect(releaseCanonicalInterviewSlot).not.toHaveBeenCalled();
+        expect(cancelInterviewSlot).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Співбесіда вже почалася");
+    });
+
+    it("«Я на зв'язку» після початку передає сигнал рекрутерці один раз", async () => {
+        const { awsBusinessClient } = await import("../../services/aws-business-client.js");
+        findByTelegramId.mockResolvedValue({
+            id: "cand-1", status: "INTERVIEW_SCHEDULED", gender: "female", currentStep: "INTERVIEW",
+            interviewSlotId: "local-slot-9", interviewSlot: { startTime: new Date(Date.now() - 10 * 60e3) },
+        });
+
+        const first = makeCtx(111034);
+        await bookingHandlers.__runCallback(buildSignedCallback("hw", "local-slot-9"), first);
+        const second = makeCtx(111034);
+        await bookingHandlers.__runCallback(buildSignedCallback("hw", "local-slot-9"), second);
+
+        expect((awsBusinessClient as any).pushIncomingRecruitingMessage).toHaveBeenCalledTimes(1);
+        expect((awsBusinessClient as any).pushIncomingRecruitingMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ telegramId: "111034", body: expect.stringContaining("на зв’язку") }),
+        );
     });
 
     it("a failed canonical release blocks the local cancel — the web slot must not stay taken silently", async () => {

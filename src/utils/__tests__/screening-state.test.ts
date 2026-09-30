@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { canScheduleInterview, hasActiveInterviewBooking, hasLiveInterviewInvitation, isQuestionnaireOpen, isScreeningComplete } from "../screening-state.js";
+import { canRescheduleInterview, canScheduleInterview, hasActiveInterviewBooking, hasInterviewStarted, hasLiveInterviewInvitation, isQuestionnaireOpen, isScreeningComplete } from "../screening-state.js";
 
 const complete = {
     status: CandidateStatus.SCREENING,
@@ -84,5 +84,25 @@ describe("interview state", () => {
         expect(hasLiveInterviewInvitation({ ...invited, status: CandidateStatus.WAITLIST_HR })).toBe(false);
         // Записалась — отказ идёт через кнопки брони, не приглашения.
         expect(hasLiveInterviewInvitation({ ...invited, interviewSlotId: "s1" })).toBe(false);
+    });
+
+    it("співбесіда почалась у момент старту слота", () => {
+        const now = new Date("2026-10-01T12:15:00Z");
+        expect(hasInterviewStarted(new Date("2026-10-01T12:15:00Z"), now)).toBe(true);
+        expect(hasInterviewStarted(new Date("2026-10-01T12:16:00Z"), now)).toBe(false);
+        expect(hasInterviewStarted(null, now)).toBe(false);
+    });
+
+    it("перенести можна лише власний запис, що ще не почався", () => {
+        const now = new Date("2026-10-01T12:00:00Z");
+        const booked = {
+            status: CandidateStatus.INTERVIEW_SCHEDULED,
+            interviewSlotId: "s1",
+            interviewSlot: { startTime: new Date("2026-10-01T12:15:00Z") },
+        };
+        expect(canRescheduleInterview(booked, now)).toBe(true);
+        expect(canRescheduleInterview(booked, new Date("2026-10-01T12:31:00Z"))).toBe(false);
+        expect(canRescheduleInterview({ ...booked, interviewSlotId: null }, now)).toBe(false);
+        expect(canRescheduleInterview({ ...booked, status: CandidateStatus.INTERVIEW_COMPLETED }, now)).toBe(false);
     });
 });

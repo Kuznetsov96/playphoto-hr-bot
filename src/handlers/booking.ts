@@ -13,7 +13,7 @@ import {
     findAvailableInterviewSlots,
     releaseCanonicalInterviewSlot,
 } from "../services/canonical-interview-slots.js";
-import { AwsBusinessApiError, RECRUITING_SLOT_TAKEN_CODE } from "../services/aws-business-client.js";
+import { AwsBusinessApiError, RECRUITING_SLOT_TAKEN_CODE, awsBusinessClient } from "../services/aws-business-client.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
@@ -23,7 +23,8 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import logger from "../core/logger.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
-import { canScheduleInterview, hasActiveInterviewBooking, hasLiveInterviewInvitation } from "../utils/screening-state.js";
+import { canRescheduleInterview, canScheduleInterview, hasActiveInterviewBooking, hasInterviewStarted, hasLiveInterviewInvitation } from "../utils/screening-state.js";
+import { buildBookedInterviewKeyboard } from "../utils/interview-booking-keyboard.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 // Ім'я кандидатки їде в сповіщення менторам з parse_mode:"HTML", а
@@ -89,7 +90,8 @@ function buildSlotSelectionKeyboard(
     slots: SlotButton[],
     bookCallbackPrefix: string,
     noFitCallback: string,
-    limit = SLOT_KEYBOARD_LIMIT
+    limit = SLOT_KEYBOARD_LIMIT,
+    noFitLabel = NO_TIME_FITS_LABEL
 ) {
     const keyboard = new InlineKeyboard();
 
@@ -101,7 +103,7 @@ function buildSlotSelectionKeyboard(
         keyboard.text(formatSlotButton(slot), `${bookCallbackPrefix}${slot.id}`).row();
     });
 
-    keyboard.text(NO_TIME_FITS_LABEL, noFitCallback).row();
+    keyboard.text(noFitLabel, noFitCallback).row();
     return keyboard;
 }
 
@@ -269,6 +271,19 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         }
 
         const isSchedulingAction = data === "start_scheduling" || data.startsWith("book_slot_") || data.startsWith("decline_invite") || data === "no_slots_fit";
+        // Записана до початку співбесіди обирає новий слот — це перенос-обмін:
+        // вебапп book() звільняє старий слот лише разом із бронюванням нового.
+        if (data.startsWith("book_slot_") && canRescheduleInterview(candidate)) {
+            return next();
+        }
+        // Решта дій вибору часу в записаної нічого не змінює: запис лишається.
+        // Раніше «Не бачу зручного часу» зі списку переносу скидав її в чергу.
+        if (isSchedulingAction && candidate.status === CandidateStatus.INTERVIEW_SCHEDULED && candidate.interviewSlotId) {
+            await ctx.answerCallbackQuery("Ваш запис лишається без змін");
+            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+            await showCandidateStatus(ctx, candidate);
+            return;
+        }
         if (isSchedulingAction && !canScheduleInterview(candidate)) {
             await ctx.answerCallbackQuery("Запис зараз недоступний");
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
@@ -334,10 +349,12 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
         return await ctx.answerCallbackQuery("Бронювання вже в процесі");
     }
 
-    // Idempotency: check if candidate already has a booked interview
+    // Той самий слот, що вже за нею, — нічого не робимо. Інший слот у
+    // записаної — перенос-обмін (гард пропускає його лише до початку).
     const existingCand = await candidateRepository.findByTelegramId(telegramId);
-    if (existingCand?.interviewSlotId) {
-        return await ctx.answerCallbackQuery("Ви вже записані на співбесіду");
+    if (existingCand?.interviewSlotId &&
+        (existingCand.interviewSlotId === slotId || existingCand.interviewSlot?.webSlotPublicId === slotId)) {
+        return await ctx.answerCallbackQuery("Цей час уже за вами");
     }
 
     bookingLocks.add(telegramId);
@@ -360,13 +377,9 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
             confirmationText += `\nЗапис з’явився у нашому графіку. ${hrDisplay} надішле посилання на відеозустріч ближче до початку.`;
         }
 
-        const kb = new InlineKeyboard()
-            .text(CANDIDATE_TEXTS["candidate-btn-reschedule"], buildSignedCallback("rb", result.slot.id)).row()
-            .text("Скасувати запис", buildSignedCallback("cb", result.slot.id)).danger().row()
-            .text("Не планую продовжувати", buildSignedCallback("wi", result.slot.id)).danger();
-        if ((result as any).candidate?.gender !== "male") {
-            kb.row().text("Написати нам", "contact_hr");
-        }
+        const kb = buildBookedInterviewKeyboard(result.slot.id, startTime, {
+            canContactStaff: (result as any).candidate?.gender !== "male",
+        });
 
         await cleanupMessages(ctx);
         const confirmationMsg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
@@ -434,7 +447,16 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
  */
 async function rejectStaleBookingAction(ctx: MyContext, slotId: string): Promise<boolean> {
     const candidate = await candidateRepository.findByTelegramId(ctx.from!.id);
-    if (candidate && hasActiveInterviewBooking(candidate, slotId)) return false;
+    if (candidate && hasActiveInterviewBooking(candidate, slotId)) {
+        // Кнопки з підтвердження броні живуть і після старту співбесіди.
+        // Перенос чи скасування о 15:31 зняли б кандидатку із запису, на
+        // який HR от-от підключиться (30.09.2026).
+        if (!hasInterviewStarted(candidate.interviewSlot?.startTime)) return false;
+        await ctx.answerCallbackQuery("Співбесіда вже почалася");
+        const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+        await showCandidateStatus(ctx, candidate);
+        return true;
+    }
     await ctx.answerCallbackQuery("Цей запис уже неактуальний");
     if (candidate) {
         const { showCandidateStatus } = await import("../utils/candidate-ui.js");
@@ -573,7 +595,13 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     }
 });
 
-// 4. Зміна часу співбесіди — одразу звільняє поточний слот і показує нові
+// 4. Зміна часу співбесіди — обмін: поточний слот тримається, доки не обрано новий.
+//
+// До 30.09.2026 «Змінити час» одразу звільняв слот і ставив кандидатку в
+// чергу. Того дня дві кандидатки так втратили запис: одна не знайшла іншого
+// часу, друга натиснула кнопку, чекаючи HR на вже початій співбесіді. Тепер
+// нове бронювання (book_slot_) саме звільняє старий слот: вебапп book() міняє
+// їх однією транзакцією, локально — «умний перенос» bookingService.
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rb" });
     if (!slotId) return next();
@@ -582,58 +610,89 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         await ctx.answerCallbackQuery("Оберіть новий час");
 
         const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
-
-        // Release current slot first so it appears in the new list.
-        // Бот освобождает слот сразу при «Змінити час», до выбора нового, —
-        // поэтому и в вебаппе освобождаем здесь же с причиной rescheduled
-        // (серверный «умный перенос» на этот путь не попадает). Без флага no-op.
-        await releaseCanonicalInterviewSlot(ctx.from.id, "rescheduled");
-        await bookingService.cancelInterviewSlot(slotId, ctx.from.id);
-        if (candidate) {
-            await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.WAITLIST_HR,
-                isWaitlisted: true,
-                currentStep: FunnelStep.INTERVIEW,
-                candidateDecision: null,
-                notificationSent: false,
-                interviewWaitlistedAt: new Date(),
-                interviewSlot: { disconnect: true },
-                googleMeetLink: null
-            });
-        }
-
+        const current = formatBookedSlot(candidate?.interviewSlot?.startTime);
         const slots = await findAvailableInterviewSlots();
 
         if (slots.length === 0) {
-            if (candidate) {
-                await candidateRepository.update(candidate.id, {
-                    interviewWaitlistReason: INTERVIEW_WAITLIST_REASON_NO_SLOTS,
-                    noSlotsAt: new Date()
-                });
-            }
-            await editWithContactButton(
-                ctx,
-                ctx.from.id,
-                `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`,
+            await ctx.editMessageText(
+                CANDIDATE_TEXTS["candidate-reschedule-no-slots"](current),
+                {
+                    parse_mode: "HTML",
+                    reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-keep-booking"], "keep_booking"),
+                },
             );
             return;
         }
 
-        const keyboard = buildSlotSelectionKeyboard(slots, "book_slot_", "no_slots_fit");
-
-        await ctx.editMessageText(
-            "Оберіть інший зручний час:\n\nЧас київський.",
-            { reply_markup: keyboard }
+        const keyboard = buildSlotSelectionKeyboard(
+            slots, "book_slot_", "keep_booking", SLOT_KEYBOARD_LIMIT, CANDIDATE_TEXTS["candidate-btn-keep-booking"],
         );
-
+        await ctx.editMessageText(
+            CANDIDATE_TEXTS["candidate-reschedule-pick"](current),
+            { parse_mode: "HTML", reply_markup: keyboard }
+        );
     } catch (e: any) {
         logger.error({ err: e, telegramId: ctx.from.id }, "Interview reschedule failed");
-        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
-        } else {
-            await ctx.answerCallbackQuery("Сталася помилка");
-        }
+        await ctx.answerCallbackQuery("Сталася помилка").catch(() => {});
     }
+});
+
+/** «Лишити мій час» — вихід зі списку переносу без жодних змін. */
+bookingHandlers.callbackQuery("keep_booking", async (ctx) => {
+    await ctx.answerCallbackQuery("Ваш запис лишається без змін");
+    const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+    if (!candidate) return;
+    const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+    await showCandidateStatus(ctx, candidate);
+});
+
+function formatBookedSlot(startTime: Date | string | null | undefined): string {
+    if (!startTime) return "ваш поточний час";
+    const date = new Date(startTime);
+    const day = date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" });
+    const time = date.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Kyiv" });
+    return `${day} о ${time}`;
+}
+
+/**
+ * «Я на зв'язку, HR ще немає» — з'являється замість переносу, щойно
+ * співбесіда почалась. Нічого не рухає у воронці: лише кладе сигнал у тред
+ * кандидатки у вебаппі, де рекрутерка його бачить непрочитаним. Один сигнал
+ * на запис за вікно WAITING_SIGNAL_WINDOW_MS — повторні тапи не засмічують тред.
+ */
+const WAITING_SIGNAL_WINDOW_MS = 5 * 60 * 1000;
+const waitingSignalDedupe = new ActionDedupeWindow(WAITING_SIGNAL_WINDOW_MS);
+
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "hw" });
+    if (!slotId) return next();
+
+    const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+    if (!candidate || !hasActiveInterviewBooking(candidate, slotId)) {
+        await ctx.answerCallbackQuery("Цей запис уже неактуальний");
+        if (candidate) {
+            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+            await showCandidateStatus(ctx, candidate);
+        }
+        return;
+    }
+
+    if (waitingSignalDedupe.tryAcquire(`hw:${ctx.from.id}:${slotId}`)) {
+        const at = formatBookedSlot(candidate.interviewSlot?.startTime);
+        await awsBusinessClient.pushIncomingRecruitingMessage({
+            telegramId: String(ctx.from.id),
+            body: `[Бот] Кандидатка на зв’язку й чекає HR — співбесіда ${at}.`,
+        }).catch((error) => {
+            logger.error({ err: error, telegramId: ctx.from.id, slotId }, "Waiting-for-HR signal could not reach the web thread");
+            const target = ADMIN_IDS[0];
+            if (target !== undefined) {
+                ctx.api.sendMessage(target, `Кандидатка ${escapeHtml(candidate.fullName ?? String(ctx.from.id))} на зв’язку й чекає HR — співбесіда ${at}. Сигнал у вебапп не дійшов.`).catch(() => {});
+            }
+        });
+    }
+
+    await ctx.answerCallbackQuery();
+    await ctx.reply(CANDIDATE_TEXTS["candidate-waiting-for-hr-sent"]);
 });
 
 // 5. Початок запису (вибір слоту)
