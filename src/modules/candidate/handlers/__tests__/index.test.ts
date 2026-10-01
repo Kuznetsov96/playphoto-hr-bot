@@ -320,3 +320,64 @@ describe("ранние шаги анкеты у законченной анке�
         expect(ctx.di.candidateRepository.upsert).not.toHaveBeenCalled();
     });
 });
+
+describe("отказ на шаге даты рождения и без вакансий (аудит 01.10.2026)", () => {
+    function ctxFor(candidateData: Record<string, any>) {
+        return {
+            session: { step: "screening_birth_day", candidateData },
+            from: { id: 1 },
+            update: { update_id: 1 },
+            di: {
+                locationRepository: { findByCity: vi.fn(async () => []) },
+                candidateRepository: { upsert: vi.fn(async () => ({})) },
+                userRepository: {
+                    upsert: vi.fn(async () => ({ id: "u1" })),
+                    findWithCandidateProfileByTelegramId: vi.fn(async () => ({ candidate: null })),
+                },
+            },
+        } as any;
+    }
+    const fifteenYearsAgo = new Date().getFullYear() - 15;
+
+    it("парню младше 17 — отказ парню, а не обещание «бот нагадає»", async () => {
+        // Реактивация младших работает только для gender=female, поэтому
+        // обещание напомнить ему не выполнилось бы никогда.
+        const { handleBirthDateSelected } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const { CANDIDATE_TEXTS } = await import("../../../../constants/candidate-texts.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await handleBirthDateSelected(ctxFor({ gender: "male", birthYear: fifteenYearsAgo, birthMonth: 1 }), 15);
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-reject-male-location"]);
+        expect(text).not.toContain("нагадає");
+    });
+
+    it("девушке младше 17 — по-прежнему текст с напоминанием", async () => {
+        const { handleBirthDateSelected } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const { CANDIDATE_TEXTS } = await import("../../../../constants/candidate-texts.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await handleBirthDateSelected(ctxFor({ gender: "female", birthYear: fifteenYearsAgo, birthMonth: 1 }), 15);
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-reject-underage"]);
+    });
+
+    it("город без вакансий называется по-украински, хотя в сессии канонический ключ", async () => {
+        const { handleNoVacancies } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+        const ctx = ctxFor({ gender: "female", fullName: "Анна Коваль", birthDate: "2005-01-01T00:00:00.000Z", city: "Zaporizhzhia" });
+
+        await handleNoVacancies(ctx, "Zaporizhzhia");
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toContain("У місті Запоріжжя зараз немає відкритих вакансій.");
+        expect(ctx.di.candidateRepository.upsert).toHaveBeenCalledWith(expect.objectContaining({
+            update: expect.objectContaining({ city: "Zaporizhzhia" }),
+        }));
+    });
+});

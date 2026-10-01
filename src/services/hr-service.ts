@@ -419,7 +419,9 @@ export const hrService = {
         const { CANDIDATE_TEXTS } = await import("../constants/candidate-texts.js");
 
         await cleanupUserSessionMessages(api, Number(cand.user.telegramId));
-        const msg = await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["hr-manual-review-approved"]).catch(() => { });
+        // parse_mode обов’язковий: текст містить <b>, і без нього кандидатка
+        // бачила теги буквально (аудит 01.10.2026).
+        const msg = await api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["hr-manual-review-approved"], { parse_mode: "HTML" }).catch(() => { });
         if (msg) await trackUserMessage(Number(cand.user.telegramId), msg.message_id);
 
         return true;
@@ -565,7 +567,10 @@ export const hrService = {
         let msg: { message_id: number } | undefined;
         try {
             await cleanupUserSessionMessages(api, tid);
-            const locName = cand.location?.name || cand.city || 'вашого міста';
+            // Точка — з філією, як в анкеті при виборі точки: три запорізькі
+            // звуться «Volkland», і name без branch не казав, яка саме. Без
+            // точки рядок про локацію не пишеться (аудит 01.10.2026).
+            const locName = cand.location ? formatLocation(cand.location, "in-city") : null;
             msg = await api.sendMessage(tid,
                 CANDIDATE_TEXTS["candidate-interview-invitation"](locName),
                 {

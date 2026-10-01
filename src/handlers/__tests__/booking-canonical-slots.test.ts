@@ -366,6 +366,18 @@ describe("interview booking over canonical slots", () => {
         expect(ctx.reply).not.toHaveBeenCalled();
     });
 
+    it("unknown booking failure says what failed — not a bare «Сталася помилка»", async () => {
+        // Аудит 01.10.2026: спливаюче «Сталася помилка» не казало, що саме не
+        // вийшло і що робити далі.
+        findByTelegramId.mockResolvedValue({ id: "cand-1", interviewSlotId: null });
+        bookInterviewSlotFlow.mockRejectedValue(new Error("HTTP 502"));
+
+        const ctx = makeCtx(111035);
+        await bookingHandlers.__runCallback(`book_slot_${WEB_SLOT_ID}`, ctx);
+
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Не вдалося записати. Спробуйте ще раз");
+    });
+
     it("cancel releases the canonical slot BEFORE the local cancel, reason candidate_cancelled", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
 

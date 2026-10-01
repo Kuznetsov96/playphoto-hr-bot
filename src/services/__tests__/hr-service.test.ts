@@ -534,6 +534,53 @@ describe('hrService', () => {
             // Вебапп бачив застарілу стадію — пуш дзеркала її виправляє.
             expect(candidateRepository.requestMirrorPush).toHaveBeenCalledWith('cand-booked');
         });
+
+        // Аудит 01.10.2026: три запорізькі точки звуться «Volkland», і запрошення
+        // без філії не казало, яка саме; без точки писало «локація вашого міста».
+        it('names the venue with its branch, as the questionnaire did', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...eligibleCandidate('cand-branch'),
+                city: 'Zaporizhzhia',
+                location: { name: 'Volkland', city: 'Zaporizhzhia', branch: 'Шевчик' },
+            } as any);
+            vi.mocked(candidateRepository.update).mockResolvedValue({} as any);
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
+
+            await hrService.inviteCandidate(api, 'cand-branch');
+
+            expect(api.sendMessage.mock.calls[0]![1]).toContain('локація <b>Volkland (Шевчик)</b>');
+        });
+
+        it('drops the location line when the candidate has no venue', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...eligibleCandidate('cand-nowhere'),
+                locationId: null,
+                location: null,
+            } as any);
+            vi.mocked(candidateRepository.update).mockResolvedValue({} as any);
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
+
+            await hrService.inviteCandidate(api, 'cand-nowhere');
+
+            expect(api.sendMessage.mock.calls[0]![1]).toBe('<b>Анкету розглянуто</b>\n\nЗапрошуємо вас на онлайн-співбесіду.\n\nОберіть зручний час:');
+        });
+    });
+
+    describe('approveTattoo', () => {
+        // Текст містить <b>; без parse_mode кандидатка бачила теги буквально.
+        it('sends the approved text as HTML', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ id: 'cand-tattoo', user: { telegramId: 789n } } as any);
+            vi.mocked(candidateRepository.update).mockResolvedValue({} as any);
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
+
+            await hrService.approveTattoo(api, 'cand-tattoo');
+
+            expect(api.sendMessage).toHaveBeenCalledWith(
+                789,
+                '<b>Анкету прийнято</b>\n\nНаступний крок — запрошення на співбесіду. Воно прийде сюди, у цей чат.',
+                { parse_mode: 'HTML' },
+            );
+        });
     });
 
     describe('rescheduleCandidate', () => {

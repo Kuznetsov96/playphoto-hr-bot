@@ -27,6 +27,7 @@ import { canRescheduleInterview, canScheduleInterview, hasActiveInterviewBooking
 import { buildBookedInterviewKeyboard } from "../utils/interview-booking-keyboard.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
+import { formatKyivWeekdayDateTime } from "../utils/kyiv-date-label.js";
 // Ім'я кандидатки їде в сповіщення менторам з parse_mode:"HTML", а
 // CandidateSchema не забороняє «<» і «>»: «<b>Іван Петров</b>» проходить усі
 // перевірки. Незакритий тег ламає sendMessage, і .catch(() => {}) навколо цих
@@ -39,7 +40,6 @@ export const bookingHandlers = new Composer<MyContext>();
 const INTERVIEW_WAITLIST_REASON_NO_SLOTS = "NO_SLOTS_AVAILABLE";
 const INTERVIEW_WAITLIST_REASON_NO_DATE_FITS = "NO_DATE_FITS";
 const BOOKING_ACTION_DEBOUNCE_MS = 15_000;
-const KYIV_TIME_ZONE = "Europe/Kyiv";
 const bookingActionDedupe = new ActionDedupeWindow(BOOKING_ACTION_DEBOUNCE_MS);
 
 type SlotButton = {
@@ -58,22 +58,7 @@ type SlotButton = {
  * до ~16 символів — саме тому кнопки стоять по одній у рядок.
  */
 function formatSlotButton(slot: SlotButton) {
-    const weekday = slot.startTime.toLocaleDateString("uk-UA", {
-        weekday: "short",
-        timeZone: KYIV_TIME_ZONE
-    });
-    const dateStr = slot.startTime.toLocaleDateString("uk-UA", {
-        day: "2-digit",
-        month: "2-digit",
-        timeZone: KYIV_TIME_ZONE
-    });
-    const timeStr = slot.startTime.toLocaleTimeString("uk-UA", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: KYIV_TIME_ZONE
-    });
-
-    return `${weekday} ${dateStr} · ${timeStr}`;
+    return formatKyivWeekdayDateTime(slot.startTime, " · ");
 }
 
 /**
@@ -196,13 +181,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             });
 
             await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
-            await ScreenManager.renderScreen(
-                ctx,
-                CANDIDATE_TEXTS["candidate-reject-male-location"](
-                    candidate.location?.name || candidate.city || "цій локації",
-                    candidate.city || "вашому місті"
-                )
-            );
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]);
             return;
         }
 
@@ -430,9 +409,11 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
             );
         } else if (e.message === "MALE_CANDIDATE") {
             await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
-            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]("цій локації", "вашому місті"));
+            await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]);
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка");
+            // «Сталася помилка» не казало, що саме не вийшло і що робити
+            // (погоджено власником 01.10.2026).
+            await ctx.answerCallbackQuery(CANDIDATE_TEXTS["candidate-booking-failed-toast"]);
         }
     } finally {
         bookingLocks.delete(telegramId);
