@@ -96,7 +96,7 @@ describe("rescheduleInterviewByCommand", () => {
     it("releases in the webapp first, then locally, then moves the funnel, then writes", async () => {
         const api = makeApi();
 
-        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "HR_MISSED", { isRetry: false });
+        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false });
 
         expect(result).toEqual({ ok: true, delivered: true, slotsOffered: 2 });
         expect(calls).toEqual([
@@ -107,7 +107,7 @@ describe("rescheduleInterviewByCommand", () => {
             "cleanup",
             "send",
         ]);
-        expect(releaseCanonicalInterviewSlot).toHaveBeenCalledWith(TID, "hr_missed");
+        expect(releaseCanonicalInterviewSlot).toHaveBeenCalledWith(TID, "candidate_asked_reschedule");
         expect(cancelInterviewSlot).toHaveBeenCalledWith("local-slot-1");
     });
 
@@ -131,7 +131,6 @@ describe("rescheduleInterviewByCommand", () => {
     });
 
     it.each([
-        ["HR_MISSED", "<b>Зустріч не відбулася з нашого боку</b>\n\nВибачте. Оберіть, будь ласка, інший зручний час:"],
         ["CANDIDATE_ASKED", "<b>Перенесемо співбесіду</b>\n\nОберіть, будь ласка, інший зручний час:"],
     ] as const)("sends the agreed %s text with the start_scheduling slot keyboard", async (reason, text) => {
         const api = makeApi();
@@ -149,7 +148,7 @@ describe("rescheduleInterviewByCommand", () => {
     it("also reschedules an auto-completed interview without an HR decision", async () => {
         findById.mockResolvedValue(candidate({ status: CandidateStatus.INTERVIEW_COMPLETED }));
 
-        const result = await rescheduleInterviewByCommand(makeApi() as never, "cand-1", "HR_MISSED", { isRetry: false });
+        const result = await rescheduleInterviewByCommand(makeApi() as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false });
 
         expect(result.ok).toBe(true);
     });
@@ -158,7 +157,7 @@ describe("rescheduleInterviewByCommand", () => {
         findAvailableInterviewSlots.mockResolvedValue([]);
         const api = makeApi();
 
-        await rescheduleInterviewByCommand(api as never, "cand-1", "HR_MISSED", { isRetry: false });
+        await rescheduleInterviewByCommand(api as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false });
 
         expect(update).toHaveBeenNthCalledWith(2, "cand-1", expect.objectContaining({
             status: CandidateStatus.SCREENING,
@@ -169,7 +168,7 @@ describe("rescheduleInterviewByCommand", () => {
             interviewInvitedAt: null,
         }), tx);
         const [, sent, options] = api.sendMessage.mock.calls[0] as unknown as [number, string, { reply_markup: never }];
-        expect(sent).toBe(CANDIDATE_TEXTS["candidate-interview-reschedule-hr-missed-no-slots"]);
+        expect(sent).toBe(CANDIDATE_TEXTS["candidate-interview-reschedule-asked-no-slots"]);
         expect(callbacks(options.reply_markup)).toEqual(["contact_hr"]);
     });
 
@@ -181,7 +180,7 @@ describe("rescheduleInterviewByCommand", () => {
         findById.mockResolvedValue(candidate(overrides));
         const api = makeApi();
 
-        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "HR_MISSED", { isRetry: false });
+        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false });
 
         expect(result).toEqual({ ok: false, reason: "state_conflict" });
         expect(releaseCanonicalInterviewSlot).not.toHaveBeenCalled();
@@ -195,7 +194,7 @@ describe("rescheduleInterviewByCommand", () => {
         findById.mockResolvedValue(candidate({ status: CandidateStatus.SCREENING, interviewSlotId: null }));
         const api = makeApi();
 
-        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "HR_MISSED", { isRetry: true });
+        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "CANDIDATE_ASKED", { isRetry: true });
 
         expect(result.ok).toBe(true);
         expect(releaseCanonicalInterviewSlot).not.toHaveBeenCalled();
@@ -208,7 +207,7 @@ describe("rescheduleInterviewByCommand", () => {
         releaseCanonicalInterviewSlot.mockRejectedValue(new Error("RECRUITING_API_DOWN"));
 
         await expect(
-            rescheduleInterviewByCommand(makeApi() as never, "cand-1", "HR_MISSED", { isRetry: false }),
+            rescheduleInterviewByCommand(makeApi() as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false }),
         ).rejects.toThrow("RECRUITING_API_DOWN");
         expect(cancelInterviewSlot).not.toHaveBeenCalled();
         expect(update).not.toHaveBeenCalled();
@@ -218,7 +217,7 @@ describe("rescheduleInterviewByCommand", () => {
         const api = makeApi();
         api.sendMessage.mockRejectedValue(Object.assign(new Error("Forbidden: bot was blocked by the user"), { error_code: 403 }));
 
-        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "HR_MISSED", { isRetry: false });
+        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false });
 
         expect(result).toEqual({ ok: true, delivered: false, slotsOffered: 2 });
         expect(handleBlockedCandidate).toHaveBeenCalledWith(api, "cand-1", "Олена");
@@ -228,7 +227,7 @@ describe("rescheduleInterviewByCommand", () => {
         const api = makeApi();
         api.sendMessage.mockRejectedValue(new Error("Too Many Requests"));
 
-        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "HR_MISSED", { isRetry: false });
+        const result = await rescheduleInterviewByCommand(api as never, "cand-1", "CANDIDATE_ASKED", { isRetry: false });
 
         expect(result).toEqual({ ok: false, reason: "send_failed" });
         expect(handleBlockedCandidate).not.toHaveBeenCalled();

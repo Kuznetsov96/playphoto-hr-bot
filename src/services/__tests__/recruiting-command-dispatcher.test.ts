@@ -189,7 +189,6 @@ describe("RecruitingCommandDispatcher", () => {
 
     describe("RESCHEDULE_INTERVIEW (рішення власника 01.10.2026)", () => {
         it.each([
-            ["HR_MISSED"],
             ["CANDIDATE_ASKED"],
         ])("passes reasonCode %s to the reschedule service and acks applied", async (reasonCode) => {
             const api = makeApi();
@@ -206,13 +205,13 @@ describe("RecruitingCommandDispatcher", () => {
 
         it("marks a repeated attempt as a retry so the service can resend a lost message", async () => {
             listPending.mockResolvedValue({
-                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "HR_MISSED", attempts: 1 })],
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "CANDIDATE_ASKED", attempts: 1 })],
             });
 
             await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
 
             expect(rescheduleInterviewByCommand).toHaveBeenCalledWith(
-                expect.anything(), "cand-1", "HR_MISSED", { isRetry: true },
+                expect.anything(), "cand-1", "CANDIDATE_ASKED", { isRetry: true },
             );
         });
 
@@ -234,7 +233,7 @@ describe("RecruitingCommandDispatcher", () => {
         it("fails with RESCHEDULE_NOT_SENT:send_failed when Telegram refused the message", async () => {
             rescheduleInterviewByCommand.mockResolvedValue({ ok: false, reason: "send_failed" });
             listPending.mockResolvedValue({
-                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "HR_MISSED" })],
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "CANDIDATE_ASKED" })],
             });
 
             await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
@@ -247,6 +246,8 @@ describe("RecruitingCommandDispatcher", () => {
 
         it.each([
             ["SOMETHING_NEW", "RESCHEDULE_UNKNOWN_REASON:SOMETHING_NEW"],
+            // Причину «зірвали ми» власник прибрав 01.10.2026.
+            ["HR_MISSED", "RESCHEDULE_UNKNOWN_REASON:HR_MISSED"],
             [null, "RESCHEDULE_UNKNOWN_REASON:missing"],
         ])("refuses unknown reasonCode %s without touching the candidate", async (reasonCode, expected) => {
             listPending.mockResolvedValue({

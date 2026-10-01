@@ -17,15 +17,15 @@ import { buildSlotSelectionKeyboard } from "../utils/interview-slot-keyboard.js"
 
 /**
  * Перенос співбесіди командою вебаппа RESCHEDULE_INTERVIEW (рішення власника
- * 01.10.2026). Дві причини з контракту:
- *  - HR_MISSED — зустріч не відбулася з нашого боку;
- *  - CANDIDATE_ASKED — кандидатка сама попросила інший час.
+ * 01.10.2026). Причина одна — CANDIDATE_ASKED: кандидатка сама попросила
+ * інший час. Варіант «зустріч зірвали ми» (HR_MISSED) власник прибрав того ж
+ * дня — лишився лише перенос на прохання кандидатки.
  *
  * Вебапп видає команду, поки кандидатка записана (INTERVIEW_SCHEDULED) або
  * поки співбесіду автоматично закрито без рішення HR (INTERVIEW_COMPLETED,
  * hrDecision = null).
  */
-export const INTERVIEW_RESCHEDULE_REASONS = ["HR_MISSED", "CANDIDATE_ASKED"] as const;
+export const INTERVIEW_RESCHEDULE_REASONS = ["CANDIDATE_ASKED"] as const;
 export type InterviewRescheduleReason = typeof INTERVIEW_RESCHEDULE_REASONS[number];
 
 export function isInterviewRescheduleReason(code: unknown): code is InterviewRescheduleReason {
@@ -33,17 +33,14 @@ export function isInterviewRescheduleReason(code: unknown): code is InterviewRes
 }
 
 const RELEASE_REASON: Record<InterviewRescheduleReason, CanonicalReleaseReason> = {
-    HR_MISSED: "hr_missed",
     CANDIDATE_ASKED: "candidate_asked_reschedule",
 };
 
 const SLOTS_TEXT: Record<InterviewRescheduleReason, string> = {
-    HR_MISSED: CANDIDATE_TEXTS["candidate-interview-reschedule-hr-missed"],
     CANDIDATE_ASKED: CANDIDATE_TEXTS["candidate-interview-reschedule-asked"],
 };
 
 const NO_SLOTS_TEXT: Record<InterviewRescheduleReason, string> = {
-    HR_MISSED: CANDIDATE_TEXTS["candidate-interview-reschedule-hr-missed-no-slots"],
     CANDIDATE_ASKED: CANDIDATE_TEXTS["candidate-interview-reschedule-asked-no-slots"],
 };
 

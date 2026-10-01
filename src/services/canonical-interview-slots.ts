@@ -28,7 +28,6 @@ export type CanonicalReleaseReason =
     | "booking_rejected"
     // Перенос командою вебаппа (рішення власника 01.10.2026): зустріч зірвалася
     // з вини HR або кандидатка сама попросила інший час.
-    | "hr_missed"
     | "candidate_asked_reschedule";
 
 /** Минимум, который нужен клавиатуре выбора слота. */
