@@ -5,6 +5,7 @@ import { interviewRepository } from '../../repositories/interview-repository.js'
 import { locationRepository } from '../../repositories/location-repository.js';
 import { accessService } from '../access-service.js';
 import { CandidateStatus, FunnelStep } from '@prisma/client';
+import { CANDIDATE_TEXTS } from '../../constants/candidate-texts.js';
 
 // Mock Prisma
 vi.mock('../../db/core.js', () => ({
@@ -98,6 +99,10 @@ vi.mock('../booking-service.js', () => ({
     }
 }));
 
+vi.mock('../canonical-interview-slots.js', () => ({
+    releaseCanonicalInterviewSlot: vi.fn().mockResolvedValue(undefined)
+}));
+
 vi.mock('../../utils/cleanup.js', () => ({
     cleanupUserSessionMessages: vi.fn().mockResolvedValue(undefined),
     trackUserMessage: vi.fn().mockResolvedValue(undefined)
@@ -177,19 +182,94 @@ describe('hrService', () => {
             });
         });
 
-        it('should update candidate with REJECTED decision but NOT update status yet', async () => {
-            vi.mocked(candidateRepository.findById).mockResolvedValue({ id: 'cand1', user: { id: 'user1', telegramId: 123 } } as any);
+        it('REJECTED goes through rejectAfterInterview — status and letter at once', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                id: 'cand1', status: CandidateStatus.INTERVIEW_COMPLETED, hrDecision: null,
+                user: { id: 'user1', telegramId: 123 }
+            } as any);
             const result = await hrService.makeDecision(mockApi, 'cand1', 'REJECTED');
             expect(result).toBe(true);
-
-            // Should NOT have status REJECTED or notificationSent: true immediately
-            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
-                currentStep: 'INTERVIEW',
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', expect.objectContaining({
+                status: CandidateStatus.REJECTED,
                 hrDecision: 'REJECTED',
-                notificationSent: false,
-                materialsSent: false,
-                hasUnreadMessage: false
-            });
+            }));
+            expect(mockApi.sendMessage).toHaveBeenCalled();
+        });
+    });
+
+    describe('rejectAfterInterview', () => {
+        const api = { sendMessage: vi.fn() };
+        const base = { id: 'cand1', hrDecision: null, notificationSent: false, interviewSlotId: null, interviewSlot: null, user: { id: 'user1', telegramId: 123 } };
+
+        beforeEach(() => {
+            api.sendMessage.mockReset().mockResolvedValue({ message_id: 7 });
+        });
+
+        it('after the meeting: REJECTED, the post-interview letter, notificationSent', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+
+            await expect(hrService.rejectAfterInterview(api, 'cand1')).resolves.toBe(true);
+
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(1, 'cand1', expect.objectContaining({
+                status: CandidateStatus.REJECTED, hrDecision: 'REJECTED', notificationSent: false,
+            }));
+            expect(api.sendMessage).toHaveBeenCalledWith(123, CANDIDATE_TEXTS['worker-offer-rejected'], { parse_mode: 'HTML' });
+            expect(candidateRepository.update).toHaveBeenLastCalledWith('cand1', { notificationSent: true });
+        });
+
+        it('booked meeting still ahead: releases the slot and sends the general rejection', async () => {
+            const { bookingService } = await import('../booking-service.js');
+            const startTime = new Date(Date.now() + 3 * 3600_000);
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...base, status: CandidateStatus.INTERVIEW_SCHEDULED, interviewSlotId: 'slot1', interviewSlot: { startTime }
+            } as any);
+
+            await hrService.rejectAfterInterview(api, 'cand1');
+
+            expect(bookingService.cancelInterviewSlot).toHaveBeenCalledWith('slot1');
+            expect(api.sendMessage).toHaveBeenCalledWith(123, CANDIDATE_TEXTS['candidate-rejected'], { parse_mode: 'HTML' });
+        });
+
+        it('meeting already started but not auto-completed: keeps the slot, post-interview letter', async () => {
+            const { bookingService } = await import('../booking-service.js');
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...base, status: CandidateStatus.INTERVIEW_SCHEDULED, interviewSlotId: 'slot1', interviewSlot: { startTime: new Date(Date.now() - 600_000) }
+            } as any);
+
+            await hrService.rejectAfterInterview(api, 'cand1');
+
+            expect(bookingService.cancelInterviewSlot).not.toHaveBeenCalled();
+            expect(api.sendMessage).toHaveBeenCalledWith(123, CANDIDATE_TEXTS['worker-offer-rejected'], { parse_mode: 'HTML' });
+        });
+
+        it('send failure: status stays REJECTED, the command fails with a code', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+            api.sendMessage.mockRejectedValue(new Error('ETIMEDOUT'));
+
+            await expect(hrService.rejectAfterInterview(api, 'cand1')).rejects.toThrow('REJECTION_NOT_SENT:send_failed');
+            expect(candidateRepository.update).not.toHaveBeenCalledWith('cand1', { notificationSent: true });
+        });
+
+        it('retry for an already rejected candidate without a letter only sends the letter', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...base, status: CandidateStatus.REJECTED, hrDecision: 'REJECTED', notificationSent: false
+            } as any);
+
+            await hrService.rejectAfterInterview(api, 'cand1');
+
+            expect(candidateRepository.update).toHaveBeenCalledTimes(1);
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', { notificationSent: true });
+            expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        });
+
+        it('already rejected and notified: nothing is sent twice', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...base, status: CandidateStatus.REJECTED, hrDecision: 'REJECTED', notificationSent: true
+            } as any);
+
+            await expect(hrService.rejectAfterInterview(api, 'cand1')).resolves.toBe(true);
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).not.toHaveBeenCalled();
         });
     });
 

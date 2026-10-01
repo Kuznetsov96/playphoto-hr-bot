@@ -20,6 +20,7 @@ vi.mock("../aws-business-client.js", () => ({
 
 const inviteCandidate = vi.fn();
 const makeDecision = vi.fn();
+const rejectAfterInterview = vi.fn();
 const markNoShow = vi.fn();
 const rejectCandidate = vi.fn();
 
@@ -27,6 +28,7 @@ vi.mock("../hr-service.js", () => ({
     hrService: {
         inviteCandidate,
         makeDecision,
+        rejectAfterInterview,
         markNoShow,
         rejectCandidate,
     },
@@ -130,13 +132,15 @@ describe("RecruitingCommandDispatcher", () => {
         expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
     });
 
-    it("REJECT_AFTER_INTERVIEW maps to makeDecision(..., 'REJECTED')", async () => {
+    it("REJECT_AFTER_INTERVIEW maps to rejectAfterInterview — rejection is sent at once", async () => {
         const api = makeApi();
+        rejectAfterInterview.mockResolvedValue(true);
         listPending.mockResolvedValue({ items: [command({ kind: "REJECT_AFTER_INTERVIEW" })] });
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
-        expect(makeDecision).toHaveBeenCalledWith(api, "cand-1", "REJECTED", expect.any(String));
+        expect(rejectAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String));
+        expect(makeDecision).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalled();
     });
 

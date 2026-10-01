@@ -12,6 +12,7 @@ import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
 import { audit } from "../core/audit-logger.js";
+import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
@@ -328,6 +329,9 @@ export const hrService = {
     },
 
     async makeDecision(api: any, candId: string, decision: "ACCEPTED" | "REJECTED", adminId?: string) {
+        // Відмова — одразу (рішення власника 01.10.2026), див. rejectAfterInterview.
+        if (decision === "REJECTED") return this.rejectAfterInterview(api, candId, adminId);
+
         const initialCand = await this.getCandidateDetails(candId);
         if (!initialCand) return false;
 
@@ -371,6 +375,116 @@ export const hrService = {
                 currentStep: cand.currentStep
             }
         });
+
+        return true;
+    },
+
+    /**
+     * Відмова HR після співбесіди — статус і лист одразу.
+     *
+     * Раніше відмова чекала 6 год у INTERVIEW_COMPLETED, а лист мав надіслати
+     * воркер. Але щотіку repairRejectedInterviewCompletedStates переводив таких
+     * у REJECTED раніше, ніж минали 6 год, — і лист не йшов нікому: на проді
+     * 81 кандидатка за 45 днів (аудит 01.10.2026). Власник вирішив: відмова
+     * надсилається одразу.
+     *
+     * Якщо зустріч ще не почалась (HR відмовила записаній), «дякуємо за
+     * розмову» було б неправдою: запис знімається, а текст — загальна
+     * відмова (рішення власника 01.10.2026).
+     *
+     * Повторний виклик для вже відмовленої без листа лише дошле лист — так
+     * повтор команди вебаппа не дублює повідомлення.
+     */
+    async rejectAfterInterview(api: any, candId: string, adminId?: string) {
+        const cand = await this.getCandidateDetails(candId);
+        if (!cand) return false;
+
+        const telegramId = Number(cand.user.telegramId);
+        const alreadyRejected = cand.status === CandidateStatus.REJECTED && cand.hrDecision === "REJECTED";
+        if (alreadyRejected && cand.notificationSent) return true;
+
+        const slotStart = cand.interviewSlot?.startTime ? new Date(cand.interviewSlot.startTime) : null;
+        const beforeMeeting = cand.status === CandidateStatus.INTERVIEW_SCHEDULED
+            && slotStart !== null && slotStart.getTime() > Date.now();
+
+        if (!alreadyRejected) {
+            if (beforeMeeting && cand.interviewSlotId) {
+                // Той самий порядок, що й при скасуванні кандидаткою: спершу
+                // вебапп, потім локально, — інакше слот лишився б зайнятим.
+                const { releaseCanonicalInterviewSlot } = await import("./canonical-interview-slots.js");
+                const { bookingService } = await import("./booking-service.js");
+                await releaseCanonicalInterviewSlot(telegramId, "hr_rejected");
+                await bookingService.cancelInterviewSlot(cand.interviewSlotId);
+            }
+
+            await candidateRepository.update(candId, {
+                status: CandidateStatus.REJECTED,
+                currentStep: FunnelStep.INTERVIEW,
+                hrDecision: "REJECTED",
+                notificationSent: false,
+                materialsSent: false,
+                hasUnreadMessage: false,
+            });
+
+            await accessService.syncUserAccess(cand.user.telegramId, "HR Decision: REJECTED");
+
+            const { timelineRepository } = await import("../repositories/timeline-repository.js");
+            await timelineRepository.createEvent(cand.user.id, 'SYSTEM_EVENT', 'ADMIN', `HR прийняв рішення: REJECTED`, {
+                decision: "REJECTED",
+                beforeMeeting,
+                adminId: adminId || 'unknown'
+            });
+
+            audit({
+                event: "candidate_decision_set",
+                result: "success",
+                actorType: "admin",
+                actorId: adminId,
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: {
+                    fromStatus: cand.status,
+                    decision: "REJECTED",
+                    previousDecision: cand.hrDecision,
+                    beforeMeeting,
+                }
+            });
+        }
+
+        const text = beforeMeeting
+            ? CANDIDATE_TEXTS["candidate-rejected"]
+            : CANDIDATE_TEXTS["worker-offer-rejected"];
+        try {
+            const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
+            // Старі повідомлення із записом і кнопками прибираються — інакше
+            // під відмовою лишились би «Змінити час» і «Скасувати запис».
+            await cleanupUserSessionMessages(api, telegramId);
+            const msg = await api.sendMessage(telegramId, text, { parse_mode: "HTML" });
+            if (msg) await trackUserMessage(telegramId, msg.message_id);
+            await candidateRepository.update(candId, { notificationSent: true });
+            logBusinessEvent({
+                event: "candidate.rejection.notification_sent",
+                candidateId: cand.id,
+                telegramId: cand.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "REJECTED",
+                result: "success",
+                module: "hr-service",
+                operation: "rejectAfterInterview",
+                safeContext: { beforeMeeting },
+            });
+        } catch (sendErr) {
+            if (isBotBlocked(sendErr)) {
+                await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+                return true;
+            }
+            logger.error({ err: sendErr, candidateId: cand.id }, "Candidate rejection notification delivery failed");
+            // Статус уже REJECTED, а листа немає — команда вебаппа має впасти
+            // з кодом, щоб рекрутерка побачила це в картці.
+            throw new Error("REJECTION_NOT_SENT:send_failed");
+        }
 
         return true;
     },
