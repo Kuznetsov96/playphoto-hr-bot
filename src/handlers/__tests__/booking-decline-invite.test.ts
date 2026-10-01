@@ -212,10 +212,12 @@ describe("booking decline invite", () => {
             { user: { telegramId: BigInt(123456) } },
             expect.objectContaining({
                 status: "REJECTED",
-                hrDecision: "REJECTED",
+                candidateDecision: "Відмова кандидата (не актуально)",
                 googleMeetLink: null,
             })
         );
+        // Відмовилась сама — у вебаппі це не має виглядати рішенням HR (B9).
+        expect(updateMany.mock.calls[0]![1]).not.toHaveProperty("hrDecision");
         expect(ctx.editMessageText).toHaveBeenCalledWith(
             CANDIDATE_TEXTS["candidate-interview-invitation-declined"],
         );

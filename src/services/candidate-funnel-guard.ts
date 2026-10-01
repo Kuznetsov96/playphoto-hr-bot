@@ -6,6 +6,8 @@ export type CandidateFunnelSnapshot = {
     status: CandidateStatus;
     currentStep: FunnelStep;
     hrDecision: string | null;
+    // Лише для причини втрати (candidate-repository): guard його не читає.
+    candidateDecision?: string | null;
     isWaitlisted: boolean;
     notificationSent: boolean;
     materialsSent: boolean;

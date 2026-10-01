@@ -838,8 +838,13 @@ bookingHandlers.callbackQuery("decline_invite_confirm", async (ctx) => {
     await candidateRepository.updateMany(
         { user: { telegramId: BigInt(telegramId) } },
         {
+            // hrDecision не чіпаємо (аудит 01.10.2026, B9): відмовилась сама
+            // кандидатка, а "REJECTED" вебапп показує в картці як рішення HR.
+            // Причину несе candidateDecision → lossReason CANDIDATE_DECLINED.
+            // hrDecision="REJECTED" у REJECTED-кандидатки ніхто не читає:
+            // ремонт воркера бере лише INTERVIEW_COMPLETED, стадія вебаппа
+            // дивиться на hrDecision теж лише при INTERVIEW_COMPLETED.
             status: CandidateStatus.REJECTED,
-            hrDecision: "REJECTED",
             candidateDecision: "Відмова кандидата (не актуально)",
             isWaitlisted: false,
             notificationSent: true,
