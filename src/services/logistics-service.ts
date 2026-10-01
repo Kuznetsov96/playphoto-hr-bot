@@ -18,11 +18,18 @@ import {
 import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canonical-read.js';
+import { isoDayOfWeekInKyiv } from '../utils/location-opening-hours.js';
 
 const bot = new Bot(BOT_TOKEN);
 
 type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED' | 'MANUAL_PROXY';
 
+
+/** `HH:MM` → години й хвилини; некоректний рядок — null. */
+function parseClock(value: string): { h: number; m: number } | null {
+    const match = /^(\d{1,2}):(\d{2})/u.exec(value.trim());
+    return match ? { h: Number(match[1]), m: Number(match[2]) } : null;
+}
 
 /** Скільки посилок за прохід може зникнути зі списку вебаппа, перш ніж це вважається збоєм. */
 const MAX_PARCELS_GONE_PER_PASS = 30;
@@ -718,9 +725,20 @@ export class LogisticsService {
         });
         if (shift?.endTime) return shift.endTime;
 
-        // Fallback: parse Location.schedule
-        const location = await prisma.location.findUnique({ where: { id: locationId } });
-        if (!location?.schedule) return null;
+        // Fallback: години роботи точки. Спершу канонічні openingHours із вебаппа —
+        // текстове Location.schedule ніхто не оновлює, і кінець зміни за ним
+        // зсувався, щойно точка змінювала години.
+        const location = await prisma.location.findUnique({
+            where: { id: locationId },
+            include: { openingHours: true }
+        });
+        const isoDay = isoDayOfWeekInKyiv(date);
+        const canonicalDay = location?.openingHours?.find(day => day.dayOfWeek === isoDay);
+        const canonicalClose = canonicalDay?.closes;
+        // closes < opens — точка працює після півночі: закриття вже наступного дня.
+        const closesNextDay = Boolean(canonicalDay && canonicalDay.closes <= canonicalDay.opens);
+        const closeFromSchedule = location?.schedule ?? null;
+        if (!canonicalClose && !closeFromSchedule) return null;
 
         // Use Kyiv time to determine day of week — parse directly from formatToParts
         // to avoid timezone shifts when re-parsing a date string
@@ -737,7 +755,9 @@ export class LogisticsService {
         const kyivMonth = kyivParts.find(p => p.type === 'month')?.value ?? '01';
         const kyivYear = kyivParts.find(p => p.type === 'year')?.value ?? '2000';
 
-        const closeTime = this.parseScheduleCloseTime(location.schedule, kyivDow);
+        const closeTime = canonicalClose
+            ? parseClock(canonicalClose)
+            : this.parseScheduleCloseTime(closeFromSchedule!, kyivDow);
         if (!closeTime) return null;
 
         // Build close time anchored to Kyiv timezone (resolve actual UTC offset for DST)
@@ -745,7 +765,7 @@ export class LogisticsService {
         const roughUtc = new Date(Date.UTC(parseInt(kyivYear), parseInt(kyivMonth) - 1, parseInt(kyivDay), closeTime.h, closeTime.m));
         const offsetMin = this.getKyivUtcOffsetMinutes(roughUtc);
         const closeUtc = new Date(roughUtc.getTime() - offsetMin * 60 * 1000);
-        return closeUtc;
+        return canonicalClose && closesNextDay ? new Date(closeUtc.getTime() + 24 * 60 * 60 * 1000) : closeUtc;
     }
 
     /**

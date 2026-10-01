@@ -337,3 +337,28 @@ describe("AwsBusinessSyncService — parcels of a photographer leaving the team"
         }));
     });
 });
+
+describe("AwsBusinessSyncService — legacy bot block", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    // isBlocked ставив лише старий синк чорного списку; у режимі вебаппа його ніхто
+    // не знімав, і знову найнята людина бачила від бота тільки «System Maintenance».
+    it("unblocks an employee the web app has active", async () => {
+        const transaction = transactionStub();
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(transaction.user.upsert).toHaveBeenCalledWith(expect.objectContaining({
+            update: expect.objectContaining({ isBlocked: false }),
+        }));
+    });
+});
