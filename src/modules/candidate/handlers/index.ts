@@ -496,7 +496,13 @@ candidateHandlers.on("message:text", async (ctx, next) => {
     const step = ctx.session.step;
     if (ctx.message.text.startsWith("/")) return next();
 
-    // SMI: Delete user message immediately
+    // Поза анкетою текст — це повідомлення людям: воно вже пішло в тред HR
+    // (middleware/recruiting-incoming), і стирати його з чату кандидатки не
+    // можна. Раніше видалялося все підряд, а у відповідь ішло «Не зрозумів
+    // повідомлення» — 70 людей за 45 днів (аудит 01.10.2026).
+    if (!step?.startsWith("screening_")) return next();
+
+    // SMI: відповіді анкети прибираються з чату.
     await ctx.deleteMessage().catch(() => { });
 
     if (step === "screening_name") {
@@ -523,11 +529,15 @@ candidateHandlers.on("message:text", async (ctx, next) => {
         return;
     }
 
-    await next();
+    // Крок із кнопками: текст — не відповідь. Перемальовуємо поточне питання
+    // з кнопками, а не «Не зрозумів» з екраном статусу.
+    await startScreening(ctx);
 });
 
-candidateHandlers.on("message:photo", async (ctx) => {
-    if (!ctx.session.step?.startsWith("screening_")) return;
+candidateHandlers.on("message:photo", async (ctx, next) => {
+    // Поза анкетою фото — повідомлення людям, далі його підхопить загальний
+    // обробник модуля. Раніше воно мовчки зникало тут без відповіді.
+    if (!ctx.session.step?.startsWith("screening_")) return next();
 
     // Приватність + SMI: фото прибирається з переписки так само, як текстові
     // відповіді. Раніше видалявся тільки текст, і особисте фото, надіслане на
