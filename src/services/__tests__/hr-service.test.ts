@@ -497,6 +497,35 @@ describe('hrService', () => {
             });
         });
 
+        // B17, аудит 01.10.2026: повідомлення пішло, запис упав на guard — і
+        // кандидатка отримувала «нові вікна» на кожен новий слот.
+        it('guard відмовляє — повідомлення не надсилається і стан не пишеться', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
+                { id: 'cand-stuck', fullName: 'Test', user: { telegramId: 321 } }
+            ] as any);
+            vi.mocked(candidateRepository.checkFunnelPatch).mockResolvedValueOnce(new Error('MENTOR_FLOW_REQUIRES_APPROVAL') as any);
+            const api = { sendMessage: vi.fn().mockResolvedValue({}) };
+
+            const count = await hrService.notifyWaitlist(api);
+
+            expect(count).toBe(0);
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).not.toHaveBeenCalled();
+        });
+
+        it('залишок materialsSent зі старого флоу скидається тим самим записом', async () => {
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
+                { id: 'cand-legacy', fullName: 'Test', materialsSent: true, user: { telegramId: 654 } }
+            ] as any);
+            vi.mocked(candidateRepository.update).mockResolvedValue({} as any);
+            const api = { sendMessage: vi.fn().mockResolvedValue({}) };
+
+            await hrService.notifyWaitlist(api);
+
+            expect(candidateRepository.checkFunnelPatch).toHaveBeenCalledWith('cand-legacy', expect.objectContaining({ materialsSent: false }));
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-legacy', expect.objectContaining({ materialsSent: false }));
+        });
+
         it('should filter legacy no-slot candidates without losing unknown reasons', async () => {
             vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([]);
 

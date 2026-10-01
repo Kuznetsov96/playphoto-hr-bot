@@ -143,14 +143,25 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         case CandidateStatus.WAITLIST_HR:
         case CandidateStatus.WAITLIST_MENTOR: {
             const { FunnelStep } = await import("@prisma/client");
-            const isWaitingForSlots = candidate.currentStep === FunnelStep.INTERVIEW || candidate.currentStep === FunnelStep.TRAINING;
-            const typeText = candidate.currentStep === FunnelStep.TRAINING ? "знайомства та навчання" : "співбесіди";
+            // Черга на знайомство/навчання (WAITLIST_MENTOR або WAITLIST на
+            // кроці TRAINING) — уже після апруву співбесіди. Запис на ці етапи
+            // з бота прибрано (аудит 01.10.2026): кнопка «Обрати час» вела в
+            // «Графік оновлюється… надішлемо сповіщення», а сповіщення ніхто
+            // не надсилав. Такій кандидатці — той самий екран, що прийнятій:
+            // власниця напише щодо навчання сама.
+            if (status === CandidateStatus.WAITLIST_MENTOR || candidate.currentStep === FunnelStep.TRAINING) {
+                text = CANDIDATE_TEXTS["candidate-accepted-welcome"]();
+                kb.text("Написати нам", "contact_hr");
+                break;
+            }
+
+            const isWaitingForSlots = candidate.currentStep === FunnelStep.INTERVIEW;
 
             text = isWaitingForSlots
-                ? CANDIDATE_TEXTS["candidate-waitlist-slots"](typeText)
+                ? CANDIDATE_TEXTS["candidate-waitlist-slots"]("співбесіди")
                 : CANDIDATE_TEXTS["candidate-success-waitlist"];
 
-            if (isWaitingForSlots) kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
+            if (isWaitingForSlots) kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row();
             if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
         }

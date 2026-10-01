@@ -138,12 +138,25 @@ export class CandidateRepository {
         return "UNKNOWN";
     }
 
+    /**
+     * Причина втрати — з ПІДСУМКОВОГО стану кандидатки (патч поверх старого),
+     * а не лише з патча (аудит 01.10.2026, B9). Раніше відмова HR після
+     * співбесіди писалась як INTERVIEW_DROPOFF: worker і ремонт ставлять лише
+     * status, а hrDecision="REJECTED" лежить у кандидатки з makeDecision.
+     * Самовідмова після броні («відмовилась від вакансії») теж падала в
+     * INTERVIEW_DROPOFF — її текст не розпізнавався.
+     *
+     * Порядок: системні рішення (неявка, вік) → рішення самої кандидатки →
+     * відмова HR на етапі співбесіди → етап, з якого пішла.
+     */
     private deriveLossReason(
         oldCandidate: CandidateFunnelSnapshot,
         data: Prisma.CandidateUpdateInput | Prisma.CandidateUpdateManyMutationInput
     ): string {
-        const hrDecision = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).hrDecision as any);
-        const candidateDecision = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).candidateDecision as any);
+        const patchHrDecision = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).hrDecision as any);
+        const patchCandidateDecision = this.readScalarValue<string | null>((data as Prisma.CandidateUpdateInput).candidateDecision as any);
+        const hrDecision = patchHrDecision !== undefined ? patchHrDecision : oldCandidate.hrDecision;
+        const candidateDecision = patchCandidateDecision !== undefined ? patchCandidateDecision : (oldCandidate.candidateDecision ?? null);
 
         if (hrDecision === "NOSHOW") return "INTERVIEW_NO_SHOW";
         if (hrDecision === "REJECTED_SYSTEM_UNDERAGE") return "UNDERAGE";
@@ -151,6 +164,8 @@ export class CandidateRepository {
         if (candidateDecision?.includes("Бот заблоковано")) return "BOT_BLOCKED";
         if (candidateDecision?.includes("відмовилась від участі")) return "CANDIDATE_WITHDREW";
         if (candidateDecision?.includes("не актуально")) return "CANDIDATE_DECLINED";
+        // «Завершити заявку» з підтвердження броні співбесіди (cwi).
+        if (candidateDecision?.includes("відмовилась від вакансії")) return "CANDIDATE_DECLINED";
         if (candidateDecision?.includes("скасувала заявку")) return "CANDIDATE_CANCELLED";
 
         const stage = this.deriveLossStageFromStatus(oldCandidate.status, oldCandidate.currentStep);
@@ -205,6 +220,7 @@ export class CandidateRepository {
                 status: true,
                 currentStep: true,
                 hrDecision: true,
+                candidateDecision: true,
                 isWaitlisted: true,
                 notificationSent: true,
                 materialsSent: true,
@@ -836,6 +852,7 @@ export class CandidateRepository {
                     status: true,
                     currentStep: true,
                     hrDecision: true,
+                    candidateDecision: true,
                     isWaitlisted: true,
                     notificationSent: true,
                     materialsSent: true,
@@ -928,9 +945,44 @@ export class CandidateRepository {
         }) as unknown as Promise<CandidateWithRelations[]>;
     }
 
+    /**
+     * Анкета пише себе через upsert (persistCandidate), зокрема фінал: відмова
+     * за віком, хлопець, лист очікування. До аудиту 01.10.2026 (B9) цей шлях
+     * не ставив ні statusChangedAt, ні lossStage/lossReason — відмова з анкети
+     * у вебаппі була без причини й без часу зміни статусу. Guard воронки тут
+     * свідомо не вмикаємо: анкета пише статуси до SCREENING-флоу, і
+     * перевірка переходів їй не призначалась.
+     */
     async upsert(args: Prisma.CandidateUpsertArgs): Promise<CandidateWithRelations> {
-        const createData = this.touchPipeline(args.create as Prisma.CandidateUpdateInput) as typeof args.create;
-        const updateData = this.touchPipeline(args.update as Prisma.CandidateUpdateInput) as typeof args.update;
+        let createData = this.touchPipeline(args.create as Prisma.CandidateUpdateInput) as typeof args.create;
+        let updateData = this.touchPipeline(args.update as Prisma.CandidateUpdateInput) as typeof args.update;
+
+        const createStatus = this.readScalarValue<CandidateStatus>((createData as { status?: CandidateStatus }).status);
+        if (createStatus !== undefined) {
+            // Нова анкета «приходить» зі старту воронки — від нього й етап втрати.
+            const fresh = { status: CandidateStatus.SCREENING, currentStep: FunnelStep.INITIAL_TEST, hrDecision: null } as CandidateFunnelSnapshot;
+            createData = {
+                ...this.enrichLossTracking(fresh, createData as Prisma.CandidateUpdateInput),
+                statusChangedAt: new Date(),
+            } as typeof args.create;
+        }
+
+        const updateStatus = this.readScalarValue<CandidateStatus>((updateData as Prisma.CandidateUpdateInput).status as any);
+        if (updateStatus !== undefined) {
+            const existing = await prisma.candidate.findUnique({
+                where: args.where,
+                select: { status: true, currentStep: true, hrDecision: true, candidateDecision: true },
+            }) as CandidateFunnelSnapshot | null;
+            // Той самий статус — не зміна: перерахунок затер би вже записану причину.
+            if (!existing || existing.status !== updateStatus) {
+                const from = existing ?? ({ status: CandidateStatus.SCREENING, currentStep: FunnelStep.INITIAL_TEST, hrDecision: null } as CandidateFunnelSnapshot);
+                updateData = {
+                    ...this.enrichLossTracking(from, updateData as Prisma.CandidateUpdateInput),
+                    statusChangedAt: new Date(),
+                } as typeof args.update;
+            }
+        }
+
         const candidate = await prisma.candidate.upsert({
             ...args,
             create: createData,
