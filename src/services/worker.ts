@@ -1146,7 +1146,13 @@ async function repairRejectedInterviewCompletedStates() {
     const inconsistentCandidates = await prisma.candidate.findMany({
         where: {
             status: CandidateStatus.INTERVIEW_COMPLETED,
-            hrDecision: { in: ["REJECTED", "NOSHOW"] }
+            // Відмову без надісланого листа не чіпаємо: її добере крок 1
+            // (лист після 6 год). Раніше ремонт забирав її першим, і лист не
+            // йшов нікому — 81 кандидатка за 45 днів (аудит 01.10.2026).
+            OR: [
+                { hrDecision: "NOSHOW" },
+                { hrDecision: "REJECTED", notificationSent: true },
+            ]
         },
         include: { user: true },
         // Та сама межа, що й у recoverStaleInterviewCandidates: залишок

@@ -381,3 +381,36 @@ describe("отказ на шаге даты рождения и без вака�
         }));
     });
 });
+
+describe("candidate text outside the questionnaire", () => {
+    const makeCtx = async (text: string, step?: string) => {
+        const { Context } = await import("grammy");
+        const api = { deleteMessage: vi.fn().mockResolvedValue(true), sendMessage: vi.fn() };
+        const update = { update_id: 1, message: { message_id: 5, date: 1, text, chat: { id: 42, type: "private" }, from: { id: 42, is_bot: false, first_name: "A" } } };
+        const ctx = new Context(update as never, api as never, { id: 1, is_bot: true } as never) as any;
+        ctx.session = { step, candidateData: {} };
+        // Анкета вважається відкритою: кандидатки в базі ще немає.
+        ctx.di = { userRepository: { findWithCandidateProfileByTelegramId: vi.fn().mockResolvedValue(null) } };
+        return { ctx, api };
+    };
+
+    it("не стирає повідомлення поза анкетою і передає далі", async () => {
+        const { candidateHandlers } = await import("../index.js");
+        const { ctx, api } = await makeCtx("а коли співбесіда?", "idle");
+        const next = vi.fn();
+
+        await candidateHandlers.middleware()(ctx, next);
+
+        expect(api.deleteMessage).not.toHaveBeenCalled();
+        expect(next).toHaveBeenCalled();
+    });
+
+    it("відповідь на питання анкети, як і раніше, прибирається", async () => {
+        const { candidateHandlers } = await import("../index.js");
+        const { ctx, api } = await makeCtx("а", "screening_name");
+
+        await candidateHandlers.middleware()(ctx, vi.fn());
+
+        expect(api.deleteMessage).toHaveBeenCalled();
+    });
+});
