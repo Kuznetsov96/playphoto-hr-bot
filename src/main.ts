@@ -23,7 +23,6 @@ import { startLogCleanupLoop } from "./services/log-cleanup-service.js";
 import { startAuditCleanupLoop } from "./services/audit-cleanup-service.js";
 import { startChatLogRetentionLoop } from "./services/chat-log-retention-service.js";
 import { startSecurityCleanupLoop } from "./services/security-cleanup-service.js";
-import { remindersService } from "./services/reminders-service.js";
 import { startWorkers } from "./workers/index.js";
 import { queues } from "./core/queue.js";
 import { configureContainer } from "./core/container.js";
@@ -178,7 +177,6 @@ async function bootstrap() {
         startAuditCleanupLoop();
         startChatLogRetentionLoop();
         startSecurityCleanupLoop();
-        remindersService.startRemindersLoop(bot.api);
         
         webhookService.listen(bot.api);
         queueWorkers = startWorkers();

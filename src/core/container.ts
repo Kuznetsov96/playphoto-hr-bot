@@ -18,7 +18,6 @@ import { trainingRepository } from '../repositories/training-repository.js';
 // Import Services
 import { supportService } from '../services/support-service.js';
 import { staffService } from '../modules/staff/services/index.js';
-import { candidateService } from '../modules/candidate/services/index.js';
 import { broadcastService } from '../services/broadcast.js';
 import { hrService } from '../services/hr-service.js';
 import { audit } from './audit-logger.js';
@@ -51,7 +50,6 @@ export function configureContainer() {
         // TODO: Refactor services to classes
         supportService: asValue(supportService),
         staffService: asValue(staffService),
-        candidateService: asValue(candidateService),
         broadcastService: asValue(broadcastService),
         hrService: asValue(hrService)
     });

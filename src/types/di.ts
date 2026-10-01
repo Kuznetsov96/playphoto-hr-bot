@@ -16,7 +16,6 @@ import type { trainingRepository } from '../repositories/training-repository.js'
 // Import Service instances
 import type { supportService } from '../services/support-service.js';
 import type { staffService } from '../modules/staff/services/index.js';
-import type { candidateService } from '../modules/candidate/services/index.js';
 import type { broadcastService } from '../services/broadcast.js';
 import type { hrService } from '../services/hr-service.js';
 import type { audit } from '../core/audit-logger.js';
@@ -41,7 +40,6 @@ export interface Cradle {
     // Services
     supportService: typeof supportService;
     staffService: typeof staffService;
-    candidateService: typeof candidateService;
     broadcastService: typeof broadcastService;
     hrService: typeof hrService;
 }
