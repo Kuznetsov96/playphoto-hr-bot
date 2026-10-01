@@ -359,10 +359,18 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
     bookingLocks.add(telegramId);
 
+    // На натискання відповідаємо ПІСЛЯ броні, а не «Бронюємо…» до неї: Telegram
+    // приймає лише одну відповідь, і другу — з причиною збою — мовчки
+    // відкидав («query is too old»). Виняток вилітав раніше за екран, тож
+    // кандидатка не бачила ні «оновіть анкету», ні «запис недоступний»
+    // (аудит 01.10.2026). Поки йде бронь, Telegram сам крутить індикатор
+    // на кнопці, а bookingLocks тримає повторний тап.
+    const answer = (text?: string) => ctx.answerCallbackQuery(text).catch(() => {});
+
     try {
-        await ctx.answerCallbackQuery("Бронюємо…");
         logger.debug({ telegramId, slotId }, "Interview booking started");
         const result = await bookInterviewSlotFlow(telegramId, slotId, ctx.from.username);
+        await answer();
 
         const startTime = (result.slot as any).startTime;
 
@@ -399,10 +407,10 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
 
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId }, "Interview booking failed");
-        if (e instanceof AwsBusinessApiError && e.code === RECRUITING_SLOT_TAKEN_CODE) {
-            // Гонка за канонический слот: пока кандидатка думала, его забрала
-            // другая. Локально ничего не записано — просто обновляем список.
-            await ctx.answerCallbackQuery("Цей час уже зайнятий").catch(() => {});
+        if ((e instanceof AwsBusinessApiError && e.code === RECRUITING_SLOT_TAKEN_CODE) || e.message === "ALREADY_BOOKED") {
+            // Гонка за слот: поки кандидатка думала, його забрала інша.
+            // Нічого не записано — просто оновлюємо список.
+            await answer("Цей час уже зайнятий");
             const freshSlots = await findAvailableInterviewSlots().catch(() => []);
             if (freshSlots.length === 0) {
                 await ctx.editMessageText(`Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`).catch(() => {});
@@ -413,26 +421,24 @@ bookingHandlers.callbackQuery(/^book_slot_(.+)$/, async (ctx) => {
                     { reply_markup: freshKeyboard }
                 ).catch(() => {});
             }
-        } else if (e.message === "ALREADY_BOOKED") {
-            await ctx.answerCallbackQuery("Цей час уже зайнятий");
         } else if (e.message === "UNDERAGE_CANDIDATE") {
-            await ctx.answerCallbackQuery("Цей етап поки недоступний для вашої анкети");
+            await answer("Цей етап поки недоступний для вашої анкети");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-underage"]);
         } else if (e.message === "AGE_LIMIT_CANDIDATE") {
-            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
+            await answer("Зараз запис для цієї анкети недоступний");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-age-limit"]);
         } else if (e.message === "SCREENING_INCOMPLETE") {
-            await ctx.answerCallbackQuery("Спершу потрібно оновити анкету");
+            await answer("Спершу потрібно оновити анкету");
             await ScreenManager.renderScreen(
                 ctx,
                 "Перед записом на співбесіду потрібно оновити анкету.\n\nНатисніть кнопку нижче, щоб продовжити з того місця, де зупинилися.",
                 new InlineKeyboard().text("Продовжити анкету", "resume_screening")
             );
         } else if (e.message === "MALE_CANDIDATE") {
-            await ctx.answerCallbackQuery("Зараз запис для цієї анкети недоступний");
+            await answer("Зараз запис для цієї анкети недоступний");
             await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]("цій локації", "вашому місті"));
         } else {
-            await ctx.answerCallbackQuery("Сталася помилка");
+            await answer("Сталася помилка");
         }
     } finally {
         bookingLocks.delete(telegramId);
