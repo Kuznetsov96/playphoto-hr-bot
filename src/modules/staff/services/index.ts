@@ -181,12 +181,16 @@ export class StaffService {
         if (!staff || staff.isWelcomeSent || !staff.user) return false;
 
         const telegramId = Number(staff.user.telegramId);
-        const firstName = staff.fullName.split(' ')[1] || staff.fullName;
+        // Ім'я — окреме поле вебаппа (синк кладе його в User.firstName). Раніше його
+        // вгадували другим словом fullName, а порядок там залежить від того, як
+        // людину внесли: «Анастасія Бородіна Ігорівна» дала б «Вітаємо, Бородіна!».
+        // Немає імені — вітаємо без нього, а не здогадуємось.
+        const firstName = staff.user.firstName?.trim() ?? "";
 
         // Наставника в процесі більше немає — обіцянка «наставник допоможе
         // онлайн» була неправдою для кожної новенької.
         const welcomeText =
-            `<b>Вітаємо в команді, ${escapeHtml(firstName)}!</b>\n\n` +
+            (firstName ? `<b>Вітаємо в команді, ${escapeHtml(firstName)}!</b>\n\n` : `<b>Вітаємо в команді!</b>\n\n`) +
             `Твій графік готовий — зміни вже в «Мій графік».\n\n` +
             `Що є в боті:\n` +
             `📅 <b>Графік</b> — твої зміни й колеги на них.\n` +

@@ -35,9 +35,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const staff = (id: string) => ({
     id,
     userId: `user-${id}`,
-    fullName: "Бланк Анастасія Тарасівна",
+    // Порядок у fullName ненадійний: у частини людей ім'я стоїть першим.
+    fullName: "Анастасія Бланк Тарасівна",
     isWelcomeSent: false,
-    user: { telegramId: 100n, role: "CANDIDATE" },
+    user: { telegramId: 100n, role: "CANDIDATE", firstName: "Анастасія" },
 });
 
 beforeEach(() => {
@@ -89,6 +90,30 @@ describe("activatePendingStaff", () => {
 
         expect(candidateUpdate).toHaveBeenCalledWith("cand-1", expect.objectContaining({ status: "HIRED" }));
         expect(userUpdate).toHaveBeenCalledWith("user-s3", { role: "STAFF" });
+    });
+
+    it("takes the first name from the web app field, not from the order of words in fullName", async () => {
+        const reversed = { ...staff("s5"), fullName: "Бланк Анастасія Тарасівна" };
+        staffFindMany.mockResolvedValue([reversed]);
+        staffFindById.mockResolvedValue(reversed);
+        firstShift.mockResolvedValue({ date: new Date(Date.now() + DAY_MS) });
+        const api = { sendMessage: vi.fn().mockResolvedValue({}) };
+
+        await staffService.activatePendingStaff(api);
+
+        expect(api.sendMessage.mock.calls[0]![1]).toContain("Вітаємо в команді, Анастасія!");
+    });
+
+    it("greets without a name rather than guessing when the web app has none", async () => {
+        const nameless = { ...staff("s6"), user: { telegramId: 100n, role: "STAFF", firstName: null } };
+        staffFindMany.mockResolvedValue([nameless]);
+        staffFindById.mockResolvedValue(nameless);
+        firstShift.mockResolvedValue({ date: new Date(Date.now() + DAY_MS) });
+        const api = { sendMessage: vi.fn().mockResolvedValue({}) };
+
+        await staffService.activatePendingStaff(api);
+
+        expect(api.sendMessage.mock.calls[0]![1]).toContain("<b>Вітаємо в команді!</b>");
     });
 
     it("counts a hire who never started the bot as failed, not welcomed", async () => {
