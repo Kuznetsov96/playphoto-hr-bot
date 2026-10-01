@@ -29,6 +29,12 @@ type ScheduledShift = {
     startTime: Date | null;
     endTime: Date | null;
     location: ShiftLocation;
+    /**
+     * Чи йде пошук підміни на цю зміну — за словами вебаппа. Є лише в зміні з
+     * канонічного читання і лише коли бекенд уже віддає це поле; `undefined`
+     * означає «невідомо», і тоді рішення лишається за локальною заявкою.
+     */
+    replacementSearchActive?: boolean;
 };
 
 type ReplacementAssignment = {
@@ -45,6 +51,18 @@ type ReplacementAssignment = {
 type OutgoingReplacementRequest = ReplacementAssignment & {
     scheduledShiftPublicId: string | null;
     status: ReplacementRequestStatus;
+    /** Є у заявки, яку веде вебапп; `null` — у старої локальної. */
+    awsReplacementPublicId?: string | null;
+};
+
+export type StaffScheduleViewOptions = {
+    /**
+     * Графік прочитано з вебаппа, а не з дзеркала. Тоді стан канонічних заявок
+     * бот не вгадує за своєю копією: та закривається із запізненням або не
+     * закривається зовсім, і фотографиня бачила «шукаємо підміну — зміна поки
+     * твоя» на зміні, яку вже віддали іншій (Dragon Park 2, 30.09.2026).
+     */
+    canonicalSchedule?: boolean;
 };
 
 export type StaffShiftView = ScheduledShift & {
@@ -66,8 +84,18 @@ export function mergeStaffScheduleView(
     acceptedAssignments: ReplacementAssignment[],
     outgoingRequests: OutgoingReplacementRequest[],
     limit: number,
-    scheduledAssignmentSlots: ScheduledShiftIdentity[] = scheduledShifts
+    scheduledAssignmentSlots: ScheduledShiftIdentity[] = scheduledShifts,
+    options: StaffScheduleViewOptions = {}
 ): StaffShiftView[] {
+    // Канонічний графік уже каже, чия зміна: віддану зміну він не містить, а
+    // зміна після скасованої чи невдалої підміни лишається на місці. Локальна
+    // копія канонічної заявки тут може лише збрехати, тож її не враховуємо.
+    // Старі локальні заявки (без awsReplacementPublicId) вебапп не знає —
+    // для них правило лишається колишнім.
+    if (options.canonicalSchedule) {
+        outgoingRequests = outgoingRequests.filter(request => !request.awsReplacementPublicId);
+    }
+
     // Заявка тримається за зміну канонічним id, тож і зіставлення йде по
     // ньому: локального посилання на рядок дзеркала в заявці більше немає.
     const outgoingByCanonicalShiftId = new Map(
@@ -83,6 +111,11 @@ export function mergeStaffScheduleView(
     const matchedActiveRequestIds = new Set<string>();
 
     const ownedShifts = scheduledShifts.flatMap<StaffShiftView>(shift => {
+        if (shift.replacementSearchActive === true) {
+            return [{ ...shift, isReplacementSearchActive: true }];
+        }
+        if (shift.replacementSearchActive === false) return [shift];
+
         const request = (shift.scheduledShiftPublicId
             ? outgoingByCanonicalShiftId.get(shift.scheduledShiftPublicId)
             : undefined)

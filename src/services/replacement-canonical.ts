@@ -81,7 +81,13 @@ export async function startCanonicalReplacement(input: {
 }
 
 export type CanonicalWaveResult =
-    | { ok: true; status: string; nextWaveAt: Date | null }
+    | {
+        ok: true;
+        status: string;
+        nextWaveAt: Date | null;
+        /** Present once someone accepted; absent while the search is still open. */
+        acceptedEmployeePublicId?: string | null;
+    }
     | { ok: false; reasonCode: "CANONICAL_BACKEND_UNAVAILABLE" };
 
 /**
@@ -104,6 +110,7 @@ export async function dispatchCanonicalWave(replacementPublicId: string): Promis
             ok: true,
             status: view.status,
             nextWaveAt: view.nextWaveAt ? new Date(view.nextWaveAt) : null,
+            acceptedEmployeePublicId: view.acceptedEmployee?.publicId ?? null,
         };
     } catch (error: unknown) {
         const code =

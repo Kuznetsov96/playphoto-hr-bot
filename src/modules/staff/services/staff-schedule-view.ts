@@ -35,10 +35,12 @@ export async function getVisibleStaffShifts(
     };
 
     let scheduledShifts;
+    let canonicalSchedule = false;
     if (options.canonicalRead === true && AWS_SCHEDULE_CANONICAL_READ_ENABLED) {
         const startedAt = Date.now();
         try {
             scheduledShifts = await awsScheduleCanonicalReadService.findForStaff(staffId, since, limit);
+            canonicalSchedule = true;
             logBusinessEvent({
                 event: "bot.aws_schedule_canonical_read.succeeded",
                 actorType: "system",
@@ -96,6 +98,7 @@ export async function getVisibleStaffShifts(
         acceptedAssignments,
         outgoingRequests,
         limit,
-        scheduledAssignmentSlots
+        scheduledAssignmentSlots,
+        { canonicalSchedule }
     );
 }

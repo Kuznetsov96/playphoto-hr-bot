@@ -648,8 +648,15 @@ Please check bot permissions (Manage Topics).`,
   // Заміни: система знає роль людини в них і каже це прямо.
   "schedule-notif-replacement-taken": (p: { shift: string | number }) =>
     `🔄 Зміну передано тобі: ${p.shift}`,
-  "schedule-notif-replacement-given": (p: { shift: string | number }) =>
-    `🔄 Твою зміну передано іншому фотографу: ${p.shift}`,
+  // Для тієї, хто просила підміну, це добра новина, а не аварія: заголовок
+  // «Термінова зміна у графіку» і «➖ Знято зміну» читалися як те, що зміну
+  // забрали. Ім’я кажемо, бо саме його вона спитає першим — кому передати
+  // ключі й кого набрати; без імені — без здогадок про стать.
+  "schedule-notif-replacement-found-title": `✅ <b>Підміну знайдено</b>`,
+  "schedule-notif-replacement-given": (p: { shift: string | number; name?: string | undefined }) =>
+    `${p.shift}\n` +
+    (p.name ? `Зміну бере ${p.name}. ` : `Зміну передано колезі. `) +
+    `Цей день у тебе тепер вільний.`,
   "schedule-notif-line-was": (p: { details: string | number }) => `Було: ${p.details}`,
   "schedule-notif-line-now": (p: { details: string | number }) => `Стало: ${p.details}`,
   "schedule-notif-added-unknown": `➕ Додано зміну — деталі уточнюються`,

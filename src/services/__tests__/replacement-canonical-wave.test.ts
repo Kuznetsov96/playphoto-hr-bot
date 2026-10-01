@@ -46,6 +46,7 @@ describe("dispatchCanonicalWave", () => {
             ok: true,
             status: "ACTIVE",
             nextWaveAt: new Date("2026-08-15T12:00:00.000Z"),
+            acceptedEmployeePublicId: null,
         });
         expect(dispatchReplacementWave).toHaveBeenCalledWith("req-1");
     });
@@ -81,12 +82,14 @@ describe("dispatchCanonicalWave", () => {
             publicId: "req-1",
             status: "CONFIRMED",
             nextWaveAt: null,
+            acceptedEmployee: { publicId: "emp-2", displayName: "Бланк Анастасія" },
         });
 
         await expect(dispatchCanonicalWave("req-1")).resolves.toEqual({
             ok: true,
             status: "CONFIRMED",
             nextWaveAt: null,
+            acceptedEmployeePublicId: "emp-2",
         });
     });
 
