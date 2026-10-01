@@ -2,7 +2,7 @@ import { InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { CandidateStatus } from "@prisma/client";
 import { ScreenManager } from "./screen-manager.js";
-import { HR_NAME, MENTOR_NAME } from "../config.js";
+import { HR_NAME } from "../config.js";
 import { getLocationDetails } from "./location-data-helper.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";

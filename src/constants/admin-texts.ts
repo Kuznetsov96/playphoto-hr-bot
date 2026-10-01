@@ -287,7 +287,6 @@ export const ADMIN_TEXTS = {
   "admin-bulk-result-partial": "⚠️ <b>Bulk task partially done",
   "admin-bulk-result-failed": "❌ <b>Bulk task failed",
   "hr-hub-title": `🚀 <b>HR Hub</b>`,
-  "mentor-hub-title": `🎓 <b>Mentor Hub</b>`,
   "hr-error-generic": (p: { error: string | number }) => `❌ Error: ${p.error}`,
   "support-btn-go-to-topic": "➡️ Go to topic",
   "hr-menu-back": `⬅️ Back`,

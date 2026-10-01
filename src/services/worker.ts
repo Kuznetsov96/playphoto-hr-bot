@@ -6,7 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, MENTOR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED, AWS_RECRUITING_MIRROR_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED, AWS_RECRUITING_MIRROR_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
@@ -480,45 +480,7 @@ export async function startWorker(bot: Bot<MyContext>) {
                 }
             }
 
-            // 6.5 Mentor Reminder (~5 minutes, window 2-7 min before start)
-            const sevenMinFutureMentor = new Date(nowTime + 7 * 60 * 1000);
-            const twoMinFutureMentor = new Date(nowTime + 2 * 60 * 1000);
-            const trainingSlots5mMentor = (await trainingRepository.findForReminder('reminded5mMentor', sevenMinFutureMentor))
-                .filter(s => s.startTime >= twoMinFutureMentor);
-
-            const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-
-            for (const slot of trainingSlots5mMentor) {
-                if (MENTORS.length === 0) break;
-                try {
-                    const cand = (slot.candidate || slot.candidateDiscovery)!;
-                    const isDiscovery = !!slot.candidateDiscovery;
-                    const typeText = isDiscovery ? "discovery" : "training";
-
-                    // Ім'я й місто йдуть у HTML-повідомлення менторові: без
-                    // екранування «<» в імені ламає sendMessage цілком.
-                    const name = escapeHtml(cand.fullName || "Candidate");
-                    const meetLink = isDiscovery ? cand.trainingMeetLink : cand.trainingMeetLink;
-                    const city = escapeHtml(cand.city || "Not specified");
-
-                    const minsLeft = Math.max(1, Math.round((slot.startTime.getTime() - nowTime) / 60000));
-                    let text = `🕵️‍♀️ <b>${MENTOR_NAME}, ${typeText} in ${minsLeft} min!</b>\n\n` +
-                        `👤 Candidate: <b>${name}</b>\n` +
-                        `🏙️ City: <b>${city}</b>\n`;
-
-                    if (meetLink) {
-                        text += `🔗 <b>Meet:</b> <a href="${meetLink}">Enter Room</a>`;
-                    }
-
-                    const kb = new InlineKeyboard().text("👤 Profile", `view_candidate_${cand.id}`);
-
-                    for (const mentorId of MENTORS) {
-                        await bot.api.sendMessage(mentorId, text, { parse_mode: "HTML", reply_markup: kb }).catch(() => { });
-                    }
-
-                    await trainingRepository.updateSlot(slot.id, { reminded5mMentor: true });
-                } catch (e) { }
-            }
+            // 6.5 Нагадування наставнику прибрано 01.10.2026: наставника в процесі немає.
             // 7. Auto-Complete (Interview & Training)
             const completedSlots = await interviewRepository.findOverdueBooked(CandidateStatus.INTERVIEW_SCHEDULED);
 
@@ -582,18 +544,6 @@ export async function startWorker(bot: Bot<MyContext>) {
                 if (!cand) continue;
 
                 try {
-                    const MENTORS = (process.env.MENTOR_IDS || "").split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-                    if (MENTORS.length > 0) {
-                        const isDiscovery = !!slot.candidateDiscovery;
-                        const typeName = isDiscovery ? "Discovery" : "Training";
-                        const name = escapeHtml(cand.fullName || "Candidate");
-
-                        const text = `🏁 <b>${typeName} Completed: ${name}</b>\n\n` +
-                            `Slot time is up. Please mark the result (Passed/Failed) in the candidate's profile so they can proceed to the next stage! 🎓🌸`;
-                        const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand.id}`);
-
-                        await bot.api.sendMessage(MENTORS[0]!, text, { parse_mode: "HTML", reply_markup: kb });
-                    }
 
                     // Кандидатці теж треба сказати, що зустріч завершилася.
                     // Раніше повідомлення йшло тільки менторові, і далі

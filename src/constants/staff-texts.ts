@@ -242,16 +242,6 @@ Example: <code>05.02 10:00</code>
 <code>DD.MM HH:MM-HH:MM</code>
 Example: <code>05.02 10:00-14:00</code>
 <i>(15 min slots will be created)</i>`,
-  "mentor-btn-add-time": `➕ Add Time`,
-  "mentor-ask-add-time": `✍️ <b>Enter date and time for training</b>
-Choose input format:
-📍 <b>Single slot</b>
-<code>DD.MM HH:MM</code>
-Example: <code>10.02 14:00</code>
-📅 <b>Window (multiple slots)</b>
-<code>DD.MM HH:MM-HH:MM</code>
-Example: <code>10.02 14:00-18:00</code>
-<i>(60 min slots will be created)</i>`,
   "hr-help-tattoo": `💍 <b>Appearance Check</b>
 Candidates who reported tattoos/piercings.
 Your approval is needed to proceed to interview booking. ✅/❌`,
@@ -260,12 +250,6 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
   "hr-label-no-unread-messages": `No unread messages! ✨`,
   "hr-btn-reply-hint": `Click button below to reply!`,
   "hr-btn-reply": `✍️ Reply`,
-  "mentor-btn-send-materials": `📚 Send Materials`,
-  "mentor-menu-new": (p: { count: number }) => p.count > 0 ? `📥 New (${p.count})` : `📥 New`,
-  "mentor-menu-waiting-booking": (p: { count: number }) => p.count > 0 ? `📩 Pending (${p.count})` : `📩 Pending`,
-  "mentor-btn-manual-book": `🗓️ Schedule Manually`,
-  "mentor-btn-resend-materials": `♻️ Resend Base`,
-  "mentor-btn-remind-booking": `🔔 Remind Booking`,
   "hr-help-waitlist": `⏳ <b>Candidate Pools</b>
 🗓️ <b>Needs Interview Slot</b> — candidates who could not book an interview time.
 📍 <b>Location Reserve</b> — candidates saved for a location that is currently full.
@@ -283,9 +267,6 @@ Your approval is needed to proceed to interview booking. ✅/❌`,
 Натисни кнопку нижче, щоб заповнити.`,
   "hr-ans-status-updated-success": `Status updated: Success! 🎉`,
   "hr-btn-schedule-created": `✅ Schedule Ready`,
-  "hr-info-cand-schedule-ready": `✨ <b>Твій графік готовий!</b>
-Наш адміністратор вніс твої дані в систему та підготував робочий графік. Твій наставник зв’яжеться з тобою для узгодження твоєї першої робочої зміни. Ласкаво просимо! 📸`,
-  "hr-ans-mentor-notified": `Done! Mentor notified. 🚀`,
   "hr-info-broadcast-confirm": (p: { city: string | number, count: string | number }) => `🌆 City: <b>${p.city}</b>
 👥 Candidates in queue: <b>${p.count}</b>
 Are you sure you want to send invitations to all these candidates?`,
@@ -606,7 +587,6 @@ Please check bot permissions (Manage Topics).`,
   "admin-tasks-ans-deleted": `✅ Task deleted`,
   "admin-tasks-calendar-title": `📂 **Select date to view tasks:**`,
   "hr-hub-title": `🚀 <b>HR Hub</b>`,
-  "mentor-hub-title": `🎓 <b>Mentor Hub</b>`,
   "list-header-attention": `👇 NEED ATTENTION`,
   "list-header-upcoming": `🕒 UPCOMING`,
   "list-header-completed": `✅ COMPLETED`,

@@ -1,7 +1,7 @@
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { googleCalendar } from "../services/google-calendar.js";
-import { ADMIN_IDS, HR_NAME, MENTOR_NAME } from "../config.js";
+import { ADMIN_IDS, HR_NAME } from "../config.js";
 import { trackMessage, cleanupMessages } from "../utils/cleanup.js";
 import { bookingService } from "../services/booking-service.js";
 // Фаза 2b: под AWS_RECRUITING_SLOTS_ENABLED список и бронь слотов ИНТЕРВЬЮ
@@ -898,21 +898,6 @@ bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
         const msg = await ctx.reply(text, { reply_markup: kb });
         trackMessage(ctx, msg.message_id);
 
-        // Notify Mentors that someone is stuck
-        const { MENTOR_IDS } = await import("../config.js");
-        if (MENTOR_IDS && MENTOR_IDS.length > 0) {
-            const cand = await candidateRepository.findByTelegramId(telegramId);
-            const name = escapeHtml(cand?.fullName || ctx.from.first_name || "Candidate");
-            const alertMsg = `📥 <b>INBOX: No discovery slots available!</b>\n\n` +
-                `👤 <b>${name}</b>\n\n` +
-                `This candidate tried to book a discovery but found NO SLOTS. She has been automatically moved to the WAITLIST. ⏳`;
-
-            for (const mentorId of MENTOR_IDS) {
-                try {
-                    await ctx.api.sendMessage(mentorId, alertMsg, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("👤 View Profile", `view_candidate_${cand?.id}`) });
-                } catch (e) { }
-            }
-        }
         return;
     }
 
@@ -1000,18 +985,6 @@ bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
             timelineService.trackEvent(existingCand.userId, `Забронювала ${typeText}: ${startTime.toLocaleString('uk-UA')}`, { slotId, type: typeText, startTime }).catch(() => {});
         }).catch(() => {});
 
-        // Notify Mentors
-        const { MENTOR_IDS } = await import("../config.js");
-        if (MENTOR_IDS.length > 0) {
-            const typeText = isTrainingPhase ? "training" : "discovery";
-            const mentorNotifyText = `🆕 <b>New ${typeText} appointment!</b>\n\n` +
-                `👤 Candidate: <b>${fullName}</b>\n` +
-                `📅 Time: <b>${startTime.toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' })}</b>\n\n` +
-                `📍 Appointment added to Google Calendar.`;
-
-            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${existingCand.id}`);
-            await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorNotifyText, { parse_mode: "HTML", reply_markup: mentorKb });
-        }
 
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId }, "Training or discovery booking failed");
@@ -1047,21 +1020,6 @@ bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
 
     await editWithContactButton(ctx, telegramId, `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
 
-    const { MENTOR_IDS } = await import("../config.js");
-    if (MENTOR_IDS && MENTOR_IDS.length > 0) {
-        const name = escapeHtml((await candidateRepository.findByTelegramId(telegramId))?.fullName || ctx.from.first_name || "Candidate");
-        const alertMsg = `📥 <b>INBOX: Candidate cannot find training slot!</b>\n\n` +
-            `👤 <b>${name}</b>\n\n` +
-            `This candidate clicked "No date fits" for training. She is now in the WAITLIST. Please contact her! 💬`;
-
-        for (const mentorId of MENTOR_IDS) {
-            try {
-                await ctx.api.sendMessage(mentorId, alertMsg, { parse_mode: "HTML" });
-            } catch (e) {
-                logger.error({ err: e, mentorId }, "Failed to send training_no_slots_fit alert to mentor");
-            }
-        }
-    }
 });
 
 // 10. Скасування mentor-запису — крок 1: підтвердження
@@ -1108,19 +1066,6 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             "Оберіть інший зручний час, коли буде зручно.",
             { parse_mode: "HTML", reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-other-time"], "start_training_scheduling") }
         );
-
-        // Notify Mentor
-        if (candidate) {
-            const { MENTOR_IDS } = await import("../config.js");
-            const typeText = wasDiscovery ? "discovery" : "training";
-            const name = escapeHtml(candidate.fullName || "Candidate");
-            const alertText = `🗓 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Booking Cancelled</b>\n\n` +
-                `👤 <b>${name}</b> cancelled her ${typeText} slot and can choose another time.`;
-            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-            for (const mentorId of MENTOR_IDS) {
-                await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
-            }
-        }
 
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Training cancellation failed");
@@ -1184,17 +1129,6 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             { parse_mode: "HTML" }
         );
 
-        if (candidate) {
-            const { MENTOR_IDS } = await import("../config.js");
-            const typeText = wasDiscovery ? "discovery" : "training";
-            const name = escapeHtml(candidate.fullName || "Candidate");
-            const alertText = `🚫 <b>Candidate Withdrew</b>\n\n` +
-                `👤 <b>${name}</b> declined the vacancy during ${typeText}.`;
-            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-            for (const mentorId of MENTOR_IDS) {
-                await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
-            }
-        }
     } catch (e: any) {
         logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Mentor-stage vacancy withdrawal failed");
         if (e.message === "FORBIDDEN_SLOT_ACCESS") {
@@ -1233,37 +1167,9 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
         }
 
-        // Notify Mentor about reschedule
-        if (candidate) {
-            const { MENTOR_IDS } = await import("../config.js");
-            const isDiscovery = candidate.status === CandidateStatus.DISCOVERY_SCHEDULED;
-            const typeText = isDiscovery ? "discovery" : "training";
-            const name = escapeHtml(candidate.fullName || "Candidate");
-            const alertText = `🗓 <b>${typeText.charAt(0).toUpperCase() + typeText.slice(1)} Rescheduled</b>\n\n` +
-                `👤 <b>${name}</b> is rescheduling her ${typeText} appointment.\n` +
-                `She is choosing a new time now.`;
-            const mentorKb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-            for (const mentorId of MENTOR_IDS) {
-                await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => {});
-            }
-        }
-
         const slots = await trainingRepository.findActiveSlots();
 
         if (slots.length === 0) {
-            // Notify Mentor
-            if (candidate) {
-                const { MENTOR_IDS: mentorIds } = await import("../config.js");
-                const name = escapeHtml(candidate.fullName || "Candidate");
-                const alertText = `⚠️ <b>No Slots Available</b>\n\n` +
-                    `👤 <b>${name}</b> tried to reschedule but found no available slots.\n` +
-                    `She is back in Inbox — please assign a time manually.`;
-                const kb = new InlineKeyboard().text("👤 View Profile", `view_candidate_${candidate.id}`);
-                for (const mentorId of mentorIds) {
-                    await ctx.api.sendMessage(mentorId, alertText, { parse_mode: "HTML", reply_markup: kb }).catch(() => {});
-                }
-            }
-
             return ctx.editMessageText("Зараз вільного часу немає. Ми запропонуємо його найближчим часом.", {
                 reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
             });
