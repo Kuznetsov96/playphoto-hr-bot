@@ -75,6 +75,29 @@ interface SyncResult {
     shiftsDeleted: number;
 }
 
+
+/**
+ * Посилка, закріплена за фотографинею, недоступна решті: «Ця посилка закріплена
+ * за іншою фотографинею». Після звільнення в вебаппі вона лишалась за нею
+ * назавжди — фото не могла завантажити жодна інша (10 посилок на 01.10.2026).
+ *
+ * Звільняємо лише в мить деактивації, а не всі старі: давні посилки звільнених
+ * раптом почали б нагадувати теперішній зміні.
+ */
+async function releaseParcelsOf(transaction: Prisma.TransactionClient, staffIds: string[]) {
+    if (staffIds.length === 0) return;
+    // Уже забрана з відділення: лишається DELIVERED, будь-хто зі зміни може взяти її на фото.
+    await transaction.parcel.updateMany({
+        where: { responsibleStaffId: { in: staffIds }, status: "DELIVERED" },
+        data: { responsibleStaffId: null, acceptedAt: null },
+    });
+    // Ще не забрана: повертаємо в чергу точки, як робить передача після кінця зміни.
+    await transaction.parcel.updateMany({
+        where: { responsibleStaffId: { in: staffIds }, status: "PICKUP_IN_PROGRESS" },
+        data: { responsibleStaffId: null, acceptedAt: null, status: "ARRIVED" },
+    });
+}
+
 export class AwsBusinessSyncService {
     private lastResult: SyncResult | null = null;
     private running: Promise<SyncResult> | null = null;
@@ -472,7 +495,7 @@ export class AwsBusinessSyncService {
                 });
                 const current = await transaction.staffProfile.findUnique({
                     where: { userId: user.id },
-                    select: { id: true, deactivatedAt: true },
+                    select: { id: true, deactivatedAt: true, isActive: true },
                 });
                 const isActive = employee.status === "ACTIVE";
                 const primaryLocationCode = employee.assignments[0]?.locationCode;
@@ -492,11 +515,22 @@ export class AwsBusinessSyncService {
                 };
                 if (current) {
                     await transaction.staffProfile.update({ where: { id: current.id }, data });
+                    if (current.isActive && !isActive) {
+                        await releaseParcelsOf(transaction, [current.id]);
+                    }
                 } else {
                     await transaction.staffProfile.create({ data: { ...data, userId: user.id } });
                 }
             }
 
+            const missing = await transaction.staffProfile.findMany({
+                where: {
+                    isActive: true,
+                    user: { telegramId: { notIn: snapshotTelegramIds } },
+                },
+                select: { id: true },
+            });
+            await releaseParcelsOf(transaction, missing.map((staff) => staff.id));
             const deactivated = await transaction.staffProfile.updateMany({
                 where: {
                     isActive: true,

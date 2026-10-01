@@ -6,7 +6,6 @@ import prisma from "../db/core.js";
 import { accessService } from "./access-service.js";
 import { Prisma } from "@prisma/client";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { MENTOR_IDS } from "../config.js";
 import { getLocationDetails } from "../utils/location-data-helper.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
@@ -69,22 +68,6 @@ async function safeFindCandidatesByStatus<TInclude extends Prisma.CandidateInclu
 
         logger.warn({ err: error, status }, "Returning empty candidate list for unsupported status");
         return [];
-    }
-}
-
-export async function notifyMentors(api: any, candidate: any) {
-    if (!MENTOR_IDS || MENTOR_IDS.length === 0) return;
-
-    const msg = `📥 <b>New candidate is waiting for materials!</b>\n\n` +
-        `👤 Name: <b>${escapeHtml(candidate.fullName || "Candidate")}</b>\n` +
-        `🏙️ City: <b>${escapeHtml(candidate.city || "—")}</b>\n` +
-        `📍 Location: <b>${escapeHtml(candidate.location ? formatLocation(candidate.location, "listing") : '—')}</b>\n\n` +
-        `Please go to <b>Mentor Hub</b> and send the knowledge base. ✨`;
-
-    for (const id of MENTOR_IDS) {
-        try {
-            await api.sendMessage(id, msg, { parse_mode: "HTML" });
-        } catch (e) { }
     }
 }
 
@@ -417,9 +400,6 @@ export const hrService = {
                 entityId: cand.id,
                 context: { fromStatus: cand.status, toStatus: CandidateStatus.ACCEPTED }
             });
-
-            // Notify Mentors ONLY AFTER offer is actually sent
-            await notifyMentors(api, cand);
 
             return true;
         } catch (e: any) {

@@ -11,7 +11,7 @@ import { logBusinessEvent } from "./core/log-events.js";
 import { bot } from "./core/bot.js";
 import { redis } from "./core/redis.js";
 import prisma from "./db/core.js";
-import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher, startAccessRevocationDispatcher, startRecruitingCommandDispatcher, startRecruitingMirrorSweep, startReplacementStatusSweep } from "./services/worker.js";
+import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher, startAccessRevocationDispatcher, startRecruitingCommandDispatcher, startRecruitingMirrorSweep, startReplacementStatusSweep, startStaffActivationSweep } from "./services/worker.js";
 import { startBirthdayLoop } from "./services/birthday-service.js";
 import { startShiftReminderLoop } from "./services/shift-reminder-service.js";
 import { startScheduleMirrorWatch } from "./services/stale-schedule-mirror.js";
@@ -44,6 +44,7 @@ let accessRevocationTimer: NodeJS.Timeout | undefined;
 let recruitingCommandTimer: NodeJS.Timeout | undefined;
 let recruitingMirrorSweepTimer: NodeJS.Timeout | undefined;
 let replacementStatusSweepTimer: NodeJS.Timeout | undefined;
+let staffActivationSweepTimer: NodeJS.Timeout | undefined;
 let scheduleMirrorTimer: NodeJS.Timeout | undefined;
 
 async function bootstrap() {
@@ -162,6 +163,7 @@ async function bootstrap() {
         recruitingCommandTimer = startRecruitingCommandDispatcher(bot as any);
         recruitingMirrorSweepTimer = startRecruitingMirrorSweep();
         replacementStatusSweepTimer = startReplacementStatusSweep(bot.api);
+        staffActivationSweepTimer = startStaffActivationSweep(bot.api);
         startBirthdayLoop(bot);
         shiftReminderTimer = startShiftReminderLoop(bot);
         // Nothing else notices when the schedule sync dies: the loop swallows its
@@ -264,6 +266,7 @@ async function shutdown(signal: string) {
         if (recruitingCommandTimer) clearInterval(recruitingCommandTimer);
         if (recruitingMirrorSweepTimer) clearInterval(recruitingMirrorSweepTimer);
         if (replacementStatusSweepTimer) clearInterval(replacementStatusSweepTimer);
+        if (staffActivationSweepTimer) clearInterval(staffActivationSweepTimer);
         if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
         if (shiftReminderTimer) clearInterval(shiftReminderTimer);
         if (runner?.isRunning()) {

@@ -25,7 +25,6 @@ vi.mock("../../repositories/candidate-repository.js", () => ({ candidateReposito
 vi.mock("../../repositories/interview-repository.js", () => ({ interviewRepository: {} }));
 vi.mock("../../repositories/training-repository.js", () => ({ trainingRepository: {} }));
 vi.mock("../task-service.js", () => ({ taskService: {} }));
-vi.mock("../hr-service.js", () => ({ notifyMentors: vi.fn() }));
 vi.mock("../../workers/invite-reminder.js", () => ({ processInviteReminders: vi.fn() }));
 vi.mock("../../repositories/session-repository.js", () => ({ sessionRepository: {} }));
 vi.mock("../funnel-anomaly-detector.js", () => ({ isImpossibleMentorState: vi.fn() }));

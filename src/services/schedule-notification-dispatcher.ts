@@ -476,6 +476,25 @@ export class ScheduleNotificationDispatcher {
         api: Pick<Api, "sendMessage">,
         group: ScheduleNotificationDeliveryGroup
     ): Promise<void> {
+        // Новенька має спершу прочитати «Вітаємо в команді», а вже потім графік.
+        // Збій привітання не зупиняє доставку графіка.
+        try {
+            const { staffService } = await import("../modules/staff/services/index.js");
+            await staffService.welcomeBeforeScheduleMessage(group.telegramId, api);
+        } catch (error) {
+            logBusinessEvent({
+                event: "bot.schedule_notifications.welcome_failed",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                telegramId: group.telegramId,
+                result: "failed",
+                module: "schedule-notification-dispatcher",
+                operation: "deliverGroup",
+                error
+            });
+        }
+
         try {
             await api.sendMessage(Number(group.telegramId), renderDeliveryGroup(group), {
                 parse_mode: "HTML",

@@ -127,6 +127,15 @@ export class WorkShiftRepository {
         });
     }
 
+    /** Найраніша зміна людини в дзеркалі (вікно синку −30/+62 дні). */
+    async findFirstForStaff(staffId: string) {
+        return prisma.workShift.findFirst({
+            where: { staffId },
+            orderBy: { date: 'asc' },
+            select: { date: true }
+        });
+    }
+
     async findWithLocationForStaff(staffId: string, since: Date, limit: number = 100) {
         return prisma.workShift.findMany({
             where: {

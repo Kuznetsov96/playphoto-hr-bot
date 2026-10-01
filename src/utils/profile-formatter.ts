@@ -231,7 +231,7 @@ export async function formatCandidateProfile(
     if (isOldStaging) {
         if (status === "AWAITING_FIRST_SHIFT") {
             text += `\n⏳ <b>Ready for Schedule</b>\n`;
-            text += `<i>Add to Google Sheets → Full Sync</i>\n`;
+            text += `<i>Add her shifts in the web app</i>\n`;
 
             // Show staging as past event
             if (candidate.firstShiftDate) {
