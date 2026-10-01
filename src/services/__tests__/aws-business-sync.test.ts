@@ -265,3 +265,75 @@ describe("AwsBusinessSyncService — hiring deficit from the web app", () => {
         expect(data).not.toHaveProperty("neededCount");
     });
 });
+
+describe("AwsBusinessSyncService — parcels of a photographer leaving the team", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    function stubWithParcels() {
+        return { ...transactionStub(), parcel: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
+    }
+
+    // 01.10.2026: 10 посилок лишились за звільненими, і фото не могла завантажити
+    // жодна інша фотографиня.
+    it("releases her parcels at the moment the web app deactivates her", async () => {
+        const transaction = stubWithParcels();
+        transaction.staffProfile.findUnique.mockResolvedValue({ id: "staff-9", deactivatedAt: null, isActive: true });
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        const base = snapshot([{ telegramId: "486213975" }]);
+        awsBusinessClientMock.snapshot.mockResolvedValue({
+            ...base,
+            employees: base.employees.map((employee) => ({ ...employee, status: "INACTIVE" })),
+        });
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(transaction.parcel.updateMany).toHaveBeenCalledWith({
+            where: { responsibleStaffId: { in: ["staff-9"] }, status: "DELIVERED" },
+            data: { responsibleStaffId: null, acceptedAt: null },
+        });
+        expect(transaction.parcel.updateMany).toHaveBeenCalledWith({
+            where: { responsibleStaffId: { in: ["staff-9"] }, status: "PICKUP_IN_PROGRESS" },
+            data: { responsibleStaffId: null, acceptedAt: null, status: "ARRIVED" },
+        });
+    });
+
+    it("leaves parcels of someone deactivated long ago untouched", async () => {
+        const transaction = stubWithParcels();
+        transaction.staffProfile.findUnique.mockResolvedValue({
+            id: "staff-9", deactivatedAt: new Date("2026-08-01T00:00:00Z"), isActive: false,
+        });
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        const base = snapshot([{ telegramId: "486213975" }]);
+        awsBusinessClientMock.snapshot.mockResolvedValue({
+            ...base,
+            employees: base.employees.map((employee) => ({ ...employee, status: "INACTIVE" })),
+        });
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(transaction.parcel.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("releases parcels of someone who dropped out of the snapshot", async () => {
+        const transaction = stubWithParcels();
+        // Перший виклик — пошук тих, кого знімок більше не містить; далі синк змін.
+        transaction.staffProfile.findMany.mockResolvedValueOnce([{ id: "staff-gone" }]);
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(transaction.parcel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: { responsibleStaffId: { in: ["staff-gone"] }, status: "DELIVERED" },
+        }));
+    });
+});

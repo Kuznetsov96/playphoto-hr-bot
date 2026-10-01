@@ -11,7 +11,6 @@ import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { systemStateRepository } from "../../repositories/system-state-repository.js";
 import { escapeHtml, formatLocation, normalizeCity } from "./utils.js";
-import { formatShiftLocationLabel } from "../../utils/logistics-formatters.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
 import { chatLogRepository } from "../../repositories/chat-log-repository.js";
@@ -51,25 +50,6 @@ function formatScheduleNotificationShiftTime(shift: {
         || "час не вказано";
 }
 
-function buildScheduleNotificationMessage(shifts: Array<{
-    date: Date;
-    startTime?: Date | null;
-    endTime?: Date | null;
-    location: { name: string; city?: string | null; branch?: string | null; schedule?: string | null };
-}>) {
-    let text = "📅 <b>Твій графік:</b>\n\n";
-
-    for (const s of shifts) {
-        const raw = s.date.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", weekday: "short" });
-        const dateStr = raw.charAt(0).toUpperCase() + raw.slice(1);
-        const timeStr = formatScheduleNotificationShiftTime(s);
-
-        text += `▫️ ${escapeHtml(dateStr)} · ${escapeHtml(timeStr)} · ${escapeHtml(formatShiftLocationLabel(s.location))}\n`;
-    }
-
-    text += "\n✨ Ти можеш переглянути графік будь-коли в меню бота.";
-    return text;
-}
 
 function formatTeamSyncPreview(preview: any): string {
     const duplicatePreview = (preview.duplicateTelegramIds || [])
@@ -150,77 +130,14 @@ async function executeFullSync(ctx: MyContext, msg: any) {
             for (const k of before) { if (!after.has(k)) { changedStaffIds.add(sid); break; } }
         }
 
-        const { TEAM_CHANNEL_LINK, MENTOR_IDS } = await import("../../config.js");
-        const { staffRepository } = await import("../../repositories/staff-repository.js");
-        const { AdminRole } = await import("@prisma/client");
-        const excludedRoles = [AdminRole.SUPER_ADMIN, AdminRole.CO_FOUNDER, AdminRole.SUPPORT, AdminRole.HR_LEAD, AdminRole.MENTOR_LEAD];
-
-        const newHires = await staffRepository.findMany({
-            where: {
-                isWelcomeSent: false,
-                isActive: true,
-                shifts: { some: {} },
-                user: {
-                    OR: [
-                        { adminRole: null },
-                        { adminRole: { notIn: excludedRoles } }
-                    ]
-                }
-            },
-            include: { user: { include: { candidate: true } } }
-        });
-
-        let newHiresNotified = 0;
-        for (const staff of newHires) {
-            try {
-                if (!staff.user) continue;
-                const staffTgId = Number(staff.user.telegramId);
-                const { staffService } = await import("../../modules/staff/services/index.js");
-                const welcomed = await staffService.finalizeStaffActivation(staff.id, ctx.api);
-
-                const startOfToday = new Date();
-                startOfToday.setHours(0, 0, 0, 0);
-                const upcomingShifts = await prisma.workShift.findMany({
-                    where: { staffId: staff.id, date: { gte: startOfToday } },
-                    orderBy: { date: 'asc' },
-                    include: { location: true },
-                    take: 30
-                });
-
-                if (welcomed) {
-                    newHiresNotified++;
-                    if (upcomingShifts.length > 0) {
-                        const schedMsg = buildScheduleNotificationMessage(upcomingShifts);
-                        const schedKb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
-                        await ctx.api.sendMessage(staffTgId, schedMsg, { parse_mode: "HTML", reply_markup: schedKb }).catch(() => { });
-                    }
-                }
-
-                const firstShift = upcomingShifts[0];
-                if (welcomed && firstShift && MENTOR_IDS.length > 0) {
-                    const dateStr = firstShift.date.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
-                    const mentorMsg =
-                        `📅 <b>New Staff First Shift Scheduled</b>\n\n` +
-                        `👤 Name: <b>${staff.fullName}</b>\n` +
-                        `📅 First Shift: <b>${dateStr}</b>\n` +
-                        `📍 Location: <b>${escapeHtml(formatLocation(firstShift.location, "listing"))}</b>\n\n` +
-                        `Schedule is ready; no separate mentor onboarding is required.`;
-                    const mentorKb = new InlineKeyboard().text("👤 Profile", `view_staff_${staff.id}`);
-                    await ctx.api.sendMessage(MENTOR_IDS[0]!, mentorMsg, { parse_mode: "HTML", reply_markup: mentorKb }).catch(() => { });
-                }
-
-                if (firstShift) {
-                    await scheduleSyncService.updateFirstShiftDateInSheet(
-                        staff.user.telegramId.toString(), firstShift.date
-                    ).catch(() => { });
-                }
-            } catch (err) {
-                logger.error({ err, staffId: staff.id }, "Team sync welcome or mentor notification failed");
-            }
-        }
+        const { staffService } = await import("../../modules/staff/services/index.js");
+        // Та сама логіка, що й у фоновому циклі (startStaffActivationSweep): кому
+        // привітання, а кого закрити мовчки, вирішує сервіс, а не ця кнопка.
+        const activation = await staffService.activatePendingStaff(ctx.api);
+        const newHiresNotified = activation.welcomed;
+        const newHireIds = new Set(activation.activatedIds);
 
         let staffNotified = 0;
-        const newHireIds = new Set(newHires.map(h => h.id));
         if (changedStaffIds.size > 0) {
             const staffToNotify = await staffRepository.findMany({
                 where: {
@@ -283,8 +200,11 @@ async function executeFullSync(ctx: MyContext, msg: any) {
         if (newHiresNotified > 0) {
             report += `📢 <b>${newHiresNotified}</b> new hires notified! ✨\n`;
         }
-        if (newHires.length > newHiresNotified) {
-            report += `⚠️ <b>${newHires.length - newHiresNotified}</b> new hires unreachable (haven't started bot)\n`;
+        if (activation.silenced > 0) {
+            report += `🔕 <b>${activation.silenced}</b> already working — activated without a welcome\n`;
+        }
+        if (activation.failed > 0) {
+            report += `⚠️ <b>${activation.failed}</b> new hires unreachable (haven't started bot)\n`;
         }
         if (staffNotified > 0) {
             report += `📅 <b>${staffNotified}</b> staff notified about schedule changes`;

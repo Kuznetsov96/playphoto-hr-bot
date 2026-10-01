@@ -115,6 +115,10 @@ export class LogisticsService {
 
         if (activeParcels.length === 0) return;
 
+        if (AWS_PARCELS_CANONICAL_READ_ENABLED) {
+            await this.syncCanonicalLocations(activeParcels);
+        }
+
         // С телефоном получателя НП отдаёт ссылку переадресации (observeNpTracking); без
         // настроенного телефона — пустая строка, как раньше.
         const trackingDocs = activeParcels.map(p => ({ DocumentNumber: p.ttn, Phone: NP_RECIPIENT_PHONE }));
@@ -175,6 +179,44 @@ export class LogisticsService {
                     });
                     await this.notifyStaffOnShift(updated.id, newStatus);
                 }
+            }
+        }
+    }
+
+    /**
+     * Точка посилки належить вебаппу: невідому посилку туди прив'язує власник,
+     * і він же може перенести її на іншу точку. Бот копіював точку лише при
+     * створенні рядка, тож прив'язка, зроблена пізніше, до нього не доходила —
+     * зміні не казали про посилку, нагадувань не було (21 посилка на 01.10.2026).
+     *
+     * Посилку, що щойно отримала точку й уже чекає у відділенні, зміна має
+     * побачити зараз: без цього її нікому й не забирати.
+     */
+    private async syncCanonicalLocations(parcels: CanonicalParcel[]) {
+        for (const parcel of parcels) {
+            if (!parcel.locationId) continue;
+            const local = await prisma.parcel.findUnique({
+                where: { ttn: parcel.ttn },
+                select: { id: true, locationId: true, status: true }
+            });
+            if (!local || local.locationId === parcel.locationId) continue;
+            if (local.status === 'COMPLETED' || local.status === 'CANCELLED') continue;
+
+            await prisma.parcel.update({
+                where: { id: local.id },
+                data: { locationId: parcel.locationId }
+            });
+            logBusinessEvent({
+                event: "logistics.parcel.location_synced",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "logistics-service",
+                operation: "syncCanonicalLocations",
+                safeContext: { parcelId: local.id, hadLocation: local.locationId !== null, status: local.status },
+            });
+            if (local.locationId === null && local.status === 'ARRIVED') {
+                await this.notifyStaffOnShift(local.id, 'ARRIVED');
             }
         }
     }

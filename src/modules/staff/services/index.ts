@@ -9,6 +9,7 @@ import { escapeHtml, formatLocation } from "../../../handlers/admin/utils.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import type { AdminRole } from "@prisma/client";
 import { CandidateStatus, Role } from "@prisma/client";
+import { kyivStartOfDay } from "../../../services/kyiv-date.js";
 import { InlineKeyboard } from "grammy";
 import { candidateRepository } from "../../../repositories/candidate-repository.js";
 import { userRepository } from "../../../repositories/user-repository.js";
@@ -126,25 +127,72 @@ export class StaffService {
     }
 
     /**
-     * UNIFIED ACTIVATION: Sends the official welcome message and updates status.
-     * This is the Single Source of Truth for hiring a new photographer.
+     * Нові співробітниці зі змінами, яким ще не надіслано привітання.
+     *
+     * Раніше це робила лише ручна кнопка Full Sync в адмінці, а фоновий синк із
+     * вебаппом — ні. З 05.08.2026 до 01.10.2026 так залишилось без привітання 20
+     * людей, а 11 з них у воронці бота так і не стали HIRED (одна навіть REJECTED).
+     *
+     * Той, у кого перша зміна вже минула, привітання не отримує: «вітаємо в
+     * команді» після місяця роботи читається як збій. Його картку закриваємо мовчки.
      */
-    async finalizeStaffActivation(staffId: string, api: any) {
+    async activatePendingStaff(api: any): Promise<{ welcomed: number; silenced: number; failed: number; activatedIds: string[] }> {
+        const { AdminRole: Roles } = await import("@prisma/client");
+        const excludedRoles = [Roles.SUPER_ADMIN, Roles.CO_FOUNDER, Roles.SUPPORT, Roles.HR_LEAD, Roles.MENTOR_LEAD];
+        const pending = await staffRepository.findMany({
+            where: {
+                isWelcomeSent: false,
+                isActive: true,
+                shifts: { some: {} },
+                user: { OR: [{ adminRole: null }, { adminRole: { notIn: excludedRoles } }] }
+            }
+        });
+
+        const today = kyivStartOfDay(new Date());
+        let welcomed = 0;
+        let silenced = 0;
+        let failed = 0;
+        const activatedIds: string[] = [];
+        for (const staff of pending) {
+            try {
+                const firstShift = await workShiftRepository.findFirstForStaff(staff.id);
+                const silent = !firstShift || firstShift.date < today;
+                const activated = await this.finalizeStaffActivation(staff.id, api, { silent });
+                activatedIds.push(staff.id);
+                if (!activated) {
+                    failed++;
+                    continue;
+                }
+                if (silent) silenced++;
+                else welcomed++;
+            } catch (err) {
+                logger.error({ err, staffId: staff.id }, "Staff activation failed");
+            }
+        }
+        return { welcomed, silenced, failed, activatedIds };
+    }
+
+    /**
+     * UNIFIED ACTIVATION: marks a hired photographer as active staff and, unless
+     * `silent`, sends her the welcome message.
+     */
+    async finalizeStaffActivation(staffId: string, api: any, options: { silent?: boolean } = {}) {
         const staff = await staffRepository.findById(staffId);
         if (!staff || staff.isWelcomeSent || !staff.user) return false;
 
         const telegramId = Number(staff.user.telegramId);
         const firstName = staff.fullName.split(' ')[1] || staff.fullName;
 
+        // Наставника в процесі більше немає — обіцянка «наставник допоможе
+        // онлайн» була неправдою для кожної новенької.
         const welcomeText =
-            `🌟 <b>Вітаємо в команді, ${firstName}!</b>\n\n` +
-            `Твій перший робочий графік готовий! Ти вже можеш переглянути свої зміни в головному меню. 📸\n\n` +
-            `🤝 <b>Твоя перша зміна:</b> Наш <b>наставник</b> допоможе тобі онлайн з усіма технічними питаннями та адаптацією. Не хвилюйся, ми всьому навчимо! ✨\n\n` +
-            `<b>Ось короткий гід по боту:</b>\n\n` +
-            `📅 <b>Графік</b> — твій список змін та імена колег.\n\n` +
-            `📋 <b>Мої завдання</b> — щоранку ти отримуватимеш список завдань ✅.\n\n` +
-            `💬 <b>Підтримка</b> — якщо виникають питання — пиши сюди.\n\n` +
-            `Бажаємо тобі класного старту! 🚀`;
+            `<b>Вітаємо в команді, ${escapeHtml(firstName)}!</b>\n\n` +
+            `Твій графік готовий — зміни вже в «Мій графік».\n\n` +
+            `Що є в боті:\n` +
+            `📅 <b>Графік</b> — твої зміни й колеги на них.\n` +
+            `📋 <b>Мої завдання</b> — щоранку список на день.\n` +
+            `💬 <b>Підтримка</b> — пиши, якщо щось незрозуміло.\n\n` +
+            `Гарного старту 💛`;
 
         // Спільний інвайт сюди не зашивається: посилання персональне, його
         // видає accessService під конкретну людину.
@@ -167,6 +215,11 @@ export class StaffService {
                 status: CandidateStatus.HIRED,
                 notificationSent: true
             });
+        }
+
+        if (options.silent) {
+            logger.info({ staffId }, "Staff activated silently: first shift already passed");
+            return true;
         }
 
         try {
