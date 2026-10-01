@@ -366,6 +366,18 @@ describe("interview booking over canonical slots", () => {
         expect(ctx.reply).not.toHaveBeenCalled();
     });
 
+    it("unknown booking failure says what failed — not a bare «Сталася помилка»", async () => {
+        // Аудит 01.10.2026: спливаюче «Сталася помилка» не казало, що саме не
+        // вийшло і що робити далі.
+        findByTelegramId.mockResolvedValue({ id: "cand-1", interviewSlotId: null });
+        bookInterviewSlotFlow.mockRejectedValue(new Error("HTTP 502"));
+
+        const ctx = makeCtx(111035);
+        await bookingHandlers.__runCallback(`book_slot_${WEB_SLOT_ID}`, ctx);
+
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Не вдалося записати. Спробуйте ще раз");
+    });
+
     it("збій броні: одна відповідь на натискання з причиною і екран, навіть коли відповідь не пройшла", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", interviewSlotId: null });
         bookInterviewSlotFlow.mockRejectedValue(new Error("SCREENING_INCOMPLETE"));

@@ -5,12 +5,22 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
+import { formatKyivWeekdayDateTime } from "../utils/kyiv-date-label.js";
 
 const prisma = new PrismaClient();
 
-const TEXT_24H_PING = `<b>Запрошення на співбесіду ще діє</b>\n\nВільні місця швидко закінчуються. Якщо ви не оберете час до кінця дня, місце перейде наступному кандидату в черзі.`;
+const HOUR_MS = 60 * 60 * 1000;
+/** Через стільки після запрошення воркер повертає анкету в резерв. */
+export const INVITE_EXPIRY_MS = 48 * HOUR_MS;
 
-const TEXT_48H_RESET = `<b>Термін дії запрошення минув</b>\n\nМісце перейшло іншому кандидату, а вашу анкету ми повернули в резерв. Щойно з'являться нові вакансії — ми напишемо.`;
+/**
+ * Строк у нагадуванні — рівно момент скидання (запрошення + 48 год), у
+ * київській зоні: «сб 03.10, 14:00». Раніше текст казав «до кінця дня», а
+ * скидання наставало наступного дня в іншу годину (аудит 01.10.2026).
+ */
+export function formatInviteDeadline(invitedAt: Date): string {
+    return formatKyivWeekdayDateTime(new Date(invitedAt.getTime() + INVITE_EXPIRY_MS), ", ");
+}
 
 /**
  * Checks candidates invited to interview.
@@ -29,8 +39,8 @@ export async function processInviteReminders(bot: any) {
 
     try {
         const now = new Date();
-        const pingThreshold = new Date(now.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
-        const resetThreshold = new Date(now.getTime() - 48 * 60 * 60 * 1000); // 48 hours ago
+        const pingThreshold = new Date(now.getTime() - 24 * HOUR_MS); // 24 hours ago
+        const resetThreshold = new Date(now.getTime() - INVITE_EXPIRY_MS); // 48 hours ago
 
         // We only care about candidates in SCREENING who have been notified but haven't booked
         const pendingCandidates = await prisma.candidate.findMany({
@@ -66,7 +76,7 @@ export async function processInviteReminders(bot: any) {
                 });
 
                 try {
-                    await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_48H_RESET, { parse_mode: "HTML" });
+                    await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["candidate-invite-expired-48h"], { parse_mode: "HTML" });
                 } catch (e: any) {
                     if (isBotBlocked(e)) {
                         await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
@@ -80,7 +90,7 @@ export async function processInviteReminders(bot: any) {
             // 5 минут, и часовое окно давало около 12 напоминаний подряд.
             else if (invitedTime <= pingThreshold.getTime() && !cand.interviewInviteReminderSentAt) {
                 try {
-                    await bot.api.sendMessage(Number(cand.user.telegramId), TEXT_24H_PING, {
+                    await bot.api.sendMessage(Number(cand.user.telegramId), CANDIDATE_TEXTS["candidate-invite-reminder-24h"](formatInviteDeadline(cand.interviewInvitedAt)), {
                         parse_mode: "HTML",
                         reply_markup: new InlineKeyboard()
                             .text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row()

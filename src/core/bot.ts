@@ -13,6 +13,7 @@ import logger from "./logger.js";
 import { di } from "./container.js";
 import { accessService } from "../services/access-service.js";
 import { sanitizeCallbackData } from "./log-sanitizer.js";
+import { getErrorScreenTexts } from "../utils/error-screen-texts.js";
 
 import type { MyContext } from "../types/context.js";
 
@@ -220,7 +221,8 @@ bot.catch(async (err) => {
     ) {
         logger.warn({ err: err.error, updateId: ctx.update.update_id }, "Telegram screen could not be updated");
         if (ctx.chat?.type === "private") {
-            await ctx.reply("Цей екран уже застарів. Натисни /start, щоб відкрити актуальне меню. ✨").catch(() => {});
+            // Звертання за роллю: кандидатці на «ви», своїм на «ти» (аудит 01.10.2026).
+            await ctx.reply(getErrorScreenTexts(ctx.dbUser).staleScreen).catch(() => {});
         }
         return;
     }
@@ -237,7 +239,9 @@ bot.catch(async (err) => {
 
     try {
         if (ctx.chat?.type === "private") {
-            const fallbackMsg = "🐾 <b>Ой, щось пішло не так!</b>\n\nМої внутрішні системи трохи заплутались, але ми вже з цим працюємо.\n\nБудь ласка, натисни /start, щоб оновити меню і спробувати знову. ✨";
+            // Раніше всім ішло «Ой, щось пішло не так!» на «ти» з 🐾 і ✨ —
+            // і кандидатці теж. Тексти погоджено власником 01.10.2026.
+            const fallbackMsg = getErrorScreenTexts(ctx.dbUser).generic;
             if (ctx.callbackQuery) {
                 await ctx.answerCallbackQuery("Відбулася технічна помилка 🛠️").catch(() => {});
                 await ctx.reply(fallbackMsg, { parse_mode: "HTML" }).catch(() => {});

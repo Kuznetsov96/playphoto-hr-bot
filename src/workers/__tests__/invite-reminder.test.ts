@@ -65,4 +65,47 @@ describe("processInviteReminders", () => {
             interviewInviteReminderSentAt: null,
         }));
     });
+
+    it("напоминание называет точный момент сброса — запрошення + 48 ч по Киеву", async () => {
+        // Раньше текст обещал «до кінця дня», а сброс наступал на следующий
+        // день в другой час.
+        const { processInviteReminders } = await import("../invite-reminder.js");
+        const bot = { api: { sendMessage: vi.fn() } };
+        // 01.10.2026 11:00 UTC = 14:00 по Киеву (UTC+3); +48 ч = сб 03.10, 14:00.
+        const invitedAt = new Date("2026-10-01T11:00:00.000Z");
+        findMany.mockResolvedValue([{ ...invited(25), interviewInvitedAt: invitedAt }]);
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(invitedAt.getTime() + 25 * HOUR));
+        try {
+            await processInviteReminders(bot);
+        } finally {
+            vi.useRealTimers();
+        }
+
+        const [, text, options] = bot.api.sendMessage.mock.calls[0]!;
+        expect(text).toBe("<b>Запрошення на співбесіду ще діє</b>\n\nОберіть зручний час до сб 03.10, 14:00. Після цього запрошення закриється.");
+        expect(options.parse_mode).toBe("HTML");
+        expect(options.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(["start_scheduling", "decline_invite"]);
+    });
+
+    it("дедлайн около полуночи берёт киевскую дату, а не UTC", async () => {
+        const { formatInviteDeadline } = await import("../invite-reminder.js");
+
+        // 30.09 22:30 UTC = 01.10 01:30 Киев; +48 ч = сб 03.10, 01:30.
+        expect(formatInviteDeadline(new Date("2026-09-30T22:30:00.000Z"))).toBe("сб 03.10, 01:30");
+    });
+
+    it("при сбросе пишет согласованный текст закрытия", async () => {
+        const { processInviteReminders } = await import("../invite-reminder.js");
+        const bot = { api: { sendMessage: vi.fn() } };
+        findMany.mockResolvedValue([invited(49, new Date())]);
+
+        await processInviteReminders(bot);
+
+        expect(bot.api.sendMessage).toHaveBeenCalledWith(
+            1,
+            "<b>Запрошення закрито</b>\n\nЧас для запису минув, тому анкету повернули в резерв. Якщо з’явиться місце, надішлемо нове запрошення.",
+            { parse_mode: "HTML" },
+        );
+    });
 });
