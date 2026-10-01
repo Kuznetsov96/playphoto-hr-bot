@@ -25,6 +25,7 @@ import { ScreenManager } from "../utils/screen-manager.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { canRescheduleInterview, canScheduleInterview, hasActiveInterviewBooking, hasInterviewStarted, hasLiveInterviewInvitation } from "../utils/screening-state.js";
 import { buildBookedInterviewKeyboard } from "../utils/interview-booking-keyboard.js";
+import { buildSlotSelectionKeyboard, NO_TIME_FITS_LABEL, SLOT_KEYBOARD_LIMIT } from "../utils/interview-slot-keyboard.js";
 import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 // Ім'я кандидатки їде в сповіщення менторам з parse_mode:"HTML", а
@@ -39,73 +40,8 @@ export const bookingHandlers = new Composer<MyContext>();
 const INTERVIEW_WAITLIST_REASON_NO_SLOTS = "NO_SLOTS_AVAILABLE";
 const INTERVIEW_WAITLIST_REASON_NO_DATE_FITS = "NO_DATE_FITS";
 const BOOKING_ACTION_DEBOUNCE_MS = 15_000;
-const KYIV_TIME_ZONE = "Europe/Kyiv";
 const bookingActionDedupe = new ActionDedupeWindow(BOOKING_ACTION_DEBOUNCE_MS);
 
-type SlotButton = {
-    id: string;
-    startTime: Date;
-};
-
-/**
- * Підпис кнопки слота: «пт 12.09 · 14:00».
- *
- * День тижня — не прикраса. Раніше кнопка казала «12.09 14:00», і щоб
- * зрозуміти, чи це робочий день, людині доводилося йти в календар. Місяць
- * лишається: за два тижні наперед «12» без місяця вже неоднозначне.
- *
- * Скорочення дня тижня в uk-UA виходить як «пт», без крапки. Підпис росте
- * до ~16 символів — саме тому кнопки стоять по одній у рядок.
- */
-function formatSlotButton(slot: SlotButton) {
-    const weekday = slot.startTime.toLocaleDateString("uk-UA", {
-        weekday: "short",
-        timeZone: KYIV_TIME_ZONE
-    });
-    const dateStr = slot.startTime.toLocaleDateString("uk-UA", {
-        day: "2-digit",
-        month: "2-digit",
-        timeZone: KYIV_TIME_ZONE
-    });
-    const timeStr = slot.startTime.toLocaleTimeString("uk-UA", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: KYIV_TIME_ZONE
-    });
-
-    return `${weekday} ${dateStr} · ${timeStr}`;
-}
-
-/**
- * Ліміт слотів на екрані. Був 40: у два стовпці це двадцять рядів, а в один
- * стовпець стало б сорок — стіна, яку неможливо охопити оком, і кнопка «Не
- * бачу зручного часу» під нею недосяжна без довгого скролу. Дванадцять
- * найближчих слотів покривають вибір на кілька днів уперед; кому не
- * підходить жоден, тому потрібна не довша сторінка, а інші дати.
- */
-const SLOT_KEYBOARD_LIMIT = 12;
-const NO_TIME_FITS_LABEL = "Не бачу зручного часу";
-
-function buildSlotSelectionKeyboard(
-    slots: SlotButton[],
-    bookCallbackPrefix: string,
-    noFitCallback: string,
-    limit = SLOT_KEYBOARD_LIMIT,
-    noFitLabel = NO_TIME_FITS_LABEL
-) {
-    const keyboard = new InlineKeyboard();
-
-    // Один слот у рядок. З днем тижня підпис виріс до ~16 символів, а
-    // Telegram ділить ширину рядка порівну: дві такі кнопки поруч на
-    // вузькому екрані обрізаються рівно там, де стоїть час. Вертикальний
-    // список читається як розклад і не змушує звіряти дати по діагоналі.
-    slots.slice(0, limit).forEach((slot) => {
-        keyboard.text(formatSlotButton(slot), `${bookCallbackPrefix}${slot.id}`).row();
-    });
-
-    keyboard.text(noFitLabel, noFitCallback).row();
-    return keyboard;
-}
 
 /**
  * Замінює екран текстом, лишаючи вихід на живу людину.
@@ -715,7 +651,7 @@ bookingHandlers.callbackQuery("start_scheduling", async (ctx) => {
         // Кнопки «Повідомити мене» тут більше немає: кандидатка вже в черзі,
         // і натискання нічого не змінювало — тост і порожня дія. Обіцянку
         // сповістити тримає текст, а єдина кнопка веде до живої людини.
-        const text = `Графік співбесід зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться нові вікна для запису.`;
+        const text = CANDIDATE_TEXTS["candidate-interview-no-slots"];
         const kb = new InlineKeyboard();
         const candidate = await candidateRepository.findByTelegramId(telegramId);
         if (candidate?.gender !== "male") {

@@ -21,7 +21,15 @@ import { bookingService } from "./booking-service.js";
  */
 
 /** Причины освобождения — уходят в releasedReason вебаппа (контракт: ≤120). */
-export type CanonicalReleaseReason = "candidate_cancelled" | "candidate_withdrew" | "rescheduled" | "booking_rejected";
+export type CanonicalReleaseReason =
+    | "candidate_cancelled"
+    | "candidate_withdrew"
+    | "rescheduled"
+    | "booking_rejected"
+    // Перенос командою вебаппа (рішення власника 01.10.2026): зустріч зірвалася
+    // з вини HR або кандидатка сама попросила інший час.
+    | "hr_missed"
+    | "candidate_asked_reschedule";
 
 /** Минимум, который нужен клавиатуре выбора слота. */
 export interface AvailableInterviewSlot {

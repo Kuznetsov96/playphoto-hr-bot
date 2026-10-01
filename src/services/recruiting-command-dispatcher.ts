@@ -279,6 +279,36 @@ export class RecruitingCommandDispatcher {
                 }
                 return;
             }
+            case "RESCHEDULE_INTERVIEW": {
+                // Перенос співбесіди (рішення власника 01.10.2026): звільнити
+                // слот, повернути кандидатку до вибору часу й надіслати
+                // список слотів. Сервіс імпортується ліниво — він тягне
+                // бронювання й календар, які решті команд не потрібні.
+                const {
+                    isInterviewRescheduleReason,
+                    rescheduleInterviewByCommand,
+                } = await import("./interview-reschedule-service.js");
+                if (!isInterviewRescheduleReason(command.reasonCode)) {
+                    // Причина визначає і текст кандидатці, і причину звільнення
+                    // слота у вебаппі — вгадувати її не можна.
+                    throw new Error(`RESCHEDULE_UNKNOWN_REASON:${command.reasonCode ?? "missing"}`);
+                }
+                const result = await rescheduleInterviewByCommand(api, candidate.id, command.reasonCode, {
+                    isRetry: command.attempts > 0,
+                });
+                if (!result.ok) {
+                    // Суфікс «:state_conflict» вебапп читає як остаточну
+                    // відмову (FAILED без повторів) — так само, як у запрошенні.
+                    if (result.reason === "state_conflict") {
+                        throw new Error("RESCHEDULE_NOT_APPLIED:state_conflict");
+                    }
+                    if (result.reason === "not_found") throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
+                    // Перенос записано, не дійшло лише повідомлення: повтор
+                    // команди дошле його (див. isAlreadyRescheduled у сервісі).
+                    throw new Error(`RESCHEDULE_NOT_SENT:${result.reason}`);
+                }
+                return;
+            }
             case "ACCEPT_AFTER_INTERVIEW": {
                 // Кнопка «✅ Accept Offer»: решение с шестичасовой задержкой
                 // доставки — оффер кандидатке отправит воркер, как и всегда.
