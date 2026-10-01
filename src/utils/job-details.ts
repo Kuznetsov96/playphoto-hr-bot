@@ -155,5 +155,5 @@ export function buildJobDetailsText(location: JobDetailsLocation | null | undefi
 
     if (lines.length === 0) return null;
 
-    return `<b>${escapeHtml(formatLocation(location, "listing"))}</b>\n${lines.join("\n")}`;
+    return `<b>${escapeHtml(formatLocation(location, "in-city"))}</b>\n${lines.join("\n")}`;
 }

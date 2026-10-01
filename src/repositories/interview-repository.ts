@@ -135,7 +135,9 @@ export class InterviewRepository {
                 remindedCompletion: false,
                 candidate: { status }
             },
-            include: { candidate: true }
+            // user — щоб написати кандидатці після автозавершення:
+            // telegramId лежить на User, а не на Candidate.
+            include: { candidate: { include: { user: true } } }
         });
     }
 

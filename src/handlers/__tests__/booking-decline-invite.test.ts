@@ -212,10 +212,12 @@ describe("booking decline invite", () => {
             { user: { telegramId: BigInt(123456) } },
             expect.objectContaining({
                 status: "REJECTED",
-                hrDecision: "REJECTED",
+                candidateDecision: "Відмова кандидата (не актуально)",
                 googleMeetLink: null,
             })
         );
+        // Відмовилась сама — у вебаппі це не має виглядати рішенням HR (B9).
+        expect(updateMany.mock.calls[0]![1]).not.toHaveProperty("hrDecision");
         expect(ctx.editMessageText).toHaveBeenCalledWith(
             CANDIDATE_TEXTS["candidate-interview-invitation-declined"],
         );
@@ -340,12 +342,19 @@ describe("booking decline invite", () => {
         expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Цей запис уже неактуальний");
     });
 
-    it("cancels a mentor-stage booking without rejecting the candidate", async () => {
+    // Аудит 01.10.2026: запис на знайомство/навчання прибрано. Старі кнопки
+    // в чатах лишилися — тап має лише відповісти й показати статус.
+    it.each([
+        ["cct", "training-slot-cancel"],
+        ["cwm", "discovery-slot-withdraw"],
+        ["rt", "training-slot-reschedule"],
+        ["cstg", "cand-staging"],
+    ])("стара кнопка %s етапу наставника нічого не змінює", async (code, payload) => {
         findByTelegramId.mockResolvedValue({
-            id: "cand-mentor-cancel",
+            id: "cand-hired",
             fullName: "Jane",
-            status: "TRAINING_SCHEDULED",
-            trainingSlotId: "training-slot-cancel",
+            status: "HIRED",
+            trainingSlotId: payload,
         });
 
         const ctx = {
@@ -355,52 +364,30 @@ describe("booking decline invite", () => {
             api: { sendMessage: vi.fn() },
         };
 
-        await bookingHandlers.__runCallback(buildSignedCallback("cct", "training-slot-cancel"), ctx);
+        await bookingHandlers.__runCallback(buildSignedCallback(code, payload), ctx);
 
-        expect(cancelTrainingSlot).toHaveBeenCalledWith("training-slot-cancel", 555666);
-        expect(update).toHaveBeenCalledWith(
-            "cand-mentor-cancel",
-            expect.objectContaining({
-                status: "WAITLIST_MENTOR",
-                currentStep: "TRAINING",
-                isWaitlisted: true,
-                candidateDecision: null,
-                notificationSent: false,
-                trainingMeetLink: null,
-            })
-        );
-        expect(update).not.toHaveBeenCalledWith(
-            "cand-mentor-cancel",
-            expect.objectContaining({ status: "REJECTED" })
-        );
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Цей запис уже неактуальний");
+        expect(cancelTrainingSlot).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
+        expect(updateMany).not.toHaveBeenCalled();
     });
 
-    it("rejects mentor-stage candidates only after explicit withdrawal confirmation", async () => {
-        findByTelegramId.mockResolvedValue({
-            id: "cand-mentor-withdraw",
-            fullName: "Jane",
-            status: "DISCOVERY_SCHEDULED",
-            discoverySlotId: "discovery-slot-withdraw",
-        });
+    it.each(["start_training_scheduling", "training_no_slots_fit", "book_training_slot_abc", "training_date_header_1"])(
+        "стара кнопка запису на навчання %s не переводить у WAITLIST_MENTOR",
+        async (data) => {
+            findByTelegramId.mockResolvedValue({ id: "cand-screening", status: "SCREENING" });
+            const ctx = {
+                from: { id: 555667 },
+                answerCallbackQuery: vi.fn(),
+                editMessageText: vi.fn(),
+                api: { sendMessage: vi.fn() },
+            };
 
-        const ctx = {
-            from: { id: 777888 },
-            answerCallbackQuery: vi.fn(),
-            editMessageText: vi.fn(),
-            api: { sendMessage: vi.fn() },
-        };
+            await bookingHandlers.__runCallback(data, ctx);
 
-        await bookingHandlers.__runCallback(buildSignedCallback("cwm", "discovery-slot-withdraw"), ctx);
-
-        expect(cancelTrainingSlot).toHaveBeenCalledWith("discovery-slot-withdraw", 777888);
-        expect(update).toHaveBeenCalledWith(
-            "cand-mentor-withdraw",
-            expect.objectContaining({
-                status: "REJECTED",
-                candidateDecision: "Кандидатка відмовилась від вакансії на mentor-етапі",
-                notificationSent: true,
-                trainingMeetLink: null,
-            })
-        );
-    });
+            expect(ctx.answerCallbackQuery).toHaveBeenCalledTimes(1);
+            expect(update).not.toHaveBeenCalled();
+            expect(updateMany).not.toHaveBeenCalled();
+        },
+    );
 });

@@ -336,4 +336,48 @@ describe("candidate funnel guard", () => {
 
         expect(() => validateCandidateFunnelTransition(context)).toThrow(InvalidCandidateTransitionError);
     });
+
+    // B17, аудит 01.10.2026: materialsSent=true лишився в кандидаток зі старого
+    // флоу наставника. Guard читав його як «входить у mentor flow» на БУДЬ-ЯКОМУ
+    // апдейті, тож notifyWaitlist слав «нові вікна», а запис стану падав —
+    // і на кожен новий слот вона отримувала повідомлення знову.
+    describe("успадкований materialsSent зі старого флоу", () => {
+        const legacyWaiting = () => makeCandidate({
+            status: CandidateStatus.WAITLIST_HR,
+            currentStep: FunnelStep.INTERVIEW,
+            isWaitlisted: true,
+            materialsSent: true,
+        });
+
+        it("не блокує запис «нові вікна» з notifyWaitlist", () => {
+            const context = buildNextCandidateFunnelState(legacyWaiting(), {
+                status: CandidateStatus.SCREENING,
+                isWaitlisted: false,
+                notificationSent: true,
+                interviewWaitlistReason: "NO_SLOTS_AVAILABLE",
+                interviewWaitlistedAt: new Date(),
+                interviewInvitedAt: null,
+                interviewInviteReminderSentAt: null,
+            });
+
+            expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+        });
+
+        it("не блокує бронь співбесіди", () => {
+            const context = buildNextCandidateFunnelState(legacyWaiting(), {
+                status: CandidateStatus.INTERVIEW_SCHEDULED,
+            });
+
+            expect(() => validateCandidateFunnelTransition(context)).not.toThrow();
+        });
+
+        it("перехід у ACCEPTED без апруву так само заборонений", () => {
+            const context = buildNextCandidateFunnelState(legacyWaiting(), {
+                status: CandidateStatus.ACCEPTED,
+                currentStep: FunnelStep.TRAINING,
+            });
+
+            expect(() => validateCandidateFunnelTransition(context)).toThrow(InvalidCandidateTransitionError);
+        });
+    });
 });

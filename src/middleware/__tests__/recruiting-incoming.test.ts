@@ -40,7 +40,7 @@ vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const { recruitingIncomingMiddleware } = await import("../recruiting-incoming.js");
+const { recruitingIncomingMiddleware, isMirroredCandidateMessage } = await import("../recruiting-incoming.js");
 const { AwsBusinessApiError } = await import("../../services/aws-business-client.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -524,5 +524,19 @@ describe("recruitingIncomingMiddleware: подстраховка при сбое
 
         expect(sendMessage).not.toHaveBeenCalled();
         adminIds = [107794048];
+    });
+});
+
+describe("isMirroredCandidateMessage", () => {
+    it("текст поза анкетою — так; відповідь анкети, команда і стікер — ні", () => {
+        expect(isMirroredCandidateMessage(makeCtx() as never)).toBe(true);
+        expect(isMirroredCandidateMessage(makeCtx({ session: { step: "screening_name" } }) as never)).toBe(false);
+        expect(isMirroredCandidateMessage(makeCtx({ message: { message_id: 1, date: 1, text: "/start" } }) as never)).toBe(false);
+        expect(isMirroredCandidateMessage(makeCtx({ message: { message_id: 1, date: 1, sticker: { file_id: "s" } } }) as never)).toBe(false);
+    });
+
+    it("вимкнений контур — ні", () => {
+        flagEnabled = false;
+        expect(isMirroredCandidateMessage(makeCtx() as never)).toBe(false);
     });
 });

@@ -62,6 +62,32 @@ export const normalizeCity = (city: string) => {
 };
 
 /**
+ * Українські назви міст для того, що читає кандидатка: кнопки міст в анкеті
+ * й речення на кшталт «У місті Запоріжжя…». У сесії й базі лишається
+ * канонічне латинське значення (CITY_MAP) — змінюється лише показ.
+ * Аудит 01.10.2026, погоджено власником.
+ */
+const CITY_LABELS_UK: Record<string, string> = {
+    "Kyiv": "Київ",
+    "Lviv": "Львів",
+    "Zaporizhzhia": "Запоріжжя",
+    "Kolomyya": "Коломия",
+    "Khmelnytskyi": "Хмельницький",
+    "Cherkasy": "Черкаси",
+    "Rivne": "Рівне",
+    "Sambir": "Самбір",
+    "Sheptytskyi": "Шептицький",
+    "Kharkiv": "Харків",
+    "Chortkiv": "Чортків",
+    "Ternopil": "Тернопіль",
+};
+
+/** Канонічне (або будь-яке відоме CITY_MAP) значення міста → українська назва; невідоме — як є. */
+export function formatCityUk(city: string): string {
+    return CITY_LABELS_UK[normalizeCity(city)] ?? city;
+}
+
+/**
  * Where a location label is being shown, which decides how the city appears.
  *
  * The venue part never varies — DDS cleanup, a city echoed inside the raw name, and the

@@ -1,4 +1,5 @@
 import { InlineKeyboard } from "grammy";
+import { formatKyivWeekdayDateTime } from "./kyiv-date-label.js";
 
 /**
  * Клавіатура вибору часу співбесіди/навчання. Винесена з handlers/booking.ts,
@@ -7,7 +8,6 @@ import { InlineKeyboard } from "grammy";
  * пізно розійшлися б у підписах і ліміті.
  */
 
-const KYIV_TIME_ZONE = "Europe/Kyiv";
 
 export type SlotButton = {
     id: string;
@@ -25,22 +25,7 @@ export type SlotButton = {
  * до ~16 символів — саме тому кнопки стоять по одній у рядок.
  */
 function formatSlotButton(slot: SlotButton) {
-    const weekday = slot.startTime.toLocaleDateString("uk-UA", {
-        weekday: "short",
-        timeZone: KYIV_TIME_ZONE
-    });
-    const dateStr = slot.startTime.toLocaleDateString("uk-UA", {
-        day: "2-digit",
-        month: "2-digit",
-        timeZone: KYIV_TIME_ZONE
-    });
-    const timeStr = slot.startTime.toLocaleTimeString("uk-UA", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: KYIV_TIME_ZONE
-    });
-
-    return `${weekday} ${dateStr} · ${timeStr}`;
+    return formatKyivWeekdayDateTime(slot.startTime, " · ");
 }
 
 /**

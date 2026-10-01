@@ -160,7 +160,7 @@ describe("buildJobDetailsText", () => {
         });
 
         expect(text).toBe(
-            "<b>Leoland (Lviv)</b>\n" +
+            "<b>Leoland</b>\n" +
             "Адреса: Львів, вул. Мельника 18\n" +
             "Години роботи: Пн–Пт 10:00–21:00, Сб–Нд 10:00–22:00\n" +
             "Оплата: 25 % від виручки в будні, 30 % у вихідні; удвох — 18 %\n" +
@@ -170,7 +170,7 @@ describe("buildJobDetailsText", () => {
 
     it("omits every line that has no data", () => {
         expect(buildJobDetailsText({ ...location, address: null, openingHours: [], pay: pay({ weekdayGuarantee: 0, weekendGuarantee: 0 }) }))
-            .toBe("<b>Leoland (Lviv)</b>\nОплата: 25 % від виручки в будні, 30 % у вихідні");
+            .toBe("<b>Leoland</b>\nОплата: 25 % від виручки в будні, 30 % у вихідні");
     });
 
     it("returns null when there is nothing to show — no invented defaults", () => {

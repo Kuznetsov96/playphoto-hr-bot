@@ -38,6 +38,31 @@ function isRecoveryEligibleCandidate(candidate: any): boolean {
 }
 
 /**
+ * Текст екрана /start після відмови — за причиною (аудит 01.10.2026, тексти
+ * погоджено власником). Раніше всім ішло «ми не зможемо запропонувати вам
+ * місце», і та, що сама закрила заявку, читала це як нашу відмову.
+ *
+ * - сама закрила заявку: candidateDecision пишуть лише її власні дії
+ *   (booking.ts decline_invite / cwi / відмова на етапі навчання,
+ *   hr-service відмова від стажування). Виняток — «Бот заблоковано»
+ *   (utils/bot-blocked.ts): це доставка, а не її рішення;
+ * - замолода (REJECTED_SYSTEM_UNDERAGE): той самий текст, що прийшов при
+ *   відмові, — хлопцю відмова хлопцю, бо обіцянка «бот нагадає» йому не діє;
+ * - решта (HR, неявка, вік понад межу) — загальна відмова.
+ */
+export function selectRejectedStatusText(candidate: any): string {
+    if (candidate.candidateDecision && !hasBlockedDeliveryReason(candidate)) {
+        return CANDIDATE_TEXTS["candidate-withdrawn"];
+    }
+    if (candidate.hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
+        return candidate.gender === "male"
+            ? CANDIDATE_TEXTS["candidate-reject-male-location"]
+            : CANDIDATE_TEXTS["candidate-reject-underage"];
+    }
+    return CANDIDATE_TEXTS["candidate-rejected"];
+}
+
+/**
  * Блок «Твоя робота»: дані точки зі знімка вебаппа (рішення власника
  * 01.10.2026). Кандидатку вантажать різні місця, і години роботи (окрема
  * таблиця) приходять не завжди — дочитуємо локацію разом із ними. Збій
@@ -106,7 +131,9 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
                 if (canScheduleInterview(candidate)) {
                     text = candidate.currentStep === FunnelStep.INTERVIEW
                         ? CANDIDATE_TEXTS["candidate-waitlist-slots"]("співбесіди")
-                        : CANDIDATE_TEXTS["candidate-interview-invitation"](candidate.location ? formatLocation(candidate.location, "listing") : (candidate.city || ""));
+                        // Та сама назва, що в повідомленні-запрошенні (hr-service
+                        // inviteCandidate): з філією, без точки — без рядка про локацію.
+                        : CANDIDATE_TEXTS["candidate-interview-invitation"](candidate.location ? formatLocation(candidate.location, "in-city") : null);
                     kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row();
                 } else {
                     text = CANDIDATE_TEXTS["candidate-success-screening"];
@@ -124,14 +151,25 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         case CandidateStatus.WAITLIST_HR:
         case CandidateStatus.WAITLIST_MENTOR: {
             const { FunnelStep } = await import("@prisma/client");
-            const isWaitingForSlots = candidate.currentStep === FunnelStep.INTERVIEW || candidate.currentStep === FunnelStep.TRAINING;
-            const typeText = candidate.currentStep === FunnelStep.TRAINING ? "знайомства та навчання" : "співбесіди";
+            // Черга на знайомство/навчання (WAITLIST_MENTOR або WAITLIST на
+            // кроці TRAINING) — уже після апруву співбесіди. Запис на ці етапи
+            // з бота прибрано (аудит 01.10.2026): кнопка «Обрати час» вела в
+            // «Графік оновлюється… надішлемо сповіщення», а сповіщення ніхто
+            // не надсилав. Такій кандидатці — той самий екран, що прийнятій:
+            // власниця напише щодо навчання сама.
+            if (status === CandidateStatus.WAITLIST_MENTOR || candidate.currentStep === FunnelStep.TRAINING) {
+                text = CANDIDATE_TEXTS["candidate-accepted-welcome"]();
+                kb.text("Написати нам", "contact_hr");
+                break;
+            }
+
+            const isWaitingForSlots = candidate.currentStep === FunnelStep.INTERVIEW;
 
             text = isWaitingForSlots
-                ? CANDIDATE_TEXTS["candidate-waitlist-slots"](typeText)
+                ? CANDIDATE_TEXTS["candidate-waitlist-slots"]("співбесіди")
                 : CANDIDATE_TEXTS["candidate-success-waitlist"];
 
-            if (isWaitingForSlots) kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], candidate.currentStep === FunnelStep.TRAINING ? "start_training_scheduling" : "start_scheduling").row();
+            if (isWaitingForSlots) kb.text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling").row();
             if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
         }
@@ -143,7 +181,11 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
 
         case CandidateStatus.INTERVIEW_COMPLETED:
         case CandidateStatus.DECISION_PENDING:
-            text = `Приємно було познайомитися!\n\nВаша анкета на розгляді у HR — відповідь надішлемо найближчим часом.` + jobDetails;
+            // Поки рішення немає — те саме, що воркер пише після автозавершення
+            // співбесіди (interview-auto-complete.ts), з тим самим строком.
+            text = (candidate.hrDecision
+                ? `Приємно було познайомитися!\n\nВаша анкета на розгляді у HR — відповідь надішлемо найближчим часом.`
+                : CANDIDATE_TEXTS["candidate-interview-thanks"]) + jobDetails;
             if (canContactStaff) kb.text("Написати нам", "contact_hr");
             break;
 
@@ -186,11 +228,13 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         }
 
         case CandidateStatus.HIRED:
-            text = "<b>Вітаємо!</b>\n\nТи вже частина команди PlayPhoto. Натисни /start, щоб відкрити робочий кабінет.";
+            // Сюди доходить лише та, в кого ще немає активного профілю: раніше
+            // екран радив натиснути /start — і /start вів на цей самий екран.
+            text = CANDIDATE_TEXTS["candidate-hired-no-cabinet"];
             break;
 
         case CandidateStatus.REJECTED:
-            text = CANDIDATE_TEXTS["candidate-rejected"];
+            text = selectRejectedStatusText(candidate);
             if (canUseRecovery) {
                 text += "\n\nРаніше наші повідомлення не доходили до вас у боті. Якщо хочете відновити зв’язок із командою — напишіть нам.";
                 kb.text("Написати нам", "contact_recovery");

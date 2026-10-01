@@ -320,3 +320,97 @@ describe("ранние шаги анкеты у законченной анке�
         expect(ctx.di.candidateRepository.upsert).not.toHaveBeenCalled();
     });
 });
+
+describe("отказ на шаге даты рождения и без вакансий (аудит 01.10.2026)", () => {
+    function ctxFor(candidateData: Record<string, any>) {
+        return {
+            session: { step: "screening_birth_day", candidateData },
+            from: { id: 1 },
+            update: { update_id: 1 },
+            di: {
+                locationRepository: { findByCity: vi.fn(async () => []) },
+                candidateRepository: { upsert: vi.fn(async () => ({})) },
+                userRepository: {
+                    upsert: vi.fn(async () => ({ id: "u1" })),
+                    findWithCandidateProfileByTelegramId: vi.fn(async () => ({ candidate: null })),
+                },
+            },
+        } as any;
+    }
+    const fifteenYearsAgo = new Date().getFullYear() - 15;
+
+    it("парню младше 17 — отказ парню, а не обещание «бот нагадає»", async () => {
+        // Реактивация младших работает только для gender=female, поэтому
+        // обещание напомнить ему не выполнилось бы никогда.
+        const { handleBirthDateSelected } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const { CANDIDATE_TEXTS } = await import("../../../../constants/candidate-texts.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await handleBirthDateSelected(ctxFor({ gender: "male", birthYear: fifteenYearsAgo, birthMonth: 1 }), 15);
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-reject-male-location"]);
+        expect(text).not.toContain("нагадає");
+    });
+
+    it("девушке младше 17 — по-прежнему текст с напоминанием", async () => {
+        const { handleBirthDateSelected } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        const { CANDIDATE_TEXTS } = await import("../../../../constants/candidate-texts.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+
+        await handleBirthDateSelected(ctxFor({ gender: "female", birthYear: fifteenYearsAgo, birthMonth: 1 }), 15);
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-reject-underage"]);
+    });
+
+    it("город без вакансий называется по-украински, хотя в сессии канонический ключ", async () => {
+        const { handleNoVacancies } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+        const ctx = ctxFor({ gender: "female", fullName: "Анна Коваль", birthDate: "2005-01-01T00:00:00.000Z", city: "Zaporizhzhia" });
+
+        await handleNoVacancies(ctx, "Zaporizhzhia");
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toContain("У місті Запоріжжя зараз немає відкритих вакансій.");
+        expect(ctx.di.candidateRepository.upsert).toHaveBeenCalledWith(expect.objectContaining({
+            update: expect.objectContaining({ city: "Zaporizhzhia" }),
+        }));
+    });
+});
+
+describe("candidate text outside the questionnaire", () => {
+    const makeCtx = async (text: string, step?: string) => {
+        const { Context } = await import("grammy");
+        const api = { deleteMessage: vi.fn().mockResolvedValue(true), sendMessage: vi.fn() };
+        const update = { update_id: 1, message: { message_id: 5, date: 1, text, chat: { id: 42, type: "private" }, from: { id: 42, is_bot: false, first_name: "A" } } };
+        const ctx = new Context(update as never, api as never, { id: 1, is_bot: true } as never) as any;
+        ctx.session = { step, candidateData: {} };
+        // Анкета вважається відкритою: кандидатки в базі ще немає.
+        ctx.di = { userRepository: { findWithCandidateProfileByTelegramId: vi.fn().mockResolvedValue(null) } };
+        return { ctx, api };
+    };
+
+    it("не стирає повідомлення поза анкетою і передає далі", async () => {
+        const { candidateHandlers } = await import("../index.js");
+        const { ctx, api } = await makeCtx("а коли співбесіда?", "idle");
+        const next = vi.fn();
+
+        await candidateHandlers.middleware()(ctx, next);
+
+        expect(api.deleteMessage).not.toHaveBeenCalled();
+        expect(next).toHaveBeenCalled();
+    });
+
+    it("відповідь на питання анкети, як і раніше, прибирається", async () => {
+        const { candidateHandlers } = await import("../index.js");
+        const { ctx, api } = await makeCtx("а", "screening_name");
+
+        await candidateHandlers.middleware()(ctx, vi.fn());
+
+        expect(api.deleteMessage).toHaveBeenCalled();
+    });
+});

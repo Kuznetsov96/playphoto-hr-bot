@@ -20,6 +20,8 @@ vi.mock("../aws-business-client.js", () => ({
 
 const inviteCandidate = vi.fn();
 const makeDecision = vi.fn();
+const rejectAfterInterview = vi.fn();
+const acceptAfterInterview = vi.fn();
 const markNoShow = vi.fn();
 const rejectCandidate = vi.fn();
 
@@ -27,6 +29,8 @@ vi.mock("../hr-service.js", () => ({
     hrService: {
         inviteCandidate,
         makeDecision,
+        rejectAfterInterview,
+        acceptAfterInterview,
         markNoShow,
         rejectCandidate,
     },
@@ -100,6 +104,7 @@ beforeEach(() => {
     findByTelegramId.mockResolvedValue(localCandidate);
     inviteCandidate.mockResolvedValue({ ok: true });
     makeDecision.mockResolvedValue(true);
+    acceptAfterInterview.mockResolvedValue(true);
     markNoShow.mockResolvedValue(true);
     rejectCandidate.mockResolvedValue(true);
     rescheduleInterviewByCommand.mockResolvedValue({ ok: true, delivered: true, slotsOffered: 3 });
@@ -134,23 +139,27 @@ describe("RecruitingCommandDispatcher", () => {
         expect(ackFailed).not.toHaveBeenCalled();
     });
 
-    it("ACCEPT_AFTER_INTERVIEW maps to makeDecision(..., 'ACCEPTED')", async () => {
+    it("ACCEPT_AFTER_INTERVIEW maps to acceptAfterInterview — the offer is sent at once", async () => {
         const api = makeApi();
+        acceptAfterInterview.mockResolvedValue(true);
         listPending.mockResolvedValue({ items: [command({ kind: "ACCEPT_AFTER_INTERVIEW" })] });
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
-        expect(makeDecision).toHaveBeenCalledWith(api, "cand-1", "ACCEPTED", expect.any(String));
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String));
+        expect(makeDecision).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
     });
 
-    it("REJECT_AFTER_INTERVIEW maps to makeDecision(..., 'REJECTED')", async () => {
+    it("REJECT_AFTER_INTERVIEW maps to rejectAfterInterview — rejection is sent at once", async () => {
         const api = makeApi();
+        rejectAfterInterview.mockResolvedValue(true);
         listPending.mockResolvedValue({ items: [command({ kind: "REJECT_AFTER_INTERVIEW" })] });
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
-        expect(makeDecision).toHaveBeenCalledWith(api, "cand-1", "REJECTED", expect.any(String));
+        expect(rejectAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String));
+        expect(makeDecision).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalled();
     });
 
@@ -320,7 +329,7 @@ describe("RecruitingCommandDispatcher", () => {
         const guardError = Object.assign(new Error("Invalid transition"), {
             reasonCode: "DECISION_ALREADY_MADE",
         });
-        makeDecision.mockRejectedValue(guardError);
+        acceptAfterInterview.mockRejectedValue(guardError);
         listPending.mockResolvedValue({ items: [command({ kind: "ACCEPT_AFTER_INTERVIEW" })] });
 
         await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
@@ -332,7 +341,7 @@ describe("RecruitingCommandDispatcher", () => {
     });
 
     it("truncates a long error message before reporting it", async () => {
-        makeDecision.mockRejectedValue(new Error("x".repeat(600)));
+        acceptAfterInterview.mockRejectedValue(new Error("x".repeat(600)));
         listPending.mockResolvedValue({ items: [command({ kind: "ACCEPT_AFTER_INTERVIEW" })] });
 
         await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
@@ -349,7 +358,7 @@ describe("RecruitingCommandDispatcher", () => {
                 command({ publicId: "22222222-2222-4222-8222-222222222222", kind: "REJECT" }),
             ],
         });
-        makeDecision.mockRejectedValue(new Error("db down"));
+        acceptAfterInterview.mockRejectedValue(new Error("db down"));
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 

@@ -18,6 +18,7 @@ import { escapeHtml, htmlToPlainText } from "../handlers/admin/utils.js";
 
 import { CANDIDATE_TEXTS, getTrainingTypeLabel } from "../constants/candidate-texts.js";
 import { processInviteReminders } from "../workers/invite-reminder.js";
+import { autoCompleteOverdueInterviews } from "./interview-auto-complete.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { sessionRepository } from "../repositories/session-repository.js";
@@ -482,33 +483,7 @@ export async function startWorker(bot: Bot<MyContext>) {
 
             // 6.5 Нагадування наставнику прибрано 01.10.2026: наставника в процесі немає.
             // 7. Auto-Complete (Interview & Training)
-            const completedSlots = await interviewRepository.findOverdueBooked(CandidateStatus.INTERVIEW_SCHEDULED);
-
-            for (const slot of completedSlots) {
-                if (!slot.candidate) continue;
-                try {
-                    await candidateRepository.update(slot.candidate.id, {
-                        status: CandidateStatus.INTERVIEW_COMPLETED,
-                        interviewCompletedAt: slot.endTime
-                    });
-                    logBusinessEvent({
-                        event: "candidate.interview.auto_completed",
-                        candidateId: slot.candidate.id,
-                        actorType: "system",
-                        actorRole: "system",
-                        stage: "INTERVIEW_COMPLETED",
-                        result: "success",
-                        module: "worker",
-                        operation: "processAutoCompleteInterview",
-                        safeContext: {
-                            slotId: slot.id,
-                            completedAt: slot.endTime.toISOString(),
-                        },
-                    });
-
-                    await interviewRepository.updateSlot(slot.id, { remindedCompletion: true });
-                } catch (e) { }
-            }
+            await autoCompleteOverdueInterviews(bot.api);
 
             // MENTOR NOTIFICATION: Delayed from startTime
             // Discovery (Знайомство) - 20 min from start
@@ -1171,7 +1146,13 @@ async function repairRejectedInterviewCompletedStates() {
     const inconsistentCandidates = await prisma.candidate.findMany({
         where: {
             status: CandidateStatus.INTERVIEW_COMPLETED,
-            hrDecision: { in: ["REJECTED", "NOSHOW"] }
+            // Відмову без надісланого листа не чіпаємо: її добере крок 1
+            // (лист після 6 год). Раніше ремонт забирав її першим, і лист не
+            // йшов нікому — 81 кандидатка за 45 днів (аудит 01.10.2026).
+            OR: [
+                { hrDecision: "NOSHOW" },
+                { hrDecision: "REJECTED", notificationSent: true },
+            ]
         },
         include: { user: true },
         // Та сама межа, що й у recoverStaleInterviewCandidates: залишок
