@@ -36,6 +36,19 @@ vi.mock("../hr-service.js", () => ({
     },
 }));
 
+const rescheduleInterviewByCommand = vi.fn();
+
+// Справжній предикат причин — маппінг reasonCode перевіряється разом із ним.
+vi.mock("../interview-reschedule-service.js", async () => {
+    const actual = await vi.importActual<typeof import("../interview-reschedule-service.js")>(
+        "../interview-reschedule-service.js",
+    );
+    return {
+        isInterviewRescheduleReason: actual.isInterviewRescheduleReason,
+        rescheduleInterviewByCommand,
+    };
+});
+
 const findByTelegramId = vi.fn();
 
 vi.mock("../../repositories/candidate-repository.js", () => ({
@@ -94,6 +107,7 @@ beforeEach(() => {
     acceptAfterInterview.mockResolvedValue(true);
     markNoShow.mockResolvedValue(true);
     rejectCandidate.mockResolvedValue(true);
+    rescheduleInterviewByCommand.mockResolvedValue({ ok: true, delivered: true, slotsOffered: 3 });
     listPending.mockResolvedValue({ items: [] });
     ackApplied.mockResolvedValue({ publicId: "x", status: "APPLIED" });
     ackFailed.mockResolvedValue({ publicId: "x", status: "PENDING" });
@@ -180,6 +194,80 @@ describe("RecruitingCommandDispatcher", () => {
 
         expect(rejectCandidate).toHaveBeenCalledWith(api, "cand-1", "GENERAL");
         expect(ackApplied).toHaveBeenCalled();
+    });
+
+    describe("RESCHEDULE_INTERVIEW (рішення власника 01.10.2026)", () => {
+        it.each([
+            ["CANDIDATE_ASKED"],
+        ])("passes reasonCode %s to the reschedule service and acks applied", async (reasonCode) => {
+            const api = makeApi();
+            listPending.mockResolvedValue({
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode })],
+            });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(rescheduleInterviewByCommand).toHaveBeenCalledWith(api, "cand-1", reasonCode, { isRetry: false });
+            expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
+            expect(ackFailed).not.toHaveBeenCalled();
+        });
+
+        it("marks a repeated attempt as a retry so the service can resend a lost message", async () => {
+            listPending.mockResolvedValue({
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "CANDIDATE_ASKED", attempts: 1 })],
+            });
+
+            await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
+
+            expect(rescheduleInterviewByCommand).toHaveBeenCalledWith(
+                expect.anything(), "cand-1", "CANDIDATE_ASKED", { isRetry: true },
+            );
+        });
+
+        it("fails with a ':state_conflict' suffix so the webapp stops retrying", async () => {
+            rescheduleInterviewByCommand.mockResolvedValue({ ok: false, reason: "state_conflict" });
+            listPending.mockResolvedValue({
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "CANDIDATE_ASKED" })],
+            });
+
+            await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
+
+            expect(ackFailed).toHaveBeenCalledWith(
+                "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "RESCHEDULE_NOT_APPLIED:state_conflict",
+            );
+            expect(ackApplied).not.toHaveBeenCalled();
+        });
+
+        it("fails with RESCHEDULE_NOT_SENT:send_failed when Telegram refused the message", async () => {
+            rescheduleInterviewByCommand.mockResolvedValue({ ok: false, reason: "send_failed" });
+            listPending.mockResolvedValue({
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode: "CANDIDATE_ASKED" })],
+            });
+
+            await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
+
+            expect(ackFailed).toHaveBeenCalledWith(
+                "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "RESCHEDULE_NOT_SENT:send_failed",
+            );
+        });
+
+        it.each([
+            ["SOMETHING_NEW", "RESCHEDULE_UNKNOWN_REASON:SOMETHING_NEW"],
+            // Причину «зірвали ми» власник прибрав 01.10.2026.
+            ["HR_MISSED", "RESCHEDULE_UNKNOWN_REASON:HR_MISSED"],
+            [null, "RESCHEDULE_UNKNOWN_REASON:missing"],
+        ])("refuses unknown reasonCode %s without touching the candidate", async (reasonCode, expected) => {
+            listPending.mockResolvedValue({
+                items: [command({ kind: "RESCHEDULE_INTERVIEW", reasonCode })],
+            });
+
+            await new RecruitingCommandDispatcher().runOnce(makeApi() as never);
+
+            expect(rescheduleInterviewByCommand).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e", expected);
+        });
     });
 
     it("acks CANDIDATE_NOT_FOUND_IN_BOT when the telegramId resolves to no local candidate", async () => {

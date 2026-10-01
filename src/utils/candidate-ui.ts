@@ -3,7 +3,8 @@ import type { MyContext } from "../types/context.js";
 import { CandidateStatus } from "@prisma/client";
 import { ScreenManager } from "./screen-manager.js";
 import { HR_NAME } from "../config.js";
-import { getLocationDetails } from "./location-data-helper.js";
+import { buildJobDetailsText, type JobDetailsLocation } from "./job-details.js";
+import logger from "../core/logger.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { cleanupMessages, trackMessage } from "./cleanup.js";
 import { formatLocation } from "./location-label.js";
@@ -62,21 +63,26 @@ export function selectRejectedStatusText(candidate: any): string {
 }
 
 /**
- * Apple Style: Compact and readable job details
+ * Блок «Твоя робота»: дані точки зі знімка вебаппа (рішення власника
+ * 01.10.2026). Кандидатку вантажать різні місця, і години роботи (окрема
+ * таблиця) приходять не завжди — дочитуємо локацію разом із ними. Збій
+ * читання не ламає екран статусу: блок тоді будується з того, що є.
  */
-function getJobDetailsText(candidate: any) {
-    const loc = candidate.location;
-    const staticInfo = getLocationDetails(loc?.name);
-
-    const locationName = loc ? formatLocation(loc, "listing") : "Smile Park";
-    const address = staticInfo?.address || loc?.address || "";
-    const schedule = staticInfo?.schedule || loc?.schedule || "Гнучкий";
-    const salary = staticInfo?.salary || loc?.salary || "20-30%";
-
-    return `\n<b>${locationName}</b>\n` +
-        `Адреса: ${address}\n` +
-        `Графік: ${schedule}\n` +
-        `Оплата: ${salary}`;
+async function getJobDetailsText(candidate: any): Promise<string | null> {
+    let location: JobDetailsLocation | null = candidate.location ?? null;
+    const locationId: string | undefined = candidate.location?.id ?? candidate.locationId ?? undefined;
+    if (locationId && !Array.isArray(candidate.location?.openingHours)) {
+        try {
+            const { default: prisma } = await import("../db/core.js");
+            location = await prisma.location.findUnique({
+                where: { id: locationId },
+                include: { openingHours: { orderBy: { dayOfWeek: "asc" } } },
+            }) ?? location;
+        } catch (error) {
+            logger.warn({ err: error, locationId }, "Job details: could not load location opening hours");
+        }
+    }
+    return buildJobDetailsText(location);
 }
 
 export async function showCandidateStatus(ctx: MyContext, candidate: any) {
@@ -108,8 +114,10 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
         CandidateStatus.INTERVIEW_COMPLETED,
         CandidateStatus.DECISION_PENDING,
     ].includes(status);
-    const jobDetails = isAcceptedOrBeyond
-        ? `\n\n<b>${isInTeam ? "Твоя робота" : "Ваша майбутня робота"}:</b>${getJobDetailsText(candidate)}`
+    // Без жодних даних точки блок не показується зовсім — і заголовок теж.
+    const jobDetailsBody = isAcceptedOrBeyond ? await getJobDetailsText(candidate) : null;
+    const jobDetails = jobDetailsBody
+        ? `\n\n<b>${isInTeam ? "Твоя робота" : "Ваша майбутня робота"}:</b>\n${jobDetailsBody}`
         : "";
 
     switch (status) {
