@@ -129,8 +129,8 @@ export class StaffService {
     /**
      * Нові співробітниці зі змінами, яким ще не надіслано привітання.
      *
-     * Раніше це робила лише ручна кнопка Full Sync в адмінці, а фоновий синк із
-     * вебаппом — ні. З 05.08.2026 до 01.10.2026 так залишилось без привітання 20
+     * Раніше це робила лише ручна кнопка Full Sync в адмінці (нею вже не
+     * користувались — усе переїхало у вебапп; кнопку прибрано), а фоновий синк — ні. З 05.08.2026 до 01.10.2026 так залишилось без привітання 20
      * людей, а 11 з них у воронці бота так і не стали HIRED (одна навіть REJECTED).
      *
      * Той, у кого перша зміна вже минула, привітання не отримує: «вітаємо в
@@ -149,6 +149,7 @@ export class StaffService {
         });
 
         const today = kyivStartOfDay(new Date());
+        const now = new Date();
         let welcomed = 0;
         let silenced = 0;
         let failed = 0;
@@ -156,7 +157,7 @@ export class StaffService {
         for (const staff of pending) {
             try {
                 const firstShift = await workShiftRepository.findFirstForStaff(staff.id);
-                const silent = !firstShift || firstShift.date < today;
+                const silent = !firstShift || firstShift.date < today || !isRecentHire(staff, now);
                 const activated = await this.finalizeStaffActivation(staff.id, api, { silent });
                 activatedIds.push(staff.id);
                 if (!activated) {
@@ -170,6 +171,26 @@ export class StaffService {
             }
         }
         return { welcomed, silenced, failed, activatedIds };
+    }
+
+    /**
+     * Привітання раніше за перше повідомлення про графік.
+     *
+     * Сповіщення про зміни вебапп віддає щохвилини, а активація бачить людину
+     * лише після синку дзеркала (до 10 хв). Без цього новенька спершу читала
+     * «Оновлення у твоєму графіку», ніби працює давно, і лише потім «Вітаємо в
+     * команді». Тому диспетчер графіка питає тут перед першою доставкою.
+     *
+     * Вітаємо лише справді нову (картка з'явилась за останні 14 днів): тих, хто
+     * працює давно й привітання так і не отримав, закриває мовчки цикл активації.
+     */
+    async welcomeBeforeScheduleMessage(telegramId: string, api: any): Promise<boolean> {
+        const user = await userRepository.findByTelegramId(BigInt(telegramId));
+        const staff = user ? await staffRepository.findByUserId(user.id) : null;
+        if (!staff || staff.isWelcomeSent || !staff.isActive) return false;
+        if (user?.adminRole) return false;
+        if (!isRecentHire(staff, new Date())) return false;
+        return this.finalizeStaffActivation(staff.id, api);
     }
 
     /**
@@ -264,6 +285,14 @@ export class StaffService {
         }
         return count;
     }
+}
+
+const RECENT_HIRE_DAYS = 14;
+
+/** Картка співробітниці з'явилась нещодавно — тобто вона справді новенька. */
+function isRecentHire(staff: { onboardingDate: Date | null }, now: Date): boolean {
+    return staff.onboardingDate !== null
+        && now.getTime() - staff.onboardingDate.getTime() <= RECENT_HIRE_DAYS * 24 * 60 * 60 * 1000;
 }
 
 export const staffService = new StaffService();

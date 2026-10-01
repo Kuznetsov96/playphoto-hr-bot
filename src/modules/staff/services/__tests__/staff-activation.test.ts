@@ -12,6 +12,7 @@ vi.mock("../../../../repositories/staff-repository.js", () => ({
     staffRepository: {
         findMany: (...a: unknown[]) => staffFindMany(...a),
         findById: (...a: unknown[]) => staffFindById(...a),
+        findByUserId: (...a: unknown[]) => staffByUser(...a),
         update: (...a: unknown[]) => staffUpdate(...a),
     },
 }));
@@ -24,8 +25,13 @@ vi.mock("../../../../repositories/candidate-repository.js", () => ({
         update: (...a: unknown[]) => candidateUpdate(...a),
     },
 }));
+const userByTelegram = vi.fn();
+const staffByUser = vi.fn();
 vi.mock("../../../../repositories/user-repository.js", () => ({
-    userRepository: { update: (...a: unknown[]) => userUpdate(...a) },
+    userRepository: {
+        update: (...a: unknown[]) => userUpdate(...a),
+        findByTelegramId: (...a: unknown[]) => userByTelegram(...a),
+    },
 }));
 
 const { staffService } = await import("../index.js");
@@ -34,6 +40,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const staff = (id: string) => ({
     id,
+    isActive: true,
+    onboardingDate: new Date(Date.now() - DAY_MS),
     userId: `user-${id}`,
     // Порядок у fullName ненадійний: у частини людей ім'я стоїть першим.
     fullName: "Анастасія Бланк Тарасівна",
@@ -125,5 +133,45 @@ describe("activatePendingStaff", () => {
         const result = await staffService.activatePendingStaff(api);
 
         expect(result).toMatchObject({ welcomed: 0, failed: 1 });
+    });
+
+    it("silences an old employee who never got a welcome even if a shift is ahead", async () => {
+        const veteran = { ...staff("s7"), onboardingDate: new Date(Date.now() - 60 * DAY_MS) };
+        staffFindMany.mockResolvedValue([veteran]);
+        staffFindById.mockResolvedValue(veteran);
+        firstShift.mockResolvedValue({ date: new Date(Date.now() + DAY_MS) });
+        const api = { sendMessage: vi.fn() };
+
+        const result = await staffService.activatePendingStaff(api);
+
+        expect(result).toMatchObject({ welcomed: 0, silenced: 1 });
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+});
+
+describe("welcomeBeforeScheduleMessage", () => {
+    // Сповіщення про графік приходить за хвилину, активація — за 5–10. Без цього
+    // новенька читала «Оновлення у твоєму графіку» раніше за «Вітаємо в команді».
+    it("welcomes a new hire right before her first schedule message", async () => {
+        userByTelegram.mockResolvedValue({ id: "user-s1", adminRole: null });
+        staffByUser.mockResolvedValue(staff("s1"));
+        staffFindById.mockResolvedValue(staff("s1"));
+        const api = { sendMessage: vi.fn().mockResolvedValue({}) };
+
+        await expect(staffService.welcomeBeforeScheduleMessage("100", api)).resolves.toBe(true);
+
+        expect(api.sendMessage.mock.calls[0]![1]).toContain("Вітаємо в команді");
+    });
+
+    it("stays silent for someone already welcomed or hired long ago", async () => {
+        userByTelegram.mockResolvedValue({ id: "user-x", adminRole: null });
+        const api = { sendMessage: vi.fn() };
+
+        staffByUser.mockResolvedValueOnce({ ...staff("a"), isWelcomeSent: true });
+        await staffService.welcomeBeforeScheduleMessage("100", api);
+        staffByUser.mockResolvedValueOnce({ ...staff("b"), onboardingDate: new Date(Date.now() - 60 * DAY_MS) });
+        await staffService.welcomeBeforeScheduleMessage("100", api);
+
+        expect(api.sendMessage).not.toHaveBeenCalled();
     });
 });
