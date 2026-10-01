@@ -9,7 +9,6 @@ export const PERMISSIONS = {
     // Commands
     ADMIN_MENU: ['SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'] as const,
     HR_MENU: ['SUPER_ADMIN', 'HR_LEAD'] as const,
-    MENTOR_MENU: ['SUPER_ADMIN', 'MENTOR_LEAD'] as const,
 
     // Finance
     FINANCE_AUDIT: ['SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'] as const,
@@ -31,9 +30,6 @@ export const PERMISSIONS = {
     HR_CANDIDATES: ['SUPER_ADMIN', 'HR_LEAD'] as const,
     HR_INTERVIEWS: ['SUPER_ADMIN', 'HR_LEAD'] as const,
 
-    // Mentor
-    MENTOR_TRAINING: ['SUPER_ADMIN', 'MENTOR_LEAD'] as const,
-    MENTOR_ONBOARDING: ['SUPER_ADMIN', 'MENTOR_LEAD'] as const,
 } as const;
 
 /**
@@ -45,7 +41,6 @@ export function getAdminRoleByTelegramId(telegramId: bigint): AdminRole | null {
     if (CONFIG.CO_FOUNDER_IDS.includes(id)) return 'CO_FOUNDER';
     if (CONFIG.SUPPORT_IDS.includes(id)) return 'SUPPORT';
     if (CONFIG.HR_IDS.includes(id)) return 'HR_LEAD';
-    if (CONFIG.MENTOR_IDS.includes(id)) return 'MENTOR_LEAD';
     return null;
 }
 

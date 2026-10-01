@@ -169,7 +169,7 @@ const protectedAdminCallbacks = adminProtected.filter(c => c.has("callback_query
     c.callbackQuery.data.startsWith("ticket_") ||
     c.callbackQuery.data.startsWith("pref_")
 ));
-protectedAdminCallbacks.use(requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT', 'HR_LEAD', 'MENTOR_LEAD'));
+protectedAdminCallbacks.use(requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT', 'HR_LEAD'));
 
 protectedAdminCallbacks.callbackQuery("admin_main_back", async (ctx: MyContext) => {
     const userRole = await getUserAdminRole(BigInt(ctx.from!.id));

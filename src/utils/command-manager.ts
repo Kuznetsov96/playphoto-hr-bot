@@ -10,9 +10,9 @@ import logger from "../core/logger.js";
  * бота разом із меню й сервісом, а обробника саме цієї команди не існувало
  * вже давно — у списку лишався пункт, тап по якому не робив нічого взагалі.
  *
- * MENTOR_LEAD лишається в enum AdminRole і в config/roles.ts (права
- * MENTOR_MENU, MENTOR_TRAINING), тож набір для нього теж лишається — але
- * веде туди ж, куди й у решти адмінів: у /start.
+ * 01.10.2026 прибрано й саму роль MENTOR_LEAD (рішення власника): у боті вона
+ * більше не дає ні адмінки, ні команд. Значення в enum AdminRole лишається
+ * тільки заради історичних рядків бази.
  */
 const COMMAND_SETS: Record<string, BotCommand[]> = {
     SUPER_ADMIN: [
@@ -22,9 +22,6 @@ const COMMAND_SETS: Record<string, BotCommand[]> = {
         { command: "start", description: "🏠 Admin Panel" },
     ],
     HR_LEAD: [
-        { command: "start", description: "🏠 Admin Panel" },
-    ],
-    MENTOR_LEAD: [
         { command: "start", description: "🏠 Admin Panel" },
     ],
     STAFF: [
@@ -54,8 +51,6 @@ export async function updateUserCommands(ctx: MyContext, role: string, adminRole
         commands = COMMAND_SETS.CO_FOUNDER || [];
     } else if (adminRole === "HR_LEAD") {
         commands = COMMAND_SETS.HR_LEAD || [];
-    } else if (adminRole === "MENTOR_LEAD") {
-        commands = COMMAND_SETS.MENTOR_LEAD || [];
     } else if (role === "STAFF") {
         commands = COMMAND_SETS.STAFF || [];
     } else if (role === "CANDIDATE") {
