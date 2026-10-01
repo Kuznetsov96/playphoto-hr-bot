@@ -396,10 +396,19 @@ export function validateCandidateFunnelTransition(context: CandidateFunnelContex
         );
     }
 
+    // Матеріали рахуються як вхід у mentor flow лише тоді, коли їх видають
+    // ЦИМ апдейтом. materialsSent=true, що лишився зі старого флоу наставника
+    // в кандидатки, яка знову чекає співбесіди, — історія, а не перехід
+    // (аудит 01.10.2026, B17). Раніше guard читав його на будь-якому апдейті:
+    // notifyWaitlist слав «нові вікна», запис стану падав на
+    // MENTOR_FLOW_REQUIRES_APPROVAL, і на кожен новий слот вона отримувала
+    // повідомлення знову, а бронь співбесіди падала так само.
+    const grantsMaterials = nextState.materialsSent && !oldState.materialsSent;
+
     const entersMentorFlow = !isMentorTrackState(oldState) && (
         isMentorTrackState(nextState) ||
         nextState.status === CandidateStatus.ACCEPTED ||
-        nextState.materialsSent
+        grantsMaterials
     );
 
     if (entersMentorFlow && !isMentorEligible(oldState) && !isMentorEligible(nextState)) {
@@ -410,7 +419,7 @@ export function validateCandidateFunnelTransition(context: CandidateFunnelContex
         );
     }
 
-    if (nextState.materialsSent && !isMentorEligible(nextState)) {
+    if (grantsMaterials && !isMentorEligible(nextState)) {
         throw new InvalidCandidateTransitionError(
             "MATERIALS_REQUIRE_MENTOR_ELIGIBILITY",
             "Candidate cannot receive mentor materials before mentor eligibility is established",

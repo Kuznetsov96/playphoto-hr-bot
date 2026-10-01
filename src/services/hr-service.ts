@@ -1149,16 +1149,11 @@ export const hrService = {
         let successCount = 0;
         for (const cand of candidates) {
             try {
-                const text = CANDIDATE_TEXTS["candidate-slots-opened"];
-                const kb = new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling");
-
-                await api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
-
                 // Лишається в пошуку часу, доки не запишеться: наступна пачка
                 // вікон сповістить її знову. interviewInvitedAt не ставимо —
                 // інакше через 48 год вона отримала б «місце перейшло іншому»
                 // й пішла в резерв, хоча місця їй ніхто не давав і не забирав.
-                await candidateRepository.update(cand.id, {
+                const patch = {
                     status: CandidateStatus.SCREENING,
                     isWaitlisted: false,
                     notificationSent: true,
@@ -1167,8 +1162,31 @@ export const hrService = {
                     // Стара дата запрошення (кандидатку запрошували раніше) разом
                     // з notificationSent одразу підхопив би 48-годинний скид.
                     interviewInvitedAt: null,
-                    interviewInviteReminderSentAt: null
-                });
+                    interviewInviteReminderSentAt: null,
+                    // Вона чекає співбесіди, тож матеріалів наставника в неї
+                    // бути не може — так само їх скидають completeInterview і
+                    // makeDecision. true тут — залишок старого флоу (аудит
+                    // 01.10.2026, B17); guard на ньому ронив цей запис.
+                    ...(cand.materialsSent ? { materialsSent: false } : {})
+                };
+
+                // Стан перевіряється ДО відправки, як в inviteCandidate:
+                // interviewWaitlistedAt — єдине, що відсіює її з наступного
+                // проходу. Якщо запис упаде після повідомлення, вона лишиться
+                // в черзі «до слота» й отримає «нові вікна» на кожен новий слот
+                // (01.10.2026 так було з 13 кандидатками за ранок).
+                const blocked = await candidateRepository.checkFunnelPatch(cand.id, patch);
+                if (blocked) {
+                    logger.warn({ err: blocked, candidateId: cand.id, status: cand.status }, "notifyWaitlist: funnel refuses the update, nothing sent");
+                    continue;
+                }
+
+                const text = CANDIDATE_TEXTS["candidate-slots-opened"];
+                const kb = new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-time"], "start_scheduling");
+
+                await api.sendMessage(Number(cand.user.telegramId), text, { parse_mode: "HTML", reply_markup: kb });
+
+                await candidateRepository.update(cand.id, patch);
                 successCount++;
             } catch (e: any) {
                 if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
