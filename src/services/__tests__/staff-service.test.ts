@@ -22,7 +22,8 @@ vi.mock('../../repositories/location-repository.js', () => ({
     locationRepository: {
         findById: vi.fn(),
         findAllActive: vi.fn(),
-        findAll: vi.fn()
+        findAll: vi.fn(),
+        countOperating: vi.fn()
     }
 }));
 
@@ -48,7 +49,7 @@ describe('StaffService', () => {
 
     it('should return formatted header with counts', async () => {
         vi.mocked(staffRepository.countActive).mockResolvedValue(10);
-        vi.mocked(locationRepository.findAll).mockResolvedValue([{ id: '1' }, { id: '2' }] as any);
+        vi.mocked(locationRepository.countOperating).mockResolvedValue(2);
 
         const t = (key: string, args?: any) => {
             if (key === 'admin-panel-team') return `Team: ${args.active} active`;
@@ -61,6 +62,9 @@ describe('StaffService', () => {
         expect(header).toContain('10 active');
         expect(header).toContain('2 active');
         expect(header).toContain('Admin Panel');
+        // Вся таблиця — це і закриті точки, і старі ручні рядки без вебаппу:
+        // власник бачив «20 active» замість реальної кількості (01.10.2026).
+        expect(locationRepository.findAll).not.toHaveBeenCalled();
     });
 
 });

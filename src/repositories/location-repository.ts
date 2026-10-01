@@ -30,6 +30,17 @@ export class LocationRepository {
         return prisma.location.findMany();
     }
 
+    /**
+     * Точки, які зараз працюють: ті, що прийшли в останньому знімку вебаппу
+     * (знімок несе лише ACTIVE, закриті синк ховає). Рядки без `awsPublicId`
+     * вебапп не знає зовсім — службові чи старі ручні, точками їх не рахуємо.
+     */
+    async countOperating(): Promise<number> {
+        return prisma.location.count({
+            where: { isHidden: false, awsPublicId: { not: null } }
+        });
+    }
+
     async findAllActive(): Promise<Location[]> {
         return activeCache.get("active", async () => {
             const locations = await prisma.location.findMany({
