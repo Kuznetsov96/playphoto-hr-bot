@@ -141,37 +141,61 @@ export function shouldMirrorCandidateText(text: string, step: string | undefined
     return true;
 }
 
-function forwardCandidateMessage(ctx: MyContext): void {
-    if (!AWS_RECRUITING_COMMANDS_ENABLED) return;
-    if (ctx.chat?.type !== "private") return;
-    if (!ctx.from || ctx.from.is_bot) return;
+type MirrorablePayload = {
+    rawBody: string;
+    attachment: ReturnType<typeof extractAttachment>["attachment"];
+};
+
+/**
+ * Синхронная часть решения «это сообщение уходит в тред рекрутёра». Одна на
+ * пушер и на ответ кандидатке «передали команді» (modules/candidate): ответ
+ * не должен обещать доставку того, что пушер отбросит.
+ */
+function mirrorablePayload(ctx: MyContext): MirrorablePayload | null {
+    if (!AWS_RECRUITING_COMMANDS_ENABLED) return null;
+    if (ctx.chat?.type !== "private") return null;
+    if (!ctx.from || ctx.from.is_bot) return null;
     // Активный сотрудник пишет боту как сотрудник — это не переписка
     // рекрутёр ↔ кандидатка, даже если Candidate-строка сохранилась.
-    if (ctx.dbUser?.staffProfile?.isActive) return;
+    if (ctx.dbUser?.staffProfile?.isActive) return null;
 
     const message = ctx.message as Record<string, any> | undefined;
     // Приватность: фото на шаге сбора документов (паспорт/ID/прописка) или
     // на экране скрининга с татуировкой — не зеркалим вообще. См.
     // DOCUMENT_COLLECTION_*_STEPS выше и isOnDocumentCollectionStep.
-    if (Array.isArray(message?.photo) && message.photo.length > 0 && isOnDocumentCollectionStep(ctx)) return;
+    if (Array.isArray(message?.photo) && message.photo.length > 0 && isOnDocumentCollectionStep(ctx)) return null;
 
     const { attachment, label } = extractAttachment(message);
     const richText = getRichMessagePlainText(message?.rich_message);
     const caption = message?.text || message?.caption || richText || "";
     const rawBody = label && caption ? `${label}: ${caption}` : label || caption;
     // Ни текста, ни медиа — зеркалить нечего.
-    if (!rawBody) return;
+    if (!rawBody) return null;
 
     // Служебный ввод — не переписка (команды, ответы анкеты). Проверяется по
     // ТЕКСТУ, а не по вложению: подпись под фото — такое же сообщение человеку,
     // и медиа с ней зеркалить надо. Поэтому фильтр стоит здесь, после сборки
     // caption, а не в начале функции: до слияния он читал ctx.message.text,
     // которого у медиа с подписью просто нет.
-    if (!shouldMirrorCandidateText(caption, ctx.session?.step)) return;
+    if (!shouldMirrorCandidateText(caption, ctx.session?.step)) return null;
+
+    return { rawBody, attachment };
+}
+
+/** Уходит ли это сообщение рекрутёру (без проверки, есть ли кандидатка в зеркале). */
+export function isMirroredCandidateMessage(ctx: MyContext): boolean {
+    return mirrorablePayload(ctx) !== null;
+}
+
+function forwardCandidateMessage(ctx: MyContext): void {
+    const mirrorable = mirrorablePayload(ctx);
+    if (mirrorable === null) return;
+    const { rawBody, attachment } = mirrorable;
 
     const body = rawBody.slice(0, MAX_BODY_LENGTH);
 
-    const telegramId = ctx.from.id;
+    // mirrorablePayload уже проверил ctx.from.
+    const telegramId = ctx.from!.id;
     const telegramMessageId = ctx.message?.message_id;
     const sentAtSeconds = ctx.message?.date;
 

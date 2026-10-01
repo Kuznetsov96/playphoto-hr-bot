@@ -366,6 +366,44 @@ describe("interview booking over canonical slots", () => {
         expect(ctx.reply).not.toHaveBeenCalled();
     });
 
+    it("unknown booking failure says what failed — not a bare «Сталася помилка»", async () => {
+        // Аудит 01.10.2026: спливаюче «Сталася помилка» не казало, що саме не
+        // вийшло і що робити далі.
+        findByTelegramId.mockResolvedValue({ id: "cand-1", interviewSlotId: null });
+        bookInterviewSlotFlow.mockRejectedValue(new Error("HTTP 502"));
+
+        const ctx = makeCtx(111035);
+        await bookingHandlers.__runCallback(`book_slot_${WEB_SLOT_ID}`, ctx);
+
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Не вдалося записати. Спробуйте ще раз");
+    });
+
+    it("збій броні: одна відповідь на натискання з причиною і екран, навіть коли відповідь не пройшла", async () => {
+        findByTelegramId.mockResolvedValue({ id: "cand-1", interviewSlotId: null });
+        bookInterviewSlotFlow.mockRejectedValue(new Error("SCREENING_INCOMPLETE"));
+
+        const ctx = makeCtx(111004);
+        ctx.answerCallbackQuery.mockRejectedValue(new Error("query is too old"));
+        await bookingHandlers.__runCallback(`book_slot_${WEB_SLOT_ID}`, ctx);
+
+        const { ScreenManager } = await import("../../utils/screen-manager.js");
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Спершу потрібно оновити анкету");
+        expect(ScreenManager.renderScreen).toHaveBeenCalled();
+    });
+
+    it("ALREADY_BOOKED оновлює список, як і зайнятий канонічний слот", async () => {
+        findByTelegramId.mockResolvedValue({ id: "cand-1", interviewSlotId: null });
+        bookInterviewSlotFlow.mockRejectedValue(new Error("ALREADY_BOOKED"));
+        findAvailableInterviewSlots.mockResolvedValue([]);
+
+        const ctx = makeCtx(111005);
+        await bookingHandlers.__runCallback(`book_slot_${WEB_SLOT_ID}`, ctx);
+
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith("Цей час уже зайнятий");
+        expect(ctx.editMessageText).toHaveBeenCalled();
+    });
+
     it("cancel releases the canonical slot BEFORE the local cancel, reason candidate_cancelled", async () => {
         findByTelegramId.mockResolvedValue({ id: "cand-1", fullName: "Олена", status: "INTERVIEW_SCHEDULED", interviewSlotId: "local-slot-1" });
 

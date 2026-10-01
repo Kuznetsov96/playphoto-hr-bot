@@ -1,5 +1,5 @@
 import { Menu } from "@grammyjs/menu";
-import { formatLocation } from "../utils/location-label.js";
+import { formatCityUk, formatLocation } from "../utils/location-label.js";
 import type { MyContext } from "../types/context.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { locationRepository } from "../repositories/location-repository.js";
@@ -151,7 +151,9 @@ menuRegistry.register(candidateCityMenu);
 candidateCityMenu.dynamic(async (ctx, range) => {
     const cities = await locationRepository.findAllCities(true, true);
     cities.forEach((city, i) => {
-        range.text(city, async (ctx) => {
+        // Підпис — українською, значення в сесії й базі — канонічне
+        // латинське (аудит 01.10.2026, погоджено власником).
+        range.text(formatCityUk(city), async (ctx) => {
             const { persistCandidate, questionnaireClosed } = await import("../modules/candidate/handlers/index.js");
             if (await questionnaireClosed(ctx)) return;
             ctx.session.candidateData.city = city;

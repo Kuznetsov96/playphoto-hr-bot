@@ -1,5 +1,5 @@
 import type { MyContext } from "../../../types/context.js";
-import { formatLocation } from "../../../utils/location-label.js";
+import { formatCityUk, formatLocation } from "../../../utils/location-label.js";
 import { escapeHtml } from "../../../handlers/admin/utils.js";
 import { CANDIDATE_TEXTS } from "../../../constants/candidate-texts.js";
 import { Composer, InlineKeyboard } from "grammy";
@@ -317,7 +317,7 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
             isWaitlisted: false
         });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](city, city));
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]);
         return;
     }
 
@@ -357,7 +357,9 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
         // питання про неї доречні. Тому екран лишається з виходом на людину.
         await ScreenManager.renderScreen(
             ctx,
-            CANDIDATE_TEXTS["candidate-info-no-vacancies"](city),
+            // Місто в реченні — українською: канонічний ключ «Zaporizhzhia»
+            // посеред українського тексту читався як збій (аудит 01.10.2026).
+            CANDIDATE_TEXTS["candidate-info-no-vacancies"](formatCityUk(city)),
             buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status),
         );
     }
@@ -495,7 +497,13 @@ candidateHandlers.on("message:text", async (ctx, next) => {
     const step = ctx.session.step;
     if (ctx.message.text.startsWith("/")) return next();
 
-    // SMI: Delete user message immediately
+    // Поза анкетою текст — це повідомлення людям: воно вже пішло в тред HR
+    // (middleware/recruiting-incoming), і стирати його з чату кандидатки не
+    // можна. Раніше видалялося все підряд, а у відповідь ішло «Не зрозумів
+    // повідомлення» — 70 людей за 45 днів (аудит 01.10.2026).
+    if (!step?.startsWith("screening_")) return next();
+
+    // SMI: відповіді анкети прибираються з чату.
     await ctx.deleteMessage().catch(() => { });
 
     if (step === "screening_name") {
@@ -522,11 +530,15 @@ candidateHandlers.on("message:text", async (ctx, next) => {
         return;
     }
 
-    await next();
+    // Крок із кнопками: текст — не відповідь. Перемальовуємо поточне питання
+    // з кнопками, а не «Не зрозумів» з екраном статусу.
+    await startScreening(ctx);
 });
 
-candidateHandlers.on("message:photo", async (ctx) => {
-    if (!ctx.session.step?.startsWith("screening_")) return;
+candidateHandlers.on("message:photo", async (ctx, next) => {
+    // Поза анкетою фото — повідомлення людям, далі його підхопить загальний
+    // обробник модуля. Раніше воно мовчки зникало тут без відповіді.
+    if (!ctx.session.step?.startsWith("screening_")) return next();
 
     // Приватність + SMI: фото прибирається з переписки так само, як текстові
     // відповіді. Раніше видалявся тільки текст, і особисте фото, надіслане на
@@ -580,9 +592,14 @@ export async function handleBirthDateSelected(ctx: MyContext, day: number) {
             hrDecision: "REJECTED_SYSTEM_UNDERAGE"
         });
         ctx.session.step = "idle";
+        // Хлопцю молодше 17 — та сама відмова, що й решті хлопців. Текст
+        // candidate-reject-underage обіцяє «бот нагадає», а реактивація
+        // працює лише для gender=female (underage-reactivation-service), тож
+        // йому ця обіцянка не виконалася б ніколи (аудит 01.10.2026).
+        const isMale = ctx.session.candidateData.gender === "male";
         await ScreenManager.renderScreen(
             ctx,
-            CANDIDATE_TEXTS["candidate-reject-underage"],
+            isMale ? CANDIDATE_TEXTS["candidate-reject-male-location"] : CANDIDATE_TEXTS["candidate-reject-underage"],
             buildFinalScreenKeyboard(ctx.session.candidateData.gender, CandidateStatus.REJECTED, "REJECTED_SYSTEM_UNDERAGE"),
         );
         return;
@@ -609,7 +626,7 @@ export async function handleLocationSelected(ctx: MyContext, targetLoc: any, cit
     if (gender === "male") {
         await persistCandidate(ctx, { fullName, birthDate, gender, city, locationId: finalLocationId, status: CandidateStatus.REJECTED });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"](targetLoc?.name || city, city));
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]);
         return;
     }
 
@@ -774,13 +791,7 @@ async function finalizeScreening(ctx: MyContext) {
             hrDecision: null
         });
         ctx.session.step = "idle";
-        await ScreenManager.renderScreen(
-            ctx,
-            CANDIDATE_TEXTS["candidate-reject-male-location"](
-                primaryLocationForAge?.name || city || "цій локації",
-                city || "вашому місті"
-            )
-        );
+        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["candidate-reject-male-location"]);
         return;
     }
 

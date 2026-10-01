@@ -58,7 +58,7 @@ describe("candidate tone of voice", () => {
      * Постійний екран статусу після прийняття: фрази переходу не несе, але
      * звертається вже на «ти» — людина по цей бік рішення вже своя.
      */
-    const IN_TEAM_KEYS = ["candidate-accepted-welcome"];
+    const IN_TEAM_KEYS = ["candidate-accepted-welcome", "candidate-hired-no-cabinet"];
 
     it("никогда не обращается к кандидатке на «ти» — кроме момента приёма в команду", () => {
         const offenders = texts.filter(
@@ -125,6 +125,21 @@ describe("candidate tone of voice", () => {
     it("не оставляет английских литералов этапов в украинском тексте", () => {
         const offenders = texts.filter(({ value }) => /\b(training|discovery)\b/i.test(value));
 
+        expect(offenders.map((o) => o.key)).toEqual([]);
+    });
+
+    /**
+     * Обіцянки без механізму (аудит 01.10.2026): «дані зберігаються — ми
+     * напишемо» на відмовах і «напишемо щодо навчання» на екрані прийнятої.
+     * Бот не має процесу, який би це виконав.
+     */
+    it("не обещает написать на отказах и на экране принятой", () => {
+        const keys = ["candidate-reject-age-limit", "candidate-reject-male-location", "candidate-accepted-welcome"];
+        const offenders = texts.filter(({ key, value }) =>
+            keys.includes(key) && /(ми напишемо|напишемо щодо|дані зберігаються|залишаються в нашій базі)/i.test(value),
+        );
+
+        expect(texts.filter(({ key }) => keys.includes(key))).toHaveLength(keys.length);
         expect(offenders.map((o) => o.key)).toEqual([]);
     });
 });
