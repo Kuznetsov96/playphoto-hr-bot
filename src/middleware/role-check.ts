@@ -148,6 +148,14 @@ export async function getUserAdminRole(telegramId: bigint): Promise<AdminRole | 
 
     if (!user) return autoRole;
 
+    // Наставника в процесі більше немає (рішення власника 01.10.2026): роль
+    // MENTOR_LEAD знімається й з бази, інакше вона жила б там після зникнення
+    // з конфігу і далі відкривала адмінку.
+    if (user.adminRole === "MENTOR_LEAD" && autoRole === null) {
+        await userRepository.update(user.id, { adminRole: null });
+        return null;
+    }
+
     // Auto-assign or sync role if it differs from DB
     if (autoRole && user.adminRole !== autoRole) {
         await userRepository.update(user.id, { adminRole: autoRole });

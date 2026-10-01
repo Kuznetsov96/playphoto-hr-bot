@@ -137,6 +137,22 @@ describe("AccessService", () => {
         await expect(service.isAuthorized(123n)).resolves.toBe(false);
     });
 
+    // Наставника в процесі немає (рішення власника 01.10.2026): роль MENTOR сама
+    // по собі більше не тримає людину в чатах команди.
+    it("не пускає за самою роллю MENTOR", async () => {
+        const service = new AccessService();
+        mocks.findWithProfilesByTelegramId.mockResolvedValue({ role: Role.MENTOR, staffProfile: null, candidate: null });
+
+        await expect(service.isAuthorized(123n)).resolves.toBe(false);
+    });
+
+    it("лишає в чатах колишню MENTOR, якщо вона активна фотографиня", async () => {
+        const service = new AccessService();
+        mocks.findWithProfilesByTelegramId.mockResolvedValue({ role: Role.MENTOR, staffProfile: { isActive: true }, candidate: null });
+
+        await expect(service.isAuthorized(123n)).resolves.toBe(true);
+    });
+
     it("clears existing protected chat bans before creating a valid one-time invite", async () => {
         const service = new AccessService();
         const unbanChatMember = vi.fn().mockResolvedValue(undefined);

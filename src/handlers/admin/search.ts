@@ -92,7 +92,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
     const canCreateTopic = !shouldUseDirectCandidateMessage(candidate, staff)
-        && (hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING'));
+        && (hasPermission(role, 'SUPPORT_CHAT'));
 
     ctx.session.step = `admin_msg_${userId}`;
 
@@ -336,7 +336,7 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
     const { hasPermission } = await import("../../config/roles.js");
     const role = await getUserAdminRole(BigInt(ctx.from!.id));
     const directCandidate = shouldUseDirectCandidateMessage(candidate, staff);
-    const hasTopicPermission = hasPermission(role, 'SUPPORT_CHAT') || hasPermission(role, 'MENTOR_ONBOARDING');
+    const hasTopicPermission = hasPermission(role, 'SUPPORT_CHAT');
     const canCreateTopic = !directCandidate && hasTopicPermission;
 
     if (!SUPPORT_CHAT_ID) {

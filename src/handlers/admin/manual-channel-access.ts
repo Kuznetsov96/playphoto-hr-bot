@@ -181,7 +181,7 @@ async function handleManualChannelRevoke(ctx: MyContext) {
 
     try {
         const user = await userRepository.findWithStaffProfileByTelegramId(telegramId);
-        if (user && (user.adminRole || ["ADMIN", "HR", "MENTOR"].includes(user.role))) {
+        if (user && (user.adminRole || ["ADMIN", "HR"].includes(user.role))) {
             clearManualFlow(ctx);
             await ScreenManager.renderScreen(
                 ctx,

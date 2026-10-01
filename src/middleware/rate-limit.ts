@@ -2,7 +2,7 @@ import { limit } from "@grammyjs/ratelimiter";
 import type { MyContext } from "../types/context.js";
 import logger from "../core/logger.js";
 import { 
-    ADMIN_IDS, MENTOR_IDS, SUPPORT_IDS, HR_IDS, 
+    ADMIN_IDS, SUPPORT_IDS, HR_IDS, 
     CO_FOUNDER_IDS, FINANCE_IDS, TEAM_CHATS 
 } from "../config.js";
 
@@ -97,7 +97,6 @@ export function createRateLimitMiddleware(redis: any, userRepositoryResolver: ()
         }
 
         if (
-            MENTOR_IDS.includes(userId) ||
             SUPPORT_IDS.includes(userId) ||
             HR_IDS.includes(userId) ||
             FINANCE_IDS.includes(userId)

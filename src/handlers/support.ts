@@ -259,7 +259,7 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const candidate = await candidateRepository.findByTelegramId(Number(telegramId));
         if (!candidate || !candidate.user) return false;
 
-        const { MENTOR_IDS, ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
+        const { ADMIN_IDS, TEAM_CHATS } = await import("../config.js");
         const { supportService } = await import("../services/support-service.js");
         const { supportRepository } = await import("../repositories/support-repository.js");
         const preferredTarget = ctx.session.supportData?.preferredTarget;

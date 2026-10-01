@@ -95,14 +95,15 @@ export class AccessService {
         const user = await userRepository.findWithProfilesByTelegramId(telegramId);
         if (!user) return false;
 
-        // 1. Admins, HRs, Mentors always have access
-        const privilegedRoles: Role[] = [Role.ADMIN, Role.HR, Role.MENTOR];
+        // 1. Admins and HRs always have access. Роль MENTOR доступу більше не дає:
+        // наставника в процесі немає (рішення власника 01.10.2026).
+        const privilegedRoles: Role[] = [Role.ADMIN, Role.HR];
         if (privilegedRoles.includes(user.role)) return true;
 
-        // 2. Staff members (must be ACTIVE)
-        if (user.role === Role.STAFF) {
-            return user.staffProfile?.isActive === true;
-        }
+        // 2. Staff members (must be ACTIVE). Активний профіль вирішує незалежно від
+        // ролі: колишня MENTOR, що працює фотографинею, не має випасти з чатів.
+        if (user.staffProfile?.isActive === true) return true;
+        if (user.role === Role.STAFF) return false;
 
         /**
          * 3. Кандидатки: доступ лише після найму.

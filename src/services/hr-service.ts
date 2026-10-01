@@ -997,12 +997,9 @@ export const hrService = {
             logger.error({ err: e }, "Failed to sync team after hiring");
         }
 
-        const { MENTOR_IDS } = await import("../config.js");
-        const mentorId = MENTOR_IDS.length > 0 ? MENTOR_IDS[0] : null;
 
         return {
             candidate: { ...cand, status: CandidateStatus.HIRED },
-            mentorId: mentorId,
             candidateId: Number(cand.user.telegramId)
         };
     },
