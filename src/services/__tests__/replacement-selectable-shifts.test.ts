@@ -41,6 +41,38 @@ const canonicalShift = (id: string, date: string, scheduledShiftPublicId: string
     location: { id: "loc-1", name: "Smile Park", city: "Київ", branch: null, schedule: null, openingHours: [] }
 });
 
+describe("listPickerShifts", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.replacementRequest.findMany.mockResolvedValue([]);
+        prismaMock.workShift.findMany.mockResolvedValue([]);
+    });
+
+    it("лишає зміну з заявкою в списку і несе стан заявки, а не ховає її", async () => {
+        canonicalRead.findForStaff.mockResolvedValue([
+            canonicalShift("s-1", "2026-09-27", "canon-s-1"),
+            canonicalShift("s-2", "2026-09-28", "canon-s-2"),
+            canonicalShift("s-3", "2026-09-29", "canon-s-3")
+        ]);
+        prismaMock.replacementRequest.findMany.mockResolvedValue([
+            { scheduledShiftPublicId: "canon-s-1", status: "FAILED" },
+            { scheduledShiftPublicId: "canon-s-2", status: "ACTIVE" },
+            // Старий невдалий пошук і новий активний на ту саму зміну:
+            // важить той, що йде зараз.
+            { scheduledShiftPublicId: "canon-s-2", status: "FAILED" }
+        ]);
+        const { replacementService } = await import("../replacement-service.js");
+
+        const result = await replacementService.listPickerShifts("staff-1");
+
+        expect(result.map(row => [row.id, row.blockedBy])).toEqual([
+            ["s-1", "FAILED"],
+            ["s-2", "ACTIVE"],
+            ["s-3", null]
+        ]);
+    });
+});
+
 describe("listSelectableShifts", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -80,7 +112,7 @@ describe("listSelectableShifts", () => {
             canonicalShift("s-2", "2026-09-21", "canon-s-2")
         ]);
         prismaMock.replacementRequest.findMany.mockResolvedValue([
-            { scheduledShiftPublicId: "canon-s-1" }
+            { scheduledShiftPublicId: "canon-s-1", status: "ACTIVE" }
         ]);
         const { replacementService } = await import("../replacement-service.js");
 
@@ -118,7 +150,7 @@ describe("listSelectableShifts", () => {
         // Заявка тримається за зміну лише канонічним id — єдиним посиланням,
         // яке в неї лишилось.
         prismaMock.replacementRequest.findMany.mockResolvedValue([
-            { scheduledShiftPublicId: "canon-s-1" }
+            { scheduledShiftPublicId: "canon-s-1", status: "ACTIVE" }
         ]);
         const { replacementService } = await import("../replacement-service.js");
 
@@ -182,7 +214,7 @@ describe("listSelectableShifts", () => {
             }
         ]);
         prismaMock.replacementRequest.findMany.mockResolvedValue([
-            { scheduledShiftPublicId: "canon-s-1" }
+            { scheduledShiftPublicId: "canon-s-1", status: "ACTIVE" }
         ]);
         const { replacementService } = await import("../replacement-service.js");
 

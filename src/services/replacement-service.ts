@@ -28,10 +28,8 @@ import { formatLocation } from "../utils/location-label.js";
 import { awsScheduleCanonicalReadService } from "./aws-schedule-canonical-read.js";
 import type { CanonicalScheduledShift } from "./aws-schedule-canonical-projector.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import {
-    readSelectableShiftsSource,
-    rejectShiftsWithActiveRequest
-} from "./replacement-selectable-shifts.js";
+import { readSelectableShiftsSource } from "./replacement-selectable-shifts.js";
+import type { ReplacementBlockingStatus } from "../modules/staff/services/replacement-shift-picker-view.js";
 
 /**
  * Мінімальний набір полів локації, який потрібен для показу зміни у пікері
@@ -78,6 +76,13 @@ const REPLACEMENT_RESTART_BLOCKING_STATUSES = [
     ReplacementRequestStatus.FOUND,
     ReplacementRequestStatus.FAILED,
 ];
+
+/** Менше число — важливіша причина, коли на одну зміну кілька заявок. */
+const BLOCKING_PRIORITY: Record<ReplacementBlockingStatus, number> = {
+    ACTIVE: 0,
+    FOUND: 1,
+    FAILED: 2,
+};
 
 type StaffWithUserLocation = StaffProfile & { user: User; location: Location | null };
 type RequestWithRelations = ReplacementRequest & {
@@ -152,7 +157,24 @@ export class ReplacementService {
      * синку дзеркала. Дзеркало лишається запасним шляхом на випадок, коли
      * канон недоступний.
      */
+    /**
+     * Зміни, по яких можна запустити пошук підміни.
+     */
     async listSelectableShifts(staffId: string) {
+        const shifts = await this.listPickerShifts(staffId);
+        return shifts.filter(shift => shift.blockedBy === null);
+    }
+
+    /**
+     * Усі майбутні зміни для екрана вибору, кожна зі станом заявки, що
+     * блокує новий пошук (`null` — пошук можна запускати).
+     *
+     * Заблоковані зміни не ховаються: коли ховалися всі, екран казав «немає
+     * майбутніх змін», і людина не дізнавалась, чому (01.10.2026). Якщо на
+     * одну зміну кілька заявок, важить та, що визначає сьогоднішню відповідь:
+     * пошук, що йде, — над знайденою підміною, а та — над невдалим пошуком.
+     */
+    async listPickerShifts(staffId: string) {
         const today = this.kyivStartOfDay(new Date());
         const { shifts } = await readSelectableShiftsSource(staffId, today, SELECTABLE_HORIZON_DAYS, {
             // Третій аргумент тут — це `limit` (кількість рядків) з погляду
@@ -209,24 +231,25 @@ export class ReplacementService {
                     status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES },
                     scheduledShiftPublicId: { in: canonicalShiftIds }
                 },
-                select: { scheduledShiftPublicId: true }
+                select: { scheduledShiftPublicId: true, status: true }
             });
 
-        // `rejectShiftsWithActiveRequest` звіряє за локальним `shift.id`, тож
-        // збіг за канонічним полем заявки тут-таки мапиться назад на локальний
-        // id відповідної зміни зі `sortedShifts`.
-        const canonicalToLocalId = new Map(
-            sortedShifts.flatMap(shift =>
-                (shift.scheduledShiftPublicId ? [[shift.scheduledShiftPublicId, shift.id] as const] : []))
-        );
-        const blockedShiftIds = new Set(blocked.flatMap(row => {
-            const localId = row.scheduledShiftPublicId
-                ? canonicalToLocalId.get(row.scheduledShiftPublicId)
-                : undefined;
-            return localId ? [localId] : [];
-        }));
+        const blockedByCanonicalId = new Map<string, ReplacementBlockingStatus>();
+        for (const row of blocked) {
+            if (!row.scheduledShiftPublicId) continue;
+            const status = row.status as ReplacementBlockingStatus;
+            const current = blockedByCanonicalId.get(row.scheduledShiftPublicId);
+            if (current === undefined || BLOCKING_PRIORITY[status] < BLOCKING_PRIORITY[current]) {
+                blockedByCanonicalId.set(row.scheduledShiftPublicId, status);
+            }
+        }
 
-        return rejectShiftsWithActiveRequest(sortedShifts, blockedShiftIds);
+        return sortedShifts.map(shift => ({
+            ...shift,
+            blockedBy: shift.scheduledShiftPublicId
+                ? blockedByCanonicalId.get(shift.scheduledShiftPublicId) ?? null
+                : null
+        }));
     }
 
     /**
