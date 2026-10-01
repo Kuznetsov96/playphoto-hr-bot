@@ -1,5 +1,6 @@
 
 import { TaskCompletionMode } from "@prisma/client";
+import prisma from "../db/core.js";
 import { z } from "zod";
 import { taskRepository, type TaskWithRelations } from "../repositories/task-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
@@ -207,6 +208,39 @@ export class TaskService {
         }
 
         return result;
+    }
+
+    /**
+     * Передає незакриті задачі зміни тій, хто вийшла на підміну.
+     *
+     * Задачу по зміні створюють один раз, за графіком на той момент, і вона
+     * запам'ятовує людину. Після підміни дайджест, нагадування й ескалації йшли
+     * тій, що віддала зміну, а та, що працює, нічого не отримувала.
+     *
+     * Задача по зміні — це задача тієї ж людини на той самий день і ту саму точку
+     * (точку задачі при створенні бере зі зміни цього дня). Особисті задачі без
+     * дати чи на іншу точку лишаються на місці.
+     */
+    async reassignShiftTasks(input: {
+        fromStaffId: string;
+        toStaffId: string;
+        shiftDate: Date;
+        city: string;
+        locationName: string;
+    }): Promise<number> {
+        const dayStart = new Date(input.shiftDate);
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+        const result = await prisma.task.updateMany({
+            where: {
+                staffId: input.fromStaffId,
+                isCompleted: false,
+                workDate: { gte: dayStart, lt: dayEnd },
+                city: input.city,
+                locationName: input.locationName,
+            },
+            data: { staffId: input.toStaffId, reminderSentAt: null, overdueAdminNotifiedAt: null },
+        });
+        return result.count;
     }
 
     /**

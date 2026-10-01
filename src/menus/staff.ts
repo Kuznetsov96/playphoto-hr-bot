@@ -32,7 +32,36 @@ import logger from "../core/logger.js";
 const WINDOW_CACHE_TTL_MS = 60 * 1000;
 let windowCache: { month: string; open: boolean; at: number } | undefined;
 
-async function shouldShowPreferencesButton() {
+/** Личное окно — на человека; тот же минутный кэш, что и у общего. */
+const personalWindowCache = new Map<string, { month: string; open: boolean; at: number }>();
+
+/**
+ * Общий сбор закрыт, но владелец мог открыть окно лично («Reopen for …»).
+ * Раньше кнопка смотрела только на общее окно, и переоткрытой фотографине
+ * некуда было нажать — форма её пустила бы, а меню её не показывало.
+ */
+async function isPersonallyReopened(telegramId: number | undefined, month: string): Promise<boolean> {
+    if (!telegramId) return false;
+    const key = String(telegramId);
+    const cached = personalWindowCache.get(key);
+    if (cached && cached.month === month && Date.now() - cached.at < WINDOW_CACHE_TTL_MS) return cached.open;
+
+    const { userRepository } = await import("../repositories/user-repository.js");
+    const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
+    const employeePublicId = user?.staffProfile?.awsEmployeePublicId;
+    if (!employeePublicId) return false;
+    try {
+        const { awsBusinessClient } = await import("../services/aws-business-client.js");
+        const schedule = await awsBusinessClient.schedulePreferenceSchedule(month, employeePublicId);
+        personalWindowCache.set(key, { month, open: schedule.open, at: Date.now() });
+        return schedule.open;
+    } catch (error) {
+        logger.warn({ err: error, month }, "Personal preference window unavailable; hiding the button");
+        return false;
+    }
+}
+
+export async function shouldShowPreferencesButton(telegramId?: number) {
     const now = new Date();
     const kyivNow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Kyiv" }));
     if (kyivNow.getDate() < 23) return false;
@@ -49,19 +78,21 @@ async function shouldShowPreferencesButton() {
     }
 
     const month = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+    let globalOpen: boolean;
     if (windowCache && windowCache.month === month && Date.now() - windowCache.at < WINDOW_CACHE_TTL_MS) {
-        return windowCache.open;
+        globalOpen = windowCache.open;
+    } else {
+        try {
+            const { awsBusinessClient } = await import("../services/aws-business-client.js");
+            const window = await awsBusinessClient.schedulePreferenceWindow(month);
+            windowCache = { month, open: window.open, at: Date.now() };
+            globalOpen = window.open;
+        } catch (error) {
+            logger.warn({ err: error, month }, "Preference collection window unavailable; keeping the button");
+            return true;
+        }
     }
-
-    try {
-        const { awsBusinessClient } = await import("../services/aws-business-client.js");
-        const window = await awsBusinessClient.schedulePreferenceWindow(month);
-        windowCache = { month, open: window.open, at: Date.now() };
-        return window.open;
-    } catch (error) {
-        logger.warn({ err: error, month }, "Preference collection window unavailable; keeping the button");
-        return true;
-    }
+    return globalOpen || isPersonallyReopened(telegramId, month);
 }
 
 // --- ROOT MENU ---
@@ -74,7 +105,7 @@ menuRegistry.register(staffRootMenu);
 export const staffHubMenu = new Menu<MyContext>("staff-main", {
     fingerprint: async (ctx) => {
         const now = new Date();
-        const preferencesVisible = await shouldShowPreferencesButton() ? "pref" : "nopref";
+        const preferencesVisible = await shouldShowPreferencesButton(ctx.from?.id) ? "pref" : "nopref";
 
         const telegramId = ctx.from?.id;
         if (!telegramId) return `staff-main:${preferencesVisible}:no-user`;
@@ -111,7 +142,7 @@ staffHubMenu.dynamic(async (ctx, range) => {
     //
     // Собственная строка на всю ширину — подпись занимает 20–23 символа в
     // зависимости от месяца, и рядом с соседом обрезалась бы.
-    if (await shouldShowPreferencesButton()) {
+    if (await shouldShowPreferencesButton(ctx.from?.id)) {
         const nextMonth = new Date(kyivNow.getFullYear(), kyivNow.getMonth() + 1, 1);
         const monthName = nextMonth.toLocaleString('uk-UA', { month: 'long' });
         range.text(`📝 Побажання (${monthName})`, async (ctx) => {

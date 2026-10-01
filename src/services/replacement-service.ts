@@ -1019,11 +1019,24 @@ export class ReplacementService {
                         select: { id: true }
                     })
                     : null;
-                await closeAs(
+                const closed = await closeAs(
                     ReplacementRequestStatus.FOUND,
                     "canonical_confirmed",
                     accepted ? { replacementStaffId: accepted.id } : {}
                 );
+                if (closed && accepted && request.requesterStaffId) {
+                    const { taskService } = await import("./task-service.js");
+                    const moved = await taskService.reassignShiftTasks({
+                        fromStaffId: request.requesterStaffId,
+                        toStaffId: accepted.id,
+                        shiftDate: request.shiftDate,
+                        city: request.location.city,
+                        locationName: request.location.name,
+                    });
+                    if (moved > 0) {
+                        logger.info({ requestId: request.id, moved }, "Shift tasks moved to the replacement");
+                    }
+                }
                 return true;
             }
             case "FAILED": {

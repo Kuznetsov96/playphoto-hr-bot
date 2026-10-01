@@ -213,7 +213,8 @@ export class AwsBusinessSyncService {
 
     private async performSync(): Promise<SyncResult> {
         const snapshot = await this.fetchSnapshot();
-        const employeeResult = await this.syncEmployeesAndLocations(snapshot);
+        const { droppedTelegramIds, ...employeeResult } = await this.syncEmployeesAndLocations(snapshot);
+        await this.revokeDroppedEmployees(droppedTelegramIds);
         await this.reportTelegramLinks(snapshot);
         const shiftResult = await this.syncShifts(snapshot);
         const result: SyncResult = {
@@ -351,8 +352,12 @@ export class AwsBusinessSyncService {
     }
 
     private async syncEmployeesAndLocations(snapshot: AwsBusinessSnapshot) {
+        // Хто випав зі знімка (видалена у вебаппі або змінила Telegram): вебапп
+        // для таких рядка на відкликання доступу не ставить, тож бот прибирає
+        // їх із чатів команди сам — після коміту, щоб не тримати транзакцію.
+        const droppedTelegramIds: bigint[] = [];
         const activeBefore = await prisma.staffProfile.count({ where: { isActive: true } });
-        return prisma.$transaction(async (transaction) => {
+        const result = await prisma.$transaction(async (transaction) => {
             const locationIds = new Map<string, string>();
             for (const location of snapshot.locations) {
                 const existing = await transaction.location.findFirst({
@@ -489,7 +494,11 @@ export class AwsBusinessSyncService {
                         username: employee.telegramUsername,
                         firstName: employee.firstName,
                         lastName: employee.lastName,
-                        ...(employee.status === "ACTIVE" ? { role: Role.STAFF } : {}),
+                        // isBlocked ставив лише старий синк чорного списку з таблиці, у
+                        // режимі вебаппа його ніхто не знімає: людина, яку заблокували до
+                        // переходу й знову найняли у вебаппі, отримувала від бота лише
+                        // «System Maintenance». Активна у вебаппі — не заблокована в боті.
+                        ...(employee.status === "ACTIVE" ? { role: Role.STAFF, isBlocked: false } : {}),
                     },
                     select: { id: true },
                 });
@@ -528,8 +537,9 @@ export class AwsBusinessSyncService {
                     isActive: true,
                     user: { telegramId: { notIn: snapshotTelegramIds } },
                 },
-                select: { id: true },
+                select: { id: true, user: { select: { telegramId: true } } },
             });
+            droppedTelegramIds.push(...missing.flatMap((staff) => staff.user ? [staff.user.telegramId] : []));
             await releaseParcelsOf(transaction, missing.map((staff) => staff.id));
             const deactivated = await transaction.staffProfile.updateMany({
                 where: {
@@ -552,6 +562,24 @@ export class AwsBusinessSyncService {
                 locations: snapshot.locations.length,
             };
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 });
+        return { ...result, droppedTelegramIds };
+    }
+
+    private async revokeDroppedEmployees(telegramIds: bigint[]): Promise<void> {
+        if (telegramIds.length === 0) return;
+        const { accessService } = await import("./access-service.js");
+        for (const telegramId of telegramIds) {
+            await accessService.syncUserAccess(telegramId, "Absent from the web app employee snapshot");
+        }
+        logBusinessEvent({
+            event: "bot.aws_business_snapshot.dropped_access_revoked",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "aws-business-sync",
+            operation: "revokeDroppedEmployees",
+            safeContext: { count: telegramIds.length },
+        });
     }
 
     /**

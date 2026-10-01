@@ -337,3 +337,55 @@ describe("AwsBusinessSyncService — parcels of a photographer leaving the team"
         }));
     });
 });
+
+describe("AwsBusinessSyncService — legacy bot block", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    // isBlocked ставив лише старий синк чорного списку; у режимі вебаппа його ніхто
+    // не знімав, і знову найнята людина бачила від бота тільки «System Maintenance».
+    it("unblocks an employee the web app has active", async () => {
+        const transaction = transactionStub();
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(transaction.user.upsert).toHaveBeenCalledWith(expect.objectContaining({
+            update: expect.objectContaining({ isBlocked: false }),
+        }));
+    });
+});
+
+const syncUserAccess = vi.fn();
+vi.mock("../access-service.js", () => ({ accessService: { syncUserAccess: (...a: unknown[]) => syncUserAccess(...a) } }));
+
+describe("AwsBusinessSyncService — employee dropped from the snapshot", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    // Вебапп ставить рядок на відкликання доступу лише при деактивації. Видалена
+    // або з новим Telegram людина просто зникала зі знімка й лишалась у чатах.
+    it("removes her from the team chats after the sync commits", async () => {
+        const transaction = { ...transactionStub(), parcel: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) } };
+        transaction.staffProfile.findMany.mockResolvedValueOnce([{ id: "staff-gone", user: { telegramId: 555n } }]);
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(syncUserAccess).toHaveBeenCalledWith(555n, "Absent from the web app employee snapshot");
+    });
+});

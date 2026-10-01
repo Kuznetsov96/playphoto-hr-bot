@@ -31,6 +31,10 @@ vi.mock("../../core/queue.js", () => ({
     defaultQueue: { add: (...a: unknown[]) => queueAdd(...a) },
     QUEUES: { DEFAULT: "default" },
 }));
+const reassignShiftTasks = vi.fn();
+vi.mock("../task-service.js", () => ({
+    taskService: { reassignShiftTasks: (...a: unknown[]) => reassignShiftTasks(...a) },
+}));
 vi.mock("../replacement-canonical.js", () => ({
     startCanonicalReplacement: vi.fn(),
     dispatchCanonicalWave: (...a: unknown[]) => dispatchCanonicalWave(...a),
@@ -66,6 +70,7 @@ beforeEach(() => {
     findMany.mockReset();
     updateMany.mockReset().mockResolvedValue({ count: 1 });
     staffFindFirst.mockReset().mockResolvedValue(null);
+    reassignShiftTasks.mockReset().mockResolvedValue(0);
     queueAdd.mockReset().mockResolvedValue(undefined);
     dispatchCanonicalWave.mockReset();
     // Дзеркало вже не містить зміни авторки — саме так виглядала заявка після
@@ -92,6 +97,14 @@ describe("canonical replacement outcome on the bot's copy", () => {
         });
         expect(telegram.sendMessage).not.toHaveBeenCalled();
         expect(queueAdd).not.toHaveBeenCalled();
+        // Задачі зміни йдуть за зміною: дайджест і пінги отримає та, що вийшла.
+        expect(reassignShiftTasks).toHaveBeenCalledWith({
+            fromStaffId: "staff-1",
+            toStaffId: "staff-2",
+            shiftDate: expect.any(Date),
+            city: "Lviv",
+            locationName: "Dragon Park 2",
+        });
     });
 
     // Dragon Park 2, 29.09.2026: вебапп поставив FAILED, бот мовчав, а графік

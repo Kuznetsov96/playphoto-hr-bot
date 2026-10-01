@@ -323,7 +323,11 @@ export const broadcastService = {
         }
 
         if (target.type === 'all' || target.type === 'city_chats' || target.type === 'city_chat_location') {
-            const allLocs = await locationRepository.findAll();
+            // Закриту точку вебапп ховає (isHidden), але її чат лишався в розсилці
+            // «по містах» і «всім». Точки, які адмін обрав явно, не фільтруємо.
+            const allLocs = (await locationRepository.findAll()).filter(
+                l => target.type === 'city_chat_location' || !l.isHidden
+            );
             if (target.type === 'city_chats' && values.length > 0) {
                 for (const city of values) {
                     const cityLocs = allLocs.filter(l => normalizeCity(l.city) === city && l.telegramChatId);
