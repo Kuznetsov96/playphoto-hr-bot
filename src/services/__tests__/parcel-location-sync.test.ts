@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const findUnique = vi.fn();
 const update = vi.fn();
+const findMany = vi.fn();
+const updateMany = vi.fn();
 
 vi.mock("../../db/core.js", () => ({
     default: {
         parcel: {
             findUnique: (...a: unknown[]) => findUnique(...a),
             update: (...a: unknown[]) => update(...a),
+            findMany: (...a: unknown[]) => findMany(...a),
+            updateMany: (...a: unknown[]) => updateMany(...a),
         },
     },
 }));
@@ -19,6 +23,7 @@ const { logisticsService } = await import("../logistics-service.js");
 
 type Service = {
     syncCanonicalLocations(parcels: Array<{ ttn: string; locationId: string | null }>): Promise<void>;
+    cancelParcelsGoneFromWebapp(parcels: Array<{ ttn: string }>): Promise<void>;
     notifyStaffOnShift(parcelId: string, status: string): Promise<void>;
 };
 const service = logisticsService as unknown as Service;
@@ -28,6 +33,8 @@ const canonical = (locationId: string | null) => ({ ttn: "20451545104740", locat
 beforeEach(() => {
     findUnique.mockReset();
     update.mockReset().mockResolvedValue({});
+    findMany.mockReset();
+    updateMany.mockReset().mockResolvedValue({ count: 0 });
     vi.restoreAllMocks();
 });
 
@@ -78,5 +85,35 @@ describe("syncCanonicalLocations", () => {
 
         expect(findUnique).not.toHaveBeenCalled();
         expect(update).not.toHaveBeenCalled();
+    });
+});
+
+// Посилку, скасовану у вебаппі (переадресація НП), вебапп перестає віддавати, а
+// в боті вона висіла відкритою: «Посилки локації», кнопка «Прийняти».
+describe("cancelParcelsGoneFromWebapp", () => {
+    it("cancels an open parcel the web app no longer lists", async () => {
+        findMany.mockResolvedValue([{ id: "p1", ttn: "111" }, { id: "p2", ttn: "222" }]);
+
+        await service.cancelParcelsGoneFromWebapp([{ ttn: "111" }]);
+
+        expect(updateMany).toHaveBeenCalledWith({
+            where: { id: { in: ["p2"] }, status: { notIn: ["COMPLETED", "CANCELLED"] } },
+            data: { status: "CANCELLED" },
+        });
+    });
+
+    it("touches nothing when the web app answers with an empty list", async () => {
+        await service.cancelParcelsGoneFromWebapp([]);
+
+        expect(findMany).not.toHaveBeenCalled();
+        expect(updateMany).not.toHaveBeenCalled();
+    });
+
+    it("treats a mass disappearance as a web app fault, not cancellations", async () => {
+        findMany.mockResolvedValue(Array.from({ length: 31 }, (_, i) => ({ id: `p${i}`, ttn: `${i}` })));
+
+        await service.cancelParcelsGoneFromWebapp([{ ttn: "known" }]);
+
+        expect(updateMany).not.toHaveBeenCalled();
     });
 });

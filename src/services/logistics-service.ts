@@ -23,6 +23,10 @@ const bot = new Bot(BOT_TOKEN);
 
 type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED' | 'MANUAL_PROXY';
 
+
+/** Скільки посилок за прохід може зникнути зі списку вебаппа, перш ніж це вважається збоєм. */
+const MAX_PARCELS_GONE_PER_PASS = 30;
+
 export class LogisticsService {
     /**
      * Один цикл логистики бота: статусы посылок и весь разговор в Telegram.
@@ -117,6 +121,7 @@ export class LogisticsService {
 
         if (AWS_PARCELS_CANONICAL_READ_ENABLED) {
             await this.syncCanonicalLocations(activeParcels);
+            await this.cancelParcelsGoneFromWebapp(activeParcels);
         }
 
         // С телефоном получателя НП отдаёт ссылку переадресации (observeNpTracking); без
@@ -140,8 +145,9 @@ export class LogisticsService {
                 // посылке (они у веба), а ради состояния РАЗГОВОРА: кто отвечает за
                 // получение, какие напоминания уже отправлены. Поля НП копируем как
                 // есть — веб остаётся их владельцем, здесь это зеркало для джойна.
+                const existingParcel = await prisma.parcel.findUnique({ where: { ttn: parcel.ttn } });
                 const localParcel =
-                    (await prisma.parcel.findUnique({ where: { ttn: parcel.ttn } })) ??
+                    existingParcel ??
                     (await prisma.parcel.create({
                         data: {
                             ttn: parcel.ttn,
@@ -153,6 +159,13 @@ export class LogisticsService {
                             scheduledDate: parcel.scheduledDate
                         }
                     }));
+
+                // Нова посилка без точки: точку призначає власник у вебаппі, і без
+                // сигналу про це ніхто не дізнавався — notifyUnmatchedParcel ніхто
+                // не викликав. Один раз, у мить, коли бот уперше бачить посилку.
+                if (!existingParcel && AWS_PARCELS_CANONICAL_READ_ENABLED && !parcel.locationId) {
+                    await this.notifyUnmatchedParcel(localParcel.id, parcel.npCity, parcel.npAddress);
+                }
 
                 const npStatus = observeNpTracking(statusDoc);
                 const newStatus = resolveParcelStatusTransition(localParcel.status, npStatus, localParcel.deliveryType);
@@ -222,19 +235,61 @@ export class LogisticsService {
     }
 
     /**
+     * Вебапп віддає боту ВСІ відомі йому посилки, крім скасованих. Тож відкрита в
+     * боті посилка, якої в цьому списку немає, — скасована у вебаппі (переадресація
+     * НП) або вебаппу невідома. Раніше вона лишалась відкритою назавжди: висіла в
+     * «Посилки локації», кнопка «Прийняти» працювала.
+     *
+     * Запобіжник: порожній список або забагато зникнень за прохід — це збій
+     * вебаппа, а не скасування; тоді нічого не чіпаємо.
+     */
+    private async cancelParcelsGoneFromWebapp(parcels: CanonicalParcel[]) {
+        if (parcels.length === 0) return;
+        const known = new Set(parcels.map(parcel => parcel.ttn));
+        const open = await prisma.parcel.findMany({
+            where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+            select: { id: true, ttn: true }
+        });
+        const gone = open.filter(parcel => !known.has(parcel.ttn));
+        if (gone.length === 0) return;
+        if (gone.length > MAX_PARCELS_GONE_PER_PASS) {
+            logger.warn({ gone: gone.length }, 'Too many parcels missing from the web app list — not cancelling');
+            return;
+        }
+        await prisma.parcel.updateMany({
+            where: { id: { in: gone.map(parcel => parcel.id) }, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+            data: { status: 'CANCELLED' }
+        });
+        logBusinessEvent({
+            event: "logistics.parcel.cancelled_absent_from_webapp",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "logistics-service",
+            operation: "cancelParcelsGoneFromWebapp",
+            safeContext: { ttns: gone.map(parcel => parcel.ttn) },
+        });
+    }
+
+    /**
      * Notifies support about a new parcel that couldn't be auto-matched to a location
      */
     private async notifyUnmatchedParcel(parcelId: string, city: string | null, address: string | null) {
         const text = `📦 <b>New Parcel — Location Unknown</b>\n\n` +
             `A new incoming parcel was detected but could not be auto-assigned to a location.\n\n` +
-            `<b>City:</b> ${city || 'Unknown'}\n` +
-            `<b>Address:</b> ${address || 'Unknown'}\n\n` +
-            `Please assign a location manually.`;
+            `<b>City:</b> ${escapeHtml(city || 'Unknown')}\n` +
+            `<b>Address:</b> ${escapeHtml(address || 'Unknown')}\n\n` +
+            (AWS_PARCELS_CANONICAL_READ_ENABLED
+                // Точку посилки тримає вебапп: призначена тут, у боті, вона не
+                // дійде до вебаппа й буде перезаписана, щойно там з'явиться своя.
+                ? `Assign a location in the web app (Logistics → Parcels). The shift on that location is notified automatically.`
+                : `Please assign a location manually.`);
 
-        const kb = new InlineKeyboard()
-            .text('📍 Assign Location', `admin_parcel_loc_${parcelId}`)
-            .row()
-            .text('📋 View Details', `admin_parcel_view_details_${parcelId}`);
+        const kb = new InlineKeyboard();
+        if (!AWS_PARCELS_CANONICAL_READ_ENABLED) {
+            kb.text('📍 Assign Location', `admin_parcel_loc_${parcelId}`).row();
+        }
+        kb.text('📋 View Details', `admin_parcel_view_details_${parcelId}`);
 
         const options: any = { parse_mode: 'HTML', reply_markup: kb };
         if (TEAM_CHATS.LOGISTICS !== undefined) {

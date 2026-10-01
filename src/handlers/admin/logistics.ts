@@ -5,7 +5,7 @@ import { LOGISTICS_TEXTS_ADMIN } from "../../constants/logistics-constants.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { Menu } from "@grammyjs/menu";
 import { menuRegistry } from "../../utils/menu-registry.js";
-import { TEAM_CHATS } from "../../config.js";
+import { TEAM_CHATS, AWS_PARCELS_CANONICAL_READ_ENABLED } from "../../config.js";
 import { audit } from "../../core/audit-logger.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../utils/logistics-formatters.js";
 import { escapeHtml } from "./utils.js";
@@ -43,7 +43,10 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
         });
     }
 
-    range.row().text("➕ Add TTN", async (ctx) => {
+    // Посилки приходять у вебапп самі, з кабінету Нової Пошти, а бот бере їх зі
+    // списку вебаппа. Ручний ТТН вебапп не бачить, тож у боті він висів EXPECTED
+    // назавжди, хоча кнопка обіцяла «Tracking will begin on next sync».
+    if (!AWS_PARCELS_CANONICAL_READ_ENABLED) range.row().text("➕ Add TTN", async (ctx) => {
         ctx.session.adminFlow = "LOGISTICS";
         ctx.session.step = "admin_logistics_add_ttn";
         delete ctx.session.taskData;
