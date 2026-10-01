@@ -280,9 +280,9 @@ export class RecruitingCommandDispatcher {
                 return;
             }
             case "ACCEPT_AFTER_INTERVIEW": {
-                // Кнопка «✅ Accept Offer»: решение с шестичасовой задержкой
-                // доставки — оффер кандидатке отправит воркер, как и всегда.
-                const ok = await hrService.makeDecision(api, candidate.id, "ACCEPTED", "webapp-recruiter");
+                // Принятие — сразу: статус и письмо кандидатке (решение
+                // владельца 01.10.2026), см. hrService.acceptAfterInterview.
+                const ok = await hrService.acceptAfterInterview(api, candidate.id, "webapp-recruiter");
                 if (!ok) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
             }

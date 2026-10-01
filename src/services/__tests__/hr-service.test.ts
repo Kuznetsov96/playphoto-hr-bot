@@ -168,20 +168,6 @@ describe('hrService', () => {
             expect(result).toBe(false);
         });
 
-        it('should update candidate with ACCEPTED decision but NOT update status yet', async () => {
-            vi.mocked(candidateRepository.findById).mockResolvedValue({ id: 'cand1', user: { id: 'user1', telegramId: 123 } } as any);
-            const result = await hrService.makeDecision(mockApi, 'cand1', 'ACCEPTED');
-            expect(result).toBe(true);
-            expect(candidateRepository.update).toHaveBeenCalledWith('cand1', {
-                currentStep: 'INTERVIEW',
-                hrDecision: 'ACCEPTED',
-                notificationSent: false,
-                materialsSent: false,
-                hasUnreadMessage: false,
-                isWaitlisted: false
-            });
-        });
-
         it('REJECTED goes through rejectAfterInterview — status and letter at once', async () => {
             vi.mocked(candidateRepository.findById).mockResolvedValue({
                 id: 'cand1', status: CandidateStatus.INTERVIEW_COMPLETED, hrDecision: null,
@@ -194,6 +180,58 @@ describe('hrService', () => {
                 hrDecision: 'REJECTED',
             }));
             expect(mockApi.sendMessage).toHaveBeenCalled();
+        });
+    });
+
+    describe('acceptAfterInterview', () => {
+        const api = { sendMessage: vi.fn() };
+        const base = { id: 'cand1', hrDecision: null, notificationSent: false, user: { id: 'user1', telegramId: 123 } };
+
+        beforeEach(() => {
+            api.sendMessage.mockReset().mockResolvedValue({ message_id: 7 });
+        });
+
+        it('after the meeting: MENTOR_MANUAL, the offer letter at once, notificationSent', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+
+            await expect(hrService.makeDecision(api, 'cand1', 'ACCEPTED')).resolves.toBe(true);
+
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(1, 'cand1', expect.objectContaining({
+                status: CandidateStatus.MENTOR_MANUAL, hrDecision: 'ACCEPTED',
+            }));
+            expect(api.sendMessage).toHaveBeenCalledWith(123, CANDIDATE_TEXTS['worker-offer-accepted'](), expect.objectContaining({ parse_mode: 'HTML' }));
+            expect(candidateRepository.update).toHaveBeenLastCalledWith('cand1', { notificationSent: true });
+        });
+
+        it('decided during the meeting: completes the interview first, then MENTOR_MANUAL', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_SCHEDULED } as any);
+
+            await hrService.acceptAfterInterview(api, 'cand1');
+
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(1, 'cand1', expect.objectContaining({
+                status: CandidateStatus.INTERVIEW_COMPLETED, interviewCompletedAt: expect.any(Date),
+            }));
+            expect(candidateRepository.update).toHaveBeenNthCalledWith(2, 'cand1', expect.objectContaining({
+                status: CandidateStatus.MENTOR_MANUAL,
+            }));
+        });
+
+        it('send failure: the command fails with a code', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+            api.sendMessage.mockRejectedValue(new Error('ETIMEDOUT'));
+
+            await expect(hrService.acceptAfterInterview(api, 'cand1')).rejects.toThrow('OFFER_NOT_SENT:send_failed');
+        });
+
+        it('already accepted and notified: nothing is sent twice', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...base, status: CandidateStatus.MENTOR_MANUAL, hrDecision: 'ACCEPTED', notificationSent: true
+            } as any);
+
+            await hrService.acceptAfterInterview(api, 'cand1');
+
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).not.toHaveBeenCalled();
         });
     });
 

@@ -329,52 +329,99 @@ export const hrService = {
     },
 
     async makeDecision(api: any, candId: string, decision: "ACCEPTED" | "REJECTED", adminId?: string) {
-        // Відмова — одразу (рішення власника 01.10.2026), див. rejectAfterInterview.
+        // Обидва рішення — одразу (рішення власника 01.10.2026): відмова — див.
+        // rejectAfterInterview, прийняття — acceptAfterInterview. Шестигодинна
+        // затримка листа прибрана: вона губила відмови й тримала прийняту в
+        // невідомості, хоча рішення ухвалює жива людина після розмови.
         if (decision === "REJECTED") return this.rejectAfterInterview(api, candId, adminId);
+        return this.acceptAfterInterview(api, candId, adminId);
+    },
 
-        const initialCand = await this.getCandidateDetails(candId);
-        if (!initialCand) return false;
-
-        await candidateRepository.update(candId, {
-            // We DON'T update status immediately. 
-            // Instead, we leave it as INTERVIEW_COMPLETED so the worker can 
-            // send the notification after 6 hours and THEN update the status.
-            currentStep: FunnelStep.INTERVIEW,
-            hrDecision: decision,
-            notificationSent: false,
-            materialsSent: false,
-            hasUnreadMessage: false, // Mark as read once decision is made
-            ...(decision === "ACCEPTED" ? { isWaitlisted: false } : {})
-        });
-
+    /**
+     * Прийняття HR після співбесіди — статус MENTOR_MANUAL і лист одразу
+     * (рішення власника 01.10.2026). Перехід той самий, що робив воркер через
+     * 6 год; якщо зустріч ще не автозавершена (HR вирішила під час розмови),
+     * спершу фіксуємо завершення — guard пускає в MENTOR_MANUAL лише з
+     * INTERVIEW_COMPLETED.
+     *
+     * Повторний виклик для вже прийнятої без листа лише дошле лист.
+     */
+    async acceptAfterInterview(api: any, candId: string, adminId?: string) {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return false;
 
-        // Sync channel access
-        await accessService.syncUserAccess(cand.user.telegramId, `HR Decision: ${decision}`);
+        const telegramId = Number(cand.user.telegramId);
+        const alreadyAccepted = cand.status === CandidateStatus.MENTOR_MANUAL && cand.hrDecision === "ACCEPTED";
+        if (alreadyAccepted && cand.notificationSent) return true;
 
-        // Log to Timeline
-        const { timelineRepository } = await import("../repositories/timeline-repository.js");
-        await timelineRepository.createEvent(cand.user.id, 'SYSTEM_EVENT', 'ADMIN', `HR прийняв рішення: ${decision}`, {
-            decision,
-            adminId: adminId || 'unknown'
-        });
-
-        audit({
-            event: "candidate_decision_set",
-            result: "success",
-            actorType: "admin",
-            actorId: adminId,
-            telegramId: cand.user.telegramId,
-            entityType: "candidate",
-            entityId: cand.id,
-            context: {
-                fromStatus: initialCand.status,
-                decision,
-                previousDecision: initialCand.hrDecision,
-                currentStep: cand.currentStep
+        if (!alreadyAccepted) {
+            if (cand.status === CandidateStatus.INTERVIEW_SCHEDULED) {
+                await candidateRepository.update(candId, {
+                    status: CandidateStatus.INTERVIEW_COMPLETED,
+                    currentStep: FunnelStep.INTERVIEW,
+                    interviewCompletedAt: new Date(),
+                });
             }
-        });
+
+            await candidateRepository.update(candId, {
+                status: CandidateStatus.MENTOR_MANUAL,
+                hrDecision: "ACCEPTED",
+                notificationSent: false,
+                materialsSent: false,
+                isWaitlisted: false,
+                hasUnreadMessage: false,
+            });
+
+            await accessService.syncUserAccess(cand.user.telegramId, "HR Decision: ACCEPTED");
+
+            const { timelineRepository } = await import("../repositories/timeline-repository.js");
+            await timelineRepository.createEvent(cand.user.id, 'SYSTEM_EVENT', 'ADMIN', `HR прийняв рішення: ACCEPTED`, {
+                decision: "ACCEPTED",
+                adminId: adminId || 'unknown'
+            });
+
+            audit({
+                event: "candidate_decision_set",
+                result: "success",
+                actorType: "admin",
+                actorId: adminId,
+                telegramId: cand.user.telegramId,
+                entityType: "candidate",
+                entityId: cand.id,
+                context: { fromStatus: cand.status, decision: "ACCEPTED", previousDecision: cand.hrDecision }
+            });
+        }
+
+        try {
+            const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
+            // Старі повідомлення з кнопками запису прибираються, як і при відмові.
+            await cleanupUserSessionMessages(api, telegramId);
+            const msg = await api.sendMessage(telegramId, CANDIDATE_TEXTS["worker-offer-accepted"](), {
+                parse_mode: "HTML",
+                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr"),
+            });
+            if (msg) await trackUserMessage(telegramId, msg.message_id);
+            await candidateRepository.update(candId, { notificationSent: true });
+            logBusinessEvent({
+                event: "candidate.offer.notification_sent",
+                candidateId: cand.id,
+                telegramId: cand.user.telegramId,
+                actorType: "system",
+                actorRole: "system",
+                stage: "ACCEPTED",
+                result: "success",
+                module: "hr-service",
+                operation: "acceptAfterInterview",
+            });
+        } catch (sendErr) {
+            if (isBotBlocked(sendErr)) {
+                await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+                return true;
+            }
+            logger.error({ err: sendErr, candidateId: cand.id }, "Candidate offer notification delivery failed");
+            // Статус уже MENTOR_MANUAL, а листа немає — рекрутерка має це побачити.
+            throw new Error("OFFER_NOT_SENT:send_failed");
+        }
 
         return true;
     },
