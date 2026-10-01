@@ -106,11 +106,11 @@ export class StaffService {
             }
 
             const activePhotographers = await staffRepository.countActive().catch(() => 0);
-            const locations = await locationRepository.findAll().catch(() => []);
+            const locations = await locationRepository.countOperating().catch(() => 0);
 
             return t('admin-panel-title') + "\n\n" +
                 t('admin-panel-team', { active: activePhotographers }) + "\n" +
-                t('admin-panel-locations', { active: locations.length }) + "\n\n" +
+                t('admin-panel-locations', { active: locations }) + "\n\n" +
                 t('admin-panel-category');
         } catch (e) {
             logger.error({ err: e }, "Failed to generate admin header");
