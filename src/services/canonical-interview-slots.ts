@@ -21,7 +21,7 @@ import { bookingService } from "./booking-service.js";
  */
 
 /** Причины освобождения — уходят в releasedReason вебаппа (контракт: ≤120). */
-export type CanonicalReleaseReason = "candidate_cancelled" | "candidate_withdrew" | "rescheduled" | "booking_rejected";
+export type CanonicalReleaseReason = "candidate_cancelled" | "candidate_withdrew" | "rescheduled" | "booking_rejected" | "hr_rejected";
 
 /** Минимум, который нужен клавиатуре выбора слота. */
 export interface AvailableInterviewSlot {
