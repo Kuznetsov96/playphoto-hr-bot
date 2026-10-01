@@ -841,6 +841,19 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request || request.status !== ReplacementRequestStatus.ACTIVE) return;
 
+        /**
+         * Заявку, яку веде вебапп, бот не закриває за своїм дзеркалом: застарілість
+         * і початок зміни бекенд перевіряє сам у тому ж виклику хвилі й повертає
+         * підсумковий статус. Локальна перевірка йшла першою і мала дві вади: вона
+         * спрацьовувала лише тоді, коли надходила вже запланована хвиля (через годину
+         * й більше після прийняття), і писала авторці «Пошук закрито. Графік уже
+         * оновлено.» про підміну, яку насправді знайшли.
+         */
+        if (request.awsReplacementPublicId) {
+            await this.dispatchCanonicalNextWave(api, request, request.awsReplacementPublicId);
+            return;
+        }
+
         if (await this.isRequestObsoleteAfterScheduleChange(request)) {
             await this.closeByScheduleSync(api, request, ReplacementRequestStatus.ACTIVE);
             return;
@@ -865,11 +878,6 @@ export class ReplacementService {
          * strand photographers who are already deciding, so the two paths coexist
          * until the last legacy request closes.
          */
-        if (request.awsReplacementPublicId) {
-            await this.dispatchCanonicalNextWave(request.id, request.awsReplacementPublicId);
-            return;
-        }
-
         const previousWave = request.currentWave;
         if (previousWave && request.nextWaveAt && request.nextWaveAt > now) return;
 
@@ -930,8 +938,14 @@ export class ReplacementService {
      * reschedules the same canonical dispatch rather than falling back to local
      * selection, which would offer the shift to people it has no record of.
      */
-    private async dispatchCanonicalNextWave(requestId: string, replacementPublicId: string) {
+    private async dispatchCanonicalNextWave(
+        api: Api,
+        request: RequestWithRelations,
+        replacementPublicId: string
+    ) {
+        const requestId = request.id;
         const result = await dispatchCanonicalWave(replacementPublicId);
+        if (result.ok && (await this.settleCanonicalRequest(api, request, result))) return;
 
         const delay = result.ok
             ? result.nextWaveAt === null
@@ -950,6 +964,133 @@ export class ReplacementService {
                 removeOnComplete: true
             }
         );
+    }
+
+    /**
+     * Переносить на локальну копію підсумок, який повернув вебапп. Повертає
+     * `true`, коли заявка там уже закрита і далі опитувати її не треба.
+     *
+     * Локальна копія канонічної заявки не правда, а кеш: її читають адмінський
+     * список, захист від повторного запуску і старі екрани. Без цього кроку вона
+     * лишалась ACTIVE назавжди, якщо пошук закінчився нічим (на 01.10.2026 таких
+     * було 96 проти двох справді активних у вебаппі).
+     *
+     * Повідомляє лише про невдачу і лише на майбутню зміну: про знайдену підміну
+     * авторці вже написав вебапп (сповіщення графіка), а про минулу зміну писати
+     * пізно й нічого не змінює.
+     */
+    private async settleCanonicalRequest(
+        api: Api,
+        request: RequestWithRelations,
+        result: { status: string; acceptedEmployeePublicId?: string | null }
+    ): Promise<boolean> {
+        const closedAt = new Date();
+        const closeAs = async (
+            status: ReplacementRequestStatus,
+            closedReason: string,
+            extra: { replacementStaffId?: string } = {}
+        ) => {
+            const updated = await prisma.replacementRequest.updateMany({
+                where: { id: request.id, status: ReplacementRequestStatus.ACTIVE },
+                data: { status, closedReason, completedAt: closedAt, nextWaveAt: null, ...extra }
+            });
+            if (updated.count === 1) {
+                logBusinessEvent({
+                    event: "bot.replacement_canonical.settled",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "success",
+                    module: "replacement-service",
+                    operation: "settleCanonicalRequest",
+                    safeContext: { requestId: request.id, canonicalStatus: result.status, localStatus: status }
+                });
+            }
+            return updated.count === 1;
+        };
+
+        switch (result.status) {
+            case "ACTIVE":
+            case "PENDING_APPROVAL":
+                return false;
+            case "CONFIRMED": {
+                const accepted = result.acceptedEmployeePublicId
+                    ? await prisma.staffProfile.findFirst({
+                        where: { awsEmployeePublicId: result.acceptedEmployeePublicId },
+                        select: { id: true }
+                    })
+                    : null;
+                await closeAs(
+                    ReplacementRequestStatus.FOUND,
+                    "canonical_confirmed",
+                    accepted ? { replacementStaffId: accepted.id } : {}
+                );
+                return true;
+            }
+            case "FAILED": {
+                const closed = await closeAs(ReplacementRequestStatus.FAILED, "all_waves_completed");
+                if (closed && this.getShiftStartAt(request) > closedAt) {
+                    await this.notifyRequesterFailed(api, request);
+                    await this.notifyAdminFailed(api, request.id);
+                }
+                return true;
+            }
+            case "EXPIRED":
+                await closeAs(ReplacementRequestStatus.EXPIRED, "shift_started");
+                return true;
+            case "CANCELLED":
+                await closeAs(ReplacementRequestStatus.CANCELLED, "cancelled_in_webapp");
+                return true;
+            case "SUPERSEDED":
+                await closeAs(ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC, "schedule_changed");
+                return true;
+            default:
+                // Невідомий статус — нова гілка бекенда. Не вгадуємо, лишаємо як є.
+                return false;
+        }
+    }
+
+    /**
+     * Сверка копій канонічних заявок, які ніхто більше не опитує: після невдалого
+     * пошуку чи рішення власника вебапп повертає `nextWaveAt = null`, і ланцюжок
+     * хвиль бота зупиняється разом із ним. Виклик хвилі для закритої заявки нічого
+     * не змінює в бекенді — він лише повертає її стан; для активної, у якої хвиля
+     * ще не настала, відповідає 409 з часом наступної.
+     */
+    async syncCanonicalRequests(api: Api, batchSize: number = 50) {
+        const requests = await prisma.replacementRequest.findMany({
+            where: {
+                status: ReplacementRequestStatus.ACTIVE,
+                awsReplacementPublicId: { not: null }
+            },
+            include: {
+                location: true,
+                requester: { include: { user: true } },
+                replacement: { include: { user: true } }
+            },
+            orderBy: { updatedAt: "asc" },
+            take: batchSize
+        });
+
+        let settled = 0;
+        let failed = 0;
+        for (const request of requests) {
+            const result = await dispatchCanonicalWave(request.awsReplacementPublicId!);
+            if (!result.ok) {
+                failed++;
+                continue;
+            }
+            if (await this.settleCanonicalRequest(api, request, result)) {
+                settled++;
+            } else {
+                // Відкрита заявка: позначаємо, що її перевірено, щоб наступний прохід
+                // брав інші першими, а не впирався в ті самі 50 рядків.
+                await prisma.replacementRequest.updateMany({
+                    where: { id: request.id, status: ReplacementRequestStatus.ACTIVE },
+                    data: { updatedAt: new Date() }
+                });
+            }
+        }
+        return { checked: requests.length, settled, failed };
     }
 
     async reconcileRequestsChangedBySchedule(api: Api) {
@@ -1378,6 +1519,14 @@ export class ReplacementService {
             .catch((err) => logger.warn({ err, requestId }, "Replacement failure admin notification failed"));
     }
 
+    private async notifyRequesterFailed(api: Api, request: RequestWithRelations) {
+        if (!request.requester) return;
+        await api.sendMessage(Number(request.requester.user.telegramId), this.formatRequesterFailureText(request), {
+            parse_mode: "HTML",
+            reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
+        }).catch((err) => logger.warn({ err, requestId: request.id }, "Requester replacement-failed notification failed"));
+    }
+
     private async failRequest(api: Api, requestId: string, status: ReplacementRequestStatus, reason: string) {
         await prisma.replacementRequest.updateMany({
             where: { id: requestId, status: ReplacementRequestStatus.ACTIVE },
@@ -1392,12 +1541,7 @@ export class ReplacementService {
         const request = await this.getRequest(requestId);
         if (!request) return;
 
-        if (request.requester) {
-            await api.sendMessage(Number(request.requester.user.telegramId), this.formatRequesterFailureText(request), {
-                parse_mode: "HTML",
-                reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
-            }).catch(() => { });
-        }
+        await this.notifyRequesterFailed(api, request);
         await this.notifyAdminFailed(api, requestId);
         await this.inactivateOpenResponses(api, requestId, this.formatClosedCandidateText(request));
     }
@@ -1783,11 +1927,11 @@ export class ReplacementService {
 
     private formatRequesterFailureText(request: RequestWithRelations) {
         return (
-            `Поки що підміну не знайдено.\n\n` +
+            `Підміну не знайшли — зміна лишається за тобою.\n\n` +
             `📅 <b>${this.formatDate(request.shiftDate)}</b>\n` +
             `🕒 <b>${escapeHtml(this.formatShiftTime(request))}</b>\n` +
             `📍 <b>${escapeHtml(formatLocation(request.location, "in-city"))}</b>\n\n` +
-            `Будь ласка, напиши в підтримку, щоб адміністратор допоміг вирішити ситуацію вручну.`
+            `Якщо вийти не можеш — напиши в підтримку, вирішимо вручну 💛`
         );
     }
 

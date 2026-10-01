@@ -3,6 +3,7 @@ import type { Api } from "grammy";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
 import {
     formatScheduleMessage,
@@ -108,7 +109,9 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     if (publication !== null) return formatScheduleMessage(publication);
 
     const lines: string[] = [
-        group.urgency === "URGENT"
+        group.notifications.every(isReplacementGiven)
+            ? STAFF_TEXTS["schedule-notif-replacement-found-title"]
+            : group.urgency === "URGENT"
             ? STAFF_TEXTS["schedule-notif-urgent-title"]
             : STAFF_TEXTS["schedule-notif-normal-title"],
         ""
@@ -129,6 +132,18 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
 }
 
 /**
+ * The requester's copy of a confirmed replacement. The backend records it as
+ * SHIFT_REMOVED (older rows as SHIFT_REASSIGNED); either way it is the shift
+ * she asked to give away, and it has to read as a found replacement — not as
+ * an urgent removal.
+ */
+function isReplacementGiven(notification: AwsScheduleNotification): boolean {
+    return notification.payload.role === "requester"
+        && notification.payload.before !== undefined
+        && (notification.changeKind === "SHIFT_REMOVED" || notification.changeKind === "SHIFT_REASSIGNED");
+}
+
+/**
  * One event as the reader experiences it. A single-sided event is one
  * sentence with the shift line; only a real before→after gets two lines.
  * Replacements name the person's role — the backend already knows it.
@@ -142,6 +157,15 @@ function describeChange(notification: AwsScheduleNotification): string[] {
         if (after) rows.push(STAFF_TEXTS["schedule-notif-line-now"]({ details: formatShiftLine(after) }));
         return rows;
     };
+
+    if (isReplacementGiven(notification) && before) {
+        return [STAFF_TEXTS["schedule-notif-replacement-given"]({
+            shift: formatShiftLine(before),
+            name: notification.payload.counterpartDisplayName
+                ? escapeHtml(notification.payload.counterpartDisplayName)
+                : undefined
+        })];
+    }
 
     switch (notification.changeKind) {
         case "SHIFT_ADDED":
@@ -161,9 +185,6 @@ function describeChange(notification: AwsScheduleNotification): string[] {
             const role = notification.payload.role;
             if (role === "accepted" && after) {
                 return [STAFF_TEXTS["schedule-notif-replacement-taken"]({ shift: formatShiftLine(after) })];
-            }
-            if (role === "requester" && before) {
-                return [STAFF_TEXTS["schedule-notif-replacement-given"]({ shift: formatShiftLine(before) })];
             }
             if (before && after) return wasNow(STAFF_TEXTS["schedule-notif-changed-title"]);
             const only = after ?? before;

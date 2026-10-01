@@ -893,6 +893,48 @@ export function startRecruitingMirrorSweep() {
     }, RECRUITING_MIRROR_SWEEP_MS);
 }
 
+const REPLACEMENT_STATUS_SWEEP_MS = 5 * 60 * 1000;
+const REPLACEMENT_STATUS_SWEEP_LEASE = "worker:replacement-status-sweep:lease";
+
+/**
+ * Сверка копій канонічних заявок на підміну з вебаппом. Без неї заявка, яку
+ * вебапп закрив без виклику бота (власник, невдалий пошук, прибирання), лишалась
+ * у боті ACTIVE назавжди, і «Мій графік» писав «шукаємо підміну» на зміні, де
+ * пошуку давно немає.
+ */
+export function startReplacementStatusSweep(api: Bot<MyContext>["api"]) {
+    return setInterval(async () => {
+        const token = `${process.pid}:${Date.now()}`;
+        try {
+            const acquired = await redis.set(REPLACEMENT_STATUS_SWEEP_LEASE, token, "PX", REPLACEMENT_STATUS_SWEEP_MS, "NX");
+            if (acquired !== "OK") return;
+            const { replacementService } = await import("./replacement-service.js");
+            const result = await replacementService.syncCanonicalRequests(api);
+            if (result.settled > 0 || result.failed > 0) {
+                logBusinessEvent({
+                    event: "replacement_status.sweep.completed",
+                    level: result.failed > 0 ? "warn" : "info",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: result.failed > 0 ? "failed" : "success",
+                    module: "worker",
+                    operation: "startReplacementStatusSweep",
+                    safeContext: result,
+                });
+            }
+        } catch (error) {
+            logger.error({ err: error, module: "worker" }, "Replacement status sweep iteration failed");
+        } finally {
+            await redis.eval(
+                "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+                1,
+                REPLACEMENT_STATUS_SWEEP_LEASE,
+                token,
+            ).catch(() => {});
+        }
+    }, REPLACEMENT_STATUS_SWEEP_MS);
+}
+
 type AlertState = {
     fingerprint: string;
     alertedAt: string;

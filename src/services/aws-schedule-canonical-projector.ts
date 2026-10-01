@@ -27,6 +27,8 @@ export type CanonicalScheduledShift = {
     startTime: Date;
     endTime: Date;
     location: Pick<LocalScheduleLocation, "id" | "name" | "city" | "branch" | "schedule" | "openingHours">;
+    /** Стан пошуку підміни від вебаппа; відсутній, якщо бекенд його ще не віддає. */
+    replacementSearchActive?: boolean;
 };
 
 export type CanonicalScheduleReadReason =
@@ -94,7 +96,10 @@ export function projectCanonicalSchedule(
                 branch: location.branch ?? null,
                 schedule: location.schedule,
                 openingHours: location.openingHours ?? []
-            }
+            },
+            ...(shift.replacementSearchActive === undefined
+                ? {}
+                : { replacementSearchActive: shift.replacementSearchActive })
         }];
     });
 }

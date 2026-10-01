@@ -137,3 +137,91 @@ describe("staff schedule replacement state", () => {
         expect(result).toEqual([]);
     });
 });
+
+describe("staff schedule replacement state from the canonical schedule", () => {
+    const canonicalRequest = (status: ReplacementRequestStatus) => ({
+        ...outgoingRequest(status),
+        awsReplacementPublicId: "aws-request-1"
+    });
+
+    it("does not resurrect a shift already given away while the local copy still says ACTIVE", () => {
+        // Dragon Park 2, 30.09.2026: вебапп віддав зміну іншій, канонічний графік
+        // її вже не містить, а локальна копія заявки ще ACTIVE.
+        const result = mergeStaffScheduleView(
+            "staff-1",
+            [],
+            [],
+            [canonicalRequest(ReplacementRequestStatus.ACTIVE)],
+            100,
+            [],
+            { canonicalSchedule: true }
+        );
+
+        expect(result).toEqual([]);
+    });
+
+    it("drops the search badge when the backend says the search is over", () => {
+        // Dragon Park 2, 29.09.2026: пошук у вебаппі FAILED, зміна лишилась за нею.
+        const result = mergeStaffScheduleView(
+            "staff-1",
+            [{ ...scheduledShift, replacementSearchActive: false }],
+            [],
+            [canonicalRequest(ReplacementRequestStatus.ACTIVE)],
+            100,
+            [],
+            { canonicalSchedule: true }
+        );
+
+        expect(result).toEqual([
+            expect.not.objectContaining({ isReplacementSearchActive: true })
+        ]);
+        expect(result).toHaveLength(1);
+    });
+
+    it("shows the search badge the backend reports even without a local request", () => {
+        const result = mergeStaffScheduleView(
+            "staff-1",
+            [{ ...scheduledShift, replacementSearchActive: true }],
+            [],
+            [],
+            100,
+            [],
+            { canonicalSchedule: true }
+        );
+
+        expect(result).toEqual([
+            expect.objectContaining({ id: scheduledShift.id, isReplacementSearchActive: true })
+        ]);
+    });
+
+    it("keeps a shift the local copy calls FOUND when the backend still has it on her", () => {
+        // Прийняття скасували в межах вікна: вебапп повернув зміну, копія ще FOUND.
+        const result = mergeStaffScheduleView(
+            "staff-1",
+            [{ ...scheduledShift, replacementSearchActive: false }],
+            [],
+            [canonicalRequest(ReplacementRequestStatus.FOUND)],
+            100,
+            [],
+            { canonicalSchedule: true }
+        );
+
+        expect(result).toHaveLength(1);
+    });
+
+    it("falls back to the local request when the backend does not send the flag yet", () => {
+        const result = mergeStaffScheduleView(
+            "staff-1",
+            [scheduledShift],
+            [],
+            [outgoingRequest(ReplacementRequestStatus.ACTIVE)],
+            100,
+            [],
+            { canonicalSchedule: true }
+        );
+
+        expect(result).toEqual([
+            expect.objectContaining({ id: scheduledShift.id, isReplacementSearchActive: true })
+        ]);
+    });
+});

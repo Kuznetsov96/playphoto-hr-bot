@@ -157,6 +157,11 @@ const replacementRequestSchema = z
          * its next poll from this instead of keeping a wave clock of its own.
          */
         nextWaveAt: z.string().nullable().optional(),
+        /**
+         * Who took the shift, once someone has. The bot needs it only to record
+         * the outcome on its own copy of the request (FOUND + replacement).
+         */
+        acceptedEmployee: z.object({ publicId: z.string().min(1) }).passthrough().nullable().optional(),
     })
     .passthrough();
 
@@ -258,6 +263,12 @@ const employeeScheduleSchema = z.object({
         localDate: z.string().date(),
         startsAt: z.string().datetime(),
         endsAt: z.string().datetime(),
+        /**
+         * Чи йде на цю зміну пошук підміни (заявка ACTIVE чи PENDING_APPROVAL у
+         * вебаппі). Optional: бекенд без цього поля мусить і далі читатися, а
+         * `.strict()` інакше відкинув би відповідь цілком.
+         */
+        replacementSearchActive: z.boolean().optional(),
     }).strict()),
 }).strict();
 
@@ -312,6 +323,9 @@ const scheduleNotificationPayloadSchema = z.object({
     // Only present when role is "accepted": what the undo button on this
     // message calls POST /offers/:offerPublicId/undo with.
     offerPublicId: z.string().optional(),
+    // Only present when role is "requester": "Ім'я Прізвище" of the colleague
+    // who took the shift. Optional — older rows and older backends lack it.
+    counterpartDisplayName: z.string().min(1).optional(),
 });
 
 const scheduleNotificationSchema = z.object({

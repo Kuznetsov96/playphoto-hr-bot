@@ -108,4 +108,27 @@ describe("staff schedule source selection", () => {
             reasonCode: "CANONICAL_SCHEDULE_UNAVAILABLE"
         }));
     });
+
+    it("ignores a stale local copy of a canonical search once the backend gave the shift away", async () => {
+        mocks.canonicalRead.mockResolvedValue([]);
+        mocks.outgoingRequests.mockResolvedValue([{
+            id: "request-1",
+            scheduledShiftPublicId: legacyShift.awsScheduledShiftPublicId,
+            awsReplacementPublicId: "44444444-4444-4444-8444-444444444444",
+            requesterStaffId: "staff-1",
+            replacementStaffId: null,
+            locationId: location.id,
+            shiftDate: canonicalShift.date,
+            shiftStartTime: canonicalShift.startTime,
+            shiftEndTime: canonicalShift.endTime,
+            status: "ACTIVE",
+            location
+        }]);
+
+        const result = await getVisibleStaffShifts("staff-1", new Date("2030-05-12"), 100, {
+            canonicalRead: true
+        });
+
+        expect(result).toEqual([]);
+    });
 });

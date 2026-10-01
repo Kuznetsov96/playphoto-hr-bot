@@ -60,6 +60,16 @@ describe("projectCanonicalSchedule", () => {
      * Пропуск точніший за fallback: решта змін приходить із канону, тобто свіжа,
      * і зникає лише той рядок, якого дзеркало ще не бачило.
      */
+    it("carries the backend's replacement search state onto the projected shift", () => {
+        const [active] = projectCanonicalSchedule(
+            "staff-1", [{ ...canonicalShift, replacementSearchActive: true }], [location], [projection]
+        );
+        const [plain] = projectCanonicalSchedule("staff-1", [canonicalShift], [location], [projection]);
+
+        expect(active).toMatchObject({ replacementSearchActive: true });
+        expect(plain).not.toHaveProperty("replacementSearchActive");
+    });
+
     it("skips a shift the mirror has not caught up with instead of failing the whole read", () => {
         expect(projectCanonicalSchedule("staff-1", [canonicalShift], [location], [])).toEqual([]);
     });

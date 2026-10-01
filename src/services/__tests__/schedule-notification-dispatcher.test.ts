@@ -378,8 +378,56 @@ describe("renderDeliveryGroup", () => {
         ])[0]!;
 
         expect(renderDeliveryGroup(taken)).toContain("Зміну передано тобі: ");
-        expect(renderDeliveryGroup(given)).toContain("Твою зміну передано іншому фотографу: ");
+        expect(renderDeliveryGroup(given)).toContain("Зміну передано колезі.");
         expect(renderDeliveryGroup(taken)).not.toContain("Змінено локацію або фотографа");
+    });
+
+    // Dragon Park 2, 30.09.2026: бекенд пише копію автора як SHIFT_REMOVED, і вона
+    // отримала «🚨 Термінова зміна у графіку · ➖ Знято зміну» замість доброї новини.
+    it("tells the requester her replacement was found, naming who took the shift", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "b",
+                employeePublicId: "e2",
+                telegramId: "200",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: {
+                    before: snapshot(),
+                    role: "requester",
+                    replacementPublicId: "r1",
+                    counterpartDisplayName: "Анастасія <Бланк>",
+                },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("✅ <b>Підміну знайдено</b>");
+        expect(text).toContain("Зміну бере Анастасія &lt;Бланк&gt;.");
+        expect(text).toContain("Цей день у тебе тепер вільний.");
+        expect(text).not.toContain("Термінова");
+        expect(text).not.toContain("Знято зміну");
+    });
+
+    it("keeps an ordinary removal urgent when it is not a replacement", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "c",
+                employeePublicId: "e2",
+                telegramId: "200",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: { before: snapshot() },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Термінова зміна у графіку");
+        expect(text).toContain("➖ Знято зміну: ");
     });
 
     it("states an urgent change as a fact: no question and no answer buttons", () => {
