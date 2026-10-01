@@ -306,6 +306,8 @@ model Location {
   cashInEnvelope         Boolean              @default(false)
   fopId                  String?
   telegramChatId         BigInt?
+  /** Умови оплати з картки локації вебаппа (знімок, рішення власника 01.10.2026). NULL — не задано. */
+  pay                    Json?
   candidates             Candidate[]
   staff                  StaffProfile[]
   shifts                 WorkShift[]

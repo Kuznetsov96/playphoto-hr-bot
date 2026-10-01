@@ -6,7 +6,6 @@ import prisma from "../db/core.js";
 import { accessService } from "./access-service.js";
 import { Prisma } from "@prisma/client";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { getLocationDetails } from "../utils/location-data-helper.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
@@ -69,24 +68,6 @@ async function safeFindCandidatesByStatus<TInclude extends Prisma.CandidateInclu
         logger.warn({ err: error, status }, "Returning empty candidate list for unsupported status");
         return [];
     }
-}
-
-function getPostInterviewSummaryText(candidate: any) {
-    const loc = candidate.location;
-    const staticInfo = getLocationDetails(loc?.name);
-
-    const locationName = loc ? formatLocation(loc, "listing") : "Smile Park";
-    const address = staticInfo?.address || loc?.address || "адреса вказана в Google Maps";
-    const schedule = staticInfo?.schedule || loc?.schedule || "Пн-Пт 14:00-21:00, Сб-Нд 12:00-21:00";
-    const salary = staticInfo?.salary || loc?.salary || "Комісія: 20% будні / 30% вихідні";
-
-    return `<b>Приємно було познайомитися!</b> 😊\n\n` +
-        `Твоя майбутня робота в деталях:\n\n` +
-        `📍 <b>Локація</b>\n${escapeHtml(locationName)}\n${escapeHtml(address)}\n\n` +
-        `📅 <b>Графік</b>\n${escapeHtml(schedule)}\n(2–3 зміни на тиждень)\n\n` +
-        `💰 <b>Оплата</b>\n${escapeHtml(salary)}\n\n` +
-        `Ми створюємо яскраві емоції та цінуємо розвиток кожного. PlayPhoto — це про людей. ✨\n\n` +
-        `<b>Раді бачити тебе в нашій команді!</b> 🤍`;
 }
 
 export const hrService = {
@@ -930,37 +911,6 @@ export const hrService = {
 
     async getInterviewSlot(slotId: string) {
         return interviewRepository.findSlotWithCandidate(slotId);
-    },
-
-    async completeInterview(slotId: string) {
-        const slot = await this.getInterviewSlot(slotId);
-        if (!slot || !slot.candidate) return null;
-
-        await candidateRepository.update(slot.candidate.id, {
-            status: CandidateStatus.INTERVIEW_COMPLETED,
-            currentStep: FunnelStep.INTERVIEW,
-            interviewCompletedAt: new Date(),
-            notificationSent: false,
-            materialsSent: false,
-            hrDecision: null
-        });
-
-        // Cleanup old messages (Interview scheduled/links) when interview is completed
-        const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
-        const botToken = process.env.BOT_TOKEN;
-        if (botToken) {
-            const bot = new Bot(botToken);
-            await cleanupUserSessionMessages(bot as any, Number(slot.candidate.user.telegramId));
-
-            // The actual message is sent outside this service in some cases, 
-            // but for safety we ensure the next message sent will be tracked.
-        }
-
-        return {
-            candidate: slot.candidate,
-            telegramId: Number(slot.candidate.user.telegramId),
-            text: getPostInterviewSummaryText(slot.candidate)
-        };
     },
 
     async getStagingCandidates() {

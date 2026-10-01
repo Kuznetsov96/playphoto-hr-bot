@@ -389,3 +389,52 @@ describe("AwsBusinessSyncService — employee dropped from the snapshot", () => 
         expect(syncUserAccess).toHaveBeenCalledWith(555n, "Absent from the web app employee snapshot");
     });
 });
+
+/**
+ * Оплата точки для блоку «Твоя робота» (рішення власника 01.10.2026):
+ * відсутнє поле — старий бекенд, не чіпаємо; null — обнуляємо колонку.
+ */
+describe("AwsBusinessSyncService — location pay", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    async function syncWithLocation(extra: Record<string, unknown>) {
+        const transaction = { ...transactionStub(), parcel: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) } };
+        prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
+        const base = snapshot([{ telegramId: "486213975" }]);
+        awsBusinessClientMock.snapshot.mockResolvedValue({
+            ...base,
+            locations: base.locations.map((location) => ({ ...location, ...extra })),
+        });
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+        await new AwsBusinessSyncService().syncAll();
+        return transaction.location.create.mock.calls[0]![0].data as Record<string, unknown>;
+    }
+
+    it("stores the pay terms the webapp sent", async () => {
+        const pay = {
+            weekdayPercent: 25, weekendPercent: 30, weekdayPairPercent: 18,
+            weekendPairPercent: 20, weekdayGuarantee: 500, weekendGuarantee: 1000,
+        };
+
+        expect((await syncWithLocation({ pay, address: "Київ" }))).toMatchObject({ pay, address: "Київ" });
+    });
+
+    it("clears the column when the webapp says there are no terms", async () => {
+        const { Prisma } = await import("@prisma/client");
+
+        expect((await syncWithLocation({ pay: null })).pay).toBe(Prisma.DbNull);
+    });
+
+    it("leaves pay and address alone when an older backend omits them", async () => {
+        const data = await syncWithLocation({});
+
+        expect(data).not.toHaveProperty("pay");
+        expect(data).not.toHaveProperty("address");
+    });
+});

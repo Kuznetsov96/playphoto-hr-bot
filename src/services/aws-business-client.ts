@@ -38,11 +38,42 @@ export class AwsBusinessApiError extends Error {
  * times are local wall-clock for the location's timezone, so they are never re-converted.
  * `closes` < `opens` means the shift runs past midnight.
  */
-const openingHoursSchema = z.object({
+const legacyOpeningHoursSchema = z.object({
     dayOfWeek: z.number().int().min(1).max(7),
     opens: z.string().regex(/^\d{2}:\d{2}$/u),
     closes: z.string().regex(/^\d{2}:\d{2}$/u),
 }).strict();
+
+/**
+ * Той самий день у форматі контракту блоку «Твоя робота» (рішення власника
+ * 01.10.2026): `weekday` 1 = понеділок, `opensAt`/`closesAt` — "HH:MM";
+ * закритий день у масиві відсутній. Обидві форми приймаються й зводяться до
+ * однієї: схема .strict(), і чужа форма елемента зупинила б синк усього
+ * знімка — разом із розкладом — незалежно від того, хто викотиться першим.
+ */
+const contractOpeningHoursSchema = z.object({
+    weekday: z.number().int().min(1).max(7),
+    opensAt: z.string().regex(/^\d{2}:\d{2}$/u),
+    closesAt: z.string().regex(/^\d{2}:\d{2}$/u),
+}).strict().transform((day) => ({ dayOfWeek: day.weekday, opens: day.opensAt, closes: day.closesAt }));
+
+const openingHoursSchema = z.union([legacyOpeningHoursSchema, contractOpeningHoursSchema]);
+
+/**
+ * Умови оплати точки з картки локації вебаппа (рішення власника 01.10.2026):
+ * відсоток від виручки в будні/вихідні, парний відсоток (0 = не задано) і
+ * гарантія за зміну в гривнях. Бот лише показує їх у блоці «Твоя робота».
+ */
+const locationPaySchema = z.object({
+    weekdayPercent: z.number(),
+    weekendPercent: z.number(),
+    weekdayPairPercent: z.number(),
+    weekendPairPercent: z.number(),
+    weekdayGuarantee: z.number(),
+    weekendGuarantee: z.number(),
+}).strict();
+
+export type LocationPay = z.infer<typeof locationPaySchema>;
 
 export const locationSchema = z.object({
     publicId: z.string().uuid(),
@@ -57,14 +88,20 @@ export const locationSchema = z.object({
      */
     branch: z.string().nullable().optional().default(null),
     city: z.string().min(1),
-    address: z.string().nullable(),
+    /**
+     * Optional з 01.10.2026 (контракт блоку «Твоя робота»): відсутнє поле —
+     * адресу в боті не чіпаємо, null — адреси немає.
+     */
+    address: z.string().nullable().optional(),
     timezone: z.string().min(1),
     /**
      * Empty when the owner has not recorded hours; never defaulted to a guess.
      * Optional for the same deploy-ordering reason as `branch` — an older API omits it,
      * and the display layer already falls back to the legacy text schedule.
+     * null (контракт 01.10.2026) означає те саме, що порожній масив: годин не задано.
      */
-    openingHours: z.array(openingHoursSchema).optional().default([]),
+    openingHours: z.array(openingHoursSchema).nullable().optional()
+        .transform((days) => days ?? []),
     /**
      * Скрывает локацию из анкеты кандидатки. Рычаг владельца: он живёт в
      * карточке локации вебаппа, бот только исполняет решение.
@@ -85,6 +122,12 @@ export const locationSchema = z.object({
      * Відсутнє поле — старий бекенд: тоді neededCount не чіпаємо.
      */
     hiringDeficit: z.number().int().min(0).optional(),
+    /**
+     * Оплата для блоку «Твоя робота» (рішення власника 01.10.2026). Optional,
+     * бо бот викочується раніше за бекенд, а схема .strict(): відсутнє поле
+     * — старий бекенд, збережене в боті не чіпаємо; null — умов не задано.
+     */
+    pay: locationPaySchema.nullable().optional(),
 }).strict();
 
 const assignmentSchema = z.object({

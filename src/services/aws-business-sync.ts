@@ -9,6 +9,7 @@ import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
 import {
     awsBusinessClient,
     type AwsBusinessSnapshot,
+    type LocationPay,
 } from "./aws-business-client.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -32,6 +33,16 @@ const SNAPSHOT_SHRINK_LIMIT = 0.7;
  */
 function hiringNeed(location: { hiringDeficit?: number | undefined }): { neededCount?: number } {
     return location.hiringDeficit === undefined ? {} : { neededCount: location.hiringDeficit };
+}
+
+/**
+ * Оплата точки для блоку «Твоя робота» (рішення власника 01.10.2026).
+ * Відсутнє поле — старий бекенд, збережене не чіпаємо; null — умов не задано
+ * (Json-колонка обнуляється через DbNull, а не через null).
+ */
+function locationPay(location: { pay?: LocationPay | null | undefined }): { pay?: Prisma.InputJsonValue | typeof Prisma.DbNull } {
+    if (location.pay === undefined) return {};
+    return { pay: location.pay === null ? Prisma.DbNull : location.pay };
 }
 
 /** Where each successful pass records its result, and the baseline for the next one. */
@@ -379,12 +390,13 @@ export class AwsBusinessSyncService {
                             name: location.name,
                             branch: location.branch,
                             city: location.city,
-                            address: location.address,
+                            ...(location.address === undefined ? {} : { address: location.address }),
                             isHidden: false,
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
                             isHiddenFromCandidates: location.isHiddenFromCandidates,
                             ...hiringNeed(location),
+                            ...locationPay(location),
                         },
                         select: { id: true },
                     })
@@ -395,12 +407,13 @@ export class AwsBusinessSyncService {
                             name: location.name,
                             branch: location.branch,
                             city: location.city,
-                            address: location.address,
+                            ...(location.address === undefined ? {} : { address: location.address }),
                             isHidden: false,
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
                             isHiddenFromCandidates: location.isHiddenFromCandidates,
                             ...hiringNeed(location),
+                            ...locationPay(location),
                         },
                         select: { id: true },
                     });
