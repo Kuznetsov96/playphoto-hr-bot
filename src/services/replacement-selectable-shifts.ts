@@ -49,21 +49,3 @@ export async function readSelectableShiftsSource(
         return { shifts: await deps.mirror(staffId, since, horizonDays), source: "mirror" };
     }
 }
-
-/**
- * Прибирає зміни, по яких пошук підміни вже триває.
- *
- * Фільтр локальний і таким лишається: заявки живуть у нашій БД, канонічний
- * бекенд їх не бачить.
- *
- * **Важливо**: множество повинне містити лише справжні ID (`shift.id`), без `null`.
- * Заявка вказує на зміну канонічним `scheduledShiftPublicId`, який nullable, тож
- * викликальна сторона зобов'язана відфільтрувати `null` і змапити канонічний id
- * на локальний `shift.id` перед побудовою цієї множини.
- */
-export function rejectShiftsWithActiveRequest(
-    shifts: CanonicalScheduledShift[],
-    blockedShiftIds: Set<string>
-): CanonicalScheduledShift[] {
-    return shifts.filter(shift => !blockedShiftIds.has(shift.id));
-}

@@ -21,7 +21,11 @@ import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../uti
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
-import { buildShiftPickerView } from "../services/replacement-shift-picker-view.js";
+import {
+    buildShiftPickerView,
+    pickerBlockedMark,
+    replacementBlockedReason
+} from "../services/replacement-shift-picker-view.js";
 import { getStaffShiftToday } from "../services/staff-today-shift.js";
 
 export const staffHandlers = new Composer<MyContext>();
@@ -277,7 +281,7 @@ export async function showReplacementShiftPicker(ctx: MyContext) {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user?.staffProfile) return;
 
-    const shifts = await replacementService.listSelectableShifts(user.staffProfile.id);
+    const shifts = await replacementService.listPickerShifts(user.staffProfile.id);
     if (shifts.length === 0) {
         await ScreenManager.renderScreen(
             ctx,
@@ -293,7 +297,11 @@ export async function showReplacementShiftPicker(ctx: MyContext) {
 
     const kb = new InlineKeyboard();
     for (const shift of visible) {
-        kb.text(replacementService.formatShiftButtonLabel(shift), `staff_repl_pick_${shift.id}`).row();
+        const label = replacementService.formatShiftButtonLabel(shift);
+        kb.text(
+            shift.blockedBy ? `${label} · ${pickerBlockedMark(shift.blockedBy)}` : label,
+            `staff_repl_pick_${shift.id}`
+        ).row();
     }
     kb.text("🏠 Меню", "staff_hub_nav");
 
@@ -313,8 +321,14 @@ async function showReplacementConfirmation(ctx: MyContext, shiftId: string) {
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     if (!user?.staffProfile) return;
 
-    const shifts = await replacementService.listSelectableShifts(user.staffProfile.id);
+    const shifts = await replacementService.listPickerShifts(user.staffProfile.id);
     const shift = shifts.find(s => s.id === shiftId);
+    if (shift?.blockedBy) {
+        // Причина замість мовчазного «недоступна»: людина вже раз запускала
+        // пошук на цю дату і має знати, що з ним сталося.
+        await ctx.answerCallbackQuery({ text: replacementBlockedReason(shift.blockedBy), show_alert: true }).catch(() => { });
+        return;
+    }
     if (!shift) {
         await ctx.answerCallbackQuery("Ця зміна вже недоступна.").catch(() => { });
         await showReplacementShiftPicker(ctx);
@@ -761,11 +775,11 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
     } catch (error: any) {
         let message = "Не вдалося запустити пошук.";
         if (error?.message === "REQUEST_ALREADY_ACTIVE") {
-            message = "Пошук для цієї зміни вже активний.";
+            message = replacementBlockedReason("ACTIVE");
         } else if (error?.message === "REQUEST_ALREADY_FOUND") {
-            message = "Підміну для цієї зміни вже знайдено. Якщо графік ще не оновили, напиши в підтримку.";
+            message = replacementBlockedReason("FOUND");
         } else if (error?.message === "REQUEST_PREVIOUSLY_FAILED") {
-            message = "Ти вже запускала пошук для цієї зміни, але заміну не знайшли. Напиши в підтримку, щоб команда допомогла вручну.";
+            message = replacementBlockedReason("FAILED");
         } else if (error?.message === "SHIFT_ALREADY_STARTED") {
             message = "Ця зміна вже почалась.";
         } else if (error?.message === "CANONICAL_REPLACEMENT_FAILED:REPLACEMENT_REQUEST_ALREADY_OPEN") {

@@ -31,3 +31,27 @@ describe("buildShiftPickerView", () => {
         expect(view.text).toContain("20 змін з 25");
     });
 });
+
+describe("заблокована зміна в пікері", () => {
+    it("лишається на екрані з поміткою, а не зникає", async () => {
+        const { pickerBlockedMark } = await import("../replacement-shift-picker-view.js");
+
+        expect(pickerBlockedMark("ACTIVE")).toBe("🔎 пошук триває");
+        expect(pickerBlockedMark("FOUND")).toBe("✅ підміну знайдено");
+        expect(pickerBlockedMark("FAILED")).toBe("✖️ не знайшли");
+    });
+
+    it("на дотик називає конкретну причину для кожного стану заявки", async () => {
+        const { replacementBlockedReason } = await import("../replacement-shift-picker-view.js");
+
+        // 01.10.2026: фотографиня бачила «немає майбутніх змін», хоча зміни
+        // були — пікер мовчки ховав ті, по яких пошук уже йшов або не вдався.
+        expect(replacementBlockedReason("ACTIVE")).toContain("вже триває");
+        expect(replacementBlockedReason("FOUND")).toContain("вже знайдено");
+        expect(replacementBlockedReason("FAILED")).toContain("не знайшли");
+        // Telegram ріже текст спливного вікна на 200 знаках.
+        for (const status of ["ACTIVE", "FOUND", "FAILED"] as const) {
+            expect(replacementBlockedReason(status).length).toBeLessThanOrEqual(200);
+        }
+    });
+});
