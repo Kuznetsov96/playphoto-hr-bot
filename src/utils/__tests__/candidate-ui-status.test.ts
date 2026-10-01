@@ -48,4 +48,30 @@ describe("showCandidateStatus", () => {
         expect(text).toBe(CANDIDATE_TEXTS["candidate-success-screening"]);
         expect(buttons(kb)).not.toContain("Обрати час");
     });
+
+    // Аудит 01.10.2026: «Обрати час» у черзі на навчання вів у тупик —
+    // «Графік оновлюється», а сповіщення ніхто не надсилав.
+    it.each([
+        { status: "WAITLIST_MENTOR", currentStep: "TRAINING" },
+        { status: "WAITLIST", currentStep: "TRAINING" },
+    ])("черга на навчання ($status) — без «Обрати час», екран прийнятої", async (state) => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+        const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
+
+        await showCandidateStatus({} as any, { ...state, gender: "female" });
+
+        const [, text, kb] = renderScreen.mock.calls[0]!;
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-accepted-welcome"]());
+        expect(buttons(kb)).not.toContain("Обрати час");
+        expect(buttons(kb)).toContain("Написати нам");
+    });
+
+    it("черга на співбесіду (WAITLIST_HR) лишає «Обрати час»", async () => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+
+        await showCandidateStatus({} as any, { status: "WAITLIST_HR", currentStep: "INTERVIEW", gender: "female" });
+
+        const [, , kb] = renderScreen.mock.calls[0]!;
+        expect(buttons(kb)).toContain("Обрати час");
+    });
 });

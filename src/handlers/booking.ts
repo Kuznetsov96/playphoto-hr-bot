@@ -15,7 +15,6 @@ import {
 } from "../services/canonical-interview-slots.js";
 import { AwsBusinessApiError, RECRUITING_SLOT_TAKEN_CODE, awsBusinessClient } from "../services/aws-business-client.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
-import { trainingRepository } from "../repositories/training-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
 
@@ -129,19 +128,6 @@ async function editWithContactButton(ctx: MyContext, telegramId: number, text: s
     );
 }
 
-export function buildMentorReschedulePatch(status: CandidateStatus) {
-    const isDiscovery = status === CandidateStatus.DISCOVERY_SCHEDULED;
-
-    return {
-        status: isDiscovery ? CandidateStatus.ACCEPTED : CandidateStatus.WAITLIST_MENTOR,
-        candidateDecision: null,
-        notificationSent: false,
-        currentStep: FunnelStep.TRAINING,
-        isWaitlisted: isDiscovery ? false : true,
-        trainingMeetLink: null
-    };
-}
-
 export function buildInterviewSlotNeededPatch(reason: string) {
     return {
         status: CandidateStatus.SCREENING,
@@ -157,10 +143,6 @@ bookingHandlers.callbackQuery(/^booking_date_header_.+$/, async (ctx) => {
     await ctx.answerCallbackQuery();
 });
 
-bookingHandlers.callbackQuery(/^training_date_header_.+$/, async (ctx) => {
-    await ctx.answerCallbackQuery();
-});
-
 // --- CALLBACK GUARD: Prevent clicking old buttons ---
 bookingHandlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
@@ -171,12 +153,11 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     // "no_slots_fit" теж тут: у відхиленої кандидатки він падав на забороні
     // переходу REJECTED → SCREENING і показував «Ой, щось пішло не так».
     const interviewActions = ["book_slot_", "reschedule_booking_", "start_scheduling", "cancel_booking_", "decline_invite", "no_slots_fit"];
-    const trainingActions = ["book_training_slot_", "reschedule_training_", "start_training_scheduling", "cancel_training_"];
     // send_nda_/confirm_nda_/start_quiz прибрані разом з етапами NDA й тесту:
     // обробників для них не було вже давно, гард стеріг неіснуючі кнопки.
     const onboardingActions = ["candidate_start_screening"];
 
-    if (![...interviewActions, ...trainingActions, ...onboardingActions].some(a => data.startsWith(a))) {
+    if (![...interviewActions, ...onboardingActions].some(a => data.startsWith(a))) {
         return next();
     }
 
@@ -292,37 +273,6 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
         }
     }
 
-    // 2. Training actions guard
-    if (trainingActions.some(a => data.startsWith(a))) {
-        const forbiddenStatuses: CandidateStatus[] = [
-            CandidateStatus.TRAINING_COMPLETED,
-            CandidateStatus.OFFLINE_STAGING,
-            CandidateStatus.AWAITING_FIRST_SHIFT,
-            CandidateStatus.HIRED,
-            CandidateStatus.NDA,
-            CandidateStatus.KNOWLEDGE_TEST,
-            CandidateStatus.STAGING_SETUP,
-            CandidateStatus.STAGING_ACTIVE,
-            CandidateStatus.READY_FOR_HIRE,
-            CandidateStatus.SCREENING,
-            CandidateStatus.REJECTED
-        ];
-        if (forbiddenStatuses.includes(candidate.status)) {
-            await ctx.answerCallbackQuery("Навчання вже завершено");
-            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
-            await showCandidateStatus(ctx, candidate);
-            return;
-        }
-        // Block HR-waitlist candidates (no HR approval yet)
-        if (candidate.status === CandidateStatus.WAITLIST_HR ||
-            (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep !== FunnelStep.TRAINING)) {
-            await ctx.answerCallbackQuery("Заявка ще на розгляді у HR");
-            const { showCandidateStatus } = await import("../utils/candidate-ui.js");
-            await showCandidateStatus(ctx, candidate);
-            return;
-        }
-    }
-
     // 3. Screening reset guard (already handled in candidate.ts but good to have here too)
     if (data === "candidate_start_screening") {
         if (candidate.status !== CandidateStatus.SCREENING && candidate.status !== CandidateStatus.REJECTED) {
@@ -334,6 +284,52 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
     }
 
     await next();
+});
+
+/**
+ * Застарілі кнопки запису на знайомство й навчання (аудит 01.10.2026).
+ *
+ * Наставника в наймі більше немає: знайомство, навчання й стажування власниця
+ * веде сама у вебаппі, бот на цих етапах мовчить. Обробники запису прибрані,
+ * але повідомлення з їхніми кнопками лишилися в чатах кандидаток. Без цього
+ * перехоплювача тап давав би «годинник» або, гірше, доходив до старих
+ * обробників: «Не планую продовжувати» (cwm) ставив REJECTED у будь-якому
+ * статусі аж до HIRED, а «Повідомити мене» (training_no_slots_fit) повертав
+ * у WAITLIST_MENTOR, хоча гард його не стеріг. Тепер такий тап нічого не
+ * змінює: коротка відповідь і екран поточного статусу.
+ *
+ * cstg — «скасувати стажування»: кнопку давно ніхто не малює.
+ *
+ * Стоїть після гарду: гард ці дії не стереже й передає далі (тести гарду
+ * беруть його як перший on-обробник).
+ */
+const LEGACY_MENTOR_STAGE_ACTIONS = new Set(["start_training_scheduling", "training_no_slots_fit"]);
+const LEGACY_MENTOR_STAGE_PREFIXES = ["book_training_slot_", "training_date_header_", "reschedule_training_", "cancel_training_"];
+const LEGACY_MENTOR_STAGE_SIGNED = /^cb:(rt|ct|cct|wm|cwm|cstg):/;
+
+export function isLegacyMentorStageCallback(data: string): boolean {
+    return LEGACY_MENTOR_STAGE_ACTIONS.has(data)
+        || LEGACY_MENTOR_STAGE_PREFIXES.some((prefix) => data.startsWith(prefix))
+        || LEGACY_MENTOR_STAGE_SIGNED.test(data);
+}
+
+bookingHandlers.on("callback_query:data", async (ctx, next) => {
+    const data = ctx.callbackQuery.data;
+    if (!isLegacyMentorStageCallback(data)) return next();
+
+    // Кнопки з підтвердження запису (змінити, скасувати, відмовитися) —
+    // той самий текст, що й у застарілого запису на співбесіду.
+    if (LEGACY_MENTOR_STAGE_SIGNED.test(data)) {
+        await ctx.answerCallbackQuery("Цей запис уже неактуальний");
+    } else {
+        await ctx.answerCallbackQuery();
+    }
+
+    const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
+    if (candidate) {
+        const { showCandidateStatus } = await import("../utils/candidate-ui.js");
+        await showCandidateStatus(ctx, candidate);
+    }
 });
 
 function isDuplicateBookingAction(actionKey: string) {
@@ -854,290 +850,8 @@ bookingHandlers.callbackQuery("decline_invite_confirm", async (ctx) => {
     await ctx.editMessageText(CANDIDATE_TEXTS["candidate-interview-invitation-declined"]);
 });
 
-// 7. Початок запису НА НАВЧАННЯ / ЗНАЙОМСТВО
-bookingHandlers.callbackQuery("start_training_scheduling", async (ctx) => {
-    await ctx.answerCallbackQuery();
-
-    const telegramId = ctx.from.id;
-
-    // Validate candidate is eligible for training scheduling
-    const candidate = await candidateRepository.findByTelegramId(telegramId);
-    if (!candidate) return;
-
-    const allowedStatuses: CandidateStatus[] = [
-        CandidateStatus.ACCEPTED,
-        CandidateStatus.DISCOVERY_COMPLETED,
-        CandidateStatus.TRAINING_SCHEDULED
-    ];
-    const isWaitlistMentor = candidate.status === CandidateStatus.WAITLIST_MENTOR ||
-        (candidate.status === CandidateStatus.WAITLIST && candidate.currentStep === FunnelStep.TRAINING);
-
-    if (!allowedStatuses.includes(candidate.status) && !isWaitlistMentor) {
-        logger.warn({ userId: telegramId, status: candidate.status, currentStep: candidate.currentStep },
-            "Training scheduling blocked because candidate status is invalid");
-        const { showCandidateStatus } = await import("../utils/candidate-ui.js");
-        await showCandidateStatus(ctx, candidate);
-        return;
-    }
-
-    const slots = await trainingRepository.findActiveSlots();
-
-    if (slots.length === 0) {
-        logger.debug({ telegramId }, "Training scheduling waitlist fallback activated");
-
-        // Auto-move to WAITLIST so Mentor can see them
-        await candidateRepository.updateMany(
-            { user: { telegramId: BigInt(telegramId) } },
-            { status: CandidateStatus.WAITLIST_MENTOR, isWaitlisted: true, currentStep: FunnelStep.TRAINING }
-        );
-
-        const text = `Графік зараз оновлюється.\n\nМи надішлемо сповіщення, щойно з’являться вікна для зустрічі-знайомства.`;
-        const kb = new InlineKeyboard()
-            .text("Повідомити мене", "training_no_slots_fit")
-            .text("Написати нам", "contact_hr");
-        const msg = await ctx.reply(text, { reply_markup: kb });
-        trackMessage(ctx, msg.message_id);
-
-        return;
-    }
-
-    logger.info({ telegramId, availableSlotCount: slots.length }, "Training scheduling slots shown");
-    const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit");
-
-    await cleanupMessages(ctx);
-    const msg = await ctx.reply(
-        `Оберіть зручний час для зустрічі-знайомства:\n\nНатисніть кнопку з потрібною датою та часом.`,
-        { reply_markup: keyboard }
-    );
-    trackMessage(ctx, msg.message_id);
-});
-
 // In-memory lock to prevent double-click race conditions
 const bookingLocks = new Set<number>();
-
-// 8. Бронювання слоту ЗНАЙОМСТВО або НАВЧАННЯ (кандидатка обирає час сама)
-bookingHandlers.callbackQuery(/^book_training_slot_(.+)$/, async (ctx) => {
-    const slotId = ctx.match[1] as string;
-    const telegramId = ctx.from.id;
-
-    if (bookingLocks.has(telegramId)) {
-        return await ctx.answerCallbackQuery("Бронювання вже в процесі");
-    }
-
-    const existingCand = await candidateRepository.findByTelegramId(telegramId);
-    if (!existingCand) {
-        return await ctx.answerCallbackQuery("Не знайшли вашу анкету");
-    }
-
-    const isTrainingPhase = existingCand.status === CandidateStatus.DISCOVERY_COMPLETED || 
-                            existingCand.status === CandidateStatus.TRAINING_SCHEDULED;
-
-    // Idempotency check appropriate for phase
-    if (isTrainingPhase) {
-        if (existingCand.trainingSlotId) {
-            return await ctx.answerCallbackQuery("Ви вже записані на навчання");
-        }
-    } else {
-        if (existingCand.discoverySlotId) {
-            return await ctx.answerCallbackQuery("Ви вже записані на знайомство");
-        }
-    }
-
-    bookingLocks.add(telegramId);
-
-    try {
-        await ctx.answerCallbackQuery(isTrainingPhase ? "Бронюємо навчання…" : "Бронюємо знайомство…");
-        logger.debug({ telegramId, slotId, phase: isTrainingPhase ? "training" : "discovery" }, "Training or discovery booking started");
-
-        const result = isTrainingPhase 
-            ? await bookingService.bookTrainingSlot(telegramId, slotId)
-            : await bookingService.bookDiscoverySlot(telegramId, slotId);
-
-        const startTime = (result as any).startTime;
-        const candData = isTrainingPhase ? (result as any).candidate : (result as any).candidateDiscovery;
-        const fullName = escapeHtml(candData?.fullName || ctx.from.first_name || "Кандидатко");
-
-        let confirmationText = "";
-        if (isTrainingPhase) {
-            confirmationText = CANDIDATE_TEXTS["candidate-training-scheduled"](
-                "навчання",
-                startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }),
-                startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }),
-                result.googleMeetLink
-            );
-        } else {
-            confirmationText = CANDIDATE_TEXTS["candidate-training-scheduled"]("знайомство", startTime.toLocaleDateString('uk-UA', { timeZone: 'Europe/Kyiv' }), startTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv' }), result.googleMeetLink);
-        }
-
-        const kb = new InlineKeyboard()
-            .text(CANDIDATE_TEXTS["candidate-btn-reschedule"], buildSignedCallback("rt", slotId)).row()
-            .text("Скасувати запис", buildSignedCallback("ct", slotId)).danger().row()
-            .text("Не планую продовжувати", buildSignedCallback("wm", slotId)).danger().row()
-            .text("Написати нам", "contact_hr");
-
-        await cleanupMessages(ctx);
-        const msg = await ctx.reply(confirmationText, { parse_mode: "HTML", reply_markup: kb });
-        trackMessage(ctx, msg.message_id);
-
-        // --- TIMELINE TRACKING ---
-        const typeText = isTrainingPhase ? "навчання" : "знайомство";
-        import("../services/timeline-service.js").then(({ timelineService }) => {
-            timelineService.trackEvent(existingCand.userId, `Забронювала ${typeText}: ${startTime.toLocaleString('uk-UA')}`, { slotId, type: typeText, startTime }).catch(() => {});
-        }).catch(() => {});
-
-
-    } catch (e: any) {
-        logger.error({ err: e, slotId, telegramId }, "Training or discovery booking failed");
-        if (e.message === "ALREADY_BOOKED") {
-            await ctx.answerCallbackQuery("Цей час уже зайнятий — оберіть інший");
-        } else {
-            await ctx.answerCallbackQuery("Сталася помилка. Спробуйте ще раз");
-        }
-    } finally {
-        bookingLocks.delete(telegramId);
-    }
-});
-
-// 9. Training No Slots Fit
-bookingHandlers.callbackQuery("training_no_slots_fit", async (ctx) => {
-    if (isDuplicateBookingAction(`training-no-slots-fit:${ctx.from.id}`)) {
-        await ctx.answerCallbackQuery("Ми вже зафіксували, що зручного часу немає");
-        return;
-    }
-    await ctx.answerCallbackQuery();
-    const telegramId = ctx.from.id;
-    const availableSlots = await trainingRepository.findActiveSlots();
-    logger.info({ telegramId, availableSlotCount: availableSlots.length }, "Training scheduling no-slots-fit selected");
-
-    await candidateRepository.updateMany(
-        { user: { telegramId: BigInt(telegramId) } },
-        {
-            status: CandidateStatus.WAITLIST_MENTOR,
-            isWaitlisted: true,
-            currentStep: FunnelStep.TRAINING // Explicitly set step for mentor waitlist
-        }
-    );
-
-    await editWithContactButton(ctx, telegramId, `Гаразд. Щойно з’являться інші вікна — ми повідомимо.`);
-
-});
-
-// 10. Скасування mentor-запису — крок 1: підтвердження
-bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "ct" });
-    if (!slotId) return next();
-    await ctx.answerCallbackQuery();
-
-    const kb = new InlineKeyboard()
-        .text("Так, скасувати запис", buildSignedCallback("cct", slotId)).danger().row()
-        .text("Ні, повернутись", "cancel_dismiss");
-
-    await ctx.editMessageText(
-        `<b>Скасувати запис?</b>\n\n` +
-        `Ми звільнимо цей час, і ви зможете обрати інший, коли буде зручно.`,
-        { parse_mode: "HTML", reply_markup: kb }
-    );
-    return;
-});
-
-// 10.1. Скасування mentor-запису — крок 2: підтверджено → back to mentor scheduling
-bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cct" });
-    if (!slotId) return next();
-    if (isDuplicateBookingAction(`cancel-training:${ctx.from.id}:${slotId}`)) {
-        await ctx.answerCallbackQuery("Скасування вже обробляється");
-        return;
-    }
-
-    try {
-        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
-        // Save original status BEFORE update for correct notification
-        const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
-
-        await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
-
-        if (candidate) {
-            await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
-        }
-
-        await ctx.answerCallbackQuery("Запис скасовано");
-        await ctx.editMessageText(
-            "<b>Запис скасовано</b>\n\n" +
-            "Оберіть інший зручний час, коли буде зручно.",
-            { parse_mode: "HTML", reply_markup: new InlineKeyboard().text(CANDIDATE_TEXTS["candidate-btn-choose-other-time"], "start_training_scheduling") }
-        );
-
-    } catch (e: any) {
-        logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Training cancellation failed");
-        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
-        } else {
-            await ctx.answerCallbackQuery("Сталася помилка");
-        }
-    }
-});
-
-// 10.2. Повна відмова на mentor-етапі — крок 1: явне підтвердження
-bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "wm" });
-    if (!slotId) return next();
-    await ctx.answerCallbackQuery();
-
-    const kb = new InlineKeyboard()
-        .text("Так, завершити заявку", buildSignedCallback("cwm", slotId)).danger().row()
-        .text("Ні, повернутись", "cancel_dismiss");
-
-    await ctx.editMessageText(
-        `<b>Завершити заявку?</b>\n\n` +
-        `Ми закриємо заявку та скасуємо запис. Якщо просто не підходить час — поверніться й оберіть «Скасувати запис» або «Змінити час».`,
-        { parse_mode: "HTML", reply_markup: kb }
-    );
-});
-
-// 10.3. Повна відмова на mentor-етапі — крок 2: підтверджено → REJECTED
-bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "cwm" });
-    if (!slotId) return next();
-    if (isDuplicateBookingAction(`withdraw-mentor:${ctx.from.id}:${slotId}`)) {
-        await ctx.answerCallbackQuery("Відмову вже зафіксовано");
-        return;
-    }
-
-    try {
-        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
-        const wasDiscovery = candidate?.status === CandidateStatus.DISCOVERY_SCHEDULED;
-
-        if (slotId !== "none") {
-            await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
-        }
-
-        if (candidate) {
-            await candidateRepository.update(candidate.id, {
-                status: CandidateStatus.REJECTED,
-                candidateDecision: "Кандидатка відмовилась від вакансії на mentor-етапі",
-                notificationSent: true,
-                discoverySlot: { disconnect: true },
-                trainingSlot: { disconnect: true },
-                trainingMeetLink: null
-            });
-        }
-
-        await ctx.answerCallbackQuery("Відмову зафіксовано");
-        await ctx.editMessageText(
-            "<b>Заявку закрито</b>\n\n" +
-            "Дякуємо, що повідомили. Бажаємо успіхів — і будемо раді, якщо колись захочете повернутися.",
-            { parse_mode: "HTML" }
-        );
-
-    } catch (e: any) {
-        logger.error({ err: e, slotId, telegramId: ctx.from.id }, "Mentor-stage vacancy withdrawal failed");
-        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
-        } else {
-            await ctx.answerCallbackQuery("Сталася помилка");
-        }
-    }
-});
 
 // 10.4. Скасування — повернутись (dismiss)
 bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
@@ -1146,48 +860,5 @@ bookingHandlers.callbackQuery("cancel_dismiss", async (ctx) => {
     const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
     if (candidate) {
         await showCandidateStatus(ctx, candidate);
-    }
-});
-
-// 11. Зміна часу навчання — одразу звільняє поточний слот і показує нові
-bookingHandlers.on("callback_query:data", async (ctx, next) => {
-    const slotId = readCallbackPayload(ctx.callbackQuery.data, { code: "rt" });
-    if (!slotId) return next();
-    try {
-        await ctx.answerCallbackQuery("Оберіть новий час");
-
-        const candidate = await candidateRepository.findByTelegramId(ctx.from.id);
-
-        // Release the booked slot before updating candidate state.
-        // Disconnecting the relation first can leave a slot stuck with isBooked=true
-        // but no linked candidate, which makes it disappear from the schedule.
-        await bookingService.cancelTrainingSlot(slotId, ctx.from.id);
-
-        if (candidate) {
-            await candidateRepository.update(candidate.id, buildMentorReschedulePatch(candidate.status));
-        }
-
-        const slots = await trainingRepository.findActiveSlots();
-
-        if (slots.length === 0) {
-            return ctx.editMessageText("Зараз вільного часу немає. Ми запропонуємо його найближчим часом.", {
-                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr")
-            });
-        }
-
-        const keyboard = buildSlotSelectionKeyboard(slots, "book_training_slot_", "training_no_slots_fit");
-
-        await ctx.editMessageText(
-            "Оберіть інший зручний час:\n\nЧас київський.",
-            { reply_markup: keyboard }
-        );
-
-    } catch (e: any) {
-        logger.error({ err: e, telegramId: ctx.from.id }, "Training reschedule failed");
-        if (e.message === "FORBIDDEN_SLOT_ACCESS") {
-            await ctx.answerCallbackQuery("Ця дія недоступна для цього запису");
-        } else {
-            await ctx.answerCallbackQuery("Сталася помилка");
-        }
     }
 });

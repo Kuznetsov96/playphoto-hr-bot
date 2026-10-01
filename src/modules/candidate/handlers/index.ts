@@ -8,7 +8,6 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 import logger from "../../../core/logger.js";
 import { getCityCode, getShortLocationName } from "../../../utils/location-helpers.js";
 import { ScreenManager } from "../../../utils/screen-manager.js";
-import { readCallbackPayload } from "../../../utils/signed-callback.js";
 import {
     MIN_CANDIDATE_AGE,
     getAgeRejection,
@@ -862,29 +861,5 @@ function buildFinalScreenKeyboard(
     return new InlineKeyboard().text("Написати нам", "contact_hr");
 }
 
-candidateHandlers.on("callback_query:data", async (ctx, next) => {
-    const candId = readCallbackPayload(ctx.callbackQuery.data, { code: "cstg" });
-    if (!candId) return next();
-    await ctx.answerCallbackQuery();
-    try {
-        const { hrService } = await import("../../../services/hr-service.js");
-        const cand = await hrService.getCandidateDetails(candId);
-        if (!cand) return;
-        if (Number(cand.user.telegramId) !== ctx.from?.id) {
-            await ctx.answerCallbackQuery("Ця дія недоступна.");
-            return;
-        }
-
-        // Guard: only allow cancellation for candidates still in setup/active phase
-        if (cand.status !== CandidateStatus.STAGING_SETUP && cand.status !== CandidateStatus.STAGING_ACTIVE) {
-            return;
-        }
-
-        await hrService.cancelCandidateStaging(ctx.api, candId);
-        await ScreenManager.renderScreen(ctx, CANDIDATE_TEXTS["staging-cancelled-by-candidate"]);
-    } catch (e) {
-        const { default: logger } = await import("../../../core/logger.js");
-        logger.error({ err: e, candId }, "Candidate staging cancellation failed");
-        await ctx.reply("Щось пішло не так. Спробуйте ще раз або напишіть нам.");
-    }
-});
+// Обробник cstg («скасувати стажування») прибрано (аудит 01.10.2026): кнопку
+// ніхто не малює, а старий тап перехоплює booking.ts → «Цей запис уже неактуальний».
