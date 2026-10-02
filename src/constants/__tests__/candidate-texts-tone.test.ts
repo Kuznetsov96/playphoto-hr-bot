@@ -58,7 +58,11 @@ describe("candidate tone of voice", () => {
      * Постійний екран статусу після прийняття: фрази переходу не несе, але
      * звертається вже на «ти» — людина по цей бік рішення вже своя.
      */
-    const IN_TEAM_KEYS = ["candidate-accepted-welcome", "candidate-hired-no-cabinet"];
+    const IN_TEAM_KEYS = [
+        "candidate-accepted-welcome",
+        "candidate-hired-no-cabinet",
+        "candidate-location-changed-in-team",
+    ];
 
     it("никогда не обращается к кандидатке на «ти» — кроме момента приёма в команду", () => {
         const offenders = texts.filter(

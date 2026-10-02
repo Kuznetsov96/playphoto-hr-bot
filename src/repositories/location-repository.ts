@@ -84,6 +84,17 @@ export class LocationRepository {
         });
     }
 
+    /**
+     * Локація за канонічним кодом вебаппа — тим самим, що бот віддає в
+     * дзеркало як `locationCode` (recruiting-mirror/snapshot.ts). Без кешу:
+     * викликається поштучно командою рекрутера, а не на кожен тап меню.
+     */
+    async findByCanonicalCode(canonicalCode: string): Promise<Location | null> {
+        return prisma.location.findUnique({
+            where: { canonicalCode }
+        });
+    }
+
     async findAllCities(onlyVisible: boolean = true, candidateOnly: boolean = false): Promise<string[]> {
         return citiesCache.get(`${onlyVisible}:${candidateOnly}`, async () => {
             const locations = await prisma.location.findMany({

@@ -1,8 +1,11 @@
 import type { Api } from "grammy";
-import { CandidateStatus } from "@prisma/client";
+import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { locationRepository } from "../repositories/location-repository.js";
+import { formatCityUk, formatLocation } from "../utils/location-label.js";
+import { isBotBlocked } from "../utils/bot-blocked.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client.js";
 import { hrService } from "./hr-service.js";
@@ -40,6 +43,32 @@ const MANUAL_CONTOUR_STATUSES: ReadonlySet<CandidateStatus> = new Set([
     CandidateStatus.READY_FOR_HIRE,
     CandidateStatus.AWAITING_FIRST_SHIFT,
 ]);
+
+/**
+ * Статусы, на которых менять локацию некому: кандидатка выбыла (REJECTED,
+ * BLOCKER) или уже сотрудница (HIRED — её точку ведёт форма найма вебаппа).
+ * Писать такой «ми змінили вашу локацію» нельзя.
+ */
+const LOCATION_CHANGE_CLOSED_STATUSES: ReadonlySet<CandidateStatus> = new Set([
+    CandidateStatus.REJECTED,
+    CandidateStatus.BLOCKER,
+    CandidateStatus.HIRED,
+]);
+
+/**
+ * По эту сторону решения HR кандидатка уже «своя», и бот говорит с ней на
+ * «ти» — тот же набор, что показывает ей экран «Ти в команді PlayPhoto»
+ * (utils/candidate-ui.ts): owner-контур, ACCEPTED, очередь на обучение.
+ */
+function isInTeamRegister(status: CandidateStatus, currentStep: FunnelStep | null | undefined): boolean {
+    if (MANUAL_CONTOUR_STATUSES.has(status)) return true;
+    if (status === CandidateStatus.ACCEPTED || status === CandidateStatus.WAITLIST_MENTOR) return true;
+    return status === CandidateStatus.WAITLIST && currentStep === FunnelStep.TRAINING;
+}
+
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 /**
  * Минимальные ЛЕГАЛЬНЫЕ пути по funnel-guard для немых owner-команд. Путь —
@@ -406,11 +435,121 @@ export class RecruitingCommandDispatcher {
                 if (!hired) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
             }
+            case "CHANGE_LOCATION": {
+                await this.changeLocation(api, command, candidate);
+                return;
+            }
             default:
                 // Более свежий вебапп прислал незнакомый вид команды: громкий
                 // failed вместо тихого пропуска — после пятой попытки рекрутёр
                 // увидит FAILED с этим кодом в карточке.
                 throw new Error(`UNKNOWN_COMMAND_KIND:${command.kind}`);
+        }
+    }
+
+    /**
+     * Рекрутёр сменил точку, где кандидатка будет работать (после интервью или
+     * раньше). Приходит на любой живой стадии. Запись — обычный
+     * candidateRepository.update: funnel-guard locationId/city не проверяет
+     * (это не поля воронки), а update сам ставит mirror-пуш в вебапп.
+     *
+     * Идемпотентность: если кандидатка уже на этой точке, на ретрае запись
+     * пропускается, а сообщение отправляется снова — прошлая попытка могла
+     * записать точку и упасть на Telegram. На первой попытке «уже там» —
+     * ничего не изменилось, тихий applied без сообщения.
+     */
+    private async changeLocation(
+        api: Api,
+        command: RecruitingCommand,
+        candidate: NonNullable<Awaited<ReturnType<typeof candidateRepository.findByTelegramId>>>,
+    ): Promise<void> {
+        if (!command.locationCode) throw new Error("LOCATION_CHANGE_INVALID:missing_location");
+        if (LOCATION_CHANGE_CLOSED_STATUSES.has(candidate.status)) {
+            throw new Error(`LOCATION_CHANGE_INVALID:candidate_${candidate.status.toLowerCase()}`);
+        }
+
+        const location = await locationRepository.findByCanonicalCode(command.locationCode);
+        if (!location) throw new Error("LOCATION_CHANGE_INVALID:location_not_found");
+
+        const alreadyThere = candidate.locationId === location.id;
+        const isRetry = command.attempts > 0;
+        const logContext = {
+            commandPublicId: command.publicId,
+            locationCode: command.locationCode,
+            fromLocationId: candidate.locationId ?? null,
+            toLocationId: location.id,
+            status: candidate.status,
+            attempts: command.attempts,
+        };
+
+        if (alreadyThere && !isRetry) {
+            logBusinessEvent({
+                event: "bot.recruiting_commands.location_unchanged",
+                actorType: "system",
+                actorRole: "system",
+                candidateId: candidate.id,
+                telegramId: command.candidate.telegramId,
+                result: "skipped",
+                reasonCode: "ALREADY_AT_LOCATION",
+                module: "recruiting-command-dispatcher",
+                operation: "changeLocation",
+                safeContext: logContext,
+            });
+            return;
+        }
+
+        if (!alreadyThere) {
+            // Місто йде за точкою, як в анкеті (handleLocationSelected пише
+            // city разом із locationId): меню міст будується з Location.city,
+            // і кандидатка, переведена в іншу точку, інакше лишалася б із
+            // містом старої.
+            await candidateRepository.update(candidate.id, {
+                location: { connect: { id: location.id } },
+                city: location.city,
+            });
+            logBusinessEvent({
+                event: "bot.recruiting_commands.location_changed",
+                actorType: "system",
+                actorRole: "system",
+                candidateId: candidate.id,
+                telegramId: command.candidate.telegramId,
+                result: "success",
+                module: "recruiting-command-dispatcher",
+                operation: "changeLocation",
+                safeContext: logContext,
+            });
+        }
+
+        const label = escapeHtml(`${formatLocation(location, "in-city")}, ${formatCityUk(location.city)}`);
+        const text = isInTeamRegister(candidate.status, candidate.currentStep)
+            ? CANDIDATE_TEXTS["candidate-location-changed-in-team"](label)
+            : CANDIDATE_TEXTS["candidate-location-changed"](label);
+        const telegramId = Number(candidate.user.telegramId);
+        try {
+            const msg = await api.sendMessage(telegramId, text, { parse_mode: "HTML" });
+            if (msg) {
+                const { trackUserMessage } = await import("../utils/cleanup.js");
+                await trackUserMessage(telegramId, msg.message_id).catch(() => { });
+            }
+        } catch (error) {
+            // Точка вже записана — повтор команди дошле лише повідомлення
+            // (гілка alreadyThere && isRetry вище).
+            const reason = isBotBlocked(error) ? "bot_blocked" : "send_failed";
+            logBusinessEvent({
+                event: "bot.recruiting_commands.location_message_failed",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                candidateId: candidate.id,
+                telegramId: command.candidate.telegramId,
+                result: "failed",
+                reasonCode: reason,
+                module: "recruiting-command-dispatcher",
+                operation: "changeLocation",
+                safeContext: logContext,
+                error,
+            });
+            throw new Error(`LOCATION_CHANGED_NOT_SENT:${reason}`);
         }
     }
 
