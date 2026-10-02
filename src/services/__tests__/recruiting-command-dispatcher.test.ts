@@ -50,9 +50,16 @@ vi.mock("../interview-reschedule-service.js", async () => {
 });
 
 const findByTelegramId = vi.fn();
+const candidateUpdate = vi.fn();
 
 vi.mock("../../repositories/candidate-repository.js", () => ({
-    candidateRepository: { findByTelegramId },
+    candidateRepository: { findByTelegramId, update: candidateUpdate },
+}));
+
+const findByCanonicalCode = vi.fn();
+
+vi.mock("../../repositories/location-repository.js", () => ({
+    locationRepository: { findByCanonicalCode },
 }));
 
 const redisSet = vi.fn();
@@ -83,6 +90,7 @@ const command = (overrides: Partial<Record<string, unknown>> = {}) => ({
     kind: "INVITE_TO_INTERVIEW",
     reasonCode: null,
     reasonText: null,
+    locationCode: null,
     attempts: 0,
     candidate: {
         telegramId: "1164289764",
@@ -108,6 +116,8 @@ beforeEach(() => {
     markNoShow.mockResolvedValue(true);
     rejectCandidate.mockResolvedValue(true);
     rescheduleInterviewByCommand.mockResolvedValue({ ok: true, delivered: true, slotsOffered: 3 });
+    candidateUpdate.mockResolvedValue({});
+    findByCanonicalCode.mockResolvedValue(null);
     listPending.mockResolvedValue({ items: [] });
     ackApplied.mockResolvedValue({ publicId: "x", status: "APPLIED" });
     ackFailed.mockResolvedValue({ publicId: "x", status: "PENDING" });
@@ -267,6 +277,146 @@ describe("RecruitingCommandDispatcher", () => {
 
             expect(rescheduleInterviewByCommand).not.toHaveBeenCalled();
             expect(ackFailed).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e", expected);
+        });
+    });
+
+    describe("CHANGE_LOCATION", () => {
+        const PUBLIC_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        const target = {
+            id: "loc-new",
+            canonicalCode: "zp-volkland-shevchyk",
+            name: "Volkland",
+            branch: "Шевчик",
+            city: "Запоріжжя",
+        };
+        const screeningCandidate = {
+            ...localCandidate,
+            status: "SCREENING",
+            currentStep: "INITIAL_TEST",
+            locationId: "loc-old",
+            city: "Київ",
+        };
+        const changeLocation = (overrides: Partial<Record<string, unknown>> = {}) =>
+            command({ kind: "CHANGE_LOCATION", locationCode: target.canonicalCode, ...overrides });
+
+        beforeEach(() => {
+            findByTelegramId.mockResolvedValue(screeningCandidate);
+            findByCanonicalCode.mockResolvedValue(target);
+        });
+
+        it("moves the candidate with her city, tells her on «ви», and acks applied", async () => {
+            const api = makeApi();
+            listPending.mockResolvedValue({ items: [changeLocation()] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(findByCanonicalCode).toHaveBeenCalledWith("zp-volkland-shevchyk");
+            expect(candidateUpdate).toHaveBeenCalledWith("cand-1", {
+                location: { connect: { id: "loc-new" } },
+                city: "Запоріжжя",
+            });
+            expect(api.sendMessage).toHaveBeenCalledTimes(1);
+            const [tid, text, options] = api.sendMessage.mock.calls[0]!;
+            expect(tid).toBe(1164289764);
+            expect(text).toContain("Ваша нова локація — <b>Volkland (Шевчик), Запоріжжя</b>");
+            expect(options).toEqual({ parse_mode: "HTML" });
+            expect(ackApplied).toHaveBeenCalledWith(PUBLIC_ID);
+            expect(ackFailed).not.toHaveBeenCalled();
+        });
+
+        it("speaks on «ти» to a candidate already past the HR decision", async () => {
+            const api = makeApi();
+            findByTelegramId.mockResolvedValue({ ...screeningCandidate, status: "STAGING_ACTIVE", currentStep: "FIRST_SHIFT" });
+            listPending.mockResolvedValue({ items: [changeLocation()] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).toHaveBeenCalledTimes(1);
+            expect(api.sendMessage.mock.calls[0]![1]).toContain("Твоя нова локація");
+            expect(ackApplied).toHaveBeenCalledWith(PUBLIC_ID);
+        });
+
+        it("fails LOCATION_CHANGE_INVALID:missing_location without a code", async () => {
+            const api = makeApi();
+            listPending.mockResolvedValue({ items: [changeLocation({ locationCode: null })] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(findByCanonicalCode).not.toHaveBeenCalled();
+            expect(candidateUpdate).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith(PUBLIC_ID, "LOCATION_CHANGE_INVALID:missing_location");
+        });
+
+        it("fails LOCATION_CHANGE_INVALID:location_not_found for an unknown code", async () => {
+            const api = makeApi();
+            findByCanonicalCode.mockResolvedValue(null);
+            listPending.mockResolvedValue({ items: [changeLocation({ locationCode: "nowhere" })] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith(PUBLIC_ID, "LOCATION_CHANGE_INVALID:location_not_found");
+        });
+
+        it("refuses a rejected candidate instead of messaging her", async () => {
+            const api = makeApi();
+            findByTelegramId.mockResolvedValue({ ...screeningCandidate, status: "REJECTED" });
+            listPending.mockResolvedValue({ items: [changeLocation()] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith(PUBLIC_ID, "LOCATION_CHANGE_INVALID:candidate_rejected");
+        });
+
+        it("acks applied silently on a first attempt when she is already there", async () => {
+            const api = makeApi();
+            findByTelegramId.mockResolvedValue({ ...screeningCandidate, locationId: "loc-new" });
+            listPending.mockResolvedValue({ items: [changeLocation()] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(ackApplied).toHaveBeenCalledWith(PUBLIC_ID);
+        });
+
+        it("on a retry after a lost message re-sends it without writing the location again", async () => {
+            const api = makeApi();
+            findByTelegramId.mockResolvedValue({ ...screeningCandidate, locationId: "loc-new" });
+            listPending.mockResolvedValue({ items: [changeLocation({ attempts: 1 })] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).not.toHaveBeenCalled();
+            expect(api.sendMessage).toHaveBeenCalledTimes(1);
+            expect(ackApplied).toHaveBeenCalledWith(PUBLIC_ID);
+        });
+
+        it("fails LOCATION_CHANGED_NOT_SENT:send_failed when the location is written but Telegram refused", async () => {
+            const api = makeApi();
+            api.sendMessage.mockRejectedValue(new Error("Too Many Requests"));
+            listPending.mockResolvedValue({ items: [changeLocation()] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).toHaveBeenCalledTimes(1);
+            expect(ackApplied).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith(PUBLIC_ID, "LOCATION_CHANGED_NOT_SENT:send_failed");
+        });
+
+        it("fails LOCATION_CHANGED_NOT_SENT:bot_blocked on a 403", async () => {
+            const api = makeApi();
+            api.sendMessage.mockRejectedValue(Object.assign(new Error("Forbidden: bot was blocked by the user"), { error_code: 403 }));
+            listPending.mockResolvedValue({ items: [changeLocation()] });
+
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+
+            expect(candidateUpdate).toHaveBeenCalledTimes(1);
+            expect(ackFailed).toHaveBeenCalledWith(PUBLIC_ID, "LOCATION_CHANGED_NOT_SENT:bot_blocked");
         });
     });
 

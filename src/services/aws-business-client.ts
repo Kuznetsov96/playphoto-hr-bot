@@ -647,6 +647,12 @@ const recruitingCommandSchema = z.object({
     kind: z.string(),
     reasonCode: z.string().nullable().optional().default(null),
     reasonText: z.string().nullable().optional().default(null),
+    /**
+     * CHANGE_LOCATION: канонічний код цільової локації (Location.canonicalCode,
+     * той самий `locationCode`, що бот шле в дзеркало). Старий вебапп поля не
+     * шле — default(null) тримає розбір черги сумісним.
+     */
+    locationCode: z.string().nullable().optional().default(null),
     attempts: z.number().int(),
     candidate: z.object({
         telegramId: z.string(),

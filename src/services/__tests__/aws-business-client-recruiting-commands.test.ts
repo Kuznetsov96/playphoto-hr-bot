@@ -27,6 +27,7 @@ describe("AwsBusinessClient recruiter commands", () => {
         kind: "INVITE_TO_INTERVIEW",
         reasonCode: null,
         reasonText: null,
+        locationCode: null,
         attempts: 0,
         candidate: {
             telegramId: "1164289764",
@@ -55,6 +56,30 @@ describe("AwsBusinessClient recruiter commands", () => {
                     }),
                 }),
             );
+        });
+
+        it("parses a command from an older webapp without locationCode as null", async () => {
+            const { locationCode: _omitted, ...legacy } = command;
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({ items: [legacy] }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            await expect(new AwsBusinessClient().listPendingRecruitingCommands(20))
+                .resolves.toEqual({ items: [{ ...legacy, locationCode: null }] });
+        });
+
+        it("carries locationCode of a CHANGE_LOCATION command through", async () => {
+            const changeLocation = { ...command, kind: "CHANGE_LOCATION", locationCode: "zp-volkland-shevchyk" };
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({ items: [changeLocation] }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+            await expect(new AwsBusinessClient().listPendingRecruitingCommands(20))
+                .resolves.toEqual({ items: [changeLocation] });
         });
 
         it("tolerates an unknown kind — the schema must carry it through as a plain string", async () => {
