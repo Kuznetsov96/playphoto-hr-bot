@@ -1,4 +1,4 @@
-import { InlineKeyboard } from "grammy";
+import { GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { ADMIN_IDS } from "../config.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
@@ -29,7 +29,7 @@ function day(date: string): string {
 
 export function renderShootAlert(alert: AwsShootAlert): string {
     const lines = alert.payload.items.map((i) => {
-        const when = i.startsAtLocalTime ? `${day(i.shootOn)} ${i.startsAtLocalTime}` : day(i.shootOn);
+        const when = escapeHtml(i.startsAtLocalTime ? `${day(i.shootOn)} ${i.startsAtLocalTime}` : day(i.shootOn));
         const who = i.childName ? ` · ${escapeHtml(i.childName)}` : "";
         return `• ${when} · ${escapeHtml(i.locationName)}${who}`;
     });
@@ -46,6 +46,12 @@ function logFailure(event: string, operation: string, kind?: string): void {
         operation,
         ...(kind ? { safeContext: { kind } } : {}),
     });
+}
+
+function sendFailureReason(error: unknown): string {
+    if (error instanceof GrammyError) return `TG_${error.error_code}`;
+    if (error instanceof HttpError) return "HTTP_ERROR";
+    return "SEND_FAILED";
 }
 
 export function createShootAlertDispatcher(
@@ -78,8 +84,8 @@ export function createShootAlertDispatcher(
                         reply_markup: new InlineKeyboard().url("Відкрити", alert.payload.openUrl),
                     });
                 } catch (error: unknown) {
-                    // Только описание ошибки Telegram, без текста сообщения; пустое описание API отвергнет.
-                    const reason = (error instanceof Error ? error.message.slice(0, 200) : "") || "SEND_FAILED";
+                    // Только код ошибки: сырой текст Telegram может нести лишнее.
+                    const reason = sendFailureReason(error);
                     await safeMarkFailed(alert.publicId, reason);
                     logFailure("bot.shoot_alerts.send_failed", "runOnce", alert.kind);
                     continue;

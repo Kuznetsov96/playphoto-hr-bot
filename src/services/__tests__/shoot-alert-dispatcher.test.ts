@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { GrammyError } from "grammy";
+import { shootAlertSchema } from "../aws-business-client.js";
 import { createShootAlertDispatcher } from "../shoot-alert-dispatcher.js";
 
 const alert = {
@@ -82,5 +84,42 @@ describe("ShootAlertDispatcher", () => {
         const client = fakeClient([alert]);
         await createShootAlertDispatcher(api as never, client as never, [111]).runOnce();
         expect(client.markShootAlertFailed).toHaveBeenCalledWith(alert.publicId, "SEND_FAILED");
+    });
+
+    it("reports a GrammyError as TG_<code>", async () => {
+        const err = new GrammyError("secret text", { ok: false, error_code: 403, description: "x" }, "sendMessage", {});
+        const api = { sendMessage: vi.fn().mockRejectedValue(err) };
+        const client = fakeClient([alert]);
+        await createShootAlertDispatcher(api as never, client as never, [111]).runOnce();
+        expect(client.markShootAlertFailed).toHaveBeenCalledWith(alert.publicId, "TG_403");
+    });
+
+    describe("payload schema", () => {
+        const base = {
+            publicId: "6f1c0000-0000-4000-8000-000000000001",
+            kind: "DAILY_DIGEST",
+            payload: {
+                openUrl: "https://app.example/owner/shoots",
+                items: [{
+                    shootPublicId: "6f1c0000-0000-4000-8000-0000000000aa",
+                    locationName: "L",
+                    shootOn: "2030-03-10",
+                    startsAtLocalTime: "12:00",
+                    childName: null,
+                }],
+            },
+        };
+        const withItem = (patch: object) => ({ ...base, payload: { ...base.payload, items: [{ ...base.payload.items[0], ...patch }] } });
+        const withUrl = (openUrl: string) => ({ ...base, payload: { ...base.payload, openUrl } });
+
+        it("accepts a valid row", () => {
+            expect(shootAlertSchema.safeParse(base).success).toBe(true);
+        });
+        it("rejects markup as time", () => {
+            expect(shootAlertSchema.safeParse(withItem({ startsAtLocalTime: "<b>12:00</b>" })).success).toBe(false);
+        });
+        it.each(["http://x.example", "javascript:alert(1)"])("rejects openUrl %s", (u) => {
+            expect(shootAlertSchema.safeParse(withUrl(u)).success).toBe(false);
+        });
     });
 });

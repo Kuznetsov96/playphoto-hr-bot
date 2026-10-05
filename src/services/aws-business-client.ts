@@ -505,13 +505,13 @@ const shootAlertItemSchema = z.object({
     shootPublicId: z.string().uuid(),
     locationName: z.string(),
     shootOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-    startsAtLocalTime: z.string().nullable(),
+    startsAtLocalTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u).nullable(),
     childName: z.string().nullable(),
 });
-const shootAlertSchema = z.object({
+export const shootAlertSchema = z.object({
     publicId: z.string().uuid(),
     kind: z.enum(["DAILY_DIGEST", "EVE_OF_SHOOT", "LATE_CREATED"]),
-    payload: z.object({ openUrl: z.string().url(), items: z.array(shootAlertItemSchema).min(1) }),
+    payload: z.object({ openUrl: z.string().url().refine((v) => new URL(v).protocol === "https:"), items: z.array(shootAlertItemSchema).min(1) }),
 });
 export type AwsShootAlert = z.infer<typeof shootAlertSchema>;
 
