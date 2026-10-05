@@ -36,19 +36,40 @@ export function renderShootAlert(alert: AwsShootAlert): string {
     return [`<b>${HEADERS[alert.kind]}</b>`, "", ...lines].join("\n");
 }
 
+function logFailure(event: string, operation: string, kind?: string): void {
+    logBusinessEvent({
+        event,
+        actorType: "system",
+        actorRole: "system",
+        result: "failure",
+        module: "shoot-alert-dispatcher",
+        operation,
+        ...(kind ? { safeContext: { kind } } : {}),
+    });
+}
+
 export function createShootAlertDispatcher(
     api: Pick<Api, "sendMessage">,
     client: ShootAlertClient = awsBusinessClient,
     adminIds: readonly number[] = ADMIN_IDS,
 ) {
+    /** Одна ошибка API при отметке не должна ронять остаток пачки. */
+    async function safeMarkFailed(publicId: string, reason: string): Promise<void> {
+        try {
+            await client.markShootAlertFailed(publicId, reason);
+        } catch {
+            logFailure("bot.shoot_alerts.mark_failed_failed", "markFailed");
+        }
+    }
+
     return {
         async runOnce(): Promise<void> {
             const { items, invalidPublicIds } = await client.pendingShootAlerts(PENDING_LIMIT);
-            for (const id of invalidPublicIds) await client.markShootAlertFailed(id, INVALID);
+            for (const id of invalidPublicIds) await safeMarkFailed(id, INVALID);
             const target = adminIds[0];
             for (const alert of items) {
                 if (target === undefined) {
-                    await client.markShootAlertFailed(alert.publicId, NO_ADMIN);
+                    await safeMarkFailed(alert.publicId, NO_ADMIN);
                     continue;
                 }
                 try {
@@ -56,20 +77,18 @@ export function createShootAlertDispatcher(
                         parse_mode: "HTML",
                         reply_markup: new InlineKeyboard().url("Відкрити", alert.payload.openUrl),
                     });
-                    await client.markShootAlertDelivered(alert.publicId);
                 } catch (error: unknown) {
-                    // Только описание ошибки Telegram, без текста сообщения.
-                    const reason = error instanceof Error ? error.message.slice(0, 200) : "SEND_FAILED";
-                    await client.markShootAlertFailed(alert.publicId, reason);
-                    logBusinessEvent({
-                        event: "bot.shoot_alerts.send_failed",
-                        actorType: "system",
-                        actorRole: "system",
-                        result: "failure",
-                        module: "shoot-alert-dispatcher",
-                        operation: "runOnce",
-                        safeContext: { kind: alert.kind },
-                    });
+                    // Только описание ошибки Telegram, без текста сообщения; пустое описание API отвергнет.
+                    const reason = (error instanceof Error ? error.message.slice(0, 200) : "") || "SEND_FAILED";
+                    await safeMarkFailed(alert.publicId, reason);
+                    logFailure("bot.shoot_alerts.send_failed", "runOnce", alert.kind);
+                    continue;
+                }
+                // Telegram уже принял сообщение: сбой отметки не повод помечать failed (будет дубль).
+                try {
+                    await client.markShootAlertDelivered(alert.publicId);
+                } catch {
+                    logFailure("bot.shoot_alerts.mark_delivered_failed", "runOnce", alert.kind);
                 }
             }
         },

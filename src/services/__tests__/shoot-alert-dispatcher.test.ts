@@ -55,4 +55,32 @@ describe("ShootAlertDispatcher", () => {
         await createShootAlertDispatcher({ sendMessage: vi.fn() } as never, client as never, [111]).runOnce();
         expect(client.markShootAlertFailed).toHaveBeenCalledWith("bad-1", "SHOOT_ALERT_PAYLOAD_INVALID");
     });
+
+    const second = { ...alert, publicId: "6f1c0000-0000-4000-8000-000000000002" };
+
+    it("does not mark failed when markDelivered rejects, and continues the batch", async () => {
+        const api = { sendMessage: vi.fn().mockResolvedValue({}) };
+        const client = fakeClient([alert, second]);
+        client.markShootAlertDelivered.mockRejectedValueOnce(new Error("api down"));
+        await createShootAlertDispatcher(api as never, client as never, [111]).runOnce();
+        expect(client.markShootAlertFailed).not.toHaveBeenCalled();
+        expect(api.sendMessage).toHaveBeenCalledTimes(2);
+        expect(client.markShootAlertDelivered).toHaveBeenCalledWith(second.publicId);
+    });
+
+    it("keeps processing when markFailed rejects", async () => {
+        const api = { sendMessage: vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue({}) };
+        const client = fakeClient([alert, second]);
+        client.markShootAlertFailed.mockRejectedValueOnce(new Error("api down"));
+        await createShootAlertDispatcher(api as never, client as never, [111]).runOnce();
+        expect(api.sendMessage).toHaveBeenCalledTimes(2);
+        expect(client.markShootAlertDelivered).toHaveBeenCalledWith(second.publicId);
+    });
+
+    it("falls back to SEND_FAILED for an empty error message", async () => {
+        const api = { sendMessage: vi.fn().mockRejectedValue(new Error("")) };
+        const client = fakeClient([alert]);
+        await createShootAlertDispatcher(api as never, client as never, [111]).runOnce();
+        expect(client.markShootAlertFailed).toHaveBeenCalledWith(alert.publicId, "SEND_FAILED");
+    });
 });
