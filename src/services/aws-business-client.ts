@@ -501,6 +501,27 @@ export interface AwsPendingReplacementNotifications {
     unidentifiableCount: number;
 }
 
+const shootAlertItemSchema = z.object({
+    shootPublicId: z.string().uuid(),
+    locationName: z.string(),
+    shootOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    startsAtLocalTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/u).nullable(),
+    childName: z.string().nullable(),
+});
+export const shootAlertSchema = z.object({
+    publicId: z.string().uuid(),
+    kind: z.enum(["DAILY_DIGEST", "EVE_OF_SHOOT", "LATE_CREATED"]),
+    payload: z.object({ openUrl: z.string().url().refine((v) => new URL(v).protocol === "https:"), items: z.array(shootAlertItemSchema).min(1) }),
+});
+export type AwsShootAlert = z.infer<typeof shootAlertSchema>;
+
+/** Valid rows plus the ids of rows that failed validation and must be reported. */
+export interface AwsPendingShootAlerts {
+    items: AwsShootAlert[];
+    invalidPublicIds: string[];
+    unidentifiableCount: number;
+}
+
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
 export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
 export type AwsScheduleNotification = z.infer<typeof scheduleNotificationSchema>;
@@ -1189,6 +1210,48 @@ export class AwsBusinessClient {
         await this.request(
             `/replacement-notifications/${encodeURIComponent(publicId)}/delivered`,
             { method: "POST", body: JSON.stringify({}) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    /** Shoot alerts awaiting delivery to the main admin; rows validated one by one. */
+    async pendingShootAlerts(limit: number): Promise<AwsPendingShootAlerts> {
+        const query = new URLSearchParams({ limit: String(limit) });
+        const value = await this.request(`/shoot-alerts/pending?${query.toString()}`, { method: "GET" });
+        const envelope = pendingReplacementNotificationsEnvelopeSchema.parse(value);
+
+        const items: AwsShootAlert[] = [];
+        const invalidPublicIds: string[] = [];
+        let unidentifiableCount = 0;
+
+        for (const row of envelope.items) {
+            const parsed = shootAlertSchema.safeParse(row);
+            if (parsed.success) {
+                items.push(parsed.data);
+                continue;
+            }
+            const identity = replacementNotificationIdentitySchema.safeParse(row);
+            if (identity.success) invalidPublicIds.push(identity.data.publicId);
+            else unidentifiableCount += 1;
+        }
+
+        return { items, invalidPublicIds, unidentifiableCount };
+    }
+
+    async markShootAlertDelivered(publicId: string): Promise<void> {
+        await this.request(
+            `/shoot-alerts/${encodeURIComponent(publicId)}/delivered`,
+            { method: "POST", body: JSON.stringify({}) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async markShootAlertFailed(publicId: string, reason: string): Promise<void> {
+        await this.request(
+            `/shoot-alerts/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
             undefined,
             { expectsBody: false },
         );

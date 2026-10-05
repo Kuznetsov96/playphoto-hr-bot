@@ -9,6 +9,7 @@ import { CandidateStatus, FunnelStep } from "@prisma/client";
 import { TEAM_CHATS, HR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED, AWS_RECRUITING_MIRROR_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
+import { createShootAlertDispatcher } from "./shoot-alert-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { runAccessRevocations } from "./access-revocation-dispatcher.js";
 import { taskService } from "./task-service.js";
@@ -685,6 +686,39 @@ export function startReplacementNotificationDispatcher(bot: Bot<MyContext>) {
             logger.error({ err: error }, "Replacement notification dispatcher iteration failed");
         });
     }, REPLACEMENT_NOTIFICATION_POLL_MS);
+}
+
+const SHOOT_ALERT_POLL_MS = 60 * 1000;
+
+/**
+ * Delivers the backend's shoot alerts (shoots without a photographer) to the
+ * main admin. Deliberately has no feature flag: the deploy form re-sets flags
+ * on every release, and the loop is harmless while the queue is empty.
+ */
+export function startShootAlertDispatcher(bot: Bot<MyContext>) {
+    logBusinessEvent({
+        event: "bot.shoot_alerts.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "worker",
+        operation: "startShootAlertDispatcher",
+        safeContext: { pollIntervalMs: SHOOT_ALERT_POLL_MS },
+    });
+
+    const dispatcher = createShootAlertDispatcher(bot.api);
+    let running = false;
+    return setInterval(() => {
+        if (running) return;
+        running = true;
+        dispatcher.runOnce()
+            .catch(error => {
+                logger.error({ err: error }, "Shoot alert dispatcher iteration failed");
+            })
+            .finally(() => {
+                running = false;
+            });
+    }, SHOOT_ALERT_POLL_MS);
 }
 
 const ACCESS_REVOCATION_POLL_MS = 60 * 1000;
