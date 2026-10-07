@@ -20,6 +20,7 @@ import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../utils/location-opening-hours.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
+import { forwardShootLineToTopic, takeShootSupportLine } from "./shoot-support-line.js";
 import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
 import {
     buildShiftPickerView,
@@ -630,9 +631,14 @@ async function presentSupportEntry(
     await ScreenManager.renderScreen(ctx, text, keyboard, options);
 }
 
-export async function startSupportFlow(ctx: MyContext) {
+export async function startSupportFlow(ctx: MyContext, options: { shootLine?: string } = {}) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
+
+    // Кожен вхід визначає рядок про зйомку заново: без параметра — стерти, щоб рядок
+    // скасованого звернення з нагадування не приліпився до наступного, стороннього питання.
+    if (options.shootLine) ctx.session.shootSupportLine = options.shootLine;
+    else delete ctx.session.shootSupportLine;
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
 
@@ -643,6 +649,23 @@ export async function startSupportFlow(ctx: MyContext) {
 
     const activeConversation = await supportConversationService.resolveActive(user.id);
     if (activeConversation) {
+        // Діалог уже відкрито: рядок про зйомку йде в ту саму тему окремим повідомленням.
+        // Теми ще немає (тікет без теми) або Telegram відмовив — рядок лишається в сесії,
+        // і його донесе пересилання наступного повідомлення (support.ts, гілка відкритої розмови).
+        const shootLine = takeShootSupportLine(ctx.session);
+        if (shootLine !== null) {
+            const delivered = await forwardShootLineToTopic(ctx.api, activeConversation.topicId, shootLine).catch((error: unknown) => {
+                // Не `err`: GrammyError несе payload з текстом повідомлення.
+                logger.error({
+                    userId: user.id,
+                    topicId: activeConversation.topicId,
+                    errorName: error instanceof Error ? error.name : typeof error,
+                }, "Shoot support line could not reach the open topic");
+                return false;
+            });
+            if (!delivered) ctx.session.shootSupportLine = shootLine;
+        }
+
         if (ctx.callbackQuery)
             await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => { });
         await presentSupportEntry(
@@ -992,6 +1015,7 @@ staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {
 
     ctx.session.step = "create_ticket";
     ctx.session.clarificationTaskId = taskId;
+    delete ctx.session.shootSupportLine;
 
     const taskPreview = truncateText(htmlToPlainText(task.taskText), 100);
     const text =

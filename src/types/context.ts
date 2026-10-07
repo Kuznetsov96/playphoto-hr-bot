@@ -193,6 +193,8 @@ export interface SessionData {
     staffSeenWelcome?: boolean;
     activeTasksCount?: number;
     clarificationTaskId?: string;
+    /** Рядок про зйомку з кнопки нагадування (план 4): живе до першого повідомлення в підтримку. */
+    shootSupportLine?: string;
     ticketId?: number; // Must be number based on existing repository
     selectedCandidateId?: string | undefined;
     selectedSlotId?: string;
