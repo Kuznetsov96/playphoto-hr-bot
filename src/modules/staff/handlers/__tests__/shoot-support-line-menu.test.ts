@@ -134,7 +134,8 @@ describe("startSupportFlow with a shoot line", () => {
         );
         expect("shootSupportLine" in ctx.session).toBe(false);
         expect(ctx.session.step).toBe("idle");
-        expect(renderScreen).toHaveBeenCalledWith(ctx, "<b>Твій діалог вже відкритий.</b>", expect.anything(), {});
+        expect(ctx.reply).toHaveBeenCalledWith("<b>Твій діалог вже відкритий.</b>", expect.objectContaining({ parse_mode: "HTML" }));
+        expect(renderScreen).not.toHaveBeenCalled();
     });
 
     it("posts into an admin-opened (outgoing) topic too", async () => {
@@ -165,7 +166,8 @@ describe("startSupportFlow with a shoot line", () => {
 
         expect(ctx.api.sendMessage).not.toHaveBeenCalled();
         expect(ctx.session.shootSupportLine).toEqual({ line: LINE, at: expect.any(Number) });
-        expect(renderScreen).toHaveBeenCalledWith(ctx, "<b>Твій діалог вже відкритий.</b>", expect.anything(), {});
+        expect(ctx.reply).toHaveBeenCalledWith("<b>Твій діалог вже відкритий.</b>", expect.objectContaining({ parse_mode: "HTML" }));
+        expect(renderScreen).not.toHaveBeenCalled();
     });
 
     it("keeps the line when Telegram refuses, and logs neither the line nor the error payload", async () => {
@@ -180,7 +182,8 @@ describe("startSupportFlow with a shoot line", () => {
         await startSupportFlow(ctx, { shootLine: LINE });
 
         expect(ctx.session.shootSupportLine).toEqual({ line: LINE, at: expect.any(Number) });
-        expect(renderScreen).toHaveBeenCalledWith(ctx, "<b>Твій діалог вже відкритий.</b>", expect.anything(), {});
+        expect(ctx.reply).toHaveBeenCalledWith("<b>Твій діалог вже відкритий.</b>", expect.objectContaining({ parse_mode: "HTML" }));
+        expect(renderScreen).not.toHaveBeenCalled();
         expect(loggerError).toHaveBeenCalledTimes(1);
         const logged = JSON.stringify(loggerError.mock.calls[0]);
         expect(logged).not.toContain("Олена");
@@ -199,7 +202,8 @@ describe("startSupportFlow with a shoot line", () => {
 
         expect(first.api.sendMessage).toHaveBeenCalledTimes(1);
         expect("shootSupportLine" in second.session).toBe(false);
-        expect(renderScreen).toHaveBeenCalledTimes(2);
+        expect(first.reply).toHaveBeenCalledTimes(1);
+        expect(second.reply).toHaveBeenCalledTimes(1);
     });
 
     it("a tap after a refused send tries again", async () => {

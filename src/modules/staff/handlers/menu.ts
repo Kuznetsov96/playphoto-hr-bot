@@ -626,8 +626,13 @@ async function presentSupportEntry(
 ) {
     // A message written by a person is correspondence, not a disposable menu
     // screen. Never replace the source message when its Reply button is used.
+    // Так само нагадування про зйомку (`cb:sds:…`, SHOOT_SUPPORT_CODE): у ньому телефон
+    // клієнта, ім'я дитини й побажання — підтримка відкривається НОВИМ повідомленням.
     const callbackData = ctx.callbackQuery?.data;
-    const isCorrespondenceReply = callbackData === "staff_support_reply" || callbackData === "contact_hr";
+    const isCorrespondenceReply =
+        callbackData === "staff_support_reply" ||
+        callbackData === "contact_hr" ||
+        (callbackData?.startsWith("cb:sds:") ?? false);
     if (isCorrespondenceReply && ctx.callbackQuery?.message) {
         await ctx.reply(text, {
             parse_mode: "HTML",
