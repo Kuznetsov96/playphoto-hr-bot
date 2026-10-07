@@ -212,12 +212,28 @@ describe("shoot task buttons: handlers", () => {
         expect(c.editMessageText).not.toHaveBeenCalled();
     });
 
-    it("pick refused → popup, message unchanged", async () => {
+    it.each(["SHOOT_DUE_OUT_OF_RANGE", "SHOOT_DUE_ALREADY_MOVED", "SHOOT_CANCELLED", "SHOOT_PHOTOS_RECEIVED"] as const)(
+        "pick refused with %s → popup, text kept, only support button left",
+        async (code) => {
+            const d = deps();
+            d.client.shootTaskDueOptions.mockResolvedValue({ ok: false, code });
+            const c = ctx(buildSignedCallback("sdp", REF));
+            await createShootTaskHandlers(d as never).pick(c as never);
+            expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+            expect(c.editMessageText).not.toHaveBeenCalled();
+            const [markup] = c.editMessageReplyMarkup.mock.calls[0]!;
+            expect((markup as { reply_markup: Keyboard }).reply_markup.inline_keyboard.flat().map((b) => b.text)).toEqual([
+                "Написати в підтримку",
+            ]);
+        },
+    );
+
+    it("pick refused as not hers → popup only, message unchanged", async () => {
         const d = deps();
-        d.client.shootTaskDueOptions.mockResolvedValue({ ok: false, code: "SHOOT_DUE_ALREADY_MOVED" });
+        d.client.shootTaskDueOptions.mockResolvedValue({ ok: false, code: "SHOOT_TASK_NOT_FOUND" });
         const c = ctx(buildSignedCallback("sdp", REF));
         await createShootTaskHandlers(d as never).pick(c as never);
-        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Термін уже перенесено — напиши в підтримку.");
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Ця зйомка вже не твоя.");
         expect(c.editMessageText).not.toHaveBeenCalled();
         expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
     });

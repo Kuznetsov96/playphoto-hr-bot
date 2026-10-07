@@ -196,7 +196,12 @@ export function createShootTaskHandlers(deps: ShootTaskHandlerDeps = defaultDeps
                 const telegramId = telegramIdOf(ctx);
                 if (ref === null || telegramId === null) return expired(answer);
                 const result = await deps.client.shootTaskDueOptions(ref, telegramId);
-                if (!result.ok) return refused(answer, "shoot_task.pick", result.code);
+                if (!result.ok) {
+                    if (PICKER_DEAD_END.has(result.code)) {
+                        await edit("shoot_task.pick", () => ctx.editMessageReplyMarkup({ reply_markup: supportKeyboard(ref) }));
+                    }
+                    return refused(answer, "shoot_task.pick", result.code);
+                }
                 if (result.options.length === 0) return refused(answer, "shoot_task.pick", "SHOOT_DUE_OUT_OF_RANGE");
                 await edit("shoot_task.pick", () =>
                     ctx.editMessageText(STAFF_TEXTS["shoot-task-pick-due"]({ current: dayLabel(result.currentDueOn) }), {
