@@ -39,6 +39,8 @@ describe("sanitizeTextForLogs: телефони", () => {
         "1600 1200 3000 2500",
         "Термін — вт 19.03.2030 включно.",
         "ДН 2 год, ставка 400",
+        "Chat 1164289764 not found",
+        "retry at 1791374328915 failed",
     ])("звичайні числа лишаються: %s", (input) => {
         expect(sanitizeTextForLogs(input)).toBe(input);
     });

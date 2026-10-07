@@ -13,13 +13,14 @@ function truncate(value: string): string {
 const PHONE_CANDIDATE = /(?<![\d+])\+?\(?\d(?:[ ()-]{0,2}\d){9,12}(?!\d)/gu;
 
 /**
- * Телефон → «…1301», як maskPhone вебаппа. Номером вважаємо запис із «+», голі 10–13 цифр
- * або запис, що починається з 0 чи 380; список сум через пробіл («1600 1200 3000») — ні.
+ * Телефон → «…1301», як maskPhone вебаппа. Номером вважаємо запис із «+» або такий, що
+ * починається з 0 чи 380. Голі 10–13 цифр (Telegram id, мітка часу в мс) лишаються — вони
+ * потрібні для діагностики; список сум через пробіл («1600 1200 3000») — теж.
  */
 function maskPhones(value: string): string {
     return value.replace(PHONE_CANDIDATE, (match) => {
         const digits = match.replace(/\D/gu, "");
-        const phoneLike = match.startsWith("+") || /^\d+$/u.test(match) || /^\(?(0|380)/u.test(match);
+        const phoneLike = match.startsWith("+") || /^\(?(0|380)/u.test(match);
         return phoneLike ? `…${digits.slice(-4)}` : match;
     });
 }
