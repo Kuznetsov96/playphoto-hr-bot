@@ -14,8 +14,8 @@ export const SHOOT_DUE_BACK_CODE = "sdb";
 export const SHOOT_SUPPORT_CODE = "sds";
 
 /**
- * Імена коротші за загальні 500 символів: після escapeHtml (`&` → `&amp;`) три вільні поля
- * ASSIGNED інакше могли б перерости ліміт Telegram у 4096 символів.
+ * Імена коротші за загальні 500 символів — обмеження для читання, не для Telegram: ліміт 4096
+ * Telegram рахує після розбору сутностей, тож `&amp;` там лише один символ.
  */
 const NAME_LIMIT = 120;
 

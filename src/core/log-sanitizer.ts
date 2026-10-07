@@ -5,9 +5,29 @@ function truncate(value: string): string {
     return `${value.slice(0, MAX_LOG_TEXT_LENGTH)}...`;
 }
 
+/**
+ * Кандидат у телефони: 10–13 цифр з одиночними пробілами, дефісами чи дужками між ними,
+ * необов’язковий «+» спереду. Двокрапка, крапка й тире не входять — час «15:00–16:00» і дата
+ * «19.03.2030» не склеюються в один номер.
+ */
+const PHONE_CANDIDATE = /(?<![\d+])\+?\(?\d(?:[ ()-]{0,2}\d){9,12}(?!\d)/gu;
+
+/**
+ * Телефон → «…1301», як maskPhone вебаппа. Номером вважаємо запис із «+», голі 10–13 цифр
+ * або запис, що починається з 0 чи 380; список сум через пробіл («1600 1200 3000») — ні.
+ */
+function maskPhones(value: string): string {
+    return value.replace(PHONE_CANDIDATE, (match) => {
+        const digits = match.replace(/\D/gu, "");
+        const phoneLike = match.startsWith("+") || /^\d+$/u.test(match) || /^\(?(0|380)/u.test(match);
+        return phoneLike ? `…${digits.slice(-4)}` : match;
+    });
+}
+
+/** Маскування до обрізання: інакше ножиці на 160-му символі лишили б початок номера. */
 export function sanitizeTextForLogs(value?: string | null): string | null {
     if (!value) return null;
-    return truncate(value.replace(/\s+/g, " ").trim());
+    return truncate(maskPhones(value.replace(/\s+/g, " ").trim()));
 }
 
 export function sanitizeCallbackData(value?: string | null): string | null {

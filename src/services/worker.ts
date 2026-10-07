@@ -10,7 +10,7 @@ import { TEAM_CHATS, HR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createShootAlertDispatcher } from "./shoot-alert-dispatcher.js";
-import { createShootTaskDispatcher } from "./shoot-task-dispatcher.js";
+import { createShootTaskDispatcher, startPolling } from "./shoot-task-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { runAccessRevocations } from "./access-revocation-dispatcher.js";
 import { taskService } from "./task-service.js";
@@ -727,7 +727,7 @@ const SHOOT_TASK_POLL_MS = 60 * 1000;
 /**
  * Повідомлення фотографам про зйомки (план 4). Без флага, як диспетчер ShootAlert: форма
  * деплою перезаписує всі флаги, а порожня черга (вебапп з вимкненим SHOOT_TASKS_ENABLED)
- * нічого не шле. `running` не дає опитуванням перекритися в одному процесі; кілька процесів
+ * нічого не шле. startPolling не дає опитуванням перекритися в одному процесі; кілька процесів
  * (репліки, перекриття виходів) потребували б оренди рядків у вебаппі — див. shoot-task-dispatcher.ts.
  */
 export function startShootTaskDispatcher(bot: Bot<MyContext>) {
@@ -741,20 +741,10 @@ export function startShootTaskDispatcher(bot: Bot<MyContext>) {
         safeContext: { pollIntervalMs: SHOOT_TASK_POLL_MS },
     });
     const dispatcher = createShootTaskDispatcher(bot.api);
-    let running = false;
-    return setInterval(() => {
-        if (running) return;
-        running = true;
-        dispatcher
-            .runOnce()
-            .catch((error: unknown) => {
-                // Без err цілком: помилка може нести тіло запиту з текстом повідомлення.
-                logger.error({ errorName: error instanceof Error ? error.name : typeof error }, "Shoot task dispatcher iteration failed");
-            })
-            .finally(() => {
-                running = false;
-            });
-    }, SHOOT_TASK_POLL_MS);
+    return startPolling(() => dispatcher.runOnce(), SHOOT_TASK_POLL_MS, (error: unknown) => {
+        // Без err цілком: помилка може нести тіло запиту з текстом повідомлення.
+        logger.error({ errorName: error instanceof Error ? error.name : typeof error }, "Shoot task dispatcher iteration failed");
+    });
 }
 
 const ACCESS_REVOCATION_POLL_MS = 60 * 1000;

@@ -40,7 +40,7 @@ let shiftReminderTimer: NodeJS.Timeout | undefined;
 let scheduleNotificationTimer: NodeJS.Timeout | undefined;
 let replacementNotificationTimer: NodeJS.Timeout | undefined;
 let shootAlertTimer: NodeJS.Timeout | undefined;
-let shootTaskTimer: NodeJS.Timeout | undefined;
+let shootTaskPoller: ReturnType<typeof startShootTaskDispatcher> | undefined;
 let accessRevocationTimer: NodeJS.Timeout | undefined;
 let recruitingCommandTimer: NodeJS.Timeout | undefined;
 let recruitingMirrorSweepTimer: NodeJS.Timeout | undefined;
@@ -161,7 +161,7 @@ async function bootstrap() {
         scheduleNotificationTimer = startScheduleNotificationDispatcher(bot as any);
         replacementNotificationTimer = startReplacementNotificationDispatcher(bot as any);
         shootAlertTimer = startShootAlertDispatcher(bot as any);
-        shootTaskTimer = startShootTaskDispatcher(bot as any);
+        shootTaskPoller = startShootTaskDispatcher(bot as any);
         accessRevocationTimer = startAccessRevocationDispatcher(bot as any);
         recruitingCommandTimer = startRecruitingCommandDispatcher(bot as any);
         recruitingMirrorSweepTimer = startRecruitingMirrorSweep();
@@ -255,6 +255,8 @@ async function bootstrap() {
     }
 }
 
+const SHOOT_TASK_STOP_TIMEOUT_MS = 10_000;
+
 async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -265,7 +267,6 @@ async function shutdown(signal: string) {
         if (scheduleNotificationTimer) clearInterval(scheduleNotificationTimer);
         if (replacementNotificationTimer) clearInterval(replacementNotificationTimer);
         if (shootAlertTimer) clearInterval(shootAlertTimer);
-        if (shootTaskTimer) clearInterval(shootTaskTimer);
         if (accessRevocationTimer) clearInterval(accessRevocationTimer);
         if (recruitingCommandTimer) clearInterval(recruitingCommandTimer);
         if (recruitingMirrorSweepTimer) clearInterval(recruitingMirrorSweepTimer);
@@ -273,6 +274,10 @@ async function shutdown(signal: string) {
         if (staffActivationSweepTimer) clearInterval(staffActivationSweepTimer);
         if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
         if (shiftReminderTimer) clearInterval(shiftReminderTimer);
+        // Опитування зйомок у польоті дописує пару в Redis — чекаємо його до redis.quit().
+        if (shootTaskPoller && !(await shootTaskPoller.stop(SHOOT_TASK_STOP_TIMEOUT_MS))) {
+            logger.warn("Shoot task poll still in flight after shutdown timeout");
+        }
         if (runner?.isRunning()) {
             await runner.stop();
         }
