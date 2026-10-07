@@ -522,6 +522,123 @@ export interface AwsPendingShootAlerts {
     unidentifiableCount: number;
 }
 
+const SHOOT_DATE = /^\d{4}-\d{2}-\d{2}$/u;
+const SHOOT_TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
+
+/**
+ * Повідомлення фотографу про зйомку (план 4), контракт `BotShootTaskView` вебаппа. Схема
+ * сувора: невідоме поле або вид — рядок іде в invalidPublicIds і стає failed, а не
+ * вгадується. Телефон — лише E.164 і лише в ASSIGNED (вебапп його більше нікуди не кладе);
+ * клієнт його не логує й не кладе в текст помилок.
+ */
+export const shootTaskSchema = z
+    .object({
+        publicId: z.string().uuid(),
+        ref: z.string().regex(/^[a-z2-7]{12}$/u),
+        kind: z.enum([
+            "ASSIGNED",
+            "PHOTOS_DUE",
+            "DUE_TODAY",
+            "OVERDUE",
+            "RETURNED",
+            "DUE_CHANGED",
+            "UNASSIGNED",
+            "CANCELLED",
+            "REDACT",
+        ]),
+        telegramId: z.string().regex(/^\d{1,20}$/u),
+        shoot: z
+            .object({
+                clientName: z.string().nullable(),
+                childName: z.string().nullable(),
+                phone: z.string().regex(/^\+380\d{9}$/u).nullable(),
+                notes: z.string().nullable(),
+                location: z.object({ name: z.string().min(1), city: z.string(), branch: z.string().nullable() }).strict(),
+                shootOn: z.string().regex(SHOOT_DATE),
+                intervals: z.array(
+                    z.object({ start: z.string().regex(SHOOT_TIME), end: z.string().regex(SHOOT_TIME).nullable() }).strict(),
+                ),
+                durationMinutes: z.number().int().positive().nullable(),
+            })
+            .strict(),
+        dueOn: z.string().regex(SHOOT_DATE),
+        canMoveDue: z.boolean(),
+        overdueDays: z.number().int().positive().nullable(),
+        returnComment: z.string().nullable(),
+        pathB: z.boolean(),
+        targetMessageId: z.number().int().positive().nullable(),
+    })
+    .strict();
+export type AwsShootTask = z.infer<typeof shootTaskSchema>;
+export type AwsShootTaskKind = AwsShootTask["kind"];
+
+export interface AwsPendingShootTasks {
+    items: AwsShootTask[];
+    invalidPublicIds: string[];
+    unidentifiableCount: number;
+}
+
+/**
+ * Причини `failed`, про які домовлено з вебаппом: TG_403 — фотограф заблокувала бота, рядок
+ * одразу FAILED; TG_MESSAGE_GONE / TG_NOT_MODIFIED закривають REDACT (повідомлення немає або
+ * телефону в ньому вже немає). PAYLOAD_INVALID — рядок не пройшов строгу схему.
+ */
+export const SHOOT_TASK_FAILURE_REASONS = {
+    BLOCKED: "TG_403",
+    MESSAGE_GONE: "TG_MESSAGE_GONE",
+    NOT_MODIFIED: "TG_NOT_MODIFIED",
+    PAYLOAD_INVALID: "SHOOT_TASK_PAYLOAD_INVALID",
+} as const;
+
+/**
+ * Відмови кнопок за ref, які бот показує спливашкою: 409 переносу (однакові для
+ * `due-options` і `due`) і 404 «не твоє / немає / контур вимкнено».
+ */
+export const SHOOT_TASK_REFUSAL_CODES = [
+    "SHOOT_CANCELLED",
+    "SHOOT_PHOTOS_RECEIVED",
+    "SHOOT_DUE_ALREADY_MOVED",
+    "SHOOT_DUE_OUT_OF_RANGE",
+    "SHOOT_TASK_NOT_FOUND",
+] as const;
+export type ShootTaskRefusalCode = (typeof SHOOT_TASK_REFUSAL_CODES)[number];
+export type ShootTaskButtonResult<T> = ({ ok: true } & T) | { ok: false; code: ShootTaskRefusalCode };
+
+const SHOOT_TASK_REFUSAL_STATUS: Record<ShootTaskRefusalCode, number> = {
+    SHOOT_CANCELLED: 409,
+    SHOOT_PHOTOS_RECEIVED: 409,
+    SHOOT_DUE_ALREADY_MOVED: 409,
+    SHOOT_DUE_OUT_OF_RANGE: 409,
+    SHOOT_TASK_NOT_FOUND: 404,
+};
+
+function shootTaskRefusal(error: unknown): ShootTaskRefusalCode | null {
+    if (!(error instanceof AwsBusinessApiError) || error.code === undefined) return null;
+    const code = error.code as ShootTaskRefusalCode;
+    return SHOOT_TASK_REFUSAL_STATUS[code] === error.status ? code : null;
+}
+
+/** Рядок без UUID у publicId звітувати нікуди: failed приймає лише UUID. */
+const shootTaskIdentitySchema = z.object({ publicId: z.string().uuid() });
+
+const shootTaskOptionsSchema = z
+    .object({
+        currentDueOn: z.string().regex(SHOOT_DATE),
+        options: z.array(z.string().regex(SHOOT_DATE)),
+        item: shootTaskSchema,
+    })
+    .strict();
+const shootTaskMovedSchema = z.object({ dueOn: z.string().regex(SHOOT_DATE), item: shootTaskSchema }).strict();
+const shootTaskLineSchema = z.object({ line: z.string().min(1) }).strict();
+
+/** telegramId — завжди `from.id` натискання; до мережі не йде нічого, що не є Telegram id. */
+function shootTaskActor(telegramId: number): string {
+    if (!Number.isSafeInteger(telegramId) || telegramId <= 0) {
+        throw new RangeError("telegramId must be a positive integer");
+    }
+    return String(telegramId);
+}
+
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
 export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
 export type AwsScheduleNotification = z.infer<typeof scheduleNotificationSchema>;
@@ -1255,6 +1372,108 @@ export class AwsBusinessClient {
             undefined,
             { expectsBody: false },
         );
+    }
+
+    /**
+     * Повідомлення фотографам про зйомки; рядки перевіряються поштучно, як у pendingShootAlerts:
+     * зламаний рядок не валить пачку й не зникає мовчки — його publicId іде в invalidPublicIds,
+     * диспетчер звітує його як failed з SHOOT_TASK_FAILURE_REASONS.PAYLOAD_INVALID.
+     */
+    async pendingShootTasks(limit: number): Promise<AwsPendingShootTasks> {
+        const query = new URLSearchParams({ limit: String(limit) });
+        const value = await this.request(`/shoot-tasks/pending?${query.toString()}`, { method: "GET" });
+        const envelope = pendingReplacementNotificationsEnvelopeSchema.parse(value);
+
+        const items: AwsShootTask[] = [];
+        const invalidPublicIds: string[] = [];
+        let unidentifiableCount = 0;
+
+        for (const row of envelope.items) {
+            const parsed = shootTaskSchema.safeParse(row);
+            if (parsed.success) {
+                items.push(parsed.data);
+                continue;
+            }
+            const identity = shootTaskIdentitySchema.safeParse(row);
+            if (identity.success) invalidPublicIds.push(identity.data.publicId);
+            else unidentifiableCount += 1;
+        }
+
+        return { items, invalidPublicIds, unidentifiableCount };
+    }
+
+    /** messageId потрібен вебаппу, щоб REDACT потім знайшов повідомлення з телефоном. */
+    async markShootTaskDelivered(publicId: string, messageId?: number): Promise<void> {
+        await this.request(
+            `/shoot-tasks/${encodeURIComponent(publicId)}/delivered`,
+            { method: "POST", body: JSON.stringify(messageId === undefined ? {} : { messageId }) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async markShootTaskFailed(publicId: string, reason: string): Promise<void> {
+        await this.request(
+            `/shoot-tasks/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    /**
+     * Екран «Обрати інший термін». telegramId — `from.id` натискання, у тілі: адреси потрапляють
+     * у журнали. Бекенд звіряє його з фотографом зйомки; відмова — типізований результат.
+     */
+    async shootTaskDueOptions(
+        ref: string,
+        telegramId: number,
+    ): Promise<ShootTaskButtonResult<{ currentDueOn: string; options: string[]; item: AwsShootTask }>> {
+        const actor = shootTaskActor(telegramId);
+        return this.shootTaskButton(async () => {
+            const value = await this.request(`/shoot-tasks/by-ref/${encodeURIComponent(ref)}/due-options`, {
+                method: "POST",
+                body: JSON.stringify({ telegramId: actor }),
+            });
+            return shootTaskOptionsSchema.parse(value);
+        });
+    }
+
+    async moveShootTaskDue(
+        ref: string,
+        telegramId: number,
+        dueOn: string,
+    ): Promise<ShootTaskButtonResult<{ dueOn: string; item: AwsShootTask }>> {
+        const actor = shootTaskActor(telegramId);
+        return this.shootTaskButton(async () => {
+            const value = await this.request(`/shoot-tasks/by-ref/${encodeURIComponent(ref)}/due`, {
+                method: "POST",
+                body: JSON.stringify({ telegramId: actor, dueOn }),
+            });
+            return shootTaskMovedSchema.parse(value);
+        });
+    }
+
+    async shootTaskSupportLine(ref: string, telegramId: number): Promise<ShootTaskButtonResult<{ line: string }>> {
+        const actor = shootTaskActor(telegramId);
+        return this.shootTaskButton(async () => {
+            const value = await this.request(`/shoot-tasks/by-ref/${encodeURIComponent(ref)}/support-line`, {
+                method: "POST",
+                body: JSON.stringify({ telegramId: actor }),
+            });
+            return shootTaskLineSchema.parse(value);
+        });
+    }
+
+    /** Відомі відмови — результат для спливашки; решта (5xx, 400, мережа, схема) — виняток. */
+    private async shootTaskButton<T extends object>(call: () => Promise<T>): Promise<ShootTaskButtonResult<T>> {
+        try {
+            return { ok: true, ...(await call()) };
+        } catch (error) {
+            const code = shootTaskRefusal(error);
+            if (code === null) throw error;
+            return { ok: false, code };
+        }
     }
 
     async markReplacementNotificationFailed(publicId: string, reason: string): Promise<void> {
