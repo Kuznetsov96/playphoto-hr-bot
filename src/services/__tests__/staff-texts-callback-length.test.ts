@@ -25,6 +25,12 @@ const TOAST_TEXTS = [
     "schedule-notif-ans-unavailable",
     "staff-replacement-revert-ans-failed",
     "staff-replacement-revert-ans-done",
+    "shoot-task-ans-not-yours",
+    "shoot-task-ans-cancelled",
+    "shoot-task-ans-received",
+    "shoot-task-ans-moved",
+    "shoot-task-ans-out-of-range",
+    "shoot-task-ans-retry",
 ] as const;
 
 describe("тексты, показываемые всплывающей плашкой", () => {
