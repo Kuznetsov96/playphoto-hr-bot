@@ -124,6 +124,7 @@ commandHandlers.command("start", async (ctx) => {
         }
 
         ctx.session.step = "idle";
+        delete ctx.session.shootSupportLine;
         delete ctx.session.adminFlow;
         delete ctx.session.taskData;
         delete ctx.session.taskCreation;

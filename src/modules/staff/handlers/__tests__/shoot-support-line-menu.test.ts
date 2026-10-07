@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const findWithProfilesByTelegramId = vi.fn();
+const findWithStaffProfileByTelegramId = vi.fn();
 const resolveActiveSupportConversation = vi.fn();
 const renderScreen = vi.fn();
 const getTaskById = vi.fn();
@@ -33,7 +34,7 @@ vi.mock("../../../../config.js", () => ({ TEAM_CHATS: { SUPPORT: 999 } }));
 vi.mock("../../../../repositories/user-repository.js", () => ({
     userRepository: {
         findByTelegramId: vi.fn(),
-        findWithStaffProfileByTelegramId: vi.fn(),
+        findWithStaffProfileByTelegramId,
         findWithProfilesByTelegramId,
     },
 }));
@@ -87,6 +88,8 @@ function openTicket(topicId: number | null) {
 
 describe("startSupportFlow with a shoot line", () => {
     beforeEach(() => {
+        // Вікно дедупу живе в модулі — кожен тест із чистого модуля.
+        vi.resetModules();
         vi.clearAllMocks();
         findWithProfilesByTelegramId.mockResolvedValue({
             id: "user-1",
@@ -103,7 +106,7 @@ describe("startSupportFlow with a shoot line", () => {
         await startSupportFlow(ctx, { shootLine: LINE });
 
         expect(ctx.session.step).toBe("create_ticket");
-        expect(ctx.session.shootSupportLine).toBe(LINE);
+        expect(ctx.session.shootSupportLine).toEqual({ line: LINE, at: expect.any(Number) });
         expect(ctx.api.sendMessage).not.toHaveBeenCalled();
     });
 
@@ -161,7 +164,7 @@ describe("startSupportFlow with a shoot line", () => {
         await startSupportFlow(ctx, { shootLine: LINE });
 
         expect(ctx.api.sendMessage).not.toHaveBeenCalled();
-        expect(ctx.session.shootSupportLine).toBe(LINE);
+        expect(ctx.session.shootSupportLine).toEqual({ line: LINE, at: expect.any(Number) });
         expect(renderScreen).toHaveBeenCalledWith(ctx, "<b>Твій діалог вже відкритий.</b>", expect.anything(), {});
     });
 
@@ -176,12 +179,59 @@ describe("startSupportFlow with a shoot line", () => {
 
         await startSupportFlow(ctx, { shootLine: LINE });
 
-        expect(ctx.session.shootSupportLine).toBe(LINE);
+        expect(ctx.session.shootSupportLine).toEqual({ line: LINE, at: expect.any(Number) });
         expect(renderScreen).toHaveBeenCalledWith(ctx, "<b>Твій діалог вже відкритий.</b>", expect.anything(), {});
         expect(loggerError).toHaveBeenCalledTimes(1);
         const logged = JSON.stringify(loggerError.mock.calls[0]);
         expect(logged).not.toContain("Олена");
         expect(logged).toContain("errorName");
+    });
+
+    it("a double tap posts the line once", async () => {
+        resolveActiveSupportConversation.mockResolvedValue(openTicket(33298));
+        const { startSupportFlow } = await import("../menu.js");
+        const first = makeCtx();
+        const second = makeCtx();
+        second.api = first.api;
+
+        await startSupportFlow(first, { shootLine: LINE });
+        await startSupportFlow(second, { shootLine: LINE });
+
+        expect(first.api.sendMessage).toHaveBeenCalledTimes(1);
+        expect("shootSupportLine" in second.session).toBe(false);
+        expect(renderScreen).toHaveBeenCalledTimes(2);
+    });
+
+    it("a tap after a refused send tries again", async () => {
+        resolveActiveSupportConversation.mockResolvedValue(openTicket(33298));
+        const { startSupportFlow } = await import("../menu.js");
+        const first = makeCtx();
+        first.api.sendMessage.mockRejectedValueOnce(new Error("Too Many Requests"));
+        const second = makeCtx();
+        second.api = first.api;
+
+        await startSupportFlow(first, { shootLine: LINE });
+        await startSupportFlow(second, { shootLine: LINE });
+
+        expect(first.api.sendMessage).toHaveBeenCalledTimes(2);
+        expect("shootSupportLine" in second.session).toBe(false);
+    });
+});
+
+describe("leaving to the staff hub", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        findWithStaffProfileByTelegramId.mockResolvedValue(null);
+    });
+
+    it("drops the pending line (cancel and «Меню» both lead here)", async () => {
+        const { showStaffHub } = await import("../menu.js");
+        const ctx = makeCtx({ step: "create_ticket", shootSupportLine: { line: LINE, at: Date.now() } });
+
+        await showStaffHub(ctx);
+
+        expect(ctx.session.step).toBe("idle");
+        expect("shootSupportLine" in ctx.session).toBe(false);
     });
 });
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Рядок про зйомку в обробнику повідомлень фотографа (план 4, Task 15): новий тікет
@@ -17,6 +17,8 @@ const createTicket = vi.fn();
 const closeTicket = vi.fn();
 const getTaskById = vi.fn();
 const renderScreen = vi.fn();
+const loggerError = vi.fn();
+const loggerWarn = vi.fn();
 
 vi.mock("../../../../constants/staff-texts.js", () => ({
     STAFF_TEXTS: {
@@ -34,7 +36,7 @@ vi.mock("../../../../constants/staff-texts.js", () => ({
 }));
 
 vi.mock("../../../../core/logger.js", () => ({
-    default: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), warn: vi.fn() },
+    default: { info: vi.fn(), error: loggerError, debug: vi.fn(), trace: vi.fn(), warn: loggerWarn },
 }));
 
 vi.mock("../../../../config.js", () => ({
@@ -105,6 +107,7 @@ vi.mock("../../../../utils/ticket-card.js", () => ({
 const LINE = "Зйомка · <Олена> · сб 11.10";
 const ESCAPED = "Зйомка · &lt;Олена&gt; · сб 11.10";
 const USER_ID = "cmlqcnojh000sla5frjx4hced";
+const pending = () => ({ line: LINE, at: Date.now() });
 
 function staffMessageCtx(session: Record<string, unknown>, text = "Можна до п’ятниці?") {
     return {
@@ -134,11 +137,13 @@ describe("shoot support line in staff messages", () => {
         findActiveTicketByUser.mockResolvedValue(null);
         findActiveOutgoingTopicByUser.mockResolvedValue(null);
         createTicket.mockResolvedValue({ id: 901, status: "OPEN" });
+        updateTicket.mockResolvedValue({});
+        touchTicket.mockResolvedValue({});
     });
 
     it("prefixes the new ticket with the escaped line and drops it from the session", async () => {
         const { handleStaffMessage } = await import("../support.js");
-        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: LINE });
+        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: pending() });
 
         expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
 
@@ -162,7 +167,7 @@ describe("shoot support line in staff messages", () => {
     it("drops the line when ticket creation fails before it was used", async () => {
         getTaskById.mockRejectedValue(new Error("db down"));
         const { handleStaffMessage } = await import("../support.js");
-        const ctx = staffMessageCtx({ step: "create_ticket", clarificationTaskId: "task-1", shootSupportLine: LINE });
+        const ctx = staffMessageCtx({ step: "create_ticket", clarificationTaskId: "task-1", shootSupportLine: pending() });
 
         expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
 
@@ -174,7 +179,7 @@ describe("shoot support line in staff messages", () => {
     it("drops the line on the handler-wide error reset", async () => {
         findWithStaffProfileByTelegramId.mockRejectedValue(new Error("db down"));
         const { handleStaffMessage } = await import("../support.js");
-        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: LINE });
+        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: pending() });
         ctx.reply.mockResolvedValue({});
 
         expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
@@ -186,7 +191,7 @@ describe("shoot support line in staff messages", () => {
     it("a line left for the open conversation goes into its topic before the message", async () => {
         findActiveTicketByUser.mockResolvedValue({ id: 454, topicId: 17030, status: "OPEN" });
         const { handleStaffMessage } = await import("../support.js");
-        const ctx = staffMessageCtx({ shootSupportLine: LINE });
+        const ctx = staffMessageCtx({ shootSupportLine: pending() });
 
         expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
 
@@ -202,7 +207,7 @@ describe("shoot support line in staff messages", () => {
     it("a ticket step overridden by an admin-opened topic still delivers the line there", async () => {
         findActiveOutgoingTopicByUser.mockResolvedValue({ id: 4, topicId: 4100 });
         const { handleStaffMessage } = await import("../support.js");
-        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: LINE });
+        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: pending() });
 
         expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
 
@@ -212,6 +217,69 @@ describe("shoot support line in staff messages", () => {
             parse_mode: "HTML",
         });
         expect(ctx.api.copyMessage).toHaveBeenCalled();
+        expect("shootSupportLine" in ctx.session).toBe(false);
+    });
+
+    it("a refused line post does not lose the photographer's message and waits for the next one", async () => {
+        findActiveTicketByUser.mockResolvedValue({ id: 454, topicId: 17030, status: "OPEN" });
+        const { handleStaffMessage } = await import("../support.js");
+        const at = Date.now() - 60_000;
+        const ctx = staffMessageCtx({ shootSupportLine: { line: LINE, at } });
+        ctx.api.sendMessage.mockRejectedValueOnce(Object.assign(new Error("Too Many Requests: retry after 3"), {
+            payload: { text: `❓ Звернення з нагадування про зйомку: ${ESCAPED}` },
+        }));
+
+        expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
+
+        expect(ctx.api.copyMessage).toHaveBeenCalledWith(999, 385856787, 11, { message_thread_id: 17030 });
+        expect(updateTicket).not.toHaveBeenCalledWith(454, { topicId: null });
+        expect(ctx.session.shootSupportLine).toEqual({ line: LINE, at });
+        const logged = JSON.stringify([...loggerError.mock.calls, ...loggerWarn.mock.calls]);
+        expect(logged).not.toContain("Олена");
+        expect(logged).toContain("errorName");
+        expect(logged).not.toContain("Support topic forwarding failed");
+    });
+});
+
+describe("a pending line older than 30 minutes", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(Date.UTC(2030, 2, 10, 9, 0)));
+        findWithStaffProfileByTelegramId.mockResolvedValue({
+            id: USER_ID,
+            staffProfile: { id: "staff-1", isActive: true, fullName: "Гут Ольга Богданівна", location: null },
+        });
+        findActiveTicketByUser.mockResolvedValue(null);
+        findActiveOutgoingTopicByUser.mockResolvedValue(null);
+        createTicket.mockResolvedValue({ id: 902, status: "OPEN" });
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("is never posted into a later, unrelated topic", async () => {
+        const { handleStaffMessage } = await import("../support.js");
+        const ctx = staffMessageCtx({ shootSupportLine: pending() });
+
+        vi.advanceTimersByTime(31 * 60_000);
+        findActiveOutgoingTopicByUser.mockResolvedValue({ id: 5, topicId: 5200 });
+        expect(await handleStaffMessage(ctx, {} as any)).toBe(true);
+
+        expect(ctx.api.copyMessage).toHaveBeenCalled();
+        expect(ctx.api.sendMessage).not.toHaveBeenCalledWith(999, expect.stringContaining("Олена"), expect.anything());
+        expect("shootSupportLine" in ctx.session).toBe(false);
+    });
+
+    it("does not prefix a ticket written later", async () => {
+        const { handleStaffMessage } = await import("../support.js");
+        const ctx = staffMessageCtx({ step: "create_ticket", shootSupportLine: pending() });
+
+        vi.advanceTimersByTime(31 * 60_000);
+        await handleStaffMessage(ctx, {} as any);
+
+        expect(createTicket).toHaveBeenCalledWith(USER_ID, "Можна до п’ятниці?");
         expect("shootSupportLine" in ctx.session).toBe(false);
     });
 });
@@ -241,7 +309,7 @@ describe("staff_help entry", () => {
 
     it("starts a ticket without the stale shoot line", async () => {
         const { staffSupportHandlers } = await import("../support.js");
-        const ctx = helpCtx({ shootSupportLine: LINE });
+        const ctx = helpCtx({ shootSupportLine: pending() });
 
         await staffSupportHandlers.middleware()(ctx, async () => { });
 
@@ -252,7 +320,7 @@ describe("staff_help entry", () => {
     it("drops the stale line even when a ticket is already open", async () => {
         findActiveTicketByUser.mockResolvedValue({ id: 454, topicId: 17030, status: "OPEN" });
         const { staffSupportHandlers } = await import("../support.js");
-        const ctx = helpCtx({ shootSupportLine: LINE });
+        const ctx = helpCtx({ shootSupportLine: pending() });
 
         await staffSupportHandlers.middleware()(ctx, async () => { });
 

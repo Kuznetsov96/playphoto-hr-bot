@@ -26,7 +26,7 @@ import { truncateText } from "../../../utils/task-helpers.js";
 import { getRichMessagePlainText } from "../../../utils/rich-message.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { formatLocation } from "../../../utils/location-label.js";
-import { forwardShootLineToTopic, takeShootSupportLine, withShootSupportPrefix } from "./shoot-support-line.js";
+import { clearShootSupportLine, forwardShootLineToTopic, takeShootSupportLine, withShootSupportPrefix } from "./shoot-support-line.js";
 
 // Statuses that are considered "Active"
 const ACTIVE_STATUSES = [TicketStatus.OPEN, TicketStatus.IN_PROGRESS];
@@ -142,7 +142,7 @@ staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
 
     // Звичайний вхід у підтримку: рядок про зйомку з давнього натискання нагадування
     // не повинен приліпитися до цього, стороннього тікета.
-    delete ctx.session.shootSupportLine;
+    clearShootSupportLine(ctx.session);
 
     // Check if user has active ticket
     const user = await userRepository.findByTelegramId(BigInt(telegramId));
@@ -828,7 +828,7 @@ async function safeHandle(
         ctx.session.step = "idle";
         delete ctx.session.ticketId;
         delete ctx.session.clarificationTaskId;
-        delete ctx.session.shootSupportLine;
+        clearShootSupportLine(ctx.session);
         try {
             await ctx.reply("Сталася помилка. Спробуй ще раз або зверніться до адміністратора. 🌸").catch(() => { });
         } catch { }
@@ -1163,7 +1163,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
 
                 // Звернення з кнопки нагадування про зйомку (план 4): рядок про зйомку — префіксом.
                 const shootLine = takeShootSupportLine(ctx.session);
-                if (shootLine !== null) text = withShootSupportPrefix(text, shootLine);
+                if (shootLine !== null) text = withShootSupportPrefix(text, shootLine.line);
 
                 // 1. Create Ticket in DB (Status: OPEN)
                 const { supportService } = await import("../../../services/support-service.js");
@@ -1282,7 +1282,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                 logger.error({ err: e, telegramId, userId: user.id }, "Support ticket creation flow failed");
                 ctx.session.step = "idle";
                 delete ctx.session.clarificationTaskId;
-                delete ctx.session.shootSupportLine;
+                clearShootSupportLine(ctx.session);
                 const { ScreenManager } = await import("../../../utils/screen-manager.js");
                 await ScreenManager.renderScreen(ctx, "Сталася помилка при створенні запиту. Спробуй ще раз або зверніться до адміністратора. 🌸");
                 return true;
@@ -1339,8 +1339,22 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                 if (ctx.message) {
                     // Рядок про зйомку, що чекав відкриту розмову (тема ще не існувала, Telegram
                     // відмовив або крок create_ticket перебила тема адміністратора), — перед повідомленням.
+                    // Збій тут не має права загубити повідомлення фотографки чи закрити тему:
+                    // рядок повертається в сесію (з тим самим часом) до наступного повідомлення.
                     const shootLine = takeShootSupportLine(ctx.session);
-                    if (shootLine !== null) await forwardShootLineToTopic(ctx.api, targetTopicId, shootLine);
+                    if (shootLine !== null) {
+                        try {
+                            await forwardShootLineToTopic(ctx.api, targetTopicId, shootLine.line);
+                        } catch (error: unknown) {
+                            // Не `err`: GrammyError несе payload з текстом повідомлення.
+                            logger.error({
+                                userId: user.id,
+                                topicId: targetTopicId,
+                                errorName: error instanceof Error ? error.name : typeof error,
+                            }, "Shoot support line could not reach the open topic");
+                            ctx.session.shootSupportLine = shootLine;
+                        }
+                    }
 
                     await ctx.api.copyMessage(TEAM_CHATS.SUPPORT, ctx.chat!.id, ctx.message.message_id, {
                         message_thread_id: targetTopicId
