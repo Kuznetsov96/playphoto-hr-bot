@@ -78,8 +78,42 @@ function reminderKeyboard(item: AwsShootTask): InlineKeyboard {
         .text(STAFF_TEXTS["staff-preferences-btn-support"], buildSignedCallback(SHOOT_SUPPORT_CODE, item.ref));
 }
 
+/**
+ * Стан «Готово» після переносу фотографом (спек «Выбор даты»): рядок терміну замінено на
+ * «Новий термін — … включно. Нагадаю зранку в цей день.», дата в повідомленні одна, кнопка —
+ * лише підтримка. «Термін минув…» і «Сьогодні останній день…» після переносу неправда, тож
+ * PHOTOS_DUE, DUE_TODAY і OVERDUE стають «Чекаємо фото зі зйомки.»; RETURNED зберігає «Що виправити».
+ */
+function renderMoved(item: AwsShootTask): { text: string; keyboard: InlineKeyboard } {
+    const block = shootBlock(item);
+    const due = dayLabel(item.dueOn);
+    if (item.kind === "RETURNED") {
+        const comment = safe(item.returnComment) ?? "—";
+        return {
+            text: withPathB(
+                item,
+                `${STAFF_TEXTS["shoot-task-returned-head"]}\n\n${block}\n\n${STAFF_TEXTS["shoot-task-returned-what"]}\n<blockquote>${comment}</blockquote>\n\n${STAFF_TEXTS["shoot-task-returned-due-moved"]({ due })}`,
+            ),
+            keyboard: supportKeyboard(item.ref),
+        };
+    }
+    return {
+        text: withPathB(
+            item,
+            `${STAFF_TEXTS["shoot-task-photos-due-head"]}\n\n${block}\n\n${STAFF_TEXTS["shoot-task-due-moved"]({ due })}\n${STAFF_TEXTS["shoot-task-send-hint"]}`,
+        ),
+        keyboard: supportKeyboard(item.ref),
+    };
+}
+
+const MOVABLE_KINDS: ReadonlySet<AwsShootTask["kind"]> = new Set(["PHOTOS_DUE", "DUE_TODAY", "OVERDUE", "RETURNED"]);
+
 /** Текст і кнопки повідомлення — таблиця «Сообщения» спеку, рядок за рядком. */
-export function renderShootTask(item: AwsShootTask): { text: string; keyboard: InlineKeyboard | null } {
+export function renderShootTask(
+    item: AwsShootTask,
+    options: { moved?: boolean } = {},
+): { text: string; keyboard: InlineKeyboard | null } {
+    if (options.moved === true && MOVABLE_KINDS.has(item.kind)) return renderMoved(item);
     const block = shootBlock(item);
     const due = dayLabel(item.dueOn);
     switch (item.kind) {

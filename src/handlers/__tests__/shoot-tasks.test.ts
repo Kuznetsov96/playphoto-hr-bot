@@ -4,7 +4,7 @@ vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "test-secre
 
 const { AwsBusinessApiError } = await import("../../services/aws-business-client.js");
 const { buildSignedCallback } = await import("../../utils/signed-callback.js");
-const { createShootTaskHandlers, dueKeyboard, confirmKeyboard, parseRef, parseRefDate, toastFor, ANSWER_DEADLINE_MS } =
+const { createShootTaskHandlers, dueKeyboard, confirmKeyboard, parseRef, parseRefDate, toastFor, movedToast, ANSWER_DEADLINE_MS } =
     await import("../shoot-tasks.js");
 const { supportKeyboard, renderShootTask } = await import("../../services/shoot-task-render.js");
 import type { AwsShootTask } from "../../services/aws-business-client.js";
@@ -147,50 +147,39 @@ describe("shoot task buttons: handlers", () => {
         expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
     });
 
-    it("confirm on an OVERDUE message → moved state, never the overdue text, support only", async () => {
+    const waiting = (pathB: boolean) =>
+        "Чекаємо фото зі зйомки.\n\nЗйомка · Олена\n📍 Dragon Park 1 (Lviv)\n📅 вт 12.03, 15:00–16:00\n\n" +
+        "Новий термін — пн 18.03 включно. Нагадаю зранку в цей день.\nУ касі точки натисни «Надіслати фото» — можна зі своєї зміни або зі зміни колеги." +
+        (pathB ? "\nЯкщо зміни немає — на екрані PIN-коду натисни «Надіслати фото ДН»." : "");
+    const returned =
+        "Фото повернули на доопрацювання.\n\nЗйомка · Олена\n📍 Dragon Park 1 (Lviv)\n📅 вт 12.03, 15:00–16:00\n\nЩо виправити:\n<blockquote>Темно</blockquote>\n\n" +
+        "Новий термін — пн 18.03 включно. Виправ і надішли знову з каси. Нагадаю зранку в цей день.\nЯкщо зміни немає — на екрані PIN-коду натисни «Надіслати фото ДН».";
+
+    it.each([
+        ["OVERDUE", { kind: "OVERDUE", overdueDays: 1, pathB: false }, waiting(false)],
+        ["DUE_TODAY", { kind: "DUE_TODAY", overdueDays: null, pathB: true }, waiting(true)],
+        ["PHOTOS_DUE", { kind: "PHOTOS_DUE", overdueDays: null, pathB: false }, waiting(false)],
+        ["RETURNED", { kind: "RETURNED", overdueDays: null, pathB: true, returnComment: "Темно" }, returned],
+    ] as const)("confirm on %s → moved state with exactly one date, support only", async (_kind, patch, expected) => {
         const d = deps();
+        d.client.moveShootTaskDue.mockResolvedValue({
+            ok: true,
+            dueOn: "2030-03-18",
+            item: { ...item, ...patch, dueOn: "2030-03-18", canMoveDue: false },
+        });
         const c = ctx(buildSignedCallback("sdc", `${REF}.300318`));
         await createShootTaskHandlers(d as never).confirm(c as never);
         expect(d.client.moveShootTaskDue).toHaveBeenCalledWith(REF, 77, "2030-03-18");
         const [text, options] = c.editMessageText.mock.calls[0]!;
-        expect(text).toBe(
-            "Чекаємо фото зі зйомки.\n\nЗйомка · Олена\n📍 Dragon Park 1 (Lviv)\n📅 вт 12.03, 15:00–16:00\n\n" +
-                "Термін — пн 18.03 включно.\nУ касі точки натисни «Надіслати фото» — можна зі своєї зміни або зі зміни колеги.\n\n" +
-                "Новий термін — пн 18.03. Нагадаю зранку в цей день.",
-        );
+        expect(text).toBe(expected);
+        expect(text.split("Новий термін").length - 1).toBe(1);
+        expect(text).not.toContain("Термін — ");
         expect(text).not.toContain("Термін минув");
         expect(text).not.toContain("призначає адміністратор");
+        expect(text).not.toContain("Сьогодні останній день");
         expect(labels(options)).toEqual(["Написати в підтримку"]);
         expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
         expect(c.answerCallbackQuery).toHaveBeenCalledWith();
-    });
-
-    it("confirm on a DUE_TODAY message drops «Сьогодні останній день»", async () => {
-        const d = deps();
-        d.client.moveShootTaskDue.mockResolvedValue({
-            ok: true,
-            dueOn: "2030-03-18",
-            item: { ...item, kind: "DUE_TODAY", overdueDays: null, dueOn: "2030-03-18", canMoveDue: false },
-        });
-        const c = ctx(buildSignedCallback("sdc", `${REF}.300318`));
-        await createShootTaskHandlers(d as never).confirm(c as never);
-        const [text] = c.editMessageText.mock.calls[0]!;
-        expect(text).not.toContain("Сьогодні останній день");
-        expect(text).toContain("Новий термін — пн 18.03. Нагадаю зранку в цей день.");
-    });
-
-    it("confirm on a RETURNED message keeps what to fix", async () => {
-        const d = deps();
-        d.client.moveShootTaskDue.mockResolvedValue({
-            ok: true,
-            dueOn: "2030-03-18",
-            item: { ...item, kind: "RETURNED", overdueDays: null, returnComment: "Темно", dueOn: "2030-03-18", canMoveDue: false },
-        });
-        const c = ctx(buildSignedCallback("sdc", `${REF}.300318`));
-        await createShootTaskHandlers(d as never).confirm(c as never);
-        const [text] = c.editMessageText.mock.calls[0]!;
-        expect(text).toContain("<blockquote>Темно</blockquote>");
-        expect(text.endsWith("Новий термін — пн 18.03. Нагадаю зранку в цей день.")).toBe(true);
     });
 
     it.each([
@@ -243,13 +232,28 @@ describe("shoot task buttons: handlers", () => {
         expect(c.editMessageText).not.toHaveBeenCalled();
     });
 
-    it("a failed edit after a successful move does not tell her to retry", async () => {
+    it("a failed edit after a successful move answers with the new date, not a retry", async () => {
         const d = deps();
         const c = ctx(buildSignedCallback("sdc", `${REF}.300318`));
         c.editMessageText.mockRejectedValue(new Error("Bad Request: message can't be edited"));
         await createShootTaskHandlers(d as never).confirm(c as never);
         expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
-        expect(c.answerCallbackQuery).not.toHaveBeenCalledWith("Спробуй ще раз за хвилину.");
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Новий термін — пн 18.03.");
+    });
+
+    it("«message is not modified» after a move is a quiet success", async () => {
+        const d = deps();
+        const c = ctx(buildSignedCallback("sdc", `${REF}.300318`));
+        c.editMessageText.mockRejectedValue(new Error("Bad Request: message is not modified"));
+        await createShootTaskHandlers(d as never).confirm(c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith();
+    });
+
+    it("the edit-failed popup fits 45 characters for every date", () => {
+        for (const date of ["2099-12-31", "2030-03-18", "2031-01-01"]) {
+            expect(movedToast(date).length).toBeLessThanOrEqual(45);
+        }
     });
 
     it("back → the original OVERDUE message, exactly as rendered from item", async () => {
@@ -361,7 +365,7 @@ describe("shoot task buttons: handlers", () => {
         expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
     });
 
-    it("a slow webapp still gets the callback answered in time, and the late result is shown", async () => {
+    it("confirm: a slow webapp gets «Переношу» in time, and the late result is shown", async () => {
         vi.useFakeTimers();
         const d = deps();
         let resolve!: (value: unknown) => void;
@@ -373,14 +377,28 @@ describe("shoot task buttons: handlers", () => {
         expect(spy).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(1);
         expect(spy).toHaveBeenCalledTimes(1);
-        expect(spy).toHaveBeenCalledWith("Спробуй ще раз за хвилину.");
+        expect(spy).toHaveBeenCalledWith("Переношу — повідомлення оновиться.");
         resolve({ ok: true, dueOn: "2030-03-18", item: { ...item, dueOn: "2030-03-18", canMoveDue: false } });
         await run;
         expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
-        expect(c.editMessageText.mock.calls[0]![0]).toContain("Новий термін — пн 18.03. Нагадаю зранку в цей день.");
+        expect(c.editMessageText.mock.calls[0]![0]).toContain("Новий термін — пн 18.03 включно. Нагадаю зранку в цей день.");
         expect(ANSWER_DEADLINE_MS).toBeLessThan(15_000);
     });
 
+    it.each(["pick", "back", "support"] as const)("%s: a slow webapp gets «Спробуй ще раз» in time", async (name) => {
+        vi.useFakeTimers();
+        const d = deps();
+        const never = new Promise(() => {});
+        d.client.shootTaskDueOptions.mockReturnValue(never);
+        d.client.shootTaskSupportLine.mockReturnValue(never);
+        const code = { pick: "sdp", back: "sdb", support: "sds" }[name];
+        const c = ctx(buildSignedCallback(code, REF));
+        const spy = c.answerCallbackQuery;
+        void createShootTaskHandlers(d as never)[name](c as never);
+        await vi.advanceTimersByTimeAsync(ANSWER_DEADLINE_MS);
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(spy).toHaveBeenCalledWith("Спробуй ще раз за хвилину.");
+    });
     it("a failing answerCallbackQuery does not crash the handler", async () => {
         const d = deps();
         const c = ctx(buildSignedCallback("sdd", `${REF}.300318`));

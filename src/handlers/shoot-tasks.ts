@@ -1,12 +1,7 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import logger from "../core/logger.js";
-import {
-    AwsBusinessApiError,
-    awsBusinessClient,
-    type AwsShootTask,
-    type ShootTaskRefusalCode,
-} from "../services/aws-business-client.js";
+import { AwsBusinessApiError, awsBusinessClient, type ShootTaskRefusalCode } from "../services/aws-business-client.js";
 import {
     SHOOT_DUE_BACK_CODE,
     SHOOT_DUE_CONFIRM_CODE,
@@ -103,16 +98,9 @@ const PICKER_DEAD_END = new Set<ShootTaskRefusalCode>([
     "SHOOT_DUE_OUT_OF_RANGE",
 ]);
 
-/**
- * Стан «Готово» (C9): живий `item` плюс «Новий термін — … Нагадаю зранку в цей день.», лише кнопка
- * підтримки. Рядок OVERDUE («Термін минув…») чи DUE_TODAY («Сьогодні останній день…») після
- * переносу вже неправда — такі повідомлення стають «Чекаємо фото зі зйомки.» з новим терміном.
- * RETURNED зберігає «Що виправити»: без коментаря фотограф не знає, що переробляти.
- */
-export function movedText(item: AwsShootTask, dueOn: string): string {
-    const base: AwsShootTask = item.kind === "RETURNED" ? item : { ...item, kind: "PHOTOS_DUE", overdueDays: null };
-    const { text } = renderShootTask({ ...base, dueOn });
-    return `${text}\n\n${STAFF_TEXTS["shoot-task-due-moved"]({ due: dayLabel(dueOn) })}`;
+/** Перенос відбувся, а повідомлення не перемалювалось — дата хоча б у спливашці. */
+export function movedToast(dueOn: string): string {
+    return STAFF_TEXTS["shoot-task-ans-moved-to"]({ due: dayLabel(dueOn) });
 }
 
 type Client = Pick<typeof awsBusinessClient, "shootTaskDueOptions" | "moveShootTaskDue" | "shootTaskSupportLine">;
@@ -142,7 +130,12 @@ type Answer = (text?: string) => Promise<void>;
  * startSupportFlow відповідає сам (і тоді друга відповідь не йде), а якщо не відповів ніхто —
  * порожня відповідь у finally. Таймер дедлайну відповідає «Спробуй ще раз», якщо вебапп мовчить.
  */
-async function handleOnce(ctx: MyContext, operation: string, work: (answer: Answer) => Promise<void>): Promise<void> {
+async function handleOnce(
+    ctx: MyContext,
+    operation: string,
+    work: (answer: Answer) => Promise<void>,
+    deadlineToast: string = STAFF_TEXTS["shoot-task-ans-retry"],
+): Promise<void> {
     const original = ctx.answerCallbackQuery;
     let answered = false;
     const guarded = (async (...args: Parameters<MyContext["answerCallbackQuery"]>) => {
@@ -159,7 +152,7 @@ async function handleOnce(ctx: MyContext, operation: string, work: (answer: Answ
     const answer: Answer = async (text) => {
         await (text === undefined ? guarded() : guarded(text));
     };
-    const deadline = setTimeout(() => void answer(STAFF_TEXTS["shoot-task-ans-retry"]), ANSWER_DEADLINE_MS);
+    const deadline = setTimeout(() => void answer(deadlineToast), ANSWER_DEADLINE_MS);
     try {
         await work(answer);
     } catch (error: unknown) {
@@ -172,12 +165,18 @@ async function handleOnce(ctx: MyContext, operation: string, work: (answer: Answ
     }
 }
 
-/** Правка після успіху вебаппа: її збій не причина казати «Спробуй ще раз» — дія вже відбулась. */
-async function edit(operation: string, run: () => Promise<unknown>): Promise<void> {
+/**
+ * Правка після успіху вебаппа: її збій не причина казати «Спробуй ще раз» — дія вже відбулась.
+ * `false` — повідомлення лишилось старим («not modified» — це успіх: воно вже таке).
+ */
+async function edit(operation: string, run: () => Promise<unknown>): Promise<boolean> {
     try {
         await run();
+        return true;
     } catch (error: unknown) {
-        if (!isNotModified(error)) logger.warn({ operation, errorName: errorName(error) }, "Shoot task message edit failed");
+        if (isNotModified(error)) return true;
+        logger.warn({ operation, errorName: errorName(error) }, "Shoot task message edit failed");
+        return false;
     }
 }
 
@@ -222,22 +221,29 @@ export function createShootTaskHandlers(deps: ShootTaskHandlerDeps = defaultDeps
                 await answer();
             }),
 
+        /** Вебапп мовчить довше за спливашку — «Переношу»: пізній результат однаково перемалює повідомлення. */
         confirm: (ctx: MyContext) =>
-            handleOnce(ctx, "shoot_task.confirm", async (answer) => {
-                const parsed = parseRefDate(payloadOf(ctx, SHOOT_DUE_CONFIRM_CODE));
-                const telegramId = telegramIdOf(ctx);
-                if (parsed === null || telegramId === null) return expired(answer);
-                const result = await deps.client.moveShootTaskDue(parsed.ref, telegramId, parsed.date);
-                if (!result.ok) return refused(answer, "shoot_task.confirm", result.code);
-                await edit("shoot_task.confirm", () =>
-                    ctx.editMessageText(movedText(result.item, result.dueOn), {
-                        parse_mode: "HTML",
-                        link_preview_options: NO_PREVIEW,
-                        reply_markup: supportKeyboard(parsed.ref),
-                    }),
-                );
-                await answer();
-            }),
+            handleOnce(
+                ctx,
+                "shoot_task.confirm",
+                async (answer) => {
+                    const parsed = parseRefDate(payloadOf(ctx, SHOOT_DUE_CONFIRM_CODE));
+                    const telegramId = telegramIdOf(ctx);
+                    if (parsed === null || telegramId === null) return expired(answer);
+                    const result = await deps.client.moveShootTaskDue(parsed.ref, telegramId, parsed.date);
+                    if (!result.ok) return refused(answer, "shoot_task.confirm", result.code);
+                    const { text } = renderShootTask({ ...result.item, dueOn: result.dueOn }, { moved: true });
+                    const shown = await edit("shoot_task.confirm", () =>
+                        ctx.editMessageText(text, {
+                            parse_mode: "HTML",
+                            link_preview_options: NO_PREVIEW,
+                            reply_markup: supportKeyboard(parsed.ref),
+                        }),
+                    );
+                    await (shown ? answer() : answer(movedToast(result.dueOn)));
+                },
+                STAFF_TEXTS["shoot-task-ans-moving"],
+            ),
 
         /** Повідомлення — точно як було: текст і кнопки з живого `item`, той самий рендер, що й при відправці. */
         back: (ctx: MyContext) =>

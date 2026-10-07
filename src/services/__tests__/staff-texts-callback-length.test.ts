@@ -31,6 +31,7 @@ const TOAST_TEXTS = [
     "shoot-task-ans-moved",
     "shoot-task-ans-out-of-range",
     "shoot-task-ans-retry",
+    "shoot-task-ans-moving",
 ] as const;
 
 describe("тексты, показываемые всплывающей плашкой", () => {

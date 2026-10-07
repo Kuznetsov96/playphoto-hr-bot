@@ -790,7 +790,10 @@ Please check bot permissions (Manage Topics).`,
     `Зараз термін — ${p.current}. Обери новий.\nПеренести можна один раз — далі лише через адміністратора.`,
   "shoot-task-confirm-due": (p: { due: string }) =>
     `Новий термін — ${p.due}?\nПісля цього змінити його зможе лише адміністратор.`,
-  "shoot-task-due-moved": (p: { due: string }) => `Новий термін — ${p.due}. Нагадаю зранку в цей день.`,
+  // Стан «Готово» після переносу: рядок стає на місце рядка терміну — одна дата в повідомленні.
+  "shoot-task-due-moved": (p: { due: string }) => `Новий термін — ${p.due} включно. Нагадаю зранку в цей день.`,
+  "shoot-task-returned-due-moved": (p: { due: string }) =>
+    `Новий термін — ${p.due} включно. Виправ і надішли знову з каси. Нагадаю зранку в цей день.`,
   "shoot-task-btn-move": `Обрати інший термін`,
   "shoot-task-btn-confirm": `Так, перенести`,
   "shoot-task-btn-back": `Назад`,
@@ -801,6 +804,10 @@ Please check bot permissions (Manage Topics).`,
   "shoot-task-ans-moved": `Термін уже перенесено — напиши в підтримку.`,
   "shoot-task-ans-out-of-range": `Дата вже недоступна — обери іншу.`,
   "shoot-task-ans-retry": `Спробуй ще раз за хвилину.`,
+  // Перенос, на який вебапп не встиг відповісти за час спливашки: результат перемалює повідомлення.
+  "shoot-task-ans-moving": `Переношу — повідомлення оновиться.`,
+  // Перенос відбувся, а повідомлення не вдалось перемалювати: дата — у спливашці (≤ 45 символів).
+  "shoot-task-ans-moved-to": (p: { due: string }) => `Новий термін — ${p.due}.`,
   "shoot-task-support-prefix": (p: { line: string }) => `❓ <b>Питання по зйомці:</b>\n${p.line}`,
   "shoot-task-support-open-topic": (p: { line: string }) =>
     `❓ Звернення з нагадування про зйомку: ${p.line}`,

@@ -109,4 +109,19 @@ describe("renderShootTask", () => {
     it("without a client name the block title is just «Зйомка»", () => {
         expect(renderShootTask({ ...base, shoot: { ...base.shoot, clientName: null } }).text).toContain("\n\nЗйомка\n📍");
     });
+
+    it("moved: one date in place of the deadline line, escaped block, support only", () => {
+        const { text, keyboard } = renderShootTask({ ...base, kind: "OVERDUE", overdueDays: 4, canMoveDue: false }, { moved: true });
+        expect(text).toBe(
+            "Чекаємо фото зі зйомки.\n\nЗйомка · Олена &lt;script&gt;\n📍 Dragon Park 1 (Lviv)\n📅 сб 16.03, 15:00–16:00\n\n" +
+                "Новий термін — вт 19.03 включно. Нагадаю зранку в цей день.\nУ касі точки натисни «Надіслати фото» — можна зі своєї зміни або зі зміни колеги.",
+        );
+        expect(labels(keyboard)).toEqual(["Написати в підтримку"]);
+    });
+
+    it("moved RETURNED: escaped comment kept, the due line says when she will be reminded", () => {
+        const { text } = renderShootTask({ ...base, kind: "RETURNED", returnComment: "a < b", canMoveDue: false }, { moved: true });
+        expect(text).toContain("<blockquote>a &lt; b</blockquote>\n\nНовий термін — вт 19.03 включно. Виправ і надішли знову з каси. Нагадаю зранку в цей день.");
+        expect(text.split("Новий термін").length - 1).toBe(1);
+    });
 });
