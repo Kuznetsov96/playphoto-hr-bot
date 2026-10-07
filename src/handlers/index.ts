@@ -13,6 +13,7 @@ import { staffSupportHandlers, handleSupportGroupMessage } from "../modules/staf
 import { supportHandlers, handleSupportMessage } from "./support.js";
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
+import { shootTaskHandlers } from "./shoot-tasks.js";
 import { bot } from "../core/bot.js";
 import { shouldRouteMessageToPrivateRoleFlows } from "../utils/message-routing.js";
 import { accessHandlers } from "./access.js";
@@ -56,6 +57,9 @@ handlers.use(async (ctx, next) => {
 
 // Preferences flow must be global (accessible to staff via PM and admins via stats)
 handlers.use(preferencesHandlers);
+
+// Кнопки нагадувань фотографу про зйомки (план 4): sdp/sdd/sdc/sdb/sds, підписані, за ref.
+handlers.use(shootTaskHandlers);
 
 // 0. Menus should be handled at root level now
 
