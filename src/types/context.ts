@@ -193,6 +193,11 @@ export interface SessionData {
     staffSeenWelcome?: boolean;
     activeTasksCount?: number;
     clarificationTaskId?: string;
+    /**
+     * Рядок про зйомку з кнопки нагадування (план 4): живе до першого повідомлення в підтримку,
+     * не довше 30 хвилин. Рядок без часу (string) — з сесій до строку, читається як прострочений.
+     */
+    shootSupportLine?: { line: string; at: number } | string;
     ticketId?: number; // Must be number based on existing repository
     selectedCandidateId?: string | undefined;
     selectedSlotId?: string;

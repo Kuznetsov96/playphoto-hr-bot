@@ -20,6 +20,14 @@ import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
 import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../utils/location-opening-hours.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
+import {
+    acquireShootLineTopicSend,
+    clearShootSupportLine,
+    forwardShootLineToTopic,
+    putShootSupportLine,
+    releaseShootLineTopicSend,
+    takeShootSupportLine,
+} from "./shoot-support-line.js";
 import { getVisibleStaffShifts } from "../services/staff-schedule-view.js";
 import {
     buildShiftPickerView,
@@ -125,6 +133,8 @@ async function renderTaskProofScreen(
  */
 export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     ctx.session.step = "idle";
+    // Вихід у меню (і «Скасувати», і «🏠 Меню», і /start) закриває звернення з нагадування.
+    clearShootSupportLine(ctx.session);
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
@@ -616,8 +626,13 @@ async function presentSupportEntry(
 ) {
     // A message written by a person is correspondence, not a disposable menu
     // screen. Never replace the source message when its Reply button is used.
+    // Так само нагадування про зйомку (`cb:sds:…`, SHOOT_SUPPORT_CODE): у ньому телефон
+    // клієнта, ім'я дитини й побажання — підтримка відкривається НОВИМ повідомленням.
     const callbackData = ctx.callbackQuery?.data;
-    const isCorrespondenceReply = callbackData === "staff_support_reply" || callbackData === "contact_hr";
+    const isCorrespondenceReply =
+        callbackData === "staff_support_reply" ||
+        callbackData === "contact_hr" ||
+        (callbackData?.startsWith("cb:sds:") ?? false);
     if (isCorrespondenceReply && ctx.callbackQuery?.message) {
         await ctx.reply(text, {
             parse_mode: "HTML",
@@ -630,9 +645,14 @@ async function presentSupportEntry(
     await ScreenManager.renderScreen(ctx, text, keyboard, options);
 }
 
-export async function startSupportFlow(ctx: MyContext) {
+export async function startSupportFlow(ctx: MyContext, options: { shootLine?: string } = {}) {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
+
+    // Кожен вхід визначає рядок про зйомку заново: без параметра — стерти, щоб рядок
+    // скасованого звернення з нагадування не приліпився до наступного, стороннього питання.
+    if (options.shootLine) putShootSupportLine(ctx.session, options.shootLine);
+    else clearShootSupportLine(ctx.session);
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
 
@@ -643,6 +663,33 @@ export async function startSupportFlow(ctx: MyContext) {
 
     const activeConversation = await supportConversationService.resolveActive(user.id);
     if (activeConversation) {
+        // Діалог уже відкрито: рядок про зйомку йде в ту саму тему окремим повідомленням.
+        // Теми ще немає (тікет без теми) або Telegram відмовив — рядок лишається в сесії,
+        // і його донесе пересилання наступного повідомлення (support.ts, гілка відкритої розмови).
+        const pending = takeShootSupportLine(ctx.session);
+        if (pending !== null && activeConversation.topicId === null) {
+            ctx.session.shootSupportLine = pending;
+        } else if (pending !== null && activeConversation.topicId !== null) {
+            const topicId = activeConversation.topicId;
+            // Подвійне натискання: рядок у темі вже є (або от-от буде) — другий не потрібен.
+            const dedupeKey = acquireShootLineTopicSend(user.id, topicId, pending.line);
+            if (dedupeKey !== null) {
+                const delivered = await forwardShootLineToTopic(ctx.api, topicId, pending.line).catch((error: unknown) => {
+                    // Не `err`: GrammyError несе payload з текстом повідомлення.
+                    logger.error({
+                        userId: user.id,
+                        topicId,
+                        errorName: error instanceof Error ? error.name : typeof error,
+                    }, "Shoot support line could not reach the open topic");
+                    return false;
+                });
+                if (!delivered) {
+                    releaseShootLineTopicSend(dedupeKey);
+                    ctx.session.shootSupportLine = pending;
+                }
+            }
+        }
+
         if (ctx.callbackQuery)
             await ctx.answerCallbackQuery(STAFF_TEXTS["support-ans-already-processing"]).catch(() => { });
         await presentSupportEntry(
@@ -992,6 +1039,7 @@ staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {
 
     ctx.session.step = "create_ticket";
     ctx.session.clarificationTaskId = taskId;
+    clearShootSupportLine(ctx.session);
 
     const taskPreview = truncateText(htmlToPlainText(task.taskText), 100);
     const text =

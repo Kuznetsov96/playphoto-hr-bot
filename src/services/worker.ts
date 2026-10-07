@@ -10,6 +10,7 @@ import { TEAM_CHATS, HR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createShootAlertDispatcher } from "./shoot-alert-dispatcher.js";
+import { createShootTaskDispatcher, startPolling } from "./shoot-task-dispatcher.js";
 import { createReplacementNotificationDispatcher } from "./replacement-notification-dispatcher.js";
 import { runAccessRevocations } from "./access-revocation-dispatcher.js";
 import { taskService } from "./task-service.js";
@@ -719,6 +720,31 @@ export function startShootAlertDispatcher(bot: Bot<MyContext>) {
                 running = false;
             });
     }, SHOOT_ALERT_POLL_MS);
+}
+
+const SHOOT_TASK_POLL_MS = 60 * 1000;
+
+/**
+ * Повідомлення фотографам про зйомки (план 4). Без флага, як диспетчер ShootAlert: форма
+ * деплою перезаписує всі флаги, а порожня черга (вебапп з вимкненим SHOOT_TASKS_ENABLED)
+ * нічого не шле. startPolling не дає опитуванням перекритися в одному процесі; кілька процесів
+ * (репліки, перекриття виходів) потребували б оренди рядків у вебаппі — див. shoot-task-dispatcher.ts.
+ */
+export function startShootTaskDispatcher(bot: Bot<MyContext>) {
+    logBusinessEvent({
+        event: "bot.shoot_tasks.started",
+        actorType: "system",
+        actorRole: "system",
+        result: "success",
+        module: "worker",
+        operation: "startShootTaskDispatcher",
+        safeContext: { pollIntervalMs: SHOOT_TASK_POLL_MS },
+    });
+    const dispatcher = createShootTaskDispatcher(bot.api);
+    return startPolling(() => dispatcher.runOnce(), SHOOT_TASK_POLL_MS, (error: unknown) => {
+        // Без err цілком: помилка може нести тіло запиту з текстом повідомлення.
+        logger.error({ errorName: error instanceof Error ? error.name : typeof error }, "Shoot task dispatcher iteration failed");
+    });
 }
 
 const ACCESS_REVOCATION_POLL_MS = 60 * 1000;

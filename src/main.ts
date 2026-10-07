@@ -11,7 +11,7 @@ import { logBusinessEvent } from "./core/log-events.js";
 import { bot } from "./core/bot.js";
 import { redis } from "./core/redis.js";
 import prisma from "./db/core.js";
-import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher, startShootAlertDispatcher, startAccessRevocationDispatcher, startRecruitingCommandDispatcher, startRecruitingMirrorSweep, startReplacementStatusSweep, startStaffActivationSweep } from "./services/worker.js";
+import { startWorker, startScheduleNotificationDispatcher, startReplacementNotificationDispatcher, startShootAlertDispatcher, startShootTaskDispatcher, startAccessRevocationDispatcher, startRecruitingCommandDispatcher, startRecruitingMirrorSweep, startReplacementStatusSweep, startStaffActivationSweep } from "./services/worker.js";
 import { startBirthdayLoop } from "./services/birthday-service.js";
 import { startShiftReminderLoop } from "./services/shift-reminder-service.js";
 import { startScheduleMirrorWatch } from "./services/stale-schedule-mirror.js";
@@ -40,6 +40,7 @@ let shiftReminderTimer: NodeJS.Timeout | undefined;
 let scheduleNotificationTimer: NodeJS.Timeout | undefined;
 let replacementNotificationTimer: NodeJS.Timeout | undefined;
 let shootAlertTimer: NodeJS.Timeout | undefined;
+let shootTaskPoller: ReturnType<typeof startShootTaskDispatcher> | undefined;
 let accessRevocationTimer: NodeJS.Timeout | undefined;
 let recruitingCommandTimer: NodeJS.Timeout | undefined;
 let recruitingMirrorSweepTimer: NodeJS.Timeout | undefined;
@@ -160,6 +161,7 @@ async function bootstrap() {
         scheduleNotificationTimer = startScheduleNotificationDispatcher(bot as any);
         replacementNotificationTimer = startReplacementNotificationDispatcher(bot as any);
         shootAlertTimer = startShootAlertDispatcher(bot as any);
+        shootTaskPoller = startShootTaskDispatcher(bot as any);
         accessRevocationTimer = startAccessRevocationDispatcher(bot as any);
         recruitingCommandTimer = startRecruitingCommandDispatcher(bot as any);
         recruitingMirrorSweepTimer = startRecruitingMirrorSweep();
@@ -253,6 +255,8 @@ async function bootstrap() {
     }
 }
 
+const SHOOT_TASK_STOP_TIMEOUT_MS = 10_000;
+
 async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -270,6 +274,10 @@ async function shutdown(signal: string) {
         if (staffActivationSweepTimer) clearInterval(staffActivationSweepTimer);
         if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
         if (shiftReminderTimer) clearInterval(shiftReminderTimer);
+        // Опитування зйомок у польоті дописує пару в Redis — чекаємо його до redis.quit().
+        if (shootTaskPoller && !(await shootTaskPoller.stop(SHOOT_TASK_STOP_TIMEOUT_MS))) {
+            logger.warn("Shoot task poll still in flight after shutdown timeout");
+        }
         if (runner?.isRunning()) {
             await runner.stop();
         }

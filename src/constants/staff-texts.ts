@@ -755,6 +755,64 @@ Please check bot permissions (Manage Topics).`,
 Посилання одноразове й діє тільки для тебе ✨`,
 
   /**
+   * Нагадування фотографу про зйомку ДН (план 4, docs/superpowers/specs/2026-10-07-shoots-bot-design.md
+   * у репо вебаппа). Терміни — сухо, без емоційних емодзі; маркери 📍 📅 🕐 — структура.
+   * Ім’я — клієнта і лише в позиції підпису: відмінювати не треба. Вільний текст сюди
+   * приходить уже екранованим і обрізаним (escapeHtml + clip з utils/shoot-format.ts).
+   */
+  "shoot-task-block-title": `Зйомка`,
+  "shoot-task-client": (p: { client: string }) => `Клієнт: ${p.client}`,
+  "shoot-task-no-phone": `телефону ще немає — адміністратор додасть його.`,
+  "shoot-task-phone-hidden": `телефон приховано.`,
+  "shoot-task-child": (p: { name: string }) => `Іменинник: ${p.name}`,
+  "shoot-task-notes": (p: { notes: string }) => `Побажання: ${p.notes}`,
+  "shoot-task-assigned-head": `Тобі призначено зйомку.`,
+  "shoot-task-assigned-due": (p: { due: string }) =>
+    `Фото — до ${p.due} включно. Надішли їх у касі цієї точки: «Надіслати фото».`,
+  "shoot-task-photos-due-head": `Чекаємо фото зі зйомки.`,
+  "shoot-task-term": (p: { due: string }) => `Термін — ${p.due} включно.`,
+  "shoot-task-send-hint": `У касі точки натисни «Надіслати фото» — можна зі своєї зміни або зі зміни колеги.`,
+  "shoot-task-due-today-head": `Сьогодні останній день, щоб надіслати фото.`,
+  "shoot-task-overdue-head": (p: { days: string }) => `Термін минув ${p.days} тому, фото ще немає.`,
+  "shoot-task-overdue-can-move": `Надішли фото з каси — зі своєї зміни або зі зміни колеги — або обери новий термін.`,
+  "shoot-task-overdue-no-move": `Надішли фото з каси — зі своєї зміни або зі зміни колеги. Новий термін тепер призначає адміністратор — напиши в підтримку.`,
+  "shoot-task-returned-head": `Фото повернули на доопрацювання.`,
+  "shoot-task-returned-what": `Що виправити:`,
+  "shoot-task-returned-due": (p: { due: string }) =>
+    `Новий термін — ${p.due} включно. Виправ і надішли знову з каси.`,
+  "shoot-task-due-changed-head": (p: { due: string }) => `Термін змінено: тепер до ${p.due} включно.`,
+  "shoot-task-remind-that-day": `Нагадаю зранку в цей день.`,
+  "shoot-task-unassigned": `Тебе знято з цієї зйомки — від тебе нічого не потрібно.`,
+  "shoot-task-cancelled": `Зйомку скасовано — від тебе нічого не потрібно.`,
+  // Лише коли payload каже, що шлях Б увімкнено (SHOOT_PHOTOS_SESSION_ENABLED у вебаппі).
+  "shoot-task-path-b": `Якщо зміни немає — на екрані PIN-коду натисни «Надіслати фото ДН».`,
+  "shoot-task-pick-due": (p: { current: string }) =>
+    `Зараз термін — ${p.current}. Обери новий.\nПеренести можна один раз — далі лише через адміністратора.`,
+  "shoot-task-confirm-due": (p: { due: string }) =>
+    `Новий термін — ${p.due}?\nПісля цього змінити його зможе лише адміністратор.`,
+  // Стан «Готово» після переносу: рядок стає на місце рядка терміну — одна дата в повідомленні.
+  "shoot-task-due-moved": (p: { due: string }) => `Новий термін — ${p.due} включно. Нагадаю зранку в цей день.`,
+  "shoot-task-returned-due-moved": (p: { due: string }) =>
+    `Новий термін — ${p.due} включно. Виправ і надішли знову з каси. Нагадаю зранку в цей день.`,
+  "shoot-task-btn-move": `Обрати інший термін`,
+  "shoot-task-btn-confirm": `Так, перенести`,
+  "shoot-task-btn-back": `Назад`,
+  // Спливашки на кнопки: ≤ 45 символів, дія першою (staff-texts-callback-length.test.ts).
+  "shoot-task-ans-not-yours": `Ця зйомка вже не твоя.`,
+  "shoot-task-ans-cancelled": `Зйомку скасовано.`,
+  "shoot-task-ans-received": `Фото вже на перевірці.`,
+  "shoot-task-ans-moved": `Термін уже перенесено — напиши в підтримку.`,
+  "shoot-task-ans-out-of-range": `Дата вже недоступна — обери іншу.`,
+  "shoot-task-ans-retry": `Спробуй ще раз за хвилину.`,
+  // Перенос, на який вебапп не встиг відповісти за час спливашки: результат перемалює повідомлення.
+  "shoot-task-ans-moving": `Переношу — повідомлення оновиться.`,
+  // Перенос відбувся, а повідомлення не вдалось перемалювати: дата — у спливашці (≤ 45 символів).
+  "shoot-task-ans-moved-to": (p: { due: string }) => `Новий термін — ${p.due}.`,
+  "shoot-task-support-prefix": (p: { line: string }) => `❓ <b>Питання по зйомці:</b>\n${p.line}`,
+  "shoot-task-support-open-topic": (p: { line: string }) =>
+    `❓ Звернення з нагадування про зйомку: ${p.line}`,
+
+  /**
    * Загальний екран збою для співробітниці — пара до candidate-error-generic
    * (на «ти»). Вибір за роллю — utils/error-screen-texts.ts. Раніше всім ішло
    * «Ой, щось пішло не так!» з 🐾 і ✨ (погоджено власником 01.10.2026).
