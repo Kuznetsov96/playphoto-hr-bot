@@ -30,6 +30,7 @@ model User {
   outgoingTopics       OutgoingTopic[]
   magnetCountRuns      MagnetCountRun[]
   lastSupportMessageId Int?
+  supportThread        SupportThread?
   isBlocked            Boolean             @default(false)
   botBlockedAt         DateTime? // Auto-set when bot gets 403, cleared on /start
 }
@@ -987,4 +988,59 @@ model KnownChat {
   lostAt  DateTime?
 
   @@index([lostAt])
+}
+
+/// Статус постійної теми співробітниці; показується іконкою теми.
+enum SupportThreadStatus {
+  WAITING
+  ANSWERED
+  ESCALATED
+  ARCHIVED
+}
+
+/// Одна постійна тема на людину в чаті підтримки (spec 2026-10-08). Не закривається.
+model SupportThread {
+  id                    String              @id @default(cuid())
+  userId                String              @unique
+  chatId                BigInt
+  topicId               Int
+  title                 String
+  status                SupportThreadStatus @default(ANSWERED)
+  escalatedToTelegramId BigInt?
+  cardMessageId         Int?
+  /// Київська дата останнього оновлення картки (YYYY-MM-DD).
+  cardDay               String?
+  /// Київська дата рядка «сьогодні на іншій точці».
+  noticeDay             String?
+  /// Будь-яке повідомлення фотографині — для правила «6 годин тиші».
+  lastStaffAt           DateTime?
+  /// Повідомлення, що потребує відповіді (не коротка подяка).
+  lastQuestionAt        DateTime?
+  lastSupportAt         DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  links                 SupportMessageLink[]
+
+  @@unique([chatId, topicId])
+}
+
+/// Пара «повідомлення в темі ↔ повідомлення в приватному чаті» для цитат, правок і реакцій.
+model SupportMessageLink {
+  id               Int           @id @default(autoincrement())
+  threadId         String
+  /// IN — фотографиня → тема; OUT — тема → фотографиня; CONTEXT — пост бота з контекстом.
+  direction        String
+  topicChatId      BigInt
+  topicMessageId   Int
+  privateChatId    BigInt?
+  privateMessageId Int?
+  /// CONTEXT: що показати фотографині, коли підтримка відповідає на цей пост.
+  contextText      String?
+  createdAt        DateTime      @default(now())
+  thread           SupportThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([topicChatId, topicMessageId])
+  @@index([privateChatId, privateMessageId])
+  @@index([threadId, createdAt])
 }

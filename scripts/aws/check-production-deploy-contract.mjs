@@ -90,7 +90,7 @@ for (const [, input, value] of workflowInputDefaults) {
 // happened to AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED on its first production
 // deploy. The list is derived from the workflow itself, so a newly added flag
 // is covered here without touching this file.
-const flags = [...content.workflow.matchAll(/printf '(AWS_[A-Z0-9_]+_ENABLED)=%q\\n'/gu)].map(
+const flags = [...content.workflow.matchAll(/printf '([A-Z][A-Z0-9_]*_ENABLED)=%q\\n'/gu)].map(
     match => match[1]
 );
 if (flags.length === 0) {

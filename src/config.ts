@@ -16,6 +16,8 @@ const envSchema = z.object({
     AWS_SCHEDULE_SHADOW_READ_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_SCHEDULE_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_PARCELS_CANONICAL_READ_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Одна постійна тема на співробітницю в чаті підтримки замість тікетів (spec 2026-10-08).
+    SUPPORT_THREADS_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_SCHEDULE_NOTIFICATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_REPLACEMENTS_SHADOW_ENABLED: z.enum(["true", "false"]).default("false"),
     AWS_REPLACEMENTS_CANONICAL_ENABLED: z.enum(["true", "false"]).default("false"),
@@ -142,6 +144,7 @@ export const AWS_BUSINESS_SYNC_INTERVAL_MS = env.AWS_BUSINESS_SYNC_INTERVAL_MS;
 export const AWS_SCHEDULE_SHADOW_READ_ENABLED = env.AWS_SCHEDULE_SHADOW_READ_ENABLED === "true";
 export const AWS_SCHEDULE_CANONICAL_READ_ENABLED = env.AWS_SCHEDULE_CANONICAL_READ_ENABLED === "true";
 export const AWS_PARCELS_CANONICAL_READ_ENABLED = env.AWS_PARCELS_CANONICAL_READ_ENABLED === "true";
+export const SUPPORT_THREADS_ENABLED = env.SUPPORT_THREADS_ENABLED === "true";
 export const AWS_SCHEDULE_NOTIFICATIONS_ENABLED = env.AWS_SCHEDULE_NOTIFICATIONS_ENABLED === "true";
 export const AWS_REPLACEMENTS_SHADOW_ENABLED = env.AWS_REPLACEMENTS_SHADOW_ENABLED === "true";
 export const AWS_REPLACEMENTS_CANONICAL_ENABLED = env.AWS_REPLACEMENTS_CANONICAL_ENABLED === "true";
