@@ -19,6 +19,8 @@ import { formatLogisticsLocation } from "../utils/logistics-formatters.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canonical-read.js';
 import { isoDayOfWeekInKyiv } from '../utils/location-opening-hours.js';
+import { deliveredEntryData, kyivShiftDateRange } from './parcel-followup-rules.js';
+import { parcelFollowupService } from './parcel-followup-service.js';
 
 const bot = new Bot(BOT_TOKEN);
 
@@ -59,16 +61,24 @@ export class LogisticsService {
             // 1. Sync existing active parcels via Tracking API (Manual & Auto)
             await this.syncActiveParcelsStatus();
 
-            // 2. Remind staff to upload content photo (2h after pickup)
+            // 2. Посилка на точці без відповідальної: кур'єрську закріплюємо за
+            // зміною, забрану повз бота — показуємо підтримці. До 08.10.2026 такі
+            // після одного повідомлення зміні випадали з усіх нагадувань.
+            await parcelFollowupService.assignDeliveredParcels();
+
+            // 3. Remind staff to upload content photo (2h after pickup)
             await this.remindPhotoUpload();
 
-            // 3. Check for stale parcels (ARRIVED > 2 days)
+            // 4. Check for stale parcels (ARRIVED > 2 days)
             await this.checkStaleParcels();
 
-            // 4. Remind staff who accepted but haven't picked up (2h before shift end)
+            // 5. Однократні сигнали підтримці: 3 дні без фото / фото без підтвердження
+            await parcelFollowupService.alertOverdueParcels();
+
+            // 6. Remind staff who accepted but haven't picked up (2h before shift end)
             await this.remindBeforeShiftEnd();
 
-            // 5. Hand off parcels stuck in PICKUP_IN_PROGRESS after shift end
+            // 7. Hand off parcels stuck in PICKUP_IN_PROGRESS after shift end
             await this.handoffExpiredShiftParcels();
         } catch (error) {
             logger.error({ err: error }, 'Logistics synchronization failed');
@@ -96,7 +106,8 @@ export class LogisticsService {
                 npAddress: row.npAddress,
                 npCity: row.npCity,
                 scheduledDate: row.scheduledDate,
-                arrivedAt: row.arrivedAt
+                arrivedAt: row.arrivedAt,
+                deliveryType: row.deliveryType
             }));
         }
         const canonical = await parcelCanonicalReadService.findActive();
@@ -128,6 +139,7 @@ export class LogisticsService {
 
         if (AWS_PARCELS_CANONICAL_READ_ENABLED) {
             await this.syncCanonicalLocations(activeParcels);
+            await this.syncCanonicalDeliveryTypes(activeParcels);
             await this.cancelParcelsGoneFromWebapp(activeParcels);
         }
 
@@ -153,17 +165,22 @@ export class LogisticsService {
                 // получение, какие напоминания уже отправлены. Поля НП копируем как
                 // есть — веб остаётся их владельцем, здесь это зеркало для джойна.
                 const existingParcel = await prisma.parcel.findUnique({ where: { ttn: parcel.ttn } });
+                const initialStatus = initialParcelStatus(observeNpTracking(statusDoc));
                 const localParcel =
                     existingParcel ??
                     (await prisma.parcel.create({
                         data: {
                             ttn: parcel.ttn,
-                            status: initialParcelStatus(observeNpTracking(statusDoc)),
+                            status: initialStatus,
                             locationId: parcel.locationId,
-                            deliveryType: parcel.npAddress ? 'Warehouse' : 'Address',
+                            // Тип доставки знає вебапп. Запасний варіант за npAddress
+                            // хибний: адресу НП має й кур'єрська посилка, тож усі 38
+                            // кур'єрських на 08.10.2026 записані як 'Warehouse'.
+                            deliveryType: parcel.deliveryType ?? (parcel.npAddress ? 'Warehouse' : 'Address'),
                             npCity: parcel.npCity,
                             npAddress: parcel.npAddress,
-                            scheduledDate: parcel.scheduledDate
+                            scheduledDate: parcel.scheduledDate,
+                            ...(initialStatus === 'DELIVERED' ? { deliveredAt: new Date() } : {})
                         }
                     }));
 
@@ -179,7 +196,11 @@ export class LogisticsService {
                 if (localParcel.status !== newStatus) {
                     const updated = await prisma.parcel.update({
                         where: { id: localParcel.id },
-                        data: { status: newStatus, staleAlertSentAt: null },
+                        data: {
+                            status: newStatus,
+                            staleAlertSentAt: null,
+                            ...(newStatus === 'DELIVERED' ? deliveredEntryData(localParcel.status, new Date()) : {})
+                        },
                         include: { location: true }
                     });
 
@@ -238,6 +259,38 @@ export class LogisticsService {
             if (local.locationId === null && local.status === 'ARRIVED') {
                 await this.notifyStaffOnShift(local.id, 'ARRIVED');
             }
+        }
+    }
+
+    /**
+     * Тип доставки теж належить вебаппу. Бот вгадував його за npAddress і
+     * помилявся для кожної кур'єрської посилки: зміна бачила «Вже видано Новою
+     * Поштою» замість «Доставлено кур'єром», а трекінг вів її як відділення.
+     * null від вебаппа (ще не знає або старіша версія) нічого не стирає.
+     */
+    private async syncCanonicalDeliveryTypes(parcels: CanonicalParcel[]) {
+        for (const parcel of parcels) {
+            if (!parcel.deliveryType) continue;
+            const local = await prisma.parcel.findUnique({
+                where: { ttn: parcel.ttn },
+                select: { id: true, deliveryType: true, status: true }
+            });
+            if (!local || local.deliveryType === parcel.deliveryType) continue;
+            if (local.status === 'COMPLETED' || local.status === 'CANCELLED') continue;
+
+            await prisma.parcel.update({
+                where: { id: local.id },
+                data: { deliveryType: parcel.deliveryType }
+            });
+            logBusinessEvent({
+                event: "logistics.parcel.delivery_type_synced",
+                actorType: "system",
+                actorRole: "system",
+                result: "success",
+                module: "logistics-service",
+                operation: "syncCanonicalDeliveryTypes",
+                safeContext: { parcelId: local.id, from: local.deliveryType, to: parcel.deliveryType, status: local.status },
+            });
         }
     }
 
@@ -333,7 +386,7 @@ export class LogisticsService {
                 }
                 break;
             case 'DELAYED':
-                text = `⏳ <b>Parcel Delayed</b>\n\nParcel ${ttn} at ${loc} has been waiting for too long!\n\nPlease check the status. 📦`;
+                text = `⏳ <b>Parcel Waiting at Nova Poshta</b>\n\nParcel ${ttn} for ${loc} has been waiting at the Nova Poshta branch for more than 2 days, and nobody has picked it up.\n\nAsk the photographer on shift to pick it up before it is sent back. 📦`;
                 break;
             case 'SHIPMENT_LOCKED':
                 text =
@@ -474,6 +527,7 @@ export class LogisticsService {
                 data: {
                     status: 'DELIVERED',
                     staleAlertSentAt: null,
+                    ...deliveredEntryData(parcel.status, new Date()),
                 }
             });
 
@@ -553,6 +607,7 @@ export class LogisticsService {
                 status: 'DELIVERED',
                 acceptedAt: parcel.acceptedAt ?? new Date(),
                 staleAlertSentAt: null,
+                ...deliveredEntryData(parcel.status, new Date()),
                 photoReminderSentAt: null,
                 shiftEndReminderSentAt: null,
             },
@@ -619,6 +674,18 @@ export class LogisticsService {
             return;
         }
 
+        // Кур'єрська посилка без відповідальної: замість листа «для всіх» її
+        // закріплюють за зміною (або пропонують узяти, якщо людей кілька).
+        if (
+            triggerStatus === 'DELIVERED' &&
+            parcel.deliveryType === 'Address' &&
+            !parcel.responsibleStaffId &&
+            parcel.contentPhotoIds.length === 0
+        ) {
+            await parcelFollowupService.followUpDeliveredParcel(parcel.id, now);
+            return;
+        }
+
         for (const shift of shifts) {
             const user = await prisma.user.findUnique({ where: { id: shift.staff.userId } });
             if (!user) continue;
@@ -656,24 +723,7 @@ export class LogisticsService {
      * as UTC-anchored Date boundaries suitable for WorkShift.date queries.
      */
     private getKyivShiftDateRange(now: Date): { shiftStart: Date; shiftEnd: Date } {
-        const parts = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'Europe/Kyiv',
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: 'numeric', hour12: false
-        }).formatToParts(now);
-
-        let y = 0, mo = 0, d = 0, h = 0;
-        for (const p of parts) {
-            if (p.type === 'year') y = parseInt(p.value);
-            if (p.type === 'month') mo = parseInt(p.value);
-            if (p.type === 'day') d = parseInt(p.value);
-            if (p.type === 'hour') h = parseInt(p.value);
-        }
-
-        if (h >= 20) d++;
-        const shiftStart = new Date(Date.UTC(y, mo - 1, d));
-        const shiftEnd = new Date(Date.UTC(y, mo - 1, d + 1));
-        return { shiftStart, shiftEnd };
+        return kyivShiftDateRange(now);
     }
 
     /**
@@ -1069,7 +1119,9 @@ export class LogisticsService {
     }
 
     /**
-     * Alerts support about parcels stuck in ARRIVED or DELIVERED (picked up but no photo) for more than 2 days
+     * Alerts support about parcels waiting at Nova Poshta (ARRIVED) for more than 2 days.
+     * DELIVERED без фото тут більше немає: про неї сигналить alertOverdueParcels
+     * з відліком від deliveredAt, а не від updatedAt.
      */
     private async checkStaleParcels() {
         const twoDaysAgo = new Date();
@@ -1077,10 +1129,7 @@ export class LogisticsService {
 
         const staleParcels = await prisma.parcel.findMany({
             where: {
-                OR: [
-                    { status: 'ARRIVED' },
-                    { status: 'DELIVERED', contentPhotoIds: { isEmpty: true } }
-                ],
+                status: 'ARRIVED',
                 updatedAt: { lt: twoDaysAgo },
                 staleAlertSentAt: null,
             },

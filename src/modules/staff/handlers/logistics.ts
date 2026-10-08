@@ -10,6 +10,7 @@ import { sanitizeCallbackData } from "../../../core/log-sanitizer.js";
 import { formatLogisticsLocation, formatLogisticsPhotographerName } from "../../../utils/logistics-formatters.js";
 import { buildSignedCallback, readCallbackPayload } from "../../../utils/signed-callback.js";
 import { canAcceptParcel } from "../../../services/parcel-status-transition.js";
+import { verifyingEntryData } from "../../../services/parcel-followup-rules.js";
 import {
     getManualProxyConfirmationText,
     getParcelPhotoAlreadySubmittedText,
@@ -203,6 +204,10 @@ async function claimParcelForPhotoFlow(parcelId: string, staffId: string) {
         data: {
             responsibleStaffId: staffId,
             acceptedAt: new Date(),
+            // Нагадування рахуються для тієї, хто взяла посилку щойно, а не
+            // для когось, кому їх слали раніше.
+            photoReminderSentAt: null,
+            shiftEndReminderSentAt: null,
         },
         include: { responsibleStaff: true, location: true }
     });
@@ -381,7 +386,7 @@ async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
     try {
         const parcel = await prisma.parcel.findUnique({
             where: { id: parcelId },
-            select: { contentPhotoIds: true }
+            select: { contentPhotoIds: true, status: true }
         });
 
         const mergedPhotoIds = Array.from(new Set([
@@ -393,7 +398,9 @@ async function finalizeParcelPhotoDraft(ctx: MyContext, parcelId: string) {
             where: { id: parcelId },
             data: {
                 contentPhotoIds: mergedPhotoIds,
-                status: 'VERIFYING'
+                status: 'VERIFYING',
+                // Від цієї миті рахується сигнал «фото чекають підтвердження».
+                ...verifyingEntryData(parcel?.status ?? 'DELIVERED', new Date())
             }
         });
 

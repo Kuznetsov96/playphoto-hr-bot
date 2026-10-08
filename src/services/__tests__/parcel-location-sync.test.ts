@@ -117,3 +117,38 @@ describe("cancelParcelsGoneFromWebapp", () => {
         expect(updateMany).not.toHaveBeenCalled();
     });
 });
+
+// 08.10.2026: усі 38 кур'єрських посилок записані як 'Warehouse' — бот вгадував
+// тип за npAddress, а адресу НП має й кур'єрська.
+describe("syncCanonicalDeliveryTypes", () => {
+    type DeliveryTypeService = {
+        syncCanonicalDeliveryTypes(parcels: Array<{ ttn: string; deliveryType: string | null }>): Promise<void>;
+    };
+    const sync = (parcels: Array<{ ttn: string; deliveryType: string | null }>) =>
+        (logisticsService as unknown as DeliveryTypeService).syncCanonicalDeliveryTypes(parcels);
+
+    it("corrects an open parcel to the web app's delivery type", async () => {
+        findUnique.mockResolvedValue({ id: "p1", deliveryType: "Warehouse", status: "DELIVERED" });
+
+        await sync([{ ttn: "111", deliveryType: "Address" }]);
+
+        expect(update).toHaveBeenCalledWith({ where: { id: "p1" }, data: { deliveryType: "Address" } });
+    });
+
+    it("never touches closed parcels, matching values or a web app that does not know", async () => {
+        findUnique
+            .mockResolvedValueOnce({ id: "p1", deliveryType: "Warehouse", status: "COMPLETED" })
+            .mockResolvedValueOnce({ id: "p2", deliveryType: "Warehouse", status: "CANCELLED" })
+            .mockResolvedValueOnce({ id: "p3", deliveryType: "Address", status: "ARRIVED" });
+
+        await sync([
+            { ttn: "1", deliveryType: "Address" },
+            { ttn: "2", deliveryType: "Address" },
+            { ttn: "3", deliveryType: "Address" },
+            { ttn: "4", deliveryType: null },
+        ]);
+
+        expect(findUnique).toHaveBeenCalledTimes(3);
+        expect(update).not.toHaveBeenCalled();
+    });
+});

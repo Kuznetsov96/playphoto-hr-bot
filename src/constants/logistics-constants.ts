@@ -59,7 +59,11 @@ export const LOGISTICS_TEXTS_STAFF = {
     'photo_upload_cancelled': 'Відправку фото скасовано, фото не передано сапорту. Якщо потрібно, почни ще раз кнопкою «Сфотографувати вміст».',
     'photo_upload_cancelled_photo_ignored': 'Фото не додано, бо відправку перед цим було скасовано. Якщо хочеш передати фото сапорту, почни ще раз кнопкою «Сфотографувати вміст».',
     'photo_upload_reminder': (count: number) => `⏳ У тебе ще не завершене завантаження фото.\n\nЗбережено фото: <b>${count}</b>.\nЯкщо вже все надіслала, натисни «Готово». Якщо ні, можна додати ще фото.`,
-    'photo_received': (count: number) => `✅ Фото отримано: <b>${count}</b>. Передаю сапорту для підтвердження. Дякую! ✨`
+    'photo_received': (count: number) => `✅ Фото отримано: <b>${count}</b>. Передаю сапорту для підтвердження. Дякую! ✨`,
+    // Кур'єрська посилка без відповідальної: раніше зміні приходило одне
+    // повідомлення без адресата, і посилка тижнями висіла «для всіх».
+    'courier_assigned': (ttn: string, loc: string) => `🚚 <b>Кур'єр доставив посилку на ${loc}.</b>\n\nТТН <code>${ttn}</code> закріплено за тобою. Розпакуй посилку й сфотографуй вміст — кнопка нижче.`,
+    'courier_claim_prompt': (ttn: string, loc: string) => `🚚 <b>Кур'єр доставив посилку на ${loc}.</b>\n\nТТН <code>${ttn}</code>. Розпакуй посилку й сфотографуй вміст. Посилка закріпиться за тією, хто перша натисне кнопку нижче.`
 };
 
 export const LOGISTICS_TEXTS_ADMIN = {
@@ -85,5 +89,28 @@ export const LOGISTICS_TEXTS_ADMIN = {
         `📸 <b>Content Photo for TTN:</b> <code>${p.ttn}</code>\n` +
         `📍 <b>Location:</b> ${p.location}\n` +
         `👤 <b>Photographer:</b> ${p.sender}\n\n` +
-        `<i>Please verify the contents and confirm receipt.</i> ✨`
+        `<i>Please verify the contents and confirm receipt.</i> ✨`,
+    // Сигнали підтримці (англійською — вимога власника). Аргументи вже
+    // екрановані: ТТН цифрами, локація й ім'я через форматери.
+    'outside_pickup_alert': (p: { ttn: string; loc: string; deliveredOn: string }) =>
+        `📬 <b>Picked Up Outside the Bot</b>\n\n` +
+        `Nova Poshta handed out parcel <code>${p.ttn}</code> for <b>${p.loc}</b> on ${p.deliveredOn}, ` +
+        `but nobody picked it up through the bot, so no photographer is responsible for it.\n\n` +
+        `Find out who has the parcel and ask them to add content photos in the bot (Parcels at location → Add content photo).`,
+    'photo_overdue_alert': (p: { ttn: string; loc: string; delivered: string; responsible: string | null }) =>
+        `⏰ <b>No Content Photos for 3 Days</b>\n\n` +
+        `<b>Parcel:</b> <code>${p.ttn}</code>\n` +
+        `<b>Location:</b> ${p.loc}\n` +
+        `<b>Delivered:</b> ${p.delivered}\n` +
+        `<b>Responsible:</b> ${p.responsible ?? 'nobody'}\n\n` +
+        (p.responsible
+            ? `Remind them to unpack the parcel and add content photos in the bot, or find out what is holding it up.`
+            : `Find out who has the parcel and ask them to add content photos in the bot (Parcels at location → Add content photo).`),
+    'review_overdue_alert': (p: { ttn: string; loc: string; submittedBy: string; submitted: string }) =>
+        `📸 <b>Photos Waiting for Review</b>\n\n` +
+        `<b>Parcel:</b> <code>${p.ttn}</code>\n` +
+        `<b>Location:</b> ${p.loc}\n` +
+        `<b>Submitted by:</b> ${p.submittedBy}\n` +
+        `<b>Submitted:</b> ${p.submitted}\n\n` +
+        `Open the content photos and confirm if everything is fine.`
 };

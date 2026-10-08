@@ -11,6 +11,8 @@ export type CanonicalParcel = {
     npCity: string | null;
     scheduledDate: Date | null;
     arrivedAt: Date | null;
+    /** 'Warehouse' | 'Address' від вебаппа; null — вебапп не сказав. */
+    deliveryType: string | null;
 };
 
 export class ParcelCanonicalReadError extends Error {
@@ -65,7 +67,8 @@ export class ParcelCanonicalReadService {
             npAddress: parcel.npAddress,
             npCity: parcel.npCity,
             scheduledDate: parcel.scheduledDate === null ? null : new Date(parcel.scheduledDate),
-            arrivedAt: parcel.arrivedAt === null ? null : new Date(parcel.arrivedAt)
+            arrivedAt: parcel.arrivedAt === null ? null : new Date(parcel.arrivedAt),
+            deliveryType: parcel.deliveryType ?? null
         }));
     }
 }
