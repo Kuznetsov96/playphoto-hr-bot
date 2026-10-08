@@ -5,6 +5,7 @@ import {
     deliveredEntryData,
     formatSupportDateAgo,
     isSameKyivShiftDay,
+    isStaffMessagingHour,
     selectOverdueAlert,
     verifyingEntryData,
     type DeliveredParcelFacts,
@@ -46,6 +47,39 @@ describe("decideDeliveredParcelAction — courier", () => {
 
     it("stays silent without anyone on shift — the 3-day support signal covers it", () => {
         expect(decideDeliveredParcelAction(delivered(), 0, NOW)).toEqual({ kind: "none" });
+    });
+});
+
+// 08.10.2026: перша жива посилка після виходу (Drive City) приїхала в день без зміни. О 20:00
+// бот закріпив би її за завтрашньою фотографинею й о 22:00 нагадав би про фото.
+describe("decideDeliveredParcelAction — courier, outside staff hours", () => {
+    const at = (kyiv: string) => new Date(`${kyiv}+03:00`);
+
+    it("stays silent in the evening, when the shift day already points at tomorrow", () => {
+        expect(decideDeliveredParcelAction(delivered(), 1, at("2026-10-08T20:05:00"))).toEqual({ kind: "none" });
+        expect(decideDeliveredParcelAction(delivered(), 2, at("2026-10-08T19:00:00"))).toEqual({ kind: "none" });
+    });
+
+    it("stays silent at night and before the morning", () => {
+        expect(decideDeliveredParcelAction(delivered(), 1, at("2026-10-09T00:30:00"))).toEqual({ kind: "none" });
+        expect(decideDeliveredParcelAction(delivered(), 1, at("2026-10-09T08:59:00"))).toEqual({ kind: "none" });
+    });
+
+    it("acts from 09:00 to 18:59 Kyiv time", () => {
+        expect(decideDeliveredParcelAction(delivered(), 1, at("2026-10-09T09:00:00"))).toEqual({ kind: "assign" });
+        expect(decideDeliveredParcelAction(delivered(), 1, at("2026-10-09T18:59:00"))).toEqual({ kind: "assign" });
+    });
+
+    it("does not delay the support alert for parcels handed out by Nova Poshta", () => {
+        expect(
+            decideDeliveredParcelAction(delivered({ deliveryType: "Warehouse" }), 0, at("2026-10-08T22:00:00")),
+        ).toEqual({ kind: "alert_outside_pickup" });
+    });
+
+    it("reads the hour in Kyiv, not UTC", () => {
+        // 06:30 UTC = 09:30 за Києвом (UTC+3 до 25.10.2026).
+        expect(isStaffMessagingHour(new Date("2026-10-09T06:30:00Z"))).toBe(true);
+        expect(isStaffMessagingHour(new Date("2026-10-09T16:30:00Z"))).toBe(false);
     });
 });
 

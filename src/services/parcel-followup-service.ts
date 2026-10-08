@@ -11,6 +11,7 @@ import {
     PARCEL_OVERDUE_MS,
     decideDeliveredParcelAction,
     formatSupportDateAgo,
+    isStaffMessagingHour,
     kyivShiftDateRange,
     selectOverdueAlert,
 } from "./parcel-followup-rules.js";
@@ -56,7 +57,11 @@ export class ParcelFollowupService {
         const parcel = await prisma.parcel.findUnique({ where: { id: parcelId }, include: { location: true } });
         if (!parcel?.locationId) return;
 
-        const staff = parcel.deliveryType === "Address" ? await this.staffOnShift(parcel.locationId, now) : [];
+        // Поза робочими годинами рішення однаково «нічого» — зміну навіть не шукаємо.
+        const staff =
+            parcel.deliveryType === "Address" && isStaffMessagingHour(now)
+                ? await this.staffOnShift(parcel.locationId, now)
+                : [];
         const action = decideDeliveredParcelAction(
             { ...parcel, contentPhotoCount: parcel.contentPhotoIds.length },
             staff.length,

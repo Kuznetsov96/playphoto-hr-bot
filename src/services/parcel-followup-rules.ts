@@ -35,6 +35,22 @@ export function kyivShiftDateRange(now: Date): { shiftStart: Date; shiftEnd: Dat
     };
 }
 
+/**
+ * Коли фотографиням можна писати про посилку, що приїхала кур'єром: 09:00–19:00 за Києвом.
+ *
+ * Поза цим вікном kyivShiftDateRange уже показує завтрашню зміну (після 20:00) або
+ * сьогоднішню, що ще не почалась (після опівночі), і закріплення пішло б людині, якої на
+ * точці немає: лист о 20:00, а за дві години remindPhotoUpload — нагадування о 22:00.
+ * Верхня межа 19:00, а не 20:00: нагадування через 2 години має лягти ще в робочий час.
+ * Коробка за ніч нікуди не дінеться — зранку її закріпить уже справжня зміна.
+ */
+export function isStaffMessagingHour(now: Date): boolean {
+    const hour = Number(
+        new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Kyiv", hour: "numeric", hour12: false }).format(now),
+    ) % 24;
+    return hour >= 9 && hour < 19;
+}
+
 export function isSameKyivShiftDay(a: Date, b: Date): boolean {
     return kyivShiftDateRange(a).shiftStart.getTime() === kyivShiftDateRange(b).shiftStart.getTime();
 }
@@ -98,6 +114,7 @@ export function decideDeliveredParcelAction(
     if (parcel.locationId === null) return { kind: "none" };
 
     if (parcel.deliveryType === "Address") {
+        if (!isStaffMessagingHour(now)) return { kind: "none" };
         // Нікого на зміні — мовчимо: 3-денний сигнал підтримці про це й є.
         if (shiftCount === 0) return { kind: "none" };
         if (shiftCount === 1) return { kind: "assign" };
