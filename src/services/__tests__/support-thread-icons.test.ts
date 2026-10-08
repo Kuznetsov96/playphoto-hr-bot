@@ -4,31 +4,29 @@ vi.mock("../../core/logger.js", () => ({ default: { warn: vi.fn(), info: vi.fn()
 
 const { pickThreadIcons } = await import("../support-thread-icons.js");
 
+/**
+ * Рішення власника 08.10: кожна зміна іконки пише в тему службовий рядок, тому
+ * іконка лише для рідкісних станів — 👀 покликали і 📁 звільнена. «Чекає» і
+ * «відповіли» видно з прев'ю останнього повідомлення.
+ */
 describe("іконки статусів", () => {
-    it("знаходить емодзі незалежно від вариаційного селектора", () => {
-        const icons = pickThreadIcons([
-            { emoji: "❗️", custom_emoji_id: "loud" },
-            { emoji: "💬", custom_emoji_id: "w" },
-            { emoji: "✅", custom_emoji_id: "a" },
-            { emoji: "👀", custom_emoji_id: "e" },
-            { emoji: "📁", custom_emoji_id: "r" },
-        ]);
-        expect(icons).toEqual({ WAITING: "w", ANSWERED: "a", ESCALATED: "e", ARCHIVED: "r" });
+    it("чекає і відповіли — без іконки (порожній рядок знімає іконку)", () => {
+        const icons = pickThreadIcons([{ emoji: "💬", custom_emoji_id: "c" }, { emoji: "✅", custom_emoji_id: "a" }]);
+        expect(icons.WAITING).toBe("");
+        expect(icons.ANSWERED).toBe("");
     });
 
-    it("«чекає відповіді» — спокійна 💬, а не ❗️ (рішення власника 08.10)", () => {
-        expect(pickThreadIcons([{ emoji: "❗️", custom_emoji_id: "loud" }, { emoji: "💬", custom_emoji_id: "calm" }]).WAITING).toBe("calm");
+    it("покликали і звільнена — з набору, незалежно від вариаційного селектора", () => {
+        const icons = pickThreadIcons([{ emoji: "👀", custom_emoji_id: "e" }, { emoji: "📁", custom_emoji_id: "r" }]);
+        expect(icons.ESCALATED).toBe("e");
+        expect(icons.ARCHIVED).toBe("r");
     });
 
-    it("«відповіли» ніколи не бере ту саму 💬", () => {
-        expect(pickThreadIcons([{ emoji: "💬", custom_emoji_id: "calm" }]).ANSWERED).toBeNull();
-    });
-
-    it("бере запасний варіант, якщо основного немає", () => {
-        expect(pickThreadIcons([{ emoji: "🔥", custom_emoji_id: "f" }]).WAITING).toBe("f");
+    it("запасний варіант, якщо основного немає", () => {
+        expect(pickThreadIcons([{ emoji: "⚡️", custom_emoji_id: "z" }]).ESCALATED).toBe("z");
     });
 
     it("нічого не знайдено — null, а не чужа іконка", () => {
-        expect(pickThreadIcons([{ emoji: "🎄", custom_emoji_id: "x" }]).ANSWERED).toBeNull();
+        expect(pickThreadIcons([{ emoji: "🎄", custom_emoji_id: "x" }]).ARCHIVED).toBeNull();
     });
 });

@@ -11,6 +11,7 @@ import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { staffSupportHandlers, handleSupportGroupMessage } from "../modules/staff/handlers/support.js";
 import { supportThreadHandlers } from "./support-threads.js";
+import { shouldShieldStaleCallback } from "../utils/stale-callback.js";
 import { handleStaffThreadMessage } from "../modules/staff/handlers/support-thread-entry.js";
 import { sendAdminOutboundMessage } from "./admin/utils.js";
 import { SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../config.js";
@@ -72,20 +73,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
     // If it's a known new callback or menu callback, let it pass
-    if (data.startsWith("cb:") ||
-        data.startsWith("staff_") || data.startsWith("staff-") || data.startsWith("admin_") || data.startsWith("admin-") ||
-        data.startsWith("hr_") || data.startsWith("hr-") ||
-        data.startsWith("mentor_") || data.startsWith("mentor-") ||
-        data.startsWith("fso_") ||
-        data.startsWith("tas_") || data.startsWith("task_") || data.startsWith("tbk_") || data.startsWith("b_") || data.startsWith("ticket_") ||
-        data.startsWith("broadcast_") || data.startsWith("pref_") || data.startsWith("onb_") ||
-        data.startsWith("gender_") || data.startsWith("city_") || data.startsWith("loc_") || data.startsWith("src_") ||
-        data.startsWith("close_topic_") || data.startsWith("close_ticket_") || data.startsWith("contact_hr") || data.startsWith("contact_recovery") || data.startsWith("recovery_reopen_") ||
-        data.startsWith("end_support_chat") || data.startsWith("view_staff_") ||
-        data.startsWith("view_candidate_") || data.startsWith("approve_") || data.startsWith("reject_") ||
-        data.startsWith("parcel_") ||
-        data.startsWith("confirm_") || data.startsWith("cancel_") || data.startsWith("staging_") ||
-        data.includes("/")) {
+    if (!shouldShieldStaleCallback(data, ctx.chat?.type)) {
         return next();
     }
 

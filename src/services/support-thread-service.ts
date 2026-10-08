@@ -108,9 +108,8 @@ export class SupportThreadService {
             if (!person) throw new Error(`Support thread: no staff profile for user ${userId}`);
 
             const view = await this.describe(person, new Date());
-            const icons = await this.deps.icons(api);
             const chatId = this.deps.chatId();
-            const topic = await api.createForumTopic(chatId, view.title, icons.ANSWERED ? { icon_custom_emoji_id: icons.ANSWERED } : {});
+            const topic = await api.createForumTopic(chatId, view.title, {});
             const thread = await this.deps.repo.create({ userId, chatId: BigInt(chatId), topicId: topic.message_thread_id, title: view.title });
             return this.publishCard(api, thread, person, view);
         });
@@ -122,8 +121,10 @@ export class SupportThreadService {
 
         const updated = await this.deps.repo.update(thread.id, { status: next.status, escalatedToTelegramId: next.escalatedToTelegramId });
         if (next.status !== thread.status) {
-            const icon = (await this.deps.icons(api))[next.status];
-            if (icon) {
+            const icons = await this.deps.icons(api);
+            const icon = icons[next.status];
+            // Іконку чіпаємо лише коли вона справді інша: кожна зміна — рядок у темі.
+            if (icon !== null && icon !== icons[thread.status as ThreadStatus]) {
                 await api.editForumTopic(Number(thread.chatId), thread.topicId, { icon_custom_emoji_id: icon }).catch(error => {
                     logger.warn({ err: error, threadId: thread.id, status: next.status }, "Support thread icon update failed");
                 });

@@ -59,7 +59,7 @@ function setup(overrides: Partial<Record<string, any>> = {}) {
         people,
         lock: async (_userId: string, fn: () => Promise<any>) => fn(),
         chatId: () => -1001234,
-        icons: async () => ({ WAITING: "w-id", ANSWERED: "a-id", ESCALATED: "e-id", ARCHIVED: "r-id" }),
+        icons: async () => ({ WAITING: "", ANSWERED: "", ESCALATED: "e-id", ARCHIVED: "r-id" }),
         sleep: async () => undefined,
         callTargets: () => ({ kuznetsov: 1, hupalova: 2 }),
         ...overrides,
@@ -73,7 +73,7 @@ describe("створення теми", () => {
     it("назва з найчастішої точки змін, не з профілю", async () => {
         const { service, api } = setup();
         await service.ensureThread(api, "u1");
-        expect(api.createForumTopic).toHaveBeenCalledWith(-1001234, "Бланк · Lviv · Dragon Park 2", { icon_custom_emoji_id: "a-id" });
+        expect(api.createForumTopic).toHaveBeenCalledWith(-1001234, "Бланк · Lviv · Dragon Park 2", {});
     });
 
     it("картка закріплена і з кнопками покликати", async () => {
@@ -137,20 +137,30 @@ describe("лок створення зайнятий", () => {
 });
 
 describe("статус-іконка", () => {
-    it("зміна статусу міняє іконку", async () => {
+    it("чекає ↔ відповіли — іконку не чіпає: зміна іконки пише в тему службовий рядок", async () => {
         const { service, api } = setup();
         const thread = await service.ensureThread(api, "u1");
-        const updated = await service.applyStatus(api, thread, { kind: "staff_question" });
-        expect(updated.status).toBe("WAITING");
-        expect(api.editForumTopic).toHaveBeenCalledWith(-1001234, 77, { icon_custom_emoji_id: "w-id" });
+        const waiting = await service.applyStatus(api, thread, { kind: "staff_question" });
+        await service.applyStatus(api, waiting, { kind: "support_reply", actorTelegramId: 5n });
+        expect(waiting.status).toBe("WAITING");
+        expect(api.editForumTopic).not.toHaveBeenCalled();
+    });
+
+    it("покликали — 👀, повернули — іконку знято", async () => {
+        const { service, api } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        const escalated = await service.applyStatus(api, thread, { kind: "escalated", targetTelegramId: 1n });
+        expect(api.editForumTopic).toHaveBeenLastCalledWith(-1001234, 77, { icon_custom_emoji_id: "e-id" });
+        await service.applyStatus(api, escalated, { kind: "back_to_support", hasUnansweredQuestion: true });
+        expect(api.editForumTopic).toHaveBeenLastCalledWith(-1001234, 77, { icon_custom_emoji_id: "" });
     });
 
     it("той самий статус не чіпає тему", async () => {
         const { service, api } = setup();
         const thread = await service.ensureThread(api, "u1");
-        const waiting = await service.applyStatus(api, thread, { kind: "staff_question" });
+        const escalated = await service.applyStatus(api, thread, { kind: "escalated", targetTelegramId: 1n });
         api.editForumTopic.mockClear();
-        await service.applyStatus(api, waiting, { kind: "staff_question" });
+        await service.applyStatus(api, escalated, { kind: "staff_question" });
         expect(api.editForumTopic).not.toHaveBeenCalled();
     });
 
@@ -158,7 +168,7 @@ describe("статус-іконка", () => {
         const { service, api } = setup();
         const thread = await service.ensureThread(api, "u1");
         api.editForumTopic.mockRejectedValueOnce(new Error("Bad Request: TOPIC_NOT_MODIFIED"));
-        await expect(service.applyStatus(api, thread, { kind: "staff_question" })).resolves.toMatchObject({ status: "WAITING" });
+        await expect(service.applyStatus(api, thread, { kind: "escalated", targetTelegramId: 1n })).resolves.toMatchObject({ status: "ESCALATED" });
     });
 });
 
