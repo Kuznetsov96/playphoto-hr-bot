@@ -29,6 +29,7 @@ CREATE TABLE "SupportMessageLink" (
     "threadId" TEXT NOT NULL,
     "direction" TEXT NOT NULL,
     "topicChatId" BIGINT NOT NULL,
+    "topicId" INTEGER,
     "topicMessageId" INTEGER NOT NULL,
     "privateChatId" BIGINT,
     "privateMessageId" INTEGER,

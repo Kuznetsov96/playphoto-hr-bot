@@ -109,9 +109,27 @@ describe("повідомлення фотографині в тему", () => {
         expect(links).toContainEqual(expect.objectContaining({ direction: "CONTEXT", contextText: "Завдання 08.10: вітрина" }));
     });
 
+    it("свайп на відповідь зі старої теми — без reply, і жодної нової теми", async () => {
+        const { service, api, repo, threads } = setup();
+        repo.findLinkByPrivateMessage.mockResolvedValue({ threadId: "t1", topicId: 300, topicMessageId: 500, privateMessageId: 40 });
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(27, "Так", { reply_to_message: { message_id: 40 } }), contexts: [] });
+        expect(api.copyMessage.mock.calls[0][3]).toEqual({ message_thread_id: 77 });
+        expect(threads.recreateTopic).not.toHaveBeenCalled();
+    });
+
+    it("Telegram відхилив reply — повтор без нього, а не «тема видалена»", async () => {
+        const { service, api, repo, threads } = setup();
+        repo.findLinkByPrivateMessage.mockResolvedValue({ threadId: "t1", topicId: 77, topicMessageId: 500, privateMessageId: 40 });
+        api.copyMessage.mockRejectedValueOnce(Object.assign(new Error("x"), { description: "Bad Request: message thread not found" }));
+        const result = await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(28, "Так", { reply_to_message: { message_id: 40 } }), contexts: [] });
+        expect(result).toBe("delivered");
+        expect(api.copyMessage.mock.calls[1][3]).toEqual({ message_thread_id: 77 });
+        expect(threads.recreateTopic).not.toHaveBeenCalled();
+    });
+
     it("свайп на відповідь підтримки — відповідь у темі з цитатою", async () => {
         const { service, api, repo } = setup();
-        repo.findLinkByPrivateMessage.mockResolvedValue({ threadId: "t1", topicMessageId: 500, privateMessageId: 40 });
+        repo.findLinkByPrivateMessage.mockResolvedValue({ threadId: "t1", topicId: 77, topicMessageId: 500, privateMessageId: 40 });
         await service.relayStaffMessage(api, {
             userId: "u1", chatId: STAFF_CHAT,
             message: text(15, "Так", { reply_to_message: { message_id: 40 }, quote: { text: "завтра о 10", position: 3 } }),
@@ -125,7 +143,7 @@ describe("повідомлення фотографині в тему", () => {
 
     it("Telegram не прийняв цитату — повтор без неї", async () => {
         const { service, api, repo } = setup();
-        repo.findLinkByPrivateMessage.mockResolvedValue({ threadId: "t1", topicMessageId: 500, privateMessageId: 40 });
+        repo.findLinkByPrivateMessage.mockResolvedValue({ threadId: "t1", topicId: 77, topicMessageId: 500, privateMessageId: 40 });
         api.copyMessage.mockRejectedValueOnce(Object.assign(new Error("x"), { description: "Bad Request: QUOTE_TEXT_INVALID" }));
         const result = await service.relayStaffMessage(api, {
             userId: "u1", chatId: STAFF_CHAT,
@@ -222,6 +240,39 @@ describe("повідомлення фотографині в тему", () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it("альбом: Telegram скопіював не все — пари не зсуваються", async () => {
+        const { service, api, links } = setup();
+        api.copyMessages.mockResolvedValueOnce([{ message_id: 901 }, { message_id: 902 }]);
+        const photo = (id: number): Any => ({ message_id: id, chat: { id: STAFF_CHAT }, media_group_id: "g3", photo: [{}] });
+        await Promise.all([41, 42, 43].map(id => service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: photo(id), contexts: [] })));
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(links.filter(l => l.direction === "IN")).toHaveLength(0);
+        expect(api.setMessageReaction).toHaveBeenCalledTimes(1);
+    });
+
+    it("альбом не дійшов — фотографиня бачить збій", async () => {
+        const { service, api, threads } = setup();
+        const photo = (id: number): Any => ({ message_id: id, chat: { id: STAFF_CHAT }, media_group_id: "g4", photo: [{}] });
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: photo(44), contexts: [] });
+        threads.ensureThread.mockRejectedValueOnce(new Error("db down"));
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(api.sendMessage).toHaveBeenCalledWith(STAFF_CHAT, "FAILED");
+    });
+
+    it("текст одразу після альбому йде в тему після альбому", async () => {
+        const { service, api } = setup();
+        const photo = (id: number): Any => ({ message_id: id, chat: { id: STAFF_CHAT }, media_group_id: "g5", photo: [{}] });
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: photo(45), contexts: [] });
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(46, "Ось звіт"), contexts: [] });
+        expect(api.copyMessages.mock.invocationCallOrder[0]).toBeLessThan(api.copyMessage.mock.invocationCallOrder[0]);
+    });
+
+    it("пари зберігають номер теми", async () => {
+        const { service, api, links } = setup();
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(47, "Питання"), contexts: [] });
+        expect(links.find(l => l.direction === "IN")).toMatchObject({ topicId: 77 });
     });
 
     it("історія пишеться в timeline", async () => {

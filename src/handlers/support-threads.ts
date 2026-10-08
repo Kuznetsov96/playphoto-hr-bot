@@ -79,8 +79,10 @@ export async function supportThreadReaction(ctx: MyContext): Promise<void> {
 
 export const supportThreadHandlers = new Composer<MyContext>();
 
+// Кнопки картки працюють і після відкату прапорця: картки в темах лишаються.
+supportThreadHandlers.callbackQuery([CALL_PATTERN, BACK_PATTERN], supportThreadCallback);
+
 if (SUPPORT_THREADS_ENABLED) {
-    supportThreadHandlers.callbackQuery([CALL_PATTERN, BACK_PATTERN], supportThreadCallback);
     supportThreadHandlers.on("edited_message", supportThreadEdit);
     supportThreadHandlers.on("message_reaction", supportThreadReaction);
 }

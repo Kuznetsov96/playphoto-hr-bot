@@ -49,8 +49,8 @@ describe("bulk task wiring pins", () => {
         }
     });
 
-    it("staff shield in handlers/index.ts includes the tbk_ prefix", () => {
-        const source = read("../../index.ts");
+    it("staff shield (utils/stale-callback.ts) includes the tbk_ prefix", () => {
+        const source = read("../../../utils/stale-callback.ts");
         expect(source).toMatch(/data\.startsWith\("tbk_"\)/);
     });
 

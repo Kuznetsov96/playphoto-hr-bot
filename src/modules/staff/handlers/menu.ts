@@ -101,8 +101,10 @@ async function renderTaskProofScreen(
  */
 export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     ctx.session.step = "idle";
-    // Вихід у меню (і «Скасувати», і «🏠 Меню», і /start) закриває звернення з нагадування.
+    // Вихід у меню (і «Скасувати», і «🏠 Меню», і /start) закриває звернення з нагадування
+    // і скасоване уточнення по задачі.
     clearShootSupportLine(ctx.session);
+    delete ctx.session.clarificationTaskId;
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
@@ -663,7 +665,9 @@ export async function startSupportFlow(ctx: MyContext, options: { shootLine?: st
     // Постійна тема: «запитів» немає — людина просто пише сюди. Крок create_ticket
     // лишається маркером «пише в підтримку», щоб чернетка звіту не забрала повідомлення.
     if (SUPPORT_THREADS_ENABLED) {
-        ctx.session.step = "create_ticket";
+        delete ctx.session.clarificationTaskId;
+        // Після відмови від розсилки крок уже чекає причину — його контекст не затирати.
+        if (ctx.session.step !== "broadcast_decline_reason") ctx.session.step = "create_ticket";
         if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => { });
         await presentSupportEntry(ctx, STAFF_TEXTS["support-thread-entry"], new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), {
             pushToStack: true,

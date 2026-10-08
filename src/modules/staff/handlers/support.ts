@@ -145,7 +145,9 @@ staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
     clearShootSupportLine(ctx.session);
 
     if (SUPPORT_THREADS_ENABLED) {
-        ctx.session.step = "create_ticket";
+        delete ctx.session.clarificationTaskId;
+        // Після відмови від розсилки крок уже чекає причину — його контекст не затирати.
+        if (ctx.session.step !== "broadcast_decline_reason") ctx.session.step = "create_ticket";
         await ctx.answerCallbackQuery().catch(() => { });
         await ScreenManager.renderScreen(ctx, STAFF_TEXTS["support-thread-entry"], new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
         return;

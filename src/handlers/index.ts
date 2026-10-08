@@ -655,8 +655,9 @@ handlers.on("message", async (ctx, next) => {
 
     // Постійна тема людини або її стара тема → фотографині. "ignored" — не наша
     // тема (LOGISTICS, General, тема кандидатки): далі старий обробник.
+    // З вимкненим прапорцем (відкат) відповіді в уже створених постійних темах однаково
+    // доходять — інакше вони б мовчки губились, бо старі тікети вже закриті переходом.
     if (
-        SUPPORT_THREADS_ENABLED &&
         ctx.message &&
         ctx.from &&
         ctx.from.id !== ctx.me.id &&
@@ -667,6 +668,7 @@ handlers.on("message", async (ctx, next) => {
             message: ctx.message,
             sender: { id: ctx.from.id, firstName: ctx.from.first_name },
             fallbackSend: staffChatId => sendAdminOutboundMessage(ctx, staffChatId, { prefixText: false }),
+            threadsOnly: !SUPPORT_THREADS_ENABLED,
         });
         if (result !== "ignored") return;
     }

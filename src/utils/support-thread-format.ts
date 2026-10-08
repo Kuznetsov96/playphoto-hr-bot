@@ -184,3 +184,14 @@ export function renderThreadCard(input: ThreadCardInput): string {
     if (input.mainPlace) lines.push(`🏠 Main point: ${escapeHtml(input.mainPlace)}`);
     return lines.join("\n");
 }
+
+/** Що з повідомлення має сенс пересилати людині; решта — службове або непідтримуване. */
+const RELAYABLE_KEYS = [
+    "text", "photo", "video", "document", "voice", "video_note", "audio", "animation", "sticker",
+    "contact", "location", "venue", "poll", "dice", "rich_message", "checklist",
+] as const;
+
+export function isRelayable(message: object): boolean {
+    const record = message as unknown as Record<string, unknown>;
+    return RELAYABLE_KEYS.some(key => record[key] !== undefined);
+}

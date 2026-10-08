@@ -1034,6 +1034,8 @@ model SupportMessageLink {
   /// IN — фотографиня → тема; OUT — тема → фотографиня; CONTEXT — пост бота з контекстом.
   direction        String
   topicChatId      BigInt
+  /// Тема, де лежить повідомлення: свайп на пару зі старої теми не має йти в нову.
+  topicId          Int?
   topicMessageId   Int
   privateChatId    BigInt?
   privateMessageId Int?

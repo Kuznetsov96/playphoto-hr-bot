@@ -6,6 +6,8 @@ import { taskProofService } from "../../../services/task-proof-service.js";
 import { supportRelayService } from "../../../services/support-thread-runtime.js";
 import type { ThreadContext } from "../../../services/support-relay-service.js";
 import { takeShootSupportLine } from "./shoot-support-line.js";
+import { isRelayable } from "../../../utils/support-thread-format.js";
+import { STAFF_TEXTS } from "../../../constants/staff-texts.js";
 
 /**
  * Повідомлення співробітниці в приватному чаті, яке не забрав жоден сценарій,
@@ -48,7 +50,9 @@ async function collectContexts(ctx: MyContext): Promise<ThreadContext[]> {
     const contexts: ThreadContext[] = [];
     const session = ctx.session;
 
-    let taskId = session.clarificationTaskId ?? null;
+    // Задача — лише одразу після «❓ Питання по завданню» (крок create_ticket). Скасоване
+    // уточнення не має приліпитися до питання про зарплату через три дні.
+    let taskId = session.step === "create_ticket" ? session.clarificationTaskId ?? null : null;
     delete session.clarificationTaskId;
     if (session.step?.startsWith(TASK_REPLY_STEP_PREFIX)) {
         const submission = await taskProofService.getSubmissionById(session.step.slice(TASK_REPLY_STEP_PREFIX.length));
@@ -88,6 +92,12 @@ export async function handleStaffThreadMessage(ctx: MyContext): Promise<boolean>
 
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(ctx.from.id));
     if (!user?.staffProfile) return false;
+
+    // Історія, розіграш, гра — Telegram не дасть скопіювати. Сказати їй і не витрачати контекст.
+    if (!isRelayable(message)) {
+        await ctx.reply(STAFF_TEXTS["support-thread-unsupported"]).catch(() => undefined);
+        return true;
+    }
 
     let contexts: ThreadContext[] = [];
     try {

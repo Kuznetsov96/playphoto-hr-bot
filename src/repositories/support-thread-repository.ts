@@ -7,6 +7,7 @@ export type NewLink = {
     threadId: string;
     direction: LinkDirection;
     topicChatId: bigint;
+    topicId?: number | null;
     topicMessageId: number;
     privateChatId?: bigint | null;
     privateMessageId?: number | null;
@@ -60,6 +61,7 @@ export class SupportThreadRepository {
                 threadId: link.threadId,
                 direction: link.direction,
                 topicChatId: link.topicChatId,
+                topicId: link.topicId ?? null,
                 topicMessageId: link.topicMessageId,
                 privateChatId: link.privateChatId ?? null,
                 privateMessageId: link.privateMessageId ?? null,

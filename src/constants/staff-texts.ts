@@ -291,6 +291,7 @@ Are you sure you want to send invitations to all these candidates?`,
 <i>«${p.task}»</i>
 
 Напиши, що саме незрозуміло, — передамо в підтримку.`,
+  "support-thread-unsupported": `Такий формат не вийде передати в підтримку. Напиши текстом або надішли фото.`,
   "support-thread-inactive-alert": `Кабінет закрито. Напиши сюди — передамо в підтримку.`,
   "support-ans-already-processing": `Твій запит уже обробляється 💛`,
   "support-info-already-open": `<b>Твій діалог з куратором вже відкритий.</b>

@@ -72,7 +72,7 @@ describe("відповідь із теми фотографині", () => {
         const { service, api, links, thread } = setup();
         await expect(service.relaySupportMessage(api, { message: inTopic(31), sender })).resolves.toBe("delivered");
         expect(api.copyMessage).toHaveBeenCalledWith(STAFF_CHAT, SUPPORT_CHAT, 31, {});
-        expect(links).toContainEqual(expect.objectContaining({ direction: "OUT", topicMessageId: 31, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 2001 }));
+        expect(links).toContainEqual(expect.objectContaining({ direction: "OUT", topicId: 77, topicMessageId: 31, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 2001 }));
         expect(thread.lastEvent).toEqual({ kind: "support_reply", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
     });
 
@@ -185,6 +185,20 @@ describe("відповідь із теми фотографині", () => {
         expect(notices).toEqual([[SUPPORT_CHAT, "➡️ This conversation now lives here: link/77", { message_thread_id: 300 }]]);
     });
 
+    it("збій бази посеред пересилання — у темі видно, що не дійшло", async () => {
+        const { service, api, repo } = setup();
+        repo.addLink.mockRejectedValueOnce(new Error("db down"));
+        await expect(service.relaySupportMessage(api, { message: inTopic(50), sender })).resolves.toBe("failed");
+        expect(api.sendMessage.mock.calls.at(-1)[1]).toMatch(/^❌ Not delivered: internal error/);
+    });
+
+    it("лише постійні теми — стара тема віддається старому обробнику", async () => {
+        const { service, api, repo } = setup();
+        repo.findLegacyUserByTopic.mockResolvedValue("u1");
+        await expect(service.relaySupportMessage(api, { message: inTopic(51, { message_thread_id: 300 }), sender, threadsOnly: true })).resolves.toBe("ignored");
+        expect(repo.findLegacyUserByTopic).not.toHaveBeenCalled();
+    });
+
     it("rich message іде запасним шляхом", async () => {
         const { service, api } = setup();
         const fallbackSend = vi.fn(async () => undefined);
@@ -262,6 +276,22 @@ describe("реакції", () => {
         const update = { ...reaction(SUPPORT_CHAT, 500, SUPPORT_ACCOUNT, ["👍", "❤"]), old_reaction: [{ type: "emoji", emoji: "👍" }] };
         await service.relayReaction(api, update, "support");
         expect(thread.lastEvent).toBeUndefined();
+    });
+
+    it("👍 на звіті по задачі (пост бота) знімає «чекає», фотографині нічого не ставить", async () => {
+        const { service, api, repo, thread } = setup();
+        repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "CONTEXT", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 700, contextText: "Завдання" });
+        await service.relayReaction(api, reaction(SUPPORT_CHAT, 700, SUPPORT_ACCOUNT, ["👍"]), "support");
+        expect(thread.lastEvent).toEqual({ kind: "support_thumbs_up", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
+        expect(api.setMessageReaction).not.toHaveBeenCalled();
+    });
+
+    it("підтримка зняла свою реакцію — у фотографині не стираємо (там може бути реакція колеги)", async () => {
+        const { service, api, repo, thread } = setup();
+        repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 500, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 11 });
+        const update = { ...reaction(SUPPORT_CHAT, 500, SUPPORT_ACCOUNT, []), old_reaction: [{ type: "emoji", emoji: "👍" }] };
+        await service.relayReaction(api, update, "support");
+        expect(api.setMessageReaction).not.toHaveBeenCalled();
     });
 
     it("інша реакція підтримки статус не змінює", async () => {

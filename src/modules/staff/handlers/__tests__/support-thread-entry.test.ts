@@ -12,7 +12,7 @@ vi.mock("../../../../services/task-service.js", () => ({ taskService: { getTaskB
 vi.mock("../../../../services/task-proof-service.js", () => ({ taskProofService: { getSubmissionById } }));
 vi.mock("../../../../repositories/user-repository.js", () => ({ userRepository: { findWithStaffProfileByTelegramId } }));
 vi.mock("../../../../constants/staff-texts.js", () => ({
-    STAFF_TEXTS: { "broadcast-ans-decline": "DECLINE-NOTED", "staff-btn-home": "Меню" },
+    STAFF_TEXTS: { "broadcast-ans-decline": "DECLINE-NOTED", "staff-btn-home": "Меню", "support-thread-unsupported": "UNSUPPORTED" },
 }));
 
 const { handleStaffThreadMessage } = await import("../support-thread-entry.js");
@@ -67,6 +67,23 @@ describe("повідомлення співробітниці йде в її т�
         expect(context.contextText).toBe("Завдання 08.10: Сфотографуй вітрину");
         expect(c.session.clarificationTaskId).toBeUndefined();
         expect(c.session.step).toBe("idle");
+    });
+
+    it("уточнення скасували, а написала вона через дні — контексту задачі немає", async () => {
+        const c = ctx({ step: "idle", clarificationTaskId: "task1" });
+        await handleStaffThreadMessage(c);
+        expect(getTaskById).not.toHaveBeenCalled();
+        expect(relayStaffMessage.mock.calls[0]![1].contexts).toEqual([]);
+        expect(c.session.clarificationTaskId).toBeUndefined();
+    });
+
+    it("непідтримуваний формат — їй кажуть, контекст із сесії не губиться", async () => {
+        const c = ctx({ step: "create_ticket", clarificationTaskId: "task1" }, { message_id: 30, story: {} });
+        await expect(handleStaffThreadMessage(c)).resolves.toBe(true);
+        expect(relayStaffMessage).not.toHaveBeenCalled();
+        expect(c.reply).toHaveBeenCalledWith("UNSUPPORTED");
+        expect(c.session.clarificationTaskId).toBe("task1");
+        expect(c.session.step).toBe("create_ticket");
     });
 
     it("відповідь на старе уточнення по звіту — контекст задачі зі звіту", async () => {

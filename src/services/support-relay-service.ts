@@ -4,7 +4,7 @@ import type { SupportThread } from "@prisma/client";
 import logger from "../core/logger.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import type { SupportThreadRepository } from "../repositories/support-thread-repository.js";
-import { isAcknowledgement } from "../utils/support-thread-format.js";
+import { isAcknowledgement, isRelayable } from "../utils/support-thread-format.js";
 import { escapeHtml, msgToHtml } from "../handlers/admin/utils.js";
 import type { AlbumBuffer } from "../utils/album-buffer.js";
 import { isTopicGoneError, type SupportThreadService } from "./support-thread-service.js";
@@ -44,16 +44,6 @@ const ANONYMOUS_ADMIN_ID = 1087968824;
 /** Цитата контексту не довша за це — щоб підпис фото вліз у 1024 символи. */
 const CONTEXT_QUOTE_LIMIT = 200;
 
-/** Що з повідомлення в темі має сенс для фотографині; решта — службове. */
-const RELAYABLE_KEYS = [
-    "text", "photo", "video", "document", "voice", "video_note", "audio", "animation", "sticker",
-    "contact", "location", "venue", "poll", "dice", "rich_message", "checklist",
-] as const;
-
-function isRelayable(message: Message): boolean {
-    const record = message as unknown as Record<string, unknown>;
-    return RELAYABLE_KEYS.some(key => record[key] !== undefined);
-}
 
 /** Скільки чекати наступну частину альбому: на проді частина проходить усю ланку middleware. */
 const ALBUM_WAIT_MS = 2_000;
@@ -155,6 +145,7 @@ export class SupportRelayService {
             return "delivered";
         }
 
+        await this.deps.albums.whenIdle(`${chatId}:`);
         const reply = await this.replyParametersForStaff(chatId, message, thread);
         let copiedId: number;
         try {
@@ -171,6 +162,7 @@ export class SupportRelayService {
             threadId: thread.id,
             direction: "IN",
             topicChatId: thread.chatId,
+            topicId: thread.topicId,
             topicMessageId: copiedId,
             privateChatId: BigInt(chatId),
             privateMessageId: message.message_id,
@@ -208,6 +200,7 @@ export class SupportRelayService {
                 threadId: thread.id,
                 direction: "OUT",
                 topicChatId: thread.chatId,
+                topicId: thread.topicId,
                 topicMessageId: copied.message_id,
                 privateChatId: BigInt(staffChatId),
                 privateMessageId,
@@ -232,7 +225,7 @@ export class SupportRelayService {
         if (sendItems) {
             const ids = await sendItems(Number(thread.chatId), thread.topicId);
             for (const id of ids) {
-                await this.deps.repo.addLink({ threadId: thread.id, direction: "CONTEXT", topicChatId: thread.chatId, topicMessageId: id, contextText: context.contextText });
+                await this.deps.repo.addLink({ threadId: thread.id, direction: "CONTEXT", topicChatId: thread.chatId, topicId: thread.topicId, topicMessageId: id, contextText: context.contextText });
             }
         }
         thread = await this.deps.threads.applyStatus(api, thread, { kind: "bot_context" });
@@ -244,15 +237,42 @@ export class SupportRelayService {
      */
     async relaySupportMessage(
         api: Api,
-        input: { message: Message; sender: { id: number; firstName: string }; fallbackSend?: (staffChatId: number) => Promise<void> },
+        input: {
+            message: Message;
+            sender: { id: number; firstName: string };
+            fallbackSend?: (staffChatId: number) => Promise<void>;
+            /** Прапорець вимкнено: лише вже створені постійні теми, старі — старому обробнику. */
+            threadsOnly?: boolean;
+        },
     ): Promise<"delivered" | "ignored" | "failed"> {
-        const { message, sender } = input;
+        const { message } = input;
         const chatId = this.deps.supportChatId();
         const topicId = message.is_topic_message ? message.message_thread_id : undefined;
         if (!topicId || !isRelayable(message)) return "ignored";
 
-        const resolved = await this.resolveTopic(api, chatId, topicId);
+        const resolved = await this.resolveTopic(api, chatId, topicId, input.threadsOnly ?? false);
         if (!resolved) return "ignored";
+        try {
+            return await this.deliverSupportMessage(api, input, resolved, chatId, topicId);
+        } catch (error) {
+            // Збій бази чи Telegram посеред шляху: команда має це бачити, а не гадати.
+            logger.error({ err: error, threadId: resolved.thread.id }, "Support reply relay crashed");
+            await api.sendMessage(chatId, "❌ Not delivered: internal error. Send it again in a minute.", {
+                message_thread_id: topicId,
+                reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+            }).catch(() => undefined);
+            return "failed";
+        }
+    }
+
+    private async deliverSupportMessage(
+        api: Api,
+        input: { message: Message; sender: { id: number; firstName: string }; fallbackSend?: (staffChatId: number) => Promise<void> },
+        resolved: { thread: SupportThread; legacyTopicId: number | null },
+        chatId: number,
+        topicId: number,
+    ): Promise<"delivered" | "failed"> {
+        const { message, sender } = input;
         let { thread } = resolved;
 
         const note = (text: string) => api.sendMessage(chatId, text, {
@@ -307,6 +327,7 @@ export class SupportRelayService {
             threadId: thread.id,
             direction: "OUT",
             topicChatId: BigInt(chatId),
+            topicId,
             topicMessageId: message.message_id,
             privateChatId: BigInt(staffChatId),
             privateMessageId: delivered.messageId,
@@ -361,10 +382,15 @@ export class SupportRelayService {
         if (side === "support") {
             if (!update.user || !this.deps.isSupportMember(update.user.id)) return;
             const link = await this.deps.repo.findLinkByTopicMessage(BigInt(update.chat.id), update.message_id);
-            if (!link || link.direction !== "IN" || !link.privateChatId || !link.privateMessageId) return;
-            await api.setMessageReaction(Number(link.privateChatId), link.privateMessageId, reactions).catch(error => {
-                logger.debug({ err: error }, "Support reaction could not be mirrored to the photographer");
-            });
+            if (!link || (link.direction !== "IN" && link.direction !== "CONTEXT")) return;
+            // Зняту реакцію не віддзеркалюємо: її бачить лише той, хто зняв, а в
+            // фотографині могла стояти реакція колеги.
+            if (link.direction === "IN" && added.length && link.privateChatId && link.privateMessageId) {
+                await api.setMessageReaction(Number(link.privateChatId), link.privateMessageId, reactions).catch(error => {
+                    logger.debug({ err: error }, "Support reaction could not be mirrored to the photographer");
+                });
+            }
+            // 👍 на її повідомленні чи на звіті бота — «відповіли».
             if (added.some(reaction => reaction.emoji === "👍") && link.thread) {
                 await this.deps.threads.applyStatus(api, link.thread, { kind: "support_thumbs_up", actorTelegramId: BigInt(update.user.id) });
             }
@@ -378,10 +404,11 @@ export class SupportRelayService {
         });
     }
 
-    private async resolveTopic(api: Api, chatId: number, topicId: number): Promise<{ thread: SupportThread; legacyTopicId: number | null } | null> {
+    private async resolveTopic(api: Api, chatId: number, topicId: number, threadsOnly: boolean): Promise<{ thread: SupportThread; legacyTopicId: number | null } | null> {
         if (this.deps.ignoredTopicIds?.().includes(topicId)) return null;
         const thread = await this.deps.repo.findByTopic(BigInt(chatId), topicId);
         if (thread) return { thread, legacyTopicId: null };
+        if (threadsOnly) return null;
         const legacyUserId = await this.deps.repo.findLegacyUserByTopic(BigInt(chatId), topicId);
         if (!legacyUserId) return null;
         try {
@@ -456,6 +483,7 @@ export class SupportRelayService {
                     threadId: thread.id,
                     direction: "OUT",
                     topicChatId: BigInt(chatId),
+                    topicId: messages[index]!.message_thread_id ?? null,
                     topicMessageId: messages[index]!.message_id,
                     privateChatId: BigInt(staffChatId),
                     privateMessageId: copied[index]!.message_id,
@@ -502,6 +530,7 @@ export class SupportRelayService {
             threadId: thread.id,
             direction: "CONTEXT",
             topicChatId: thread.chatId,
+            topicId: thread.topicId,
             topicMessageId: sent.message_id,
             contextText: context.contextText,
         });
@@ -511,7 +540,8 @@ export class SupportRelayService {
         const repliedId = message.reply_to_message?.message_id;
         if (!repliedId) return undefined;
         const link = await this.deps.repo.findLinkByPrivateMessage(BigInt(chatId), repliedId);
-        if (!link || link.threadId !== thread.id) return undefined;
+        // Пара зі старої теми: reply на неї в новій темі Telegram не прийме.
+        if (!link || link.threadId !== thread.id || link.topicId !== thread.topicId) return undefined;
         return withQuote({ message_id: link.topicMessageId, allow_sending_without_reply: true }, message);
     }
 
@@ -530,51 +560,65 @@ export class SupportRelayService {
             message_thread_id: target.topicId,
             ...(replyParameters ? { reply_parameters: replyParameters } : {}),
         });
-        try {
-            const copied = await api.copyMessage(Number(thread.chatId), fromChatId, messageId, options(thread, reply));
-            return { thread, messageId: copied.message_id };
-        } catch (error) {
-            if (reply?.quote && isQuoteError(error)) {
-                const { quote: _quote, quote_position: _position, ...plain } = reply;
-                const copied = await api.copyMessage(Number(thread.chatId), fromChatId, messageId, options(thread, plain));
-                return { thread, messageId: copied.message_id };
-            }
-            if (isTopicGoneError(error)) {
-                const recreated = await this.deps.threads.recreateTopic(api, thread);
-                const copied = await api.copyMessage(Number(recreated.chatId), fromChatId, messageId, options(recreated));
-                return { thread: recreated, messageId: copied.message_id };
-            }
-            throw error;
+        // Спроби від найповнішої: з цитатою → без цитати → без reply. Лише коли й без
+        // reply не вийшло — це справді видалена тема, а не зламана відповідь.
+        const attempts: (ReplyParameters | undefined)[] = [reply];
+        if (reply?.quote) {
+            const { quote: _quote, quote_position: _position, ...plain } = reply;
+            attempts.push(plain);
         }
+        if (reply) attempts.push(undefined);
+
+        let lastError: unknown;
+        for (const attempt of attempts) {
+            try {
+                const copied = await api.copyMessage(Number(thread.chatId), fromChatId, messageId, options(thread, attempt));
+                return { thread, messageId: copied.message_id };
+            } catch (error) {
+                lastError = error;
+                if (attempt?.quote && !isQuoteError(error) && !isTopicGoneError(error)) break;
+            }
+        }
+        if (isTopicGoneError(lastError)) {
+            const recreated = await this.deps.threads.recreateTopic(api, thread);
+            const copied = await api.copyMessage(Number(recreated.chatId), fromChatId, messageId, options(recreated));
+            return { thread: recreated, messageId: copied.message_id };
+        }
+        throw lastError;
     }
 
     private async flushStaffAlbum(api: Api, userId: string, chatId: number, items: Message[]) {
         const messages = [...items].sort((a, b) => a.message_id - b.message_id);
-        let thread = await this.deps.threads.ensureThread(api, userId);
-        const ids = messages.map(item => item.message_id);
-        let copied: { message_id: number }[];
         try {
-            copied = await api.copyMessages(Number(thread.chatId), chatId, ids, { message_thread_id: thread.topicId });
-        } catch (error) {
-            if (!isTopicGoneError(error)) {
-                logger.error({ err: error, userId }, "Staff album could not reach the support topic");
-                await this.tellStaffItFailed(api, chatId);
-                return;
+            let thread = await this.deps.threads.ensureThread(api, userId);
+            const ids = messages.map(item => item.message_id);
+            let copied: { message_id: number }[];
+            try {
+                copied = await api.copyMessages(Number(thread.chatId), chatId, ids, { message_thread_id: thread.topicId });
+            } catch (error) {
+                if (!isTopicGoneError(error)) throw error;
+                thread = await this.deps.threads.recreateTopic(api, thread);
+                copied = await api.copyMessages(Number(thread.chatId), chatId, ids, { message_thread_id: thread.topicId });
             }
-            thread = await this.deps.threads.recreateTopic(api, thread);
-            copied = await api.copyMessages(Number(thread.chatId), chatId, ids, { message_thread_id: thread.topicId });
+            // copyMessages мовчки пропускає те, що не може скопіювати: тоді не вгадуємо пари.
+            if (copied.length === messages.length) {
+                for (let index = 0; index < messages.length; index++) {
+                    await this.deps.repo.addLink({
+                        threadId: thread.id,
+                        direction: "IN",
+                        topicChatId: thread.chatId,
+                        topicId: thread.topicId,
+                        topicMessageId: copied[index]!.message_id,
+                        privateChatId: BigInt(chatId),
+                        privateMessageId: messages[index]!.message_id,
+                    });
+                }
+            }
+            await this.afterStaffDelivery(api, thread, userId, chatId, messages[0]!, false);
+        } catch (error) {
+            logger.error({ err: error, userId }, "Staff album could not reach the support topic");
+            await this.tellStaffItFailed(api, chatId);
         }
-        for (let index = 0; index < messages.length && index < copied.length; index++) {
-            await this.deps.repo.addLink({
-                threadId: thread.id,
-                direction: "IN",
-                topicChatId: thread.chatId,
-                topicMessageId: copied[index]!.message_id,
-                privateChatId: BigInt(chatId),
-                privateMessageId: messages[index]!.message_id,
-            });
-        }
-        await this.afterStaffDelivery(api, thread, userId, chatId, messages[0]!, false);
     }
 
     private async afterStaffDelivery(api: Api, thread: SupportThread, userId: string, chatId: number, message: Message, isAck: boolean) {
