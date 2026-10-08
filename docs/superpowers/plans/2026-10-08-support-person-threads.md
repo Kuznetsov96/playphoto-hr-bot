@@ -14,7 +14,7 @@
 
 - Тексти команди — англійською в `src/constants/admin-texts.ts`; тексти фотографині — українською на «ти» в `src/constants/staff-texts.ts`, проходять `staff-texts-tone.test.ts` (одне емоційне емодзі, без 🌸, без ✨ у помилках).
 - Назва теми: `Прізвище · Місто · Майданчик Філія`, ≤128 символів; ініціал (`surnameNameDot`) лише при збігу прізвищ.
-- Іконки: ❗️ WAITING, ✅ ANSWERED, 👀 ESCALATED, 📁 ARCHIVED з `getForumTopicIconStickers`.
+- Іконки: 💬 WAITING, ✅ ANSWERED, 👀 ESCALATED, 📁 ARCHIVED з `getForumTopicIconStickers`.
 - Реакція-підтвердження `✍`; текстове підтвердження лише після 6 год тиші і не на коротку подяку.
 - Пауза між людьми при міграції 3 с; зв'язки живуть 90 днів.
 - Прапорець проходить усі чотири ланки деплою: input форми → `release.env` → `deploy/aws/hooks/start.sh export` → `set_env` у `scripts/aws/deploy-production-bot.sh`, плюс контракт-скрипти.

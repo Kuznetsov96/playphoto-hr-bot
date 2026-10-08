@@ -7,12 +7,21 @@ const { pickThreadIcons } = await import("../support-thread-icons.js");
 describe("іконки статусів", () => {
     it("знаходить емодзі незалежно від вариаційного селектора", () => {
         const icons = pickThreadIcons([
-            { emoji: "❗️", custom_emoji_id: "w" },
+            { emoji: "❗️", custom_emoji_id: "loud" },
+            { emoji: "💬", custom_emoji_id: "w" },
             { emoji: "✅", custom_emoji_id: "a" },
             { emoji: "👀", custom_emoji_id: "e" },
             { emoji: "📁", custom_emoji_id: "r" },
         ]);
         expect(icons).toEqual({ WAITING: "w", ANSWERED: "a", ESCALATED: "e", ARCHIVED: "r" });
+    });
+
+    it("«чекає відповіді» — спокійна 💬, а не ❗️ (рішення власника 08.10)", () => {
+        expect(pickThreadIcons([{ emoji: "❗️", custom_emoji_id: "loud" }, { emoji: "💬", custom_emoji_id: "calm" }]).WAITING).toBe("calm");
+    });
+
+    it("«відповіли» ніколи не бере ту саму 💬", () => {
+        expect(pickThreadIcons([{ emoji: "💬", custom_emoji_id: "calm" }]).ANSWERED).toBeNull();
     });
 
     it("бере запасний варіант, якщо основного немає", () => {

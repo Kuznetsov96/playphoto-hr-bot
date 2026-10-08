@@ -5,11 +5,12 @@ import type { ThreadStatus } from "../utils/support-thread-format.js";
 /**
  * Іконка теми — це статус (spec 2026-10-08). Боту дозволено лише набір
  * `getForumTopicIconStickers`; на проді 08.10.2026 у ньому були всі чотири
- * перші варіанти. Решта — запас на випадок, якщо Telegram змінить набір.
+ * перші варіанти (💬 ✅ 👀 📁). Решта — запас на випадок, якщо Telegram змінить набір.
  */
 const PREFERRED: Record<ThreadStatus, string[]> = {
-    WAITING: ["❗", "‼", "🔥"],
-    ANSWERED: ["✅", "💬"],
+    // 💬 — рішення власника 08.10: ❗️ кричить, коли таких тем у списку з десяток.
+    WAITING: ["💬", "❗", "🔥"],
+    ANSWERED: ["✅"],
     ESCALATED: ["👀", "⚡"],
     ARCHIVED: ["📁", "🗂"],
 };
