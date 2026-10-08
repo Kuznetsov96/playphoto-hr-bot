@@ -405,6 +405,10 @@ export class SupportRelayService {
                 await api.setMessageReaction(Number(link.privateChatId), link.privateMessageId, reactions).catch(error => {
                     logger.debug({ err: error }, "Support reaction could not be mirrored to the photographer");
                 });
+                // Реакція менеджера замінила ✍ — наступне повідомлення не має її знімати.
+                if (link.thread?.lastAckMessageId === link.privateMessageId) {
+                    await this.deps.repo.update(link.threadId, { lastAckMessageId: null });
+                }
             }
             // 👍 на її повідомленні чи на звіті бота — «відповіли».
             if (added.some(reaction => reaction.emoji === "👍") && link.thread) {
@@ -666,10 +670,25 @@ export class SupportRelayService {
         const now = this.deps.now();
         const quietSince = thread.lastStaffAt;
         const updated = await this.deps.threads.applyStatus(api, thread, { kind: isAck ? "staff_ack" : "staff_question" });
-        await this.deps.repo.update(updated.id, { lastStaffAt: now, ...(isAck ? {} : { lastQuestionAt: now }) });
 
-        await api.setMessageReaction(chatId, message.message_id, [{ type: "emoji", emoji: ACK_REACTION }]).catch(error => {
-            logger.debug({ err: error }, "Support delivery reaction could not be set");
+        // ✍ — лише на останньому її повідомленні, як «Доставлено» в iMessage: з попереднього
+        // знімаємо. Реакцію менеджера на ньому бот не чіпає — тоді позначку вже скинуто.
+        const previousAck = updated.lastAckMessageId ?? thread.lastAckMessageId;
+        if (previousAck && previousAck !== message.message_id) {
+            await api.setMessageReaction(chatId, previousAck, []).catch(error => {
+                logger.debug({ err: error }, "Previous delivery reaction could not be removed");
+            });
+        }
+        const acked = await api.setMessageReaction(chatId, message.message_id, [{ type: "emoji", emoji: ACK_REACTION }])
+            .then(() => true)
+            .catch(error => {
+                logger.debug({ err: error }, "Support delivery reaction could not be set");
+                return false;
+            });
+        await this.deps.repo.update(updated.id, {
+            lastStaffAt: now,
+            ...(isAck ? {} : { lastQuestionAt: now }),
+            lastAckMessageId: acked ? message.message_id : null,
         });
         const quiet = !quietSince || now.getTime() - quietSince.getTime() >= ACK_QUIET_MS;
         if (quiet && !isAck) {

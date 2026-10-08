@@ -161,6 +161,11 @@ describe("картка людини", () => {
         expect(renderThreadCard({ ...base, archivedAt: "08.10" }).split("\n")[0]).toBe("📦 Employment ended · 08.10");
     });
 
+    it("у картці прізвище й ім'я, без по батькові", () => {
+        const card = renderThreadCard({ ...base, fullName: "Мамедова Анна Юсифівна", username: "moreeelo2" });
+        expect(card).toContain("👤 Мамедова Анна · @moreeelo2");
+    });
+
     it("ім'я, юзернейм, телефон і основна точка, HTML екранується", () => {
         const card = renderThreadCard({ ...base, fullName: "Гут <Ольга>", username: "gut", phone: "+380", mainPlace: "Lviv · Smile Park Forum Lviv" });
         expect(card).toContain("👤 Гут &lt;Ольга&gt; · @gut");
