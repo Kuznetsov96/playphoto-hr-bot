@@ -492,23 +492,36 @@ export class SupportRelayService {
     private async flushSupportAlbum(api: Api, thread: SupportThread, staffChatId: number, sender: { id: number; firstName: string }, items: Message[]) {
         const messages = [...items].sort((a, b) => a.message_id - b.message_id);
         const chatId = this.deps.supportChatId();
+        const topicId = messages[0]!.message_thread_id ?? thread.topicId;
+        let copied: { message_id: number }[];
         try {
-            const copied = await api.copyMessages(staffChatId, chatId, messages.map(item => item.message_id));
-            for (let index = 0; index < messages.length && index < copied.length; index++) {
-                await this.deps.repo.addLink({
-                    threadId: thread.id,
-                    direction: "OUT",
-                    topicChatId: BigInt(chatId),
-                    topicId: messages[index]!.message_thread_id ?? null,
-                    topicMessageId: messages[index]!.message_id,
-                    privateChatId: BigInt(staffChatId),
-                    privateMessageId: copied[index]!.message_id,
-                });
+            copied = await api.copyMessages(staffChatId, chatId, messages.map(item => item.message_id));
+        } catch (error) {
+            await api.sendMessage(chatId, this.deliveryFailureText(thread, error), { message_thread_id: topicId })
+                .catch(noteError => logger.warn({ err: noteError }, "Support album failure note failed"));
+            return;
+        }
+        try {
+            // copyMessages мовчки пропускає те, що не може скопіювати: тоді не вгадуємо пари.
+            if (copied.length === messages.length) {
+                for (let index = 0; index < messages.length; index++) {
+                    await this.deps.repo.addLink({
+                        threadId: thread.id,
+                        direction: "OUT",
+                        topicChatId: BigInt(chatId),
+                        topicId: messages[index]!.message_thread_id ?? null,
+                        topicMessageId: messages[index]!.message_id,
+                        privateChatId: BigInt(staffChatId),
+                        privateMessageId: copied[index]!.message_id,
+                    });
+                }
             }
             await this.afterSupportDelivery(api, thread, sender, messages[0]!);
         } catch (error) {
-            await api.sendMessage(chatId, this.deliveryFailureText(thread, error), { message_thread_id: messages[0]!.message_thread_id ?? thread.topicId })
-                .catch(noteError => logger.warn({ err: noteError }, "Support album failure note failed"));
+            // Альбом уже в неї — «надішли ще раз» продублював би його.
+            logger.error({ err: error, threadId: thread.id }, "Support album delivered but not recorded");
+            await api.sendMessage(chatId, "⚠️ Delivered, but the bot couldn't record it: quotes, edits and reactions won't work for this album.", { message_thread_id: topicId })
+                .catch(noteError => logger.warn({ err: noteError }, "Support album note failed"));
         }
     }
 
@@ -627,9 +640,9 @@ export class SupportRelayService {
     }
 
     private async recordStaffAlbum(api: Api, thread: SupportThread, userId: string, chatId: number, messages: Message[], copied: { message_id: number }[]) {
-        {
-            // copyMessages мовчки пропускає те, що не може скопіювати: тоді не вгадуємо пари.
-            if (copied.length === messages.length) {
+        // copyMessages мовчки пропускає те, що не може скопіювати: тоді не вгадуємо пари.
+        if (copied.length === messages.length) {
+            try {
                 for (let index = 0; index < messages.length; index++) {
                     await this.deps.repo.addLink({
                         threadId: thread.id,
@@ -641,9 +654,12 @@ export class SupportRelayService {
                         privateMessageId: messages[index]!.message_id,
                     });
                 }
+            } catch (error) {
+                // Без пар зникнуть лише цитати й правки; статус і ✍ — ні.
+                logger.error({ err: error, userId, threadId: thread.id }, "Staff album links could not be recorded");
             }
-            await this.afterStaffDelivery(api, thread, userId, chatId, messages[0]!, false);
         }
+        await this.afterStaffDelivery(api, thread, userId, chatId, messages[0]!, false);
     }
 
     private async afterStaffDelivery(api: Api, thread: SupportThread, userId: string, chatId: number, message: Message, isAck: boolean) {

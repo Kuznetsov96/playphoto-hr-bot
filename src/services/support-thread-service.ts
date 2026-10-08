@@ -247,8 +247,12 @@ export class SupportThreadService {
                     }
                     continue;
                 }
-                // Уже в архіві, а тема «чекає» — це вона написала після звільнення; не глушити.
-                if (thread.archivedAt) continue;
+                if (thread.archivedAt) {
+                    // Звільнення вже позначене. Чекає відповіді — не глушити її питання; коли
+                    // відповіли — тихо в архів 📁 (рядок про звільнення вже є або не потрібен).
+                    if (thread.status === "ANSWERED") await this.applyStatus(api, thread, { kind: "archived" });
+                    continue;
+                }
                 // Написала в день звільнення і чекає відповіді: позначити звільнення в картці,
                 // але не ховати питання за 📁 і не ставити службовий рядок останнім.
                 if (thread.status === "WAITING" || thread.status === "ESCALATED") {

@@ -291,6 +291,20 @@ describe("звільнена написала в день звільнення",
     });
 });
 
+describe("звільненій відповіли", () => {
+    it("наступний ранок кладе тему в архів 📁 (без повторного рядка)", async () => {
+        const { service, api, people, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        people.getPerson.mockResolvedValue({ ...(await people.getPerson()), isActive: false });
+        repo.threads.set(thread.id, { ...repo.threads.get(thread.id), status: "ANSWERED", archivedAt: new Date("2026-10-07T05:00:00Z") });
+        api.sendMessage.mockClear();
+        await service.archiveInactive(api);
+        expect(repo.threads.get(thread.id)!.status).toBe("ARCHIVED");
+        expect(api.editForumTopic).toHaveBeenLastCalledWith(-1001234, 77, { icon_custom_emoji_id: "r-id" });
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+});
+
 describe("повернулась на роботу", () => {
     it("тема виходить з архіву, картка знову показує сьогодні", async () => {
         const { service, api, people, repo } = setup();

@@ -192,6 +192,17 @@ describe("відповідь із теми фотографині", () => {
         expect(api.sendMessage.mock.calls.at(-1)[1]).toMatch(/^❌ Not delivered: internal error/);
     });
 
+    it("альбом підтримки доставлено, а запис упав — «⚠️ Delivered», не «надішли ще раз»", async () => {
+        const { service, api, repo } = setup();
+        repo.addLink.mockRejectedValue(new Error("db down"));
+        await service.relaySupportMessage(api, { message: inTopic(53, { text: undefined, photo: [{}], media_group_id: "sg1" }), sender });
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(api.copyMessages).toHaveBeenCalledTimes(1);
+        const notes = api.sendMessage.mock.calls.map((c: Any[]) => String(c[1]));
+        expect(notes.some((n: string) => n.startsWith("⚠️ Delivered"))).toBe(true);
+        expect(notes.some((n: string) => n.startsWith("❌"))).toBe(false);
+    });
+
     it("доставлено, а запис упав — не просимо надіслати вдруге", async () => {
         const { service, api, repo } = setup();
         repo.addLink.mockRejectedValueOnce(new Error("db down"));
