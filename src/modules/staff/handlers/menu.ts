@@ -16,8 +16,7 @@ import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
 import { formatShiftLocationLabel } from "../../../utils/logistics-formatters.js";
 import { replacementService } from "../../../services/replacement-service.js";
-import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
-import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../utils/location-opening-hours.js";
+import { formatStaffShiftTime } from "../../../utils/staff-shift-time.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import {
@@ -60,37 +59,6 @@ function formatShiftColleague(fullName: string, username?: string | null, telegr
     }
 
     return escapedLabel;
-}
-
-function formatShiftClock(date: Date) {
-    return date.toLocaleTimeString("uk-UA", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "Europe/Kyiv"
-    });
-}
-
-/**
- * Shift times, most authoritative source first:
- *   1. the shift's own start/end, as planned in the webapp;
- *   2. the location's canonical opening hours for that weekday;
- *   3. the legacy hand-seeded text schedule, for locations not yet migrated.
- *
- * Never fall back to an invented default — an unknown time must read as "not set".
- */
-function formatStaffShiftTime(shift: {
-    date: Date;
-    startTime?: Date | null;
-    endTime?: Date | null;
-    location?: { schedule?: string | null; openingHours?: OpeningHoursDay[] | null } | null;
-}) {
-    if (shift.startTime && shift.endTime) {
-        return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
-    }
-
-    return getShiftTimeFromOpeningHours(shift.location?.openingHours, shift.date)
-        || getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date)
-        || "час не вказано";
 }
 
 function buildTaskProofKeyboard(taskId: string) {

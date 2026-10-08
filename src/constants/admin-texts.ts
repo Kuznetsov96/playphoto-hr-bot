@@ -1,4 +1,12 @@
 export const ADMIN_TEXTS = {
+  // Постійна тема співробітниці в чаті підтримки (spec 2026-10-08).
+  "support-thread-btn-call-kuznetsov": `🔔 Kuznetsov`,
+  "support-thread-btn-call-hupalova": `🔔 Hupalova`,
+  "support-thread-btn-back": `↩ Back to Support`,
+  "support-thread-btn-open": `Open topic`,
+  "support-thread-away": (p: { place: string }) => `📍 Today at ${p.place} (not the main point)`,
+  "support-thread-recreated": `⚠️ Previous topic was deleted — history is in the archive.`,
+  "support-thread-archived": (p: { day: string }) => `📦 Employment ended · ${p.day}`,
   "admin-panel-title": `🤖 <b>PlayPhoto 2.0 Admin Panel</b>`,
   "admin-panel-team": (p: { active: string | number }) => `👥 <b>Team:</b> ${p.active} active`,
   "admin-panel-locations": (p: { active: string | number }) => `📍 <b>Locations:</b> ${p.active} active`,
