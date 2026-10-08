@@ -184,7 +184,9 @@ export function renderThreadCard(input: ThreadCardInput): string {
             : "no shift";
         lines.push(`📍 Today ${input.today.day}: ${where}`);
     }
-    lines.push(`👤 ${escapeHtml(input.fullName)}${input.username ? ` · @${escapeHtml(input.username)}` : ""}`);
+    // Прізвище й ім'я: по батькові в картці лише подовжує рядок.
+    const name = input.fullName.trim().split(/\s+/).slice(0, 2).join(" ");
+    lines.push(`👤 ${escapeHtml(name)}${input.username ? ` · @${escapeHtml(input.username)}` : ""}`);
     if (input.phone) lines.push(`📞 <code>${escapeHtml(input.phone)}</code>`);
     if (input.mainPlace) lines.push(`🏠 Main point: ${escapeHtml(input.mainPlace)}`);
     return lines.join("\n");

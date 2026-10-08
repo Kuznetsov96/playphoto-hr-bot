@@ -290,6 +290,13 @@ describe("реакції", () => {
         expect(thread.lastEvent).toEqual({ kind: "support_thumbs_up", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
     });
 
+    it("реакція менеджера на повідомлення з ✍ — бот її потім не зніме", async () => {
+        const { service, api, repo, thread } = setup({ lastAckMessageId: 11 });
+        repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 500, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 11 });
+        await service.relayReaction(api, reaction(SUPPORT_CHAT, 500, SUPPORT_ACCOUNT, ["❤"]), "support");
+        expect(repo.update).toHaveBeenCalledWith("t1", { lastAckMessageId: null });
+    });
+
     it("кілька реакцій — переноситься лише щойно додана", async () => {
         const { service, api, repo, thread } = setup();
         repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 500, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 11 });

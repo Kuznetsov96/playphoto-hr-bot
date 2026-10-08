@@ -295,6 +295,16 @@ describe("повідомлення фотографині в тему", () => {
         expect(links.find(l => l.direction === "IN")).toMatchObject({ topicId: 77 });
     });
 
+    it("✍ лише на останньому її повідомленні — з попереднього знімається", async () => {
+        const { service, api, thread } = setup();
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(71, "Привіт"), contexts: [] });
+        expect(thread.lastAckMessageId).toBe(71);
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(72, "Можна питання?"), contexts: [] });
+        expect(api.setMessageReaction).toHaveBeenCalledWith(STAFF_CHAT, 71, []);
+        expect(api.setMessageReaction).toHaveBeenLastCalledWith(STAFF_CHAT, 72, [{ type: "emoji", emoji: "✍" }]);
+        expect(thread.lastAckMessageId).toBe(72);
+    });
+
     it("історія пишеться в timeline", async () => {
         const { service, api, timeline } = setup();
         await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(24, "Питання"), contexts: [] });
