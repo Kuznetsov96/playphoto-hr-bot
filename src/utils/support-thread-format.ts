@@ -22,6 +22,7 @@ export type ThreadEvent =
     | { kind: "support_thumbs_up"; actorTelegramId: bigint }
     | { kind: "bot_context" }
     | { kind: "archived" }
+    | { kind: "reactivated" }
     | { kind: "escalated"; targetTelegramId: bigint }
     | { kind: "back_to_support"; hasUnansweredQuestion: boolean };
 
@@ -145,6 +146,8 @@ export function nextStatus(current: ThreadState, event: ThreadEvent): ThreadStat
             return current.status === "ESCALATED" ? current : { status: "WAITING", escalatedToTelegramId: null };
         case "support_reply":
         case "support_thumbs_up":
+            // З архіву виводить лише її власне повідомлення, не відповідь команди.
+            if (current.status === "ARCHIVED") return current;
             if (current.status === "ESCALATED" && current.escalatedToTelegramId !== event.actorTelegramId) return current;
             return { status: "ANSWERED", escalatedToTelegramId: null };
         case "escalated":
@@ -153,6 +156,8 @@ export function nextStatus(current: ThreadState, event: ThreadEvent): ThreadStat
             return { status: event.hasUnansweredQuestion ? "WAITING" : "ANSWERED", escalatedToTelegramId: null };
         case "archived":
             return { status: "ARCHIVED", escalatedToTelegramId: null };
+        case "reactivated":
+            return current.status === "ARCHIVED" ? { status: "ANSWERED", escalatedToTelegramId: null } : current;
     }
 }
 
@@ -172,7 +177,7 @@ export type ThreadCardInput = {
 export function renderThreadCard(input: ThreadCardInput): string {
     const lines: string[] = [];
     if (input.archivedAt) {
-        lines.push(`📦 Employment ended ${input.archivedAt}`);
+        lines.push(`📦 Employment ended · ${input.archivedAt}`);
     } else if (input.today) {
         const where = input.today.place
             ? [escapeHtml(input.today.place), input.today.time].filter(Boolean).join(" · ")

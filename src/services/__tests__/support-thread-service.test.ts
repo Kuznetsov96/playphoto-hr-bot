@@ -25,6 +25,7 @@ function fakeRepo() {
             return row;
         }),
         listByStatusNot: vi.fn(async (status: string) => [...threads.values()].filter(t => t.status !== status)),
+        listAll: vi.fn(async () => [...threads.values()]),
         listCollidingSurnames: vi.fn(async () => new Set<string>()),
     };
 }
@@ -270,6 +271,53 @@ describe("звільнена пише після архіву", () => {
         api.editMessageText.mockClear();
         await service.refreshCard(api, repo.threads.get(thread.id)!);
         expect(api.editMessageText.mock.calls[0]![2].split("\n")[0]).toMatch(/^📦 Employment ended /);
+    });
+});
+
+describe("повернулась на роботу", () => {
+    it("тема виходить з архіву, картка знову показує сьогодні", async () => {
+        const { service, api, people, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        const active = await people.getPerson();
+        people.getPerson.mockResolvedValue({ ...active, isActive: false });
+        await service.archiveInactive(api);
+        expect(repo.threads.get(thread.id)!.status).toBe("ARCHIVED");
+        people.getPerson.mockResolvedValue(active);
+        api.editMessageText.mockClear();
+        await service.archiveInactive(api);
+        expect(repo.threads.get(thread.id)!.status).toBe("ANSWERED");
+        expect(repo.threads.get(thread.id)!.archivedAt).toBeNull();
+        expect(api.editMessageText.mock.calls.at(-1)![2].split("\n")[0]).toMatch(/^📍 Today /);
+    });
+
+    it("картка не показує звільнення активній, навіть якщо позначка ще не знята", async () => {
+        const { service, api, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        repo.threads.set(thread.id, { ...repo.threads.get(thread.id), archivedAt: new Date("2026-10-01T10:00:00Z") });
+        api.editMessageText.mockClear();
+        await service.refreshCard(api, repo.threads.get(thread.id)!);
+        expect(api.editMessageText.mock.calls[0]![2].split("\n")[0]).toMatch(/^📍 Today /);
+    });
+});
+
+describe("дорогий опис людини", () => {
+    it("картка і рядок «сьогодні» в один момент читають графік один раз", async () => {
+        const { service, api, people, repo } = setup();
+        // тема вже є (створена раніше, інший процес) — кеш опису порожній
+        const thread = await repo.create({ userId: "u1", chatId: -1001234n, topicId: 77, title: "Бланк", cardMessageId: 5 });
+        const fresh = { ...thread, cardDay: null, noticeDay: null };
+        await service.refreshCardIfStale(api, fresh);
+        await service.noticeIfAway(api, fresh);
+        expect(people.todayShift).toHaveBeenCalledTimes(1);
+    });
+
+    it("непередбачена помилка оновлення картки не змушує читати графік на кожне повідомлення", async () => {
+        const { service, api, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        repo.threads.set(thread.id, { ...repo.threads.get(thread.id), cardDay: null });
+        api.editMessageText.mockRejectedValueOnce(new Error("Bad Request: something odd"));
+        await service.refreshCard(api, repo.threads.get(thread.id)!);
+        expect(repo.threads.get(thread.id)!.cardDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 });
 

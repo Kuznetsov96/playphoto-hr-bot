@@ -230,6 +230,22 @@ describe("правки", () => {
         expect(api.editMessageText).toHaveBeenCalledWith(STAFF_CHAT, 2002, "<blockquote>Завдання</blockquote>\nЗніми справа", { parse_mode: "HTML" });
     });
 
+    it("правка підпису альбому, поки він ще чекає відправки, — доходить після відправки", async () => {
+        vi.useFakeTimers();
+        try {
+            const { service, api, repo } = setup();
+            repo.findLinkByPrivateMessage
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce({ direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 900, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 61 });
+            await service.relayEdit(api, { message_id: 61, chat: { id: STAFF_CHAT }, media_group_id: "g9", photo: [{}], caption: "Новий підпис" } as Any, "staff");
+            expect(api.editMessageCaption).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(3_500);
+            expect(api.editMessageCaption).toHaveBeenCalledWith(SUPPORT_CHAT, 900, { caption: "Новий підпис", caption_entities: [] });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("«not modified» і повідомлення без пари — тихо", async () => {
         const { service, api, repo } = setup();
         await expect(service.relayEdit(api, { message_id: 1, chat: { id: STAFF_CHAT }, text: "x" } as Any, "staff")).resolves.toBeUndefined();

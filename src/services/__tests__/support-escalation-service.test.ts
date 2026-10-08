@@ -82,6 +82,14 @@ describe("покликати", () => {
         expect(api.sendMessage.mock.calls[0][0]).toBe(CHAT);
     });
 
+    it("подвійне натискання — одне покликання", async () => {
+        const { service, api } = setup();
+        await service.call(api, "t1", "kuznetsov", caller);
+        await service.call(api, "t1", "kuznetsov", caller);
+        expect(api.sendMessage.mock.calls.filter((c: Any[]) => c[0] === CHAT)).toHaveLength(1);
+        expect(api.sendMessage.mock.calls.filter((c: Any[]) => c[0] === KUZNETSOV)).toHaveLength(1);
+    });
+
     it("ціль не налаштована — помилка, статус не змінюється", async () => {
         const { service, api, thread } = setup({}, { kuznetsov: undefined, hupalova: HUPALOVA, support: SUPPORT });
         await expect(service.call(api, "t1", "kuznetsov", caller)).rejects.toThrow("not configured");

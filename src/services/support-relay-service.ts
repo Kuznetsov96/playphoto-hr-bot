@@ -47,6 +47,8 @@ const CONTEXT_QUOTE_LIMIT = 200;
 
 /** Скільки чекати наступну частину альбому: на проді частина проходить усю ланку middleware. */
 const ALBUM_WAIT_MS = 2_000;
+/** Запас після відправки альбому, перш ніж повторити правку його підпису. */
+const EDIT_RETRY_MARGIN_MS = 1_500;
 const TEXT_LIMIT = 4096;
 const CAPTION_LIMIT = 1024;
 
@@ -338,11 +340,19 @@ export class SupportRelayService {
         return "delivered";
     }
 
-    async relayEdit(api: Api, message: Message, side: "staff" | "support"): Promise<void> {
+    async relayEdit(api: Api, message: Message, side: "staff" | "support", retried = false): Promise<void> {
         const link = side === "staff"
             ? await this.deps.repo.findLinkByPrivateMessage(BigInt(message.chat.id), message.message_id)
             : await this.deps.repo.findLinkByTopicMessage(BigInt(message.chat.id), message.message_id);
-        if (!link) return;
+        if (!link) {
+            // Альбом ще чекає відправки — пари немає; спробувати, коли він піде.
+            if (message.media_group_id && !retried) {
+                setTimeout(() => {
+                    this.relayEdit(api, message, side, true).catch(error => logger.warn({ err: error }, "Delayed album edit relay failed"));
+                }, (this.deps.albumDelayMs ?? ALBUM_WAIT_MS) + EDIT_RETRY_MARGIN_MS);
+            }
+            return;
+        }
         const expected = side === "staff" ? "IN" : "OUT";
         if (link.direction !== expected) return;
 

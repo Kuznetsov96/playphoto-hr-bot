@@ -21,6 +21,11 @@ const LEASE_MS = 5 * 60 * 1000;
  */
 const PAUSE_BETWEEN_PEOPLE_MS = 20_000;
 const LINK_RETENTION_MS = 90 * 86_400_000;
+const FAIL_KEY_PREFIX = "support:threads:migration:fail:";
+const NOTED_KEY_PREFIX = "support:threads:migration:noted:";
+/** Після стількох збоїв людина пропускається, щоб перехід не крутився вічно. */
+const MAX_ATTEMPTS_PER_PERSON = 3;
+const FAIL_TTL_S = 30 * 86_400;
 
 type RedisLike = {
     get(key: string): Promise<string | null>;
@@ -31,7 +36,7 @@ type RedisLike = {
 export type MigrationDeps = {
     redis: RedisLike;
     repo: Pick<SupportThreadRepository, "listLegacyActive" | "closeLegacy">;
-    threads: Pick<SupportThreadService, "ensureThread">;
+    threads: Pick<SupportThreadService, "ensureThread" | "applyStatus">;
     supportChatId: () => number;
     topicLink: (chatId: bigint, topicId: number) => string;
     sleep: (ms: number) => Promise<void>;
@@ -40,13 +45,19 @@ export type MigrationDeps = {
 export async function migrateLegacyConversations(api: Api, deps: MigrationDeps): Promise<{ migrated: number; skipped: number; failed: number }> {
     const result = { migrated: 0, skipped: 0, failed: 0 };
     if (await deps.redis.get(DONE_KEY)) return result;
-    if ((await deps.redis.set(LEASE_KEY, String(process.pid), "PX", LEASE_MS, "NX")) !== "OK") return result;
+    const token = `${process.pid}:${Date.now()}`;
+    if ((await deps.redis.set(LEASE_KEY, token, "PX", LEASE_MS, "NX")) !== "OK") return result;
 
     try {
         const rows = await deps.repo.listLegacyActive(BigInt(deps.supportChatId()));
-        for (const [index, row] of rows.entries()) {
-            if (index > 0) await deps.sleep(PAUSE_BETWEEN_PEOPLE_MS);
-            await deps.redis.set(LEASE_KEY, String(process.pid), "PX", LEASE_MS);
+        let migratedBefore = false;
+        for (const row of rows) {
+            const failKey = `${FAIL_KEY_PREFIX}${row.userId}`;
+            if (Number(await deps.redis.get(failKey) ?? 0) >= MAX_ATTEMPTS_PER_PERSON) {
+                result.skipped++; // кілька спроб не вдалося — у журналі є причина, перехід не тримаємо
+                continue;
+            }
+
             let thread;
             try {
                 thread = await deps.threads.ensureThread(api, row.userId);
@@ -55,32 +66,59 @@ export async function migrateLegacyConversations(api: Api, deps: MigrationDeps):
                     result.skipped++; // кандидатка — її старий контур не чіпаємо
                     continue;
                 }
-                result.failed++;
+                await countFailure(deps, failKey, result);
                 logger.error({ err: error, userId: row.userId }, "Support thread migration failed for a person");
                 continue;
             }
 
-            const newLink = deps.topicLink(thread.chatId, thread.topicId);
-            if (row.topics.length) {
-                const previous = row.topics.map(topic => deps.topicLink(topic.chatId, topic.topicId)).join(" · ");
-                await api.sendMessage(Number(thread.chatId), `⬅️ Previous conversation: ${previous}`, { message_thread_id: thread.topicId })
-                    .catch(error => logger.warn({ err: error, threadId: thread.id }, "Previous-conversation note failed"));
+            // Пауза — лише між справжніми перенесеннями, кандидатки її не чекають.
+            if (migratedBefore) await deps.sleep(PAUSE_BETWEEN_PEOPLE_MS);
+            migratedBefore = true;
+            await deps.redis.set(LEASE_KEY, token, "PX", LEASE_MS);
+
+            try {
+                // Рядки «Previous/Moved» — раз на людину, навіть якщо процес упав після них.
+                const notedKey = `${NOTED_KEY_PREFIX}${row.userId}`;
+                if (!(await deps.redis.get(notedKey))) {
+                    const newLink = deps.topicLink(thread.chatId, thread.topicId);
+                    if (row.topics.length) {
+                        const previous = row.topics.map(topic => deps.topicLink(topic.chatId, topic.topicId)).join(" · ");
+                        await api.sendMessage(Number(thread.chatId), `⬅️ Previous conversation: ${previous}`, { message_thread_id: thread.topicId })
+                            .catch(error => logger.warn({ err: error, threadId: thread.id }, "Previous-conversation note failed"));
+                    }
+                    for (const topic of row.topics) {
+                        await api.sendMessage(Number(topic.chatId), `➡️ Moved to the permanent topic: ${newLink}`, { message_thread_id: topic.topicId })
+                            .catch(error => logger.warn({ err: error, topicId: topic.topicId }, "Moved note failed"));
+                        await api.closeForumTopic(Number(topic.chatId), topic.topicId)
+                            .catch(error => logger.warn({ err: error, topicId: topic.topicId }, "Legacy topic close failed"));
+                    }
+                    await deps.redis.set(notedKey, "1", "EX", FAIL_TTL_S);
+                }
+                if (row.waiting) await deps.threads.applyStatus(api, thread, { kind: "bot_context" });
+                await deps.repo.closeLegacy({ ticketIds: row.ticketIds, outgoingIds: row.outgoingIds, proofIds: row.proofIds });
+                result.migrated++;
+            } catch (error) {
+                await countFailure(deps, failKey, result);
+                logger.error({ err: error, userId: row.userId }, "Support thread migration failed for a person");
             }
-            for (const topic of row.topics) {
-                await api.sendMessage(Number(topic.chatId), `➡️ Moved to the permanent topic: ${newLink}`, { message_thread_id: topic.topicId })
-                    .catch(error => logger.warn({ err: error, topicId: topic.topicId }, "Moved note failed"));
-                await api.closeForumTopic(Number(topic.chatId), topic.topicId)
-                    .catch(error => logger.warn({ err: error, topicId: topic.topicId }, "Legacy topic close failed"));
-            }
-            await deps.repo.closeLegacy({ ticketIds: row.ticketIds, outgoingIds: row.outgoingIds, proofIds: row.proofIds });
-            result.migrated++;
         }
         if (result.failed === 0) await deps.redis.set(DONE_KEY, "1");
         logger.info({ event: "support.threads.migration.completed", ...result }, "Support thread migration finished");
         return result;
     } finally {
-        await deps.redis.del(LEASE_KEY).catch(() => 0);
+        // Лише свій лок: якщо наш устиг протухнути, його вже тримає інший процес.
+        if ((await deps.redis.get(LEASE_KEY).catch(() => null)) === token) {
+            await deps.redis.del(LEASE_KEY).catch(() => 0);
+        }
     }
+}
+
+/** Збій рахується; на останній дозволеній спробі людина вже «пропущена», а не «збій». */
+async function countFailure(deps: MigrationDeps, failKey: string, result: { skipped: number; failed: number }) {
+    const attempts = Number(await deps.redis.get(failKey) ?? 0) + 1;
+    await deps.redis.set(failKey, String(attempts), "EX", FAIL_TTL_S);
+    if (attempts >= MAX_ATTEMPTS_PER_PERSON) result.skipped++;
+    else result.failed++;
 }
 
 export type DailyDeps = {

@@ -130,6 +130,16 @@ describe("статус теми", () => {
         expect(nextStatus(plain("ARCHIVED"), { kind: "staff_question" }).status).toBe("WAITING");
     });
 
+    it("відповідь чи 👍 підтримки в архіві архів не знімає — лише її власне повідомлення", () => {
+        expect(nextStatus(plain("ARCHIVED"), { kind: "support_reply", actorTelegramId: 1n }).status).toBe("ARCHIVED");
+        expect(nextStatus(plain("ARCHIVED"), { kind: "support_thumbs_up", actorTelegramId: 1n }).status).toBe("ARCHIVED");
+    });
+
+    it("повернулась на роботу — з архіву у «відповіли»", () => {
+        expect(nextStatus(plain("ARCHIVED"), { kind: "reactivated" })).toEqual(plain("ANSWERED"));
+        expect(nextStatus(plain("WAITING"), { kind: "reactivated" }).status).toBe("WAITING");
+    });
+
     it("звільнення — архів і без ескалації", () => {
         expect(nextStatus(plain("ESCALATED", 1n), { kind: "archived" })).toEqual(plain("ARCHIVED"));
     });
@@ -147,8 +157,8 @@ describe("картка людини", () => {
         expect(card.split("\n")[0]).toBe("📍 Today 08.10: Lviv · Dragon Park 1 · 10:00–20:00");
     });
 
-    it("архів замість сьогодні", () => {
-        expect(renderThreadCard({ ...base, archivedAt: "08.10" }).split("\n")[0]).toBe("📦 Employment ended 08.10");
+    it("архів замість сьогодні — той самий формат, що й рядок у темі", () => {
+        expect(renderThreadCard({ ...base, archivedAt: "08.10" }).split("\n")[0]).toBe("📦 Employment ended · 08.10");
     });
 
     it("ім'я, юзернейм, телефон і основна точка, HTML екранується", () => {

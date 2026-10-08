@@ -20,6 +20,8 @@ export type LegacyConversation = {
     ticketIds: number[];
     outgoingIds: number[];
     proofIds: string[];
+    /** Стара розмова чекала відповіді підтримки: тікет не взяли або звіт чекає команду. */
+    waiting: boolean;
 };
 
 const OPEN_PROOF_STATUSES = ["OPEN", "WAITING_FOR_STAFF", "WAITING_FOR_SUPPORT"] as const;
@@ -119,11 +121,11 @@ export class SupportThreadRepository {
 
     async listLegacyActive(supportChatId: bigint): Promise<LegacyConversation[]> {
         const [tickets, outgoing, proofs] = await Promise.all([
-            prisma.supportTicket.findMany({ where: { status: { in: ["OPEN", "IN_PROGRESS"] } }, select: { id: true, userId: true, topicId: true }, orderBy: { id: "asc" } }),
+            prisma.supportTicket.findMany({ where: { status: { in: ["OPEN", "IN_PROGRESS"] } }, select: { id: true, userId: true, topicId: true, status: true }, orderBy: { id: "asc" } }),
             prisma.outgoingTopic.findMany({ where: { isClosed: false }, select: { id: true, userId: true, topicId: true, chatId: true }, orderBy: { id: "asc" } }),
             prisma.taskProofSubmission.findMany({
                 where: { supportTopicStatus: { in: [...OPEN_PROOF_STATUSES] }, supportTopicId: { not: null } },
-                select: { id: true, supportTopicId: true, supportChatId: true, staff: { select: { userId: true } } },
+                select: { id: true, supportTopicId: true, supportChatId: true, supportTopicStatus: true, staff: { select: { userId: true } } },
                 orderBy: { createdAt: "asc" },
             }),
         ]);
@@ -132,7 +134,7 @@ export class SupportThreadRepository {
         const entry = (userId: string) => {
             let row = byUser.get(userId);
             if (!row) {
-                row = { userId, topics: [], ticketIds: [], outgoingIds: [], proofIds: [] };
+                row = { userId, topics: [], ticketIds: [], outgoingIds: [], proofIds: [], waiting: false };
                 byUser.set(userId, row);
             }
             return row;
@@ -141,6 +143,7 @@ export class SupportThreadRepository {
         for (const ticket of tickets) {
             const row = entry(ticket.userId);
             row.ticketIds.push(ticket.id);
+            if (ticket.status === "OPEN") row.waiting = true;
             if (ticket.topicId) row.topics.push({ chatId: supportChatId, topicId: ticket.topicId });
         }
         for (const topic of outgoing) {
@@ -152,6 +155,7 @@ export class SupportThreadRepository {
         for (const proof of proofs) {
             const row = entry(proof.staff.userId);
             row.proofIds.push(proof.id);
+            if (proof.supportTopicStatus === "OPEN" || proof.supportTopicStatus === "WAITING_FOR_SUPPORT") row.waiting = true;
             if (proof.supportTopicId && proof.supportChatId) row.topics.push({ chatId: proof.supportChatId, topicId: proof.supportTopicId });
         }
         return [...byUser.values()];

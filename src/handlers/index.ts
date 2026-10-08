@@ -739,7 +739,8 @@ handlers.use(async (ctx, next) => {
                 if (ctx.message && (await handleStaffThreadMessage(ctx))) return;
                 const text = STAFF_TEXTS["support-thread-inactive-alert"];
                 if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text, show_alert: true });
-                else await ctx.reply(text);
+                // Відповідаємо лише на її дії, а не на службові оновлення (my_chat_member тощо).
+                else if (ctx.message) await ctx.reply(text);
                 return;
             }
             if (ctx.chat?.type === "private") {

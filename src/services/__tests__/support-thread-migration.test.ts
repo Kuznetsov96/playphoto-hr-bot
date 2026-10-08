@@ -99,6 +99,53 @@ describe("перехід на постійні теми", () => {
         expect(leaseCalls.slice(1).every((c: Any[]) => c[2] === "PX" && c[3] === 300_000 && !c.includes("NX"))).toBe(true);
     });
 
+    it("кандидатки не чекають паузи — пауза лише між справжніми перенесеннями", async () => {
+        const { deps, api } = setup([
+            { userId: "candidate", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [] },
+            { userId: "u1", topics: [], ticketIds: [2], outgoingIds: [], proofIds: [] },
+        ]);
+        await migrateLegacyConversations(api, deps);
+        expect(deps.sleep).not.toHaveBeenCalled();
+    });
+
+    it("людина, що падає тричі, більше не тримає перехід незавершеним", async () => {
+        const { deps, api, store } = setup([{ userId: "broken", topics: [], ticketIds: [7], outgoingIds: [], proofIds: [] }]);
+        await migrateLegacyConversations(api, deps);
+        await migrateLegacyConversations(api, deps);
+        expect(store.has("support:threads:migrated:v1")).toBe(false);
+        await migrateLegacyConversations(api, deps);
+        expect(store.get("support:threads:migrated:v1")).toBe("1");
+    });
+
+    it("повтор після падіння посеред людини не дублює рядки", async () => {
+        const { deps, api, repo } = setup([{ userId: "u1", topics: [{ chatId: BigInt(CHAT), topicId: 10 }], ticketIds: [1], outgoingIds: [], proofIds: [] }]);
+        repo.closeLegacy.mockRejectedValueOnce(new Error("db down"));
+        await migrateLegacyConversations(api, deps);
+        await migrateLegacyConversations(api, deps);
+        const previous = api.sendMessage.mock.calls.filter((c: Any[]) => String(c[1]).startsWith("⬅️"));
+        expect(previous).toHaveLength(1);
+        expect(repo.closeLegacy).toHaveBeenCalledTimes(2);
+    });
+
+    it("лок чужого процесу не видаляється", async () => {
+        const { deps, api, store, redis } = setup([]);
+        redis.set.mockImplementation(async (key: string, value: string, ...args: Any[]) => {
+            if (key === "support:threads:migration:lease" && !args.includes("NX")) { store.set(key, "someone-else"); return "OK"; }
+            if (args.includes("NX") && store.has(key)) return null;
+            store.set(key, value);
+            return "OK";
+        });
+        await migrateLegacyConversations(api, { ...deps, repo: { ...deps.repo, listLegacyActive: vi.fn(async () => [{ userId: "u1", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [] }]) } });
+        expect(store.get("support:threads:migration:lease")).toBe("someone-else");
+    });
+
+    it("стара розмова чекала відповіді — нова тема теж «чекає»", async () => {
+        const { deps, api, threads } = setup([{ userId: "u1", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [], waiting: true }]);
+        threads.applyStatus = vi.fn(async (_a: Any, t: Any) => t);
+        await migrateLegacyConversations(api, deps);
+        expect(threads.applyStatus).toHaveBeenCalledWith(api, expect.objectContaining({ id: "thread-u1" }), { kind: "bot_context" });
+    });
+
     it("пауза між людьми — щоб не впертися в ліміт групи", async () => {
         const { deps, api } = setup([
             { userId: "u1", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [] },

@@ -50,10 +50,10 @@ export const threadPeople: ThreadPeople = {
     },
 
     async todayShift(staffId, now) {
-        const { getVisibleStaffShifts } = await import("../modules/staff/services/staff-schedule-view.js");
+        // Та сама функція, що в хабі: зміна, віддана на заміну, вже не її.
+        const { getStaffShiftToday } = await import("../modules/staff/services/staff-today-shift.js");
         const today = new Date(`${kyivDay(now)}T00:00:00.000Z`);
-        const shifts = await getVisibleStaffShifts(staffId, today, 5, { canonicalRead: true });
-        const shift = shifts.find(item => item.date.getTime() === today.getTime());
+        const shift = await getStaffShiftToday(staffId, today);
         if (!shift) return null;
         const time = formatStaffShiftTime(shift);
         return { location: toPlace(shift.location), time: time === SHIFT_TIME_NOT_SET ? null : time.replace("-", "–") };

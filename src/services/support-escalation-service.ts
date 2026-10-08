@@ -4,6 +4,7 @@ import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import type { SupportThreadRepository } from "../repositories/support-thread-repository.js";
 import type { SupportThreadService } from "./support-thread-service.js";
+import { ActionDedupeWindow } from "../utils/action-dedupe.js";
 
 /**
  * «Покликати» Кузнєцова чи Гупалову в тему і повернути її Support-акаунту
@@ -31,12 +32,28 @@ export const backButton = (threadId: string) => ({
     inline_keyboard: [[{ text: ADMIN_TEXTS["support-thread-btn-back"], callback_data: `sth:b:${threadId}` }]],
 });
 
+/** Подвійне натискання «🔔» не має кликати двічі. */
+const CALL_DEDUPE_MS = 15_000;
+
 export class SupportEscalationService {
+    private readonly callDedupe = new ActionDedupeWindow(CALL_DEDUPE_MS);
+
     constructor(private readonly deps: EscalationDeps) {}
 
     async call(api: Api, threadId: string, target: EscalationTarget, caller: { id: number; firstName: string }): Promise<void> {
         const targetId = this.deps.targets()[target];
         if (!targetId) throw new Error(`Escalation target ${target} is not configured`);
+        const dedupeKey = `${threadId}:${target}`;
+        if (!this.callDedupe.tryAcquire(dedupeKey)) return;
+        try {
+            await this.callOnce(api, threadId, target, targetId, caller);
+        } catch (error) {
+            this.callDedupe.release(dedupeKey); // невдале натискання не блокує наступне
+            throw error;
+        }
+    }
+
+    private async callOnce(api: Api, threadId: string, target: EscalationTarget, targetId: number, caller: { id: number; firstName: string }): Promise<void> {
         const thread = await this.deps.repo.findById(threadId);
         if (!thread) throw new Error(`Support thread ${threadId} not found`);
 

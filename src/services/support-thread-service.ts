@@ -45,7 +45,7 @@ export type ThreadPeople = {
 };
 
 export type ThreadDeps = {
-    repo: Pick<SupportThreadRepository, "findByUserId" | "findById" | "create" | "update" | "listByStatusNot" | "listCollidingSurnames">;
+    repo: Pick<SupportThreadRepository, "findByUserId" | "findById" | "create" | "update" | "listByStatusNot" | "listAll" | "listCollidingSurnames">;
     people: ThreadPeople;
     lock: <T>(userId: string, fn: () => Promise<T>) => Promise<T>;
     chatId: () => number;
@@ -56,6 +56,7 @@ export type ThreadDeps = {
 
 /** Скільки чекати чужого створення теми: createForumTopic + картка + закріп — кілька секунд. */
 const LOCK_WAIT_STEP_MS = 250;
+const DESCRIBE_CACHE_MS = 60_000;
 const LOCK_WAIT_ATTEMPTS = 60;
 
 /** Пауза між темами у фонових обходах: ліміт Telegram — 20 повідомлень на хвилину в групі. */
@@ -136,7 +137,9 @@ export class SupportThreadService {
     async refreshCard(api: Api, thread: SupportThread, now: Date = new Date()): Promise<void> {
         const person = await this.deps.people.getPerson(thread.userId);
         if (!person) return;
-        const view = await this.describe(person, now, thread.archivedAt ? shortDay(kyivDay(thread.archivedAt)) : null);
+        // «Звільнена» — лише поки вона справді неактивна; позначку знімає щоденна задача.
+        const archivedAt = !person.isActive && thread.archivedAt ? shortDay(kyivDay(thread.archivedAt)) : null;
+        const view = await this.describe(person, now, archivedAt);
 
         if (thread.cardMessageId) {
             try {
@@ -155,6 +158,8 @@ export class SupportThreadService {
                 }
                 if (!text.includes("message to edit not found") && !text.includes("message_id_invalid")) {
                     logger.warn({ err: error, threadId: thread.id }, "Support thread card update failed");
+                    // Завтра спробуємо знову; інакше опис людини читався б на кожне повідомлення.
+                    await this.deps.repo.update(thread.id, { cardDay: kyivDay(now) });
                     return;
                 }
             }
@@ -228,14 +233,18 @@ export class SupportThreadService {
     }
 
     async archiveInactive(api: Api, now: Date = new Date()): Promise<void> {
-        const threads = await this.deps.repo.listByStatusNot("ARCHIVED");
+        const threads = await this.deps.repo.listAll();
         for (const thread of threads) {
             try {
                 const person = await this.deps.people.getPerson(thread.userId);
                 if (!person) continue;
                 if (person.isActive) {
-                    // Повернулась на роботу — наступне звільнення знову буде видно.
-                    if (thread.archivedAt) await this.deps.repo.update(thread.id, { archivedAt: null });
+                    // Повернулась на роботу: тема виходить з архіву, картка знову про сьогодні.
+                    if (thread.archivedAt || thread.status === "ARCHIVED") {
+                        const cleared = await this.deps.repo.update(thread.id, { archivedAt: null });
+                        const back = await this.applyStatus(api, cleared, { kind: "reactivated" });
+                        await this.refreshCard(api, back, now);
+                    }
                     continue;
                 }
                 // Уже в архіві, а тема «чекає» — це вона написала після звільнення; не глушити.
@@ -252,7 +261,24 @@ export class SupportThreadService {
         }
     }
 
-    private async describe(person: ThreadPerson, now: Date, archivedAt: string | null = null) {
+    /**
+     * Опис людини читає графік (HTTP до канону) і всіх співробітниць. Картка й рядок
+     * «сьогодні» на першому повідомленні дня питають його підряд — хвилину тримаємо.
+     */
+    private readonly describeCache = new Map<string, { at: number; value: Promise<Awaited<ReturnType<SupportThreadService["describeFresh"]>>> }>();
+
+    private describe(person: ThreadPerson, now: Date, archivedAt: string | null = null) {
+        const key = `${person.userId}:${kyivDay(now)}:${archivedAt ?? ""}`;
+        const cached = this.describeCache.get(key);
+        if (cached && now.getTime() - cached.at < DESCRIBE_CACHE_MS) return cached.value;
+        const value = this.describeFresh(person, now, archivedAt);
+        this.describeCache.set(key, { at: now.getTime(), value });
+        value.catch(() => this.describeCache.delete(key));
+        if (this.describeCache.size > 500) this.describeCache.clear();
+        return value;
+    }
+
+    private async describeFresh(person: ThreadPerson, now: Date, archivedAt: string | null) {
         const [shiftPlaces, today, colliding] = await Promise.all([
             this.deps.people.recentShiftLocations(person.staffId, now),
             this.deps.people.todayShift(person.staffId, now),

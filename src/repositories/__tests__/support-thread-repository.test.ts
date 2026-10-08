@@ -61,13 +61,13 @@ describe("стара тема", () => {
     });
 
     it("групує активні старі розмови за людиною", async () => {
-        db.supportTicket.findMany.mockResolvedValue([{ id: 1, userId: "u1", topicId: 10 }, { id: 2, userId: "u1", topicId: null }]);
+        db.supportTicket.findMany.mockResolvedValue([{ id: 1, userId: "u1", topicId: 10, status: "OPEN" }, { id: 2, userId: "u1", topicId: null, status: "IN_PROGRESS" }]);
         db.outgoingTopic.findMany.mockResolvedValue([{ id: 3, userId: "u1", topicId: 11, chatId: -100n }, { id: 4, userId: null, topicId: 12, chatId: -100n }]);
-        db.taskProofSubmission.findMany.mockResolvedValue([{ id: "p1", supportTopicId: 13, supportChatId: -100n, staff: { userId: "u2" } }]);
+        db.taskProofSubmission.findMany.mockResolvedValue([{ id: "p1", supportTopicId: 13, supportChatId: -100n, supportTopicStatus: "WAITING_FOR_STAFF", staff: { userId: "u2" } }]);
         const rows = await supportThreadRepository.listLegacyActive(-100n);
         expect(rows).toEqual([
-            { userId: "u1", topics: [{ chatId: -100n, topicId: 10 }, { chatId: -100n, topicId: 11 }], ticketIds: [1, 2], outgoingIds: [3], proofIds: [] },
-            { userId: "u2", topics: [{ chatId: -100n, topicId: 13 }], ticketIds: [], outgoingIds: [], proofIds: ["p1"] },
+            { userId: "u1", topics: [{ chatId: -100n, topicId: 10 }, { chatId: -100n, topicId: 11 }], ticketIds: [1, 2], outgoingIds: [3], proofIds: [], waiting: true },
+            { userId: "u2", topics: [{ chatId: -100n, topicId: 13 }], ticketIds: [], outgoingIds: [], proofIds: ["p1"], waiting: false },
         ]);
     });
 });
