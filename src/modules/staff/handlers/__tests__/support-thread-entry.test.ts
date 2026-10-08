@@ -86,6 +86,19 @@ describe("повідомлення співробітниці йде в її т�
         expect(c.session.step).toBe("create_ticket");
     });
 
+    it("службова подія (закріпила повідомлення) — мовчки, без «не вийде передати»", async () => {
+        const c = ctx({}, { message_id: 31, pinned_message: {} });
+        await expect(handleStaffThreadMessage(c)).resolves.toBe(true);
+        expect(c.reply).not.toHaveBeenCalled();
+        expect(relayStaffMessage).not.toHaveBeenCalled();
+    });
+
+    it("частина альбому лишає крок «пише в підтримку» — наступні частини не втечуть у чернетку звіту", async () => {
+        const c = ctx({ step: "create_ticket" }, { message_id: 32, media_group_id: "g1", photo: [{}] });
+        await handleStaffThreadMessage(c);
+        expect(c.session.step).toBe("create_ticket");
+    });
+
     it("відповідь на старе уточнення по звіту — контекст задачі зі звіту", async () => {
         getSubmissionById.mockResolvedValue({ id: "p1", taskId: "task1" });
         getTaskById.mockResolvedValue({ id: "task1", taskText: "Вітрина", workDate: null, locationName: null, city: null });

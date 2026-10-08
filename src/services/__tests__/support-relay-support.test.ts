@@ -185,11 +185,21 @@ describe("відповідь із теми фотографині", () => {
         expect(notices).toEqual([[SUPPORT_CHAT, "➡️ This conversation now lives here: link/77", { message_thread_id: 300 }]]);
     });
 
-    it("збій бази посеред пересилання — у темі видно, що не дійшло", async () => {
-        const { service, api, repo } = setup();
-        repo.addLink.mockRejectedValueOnce(new Error("db down"));
+    it("збій бази до відправки — у темі «не дійшло»", async () => {
+        const { service, api } = setup();
+        (service as Any).deps.getStaffChatId = async () => { throw new Error("db down"); };
         await expect(service.relaySupportMessage(api, { message: inTopic(50), sender })).resolves.toBe("failed");
         expect(api.sendMessage.mock.calls.at(-1)[1]).toMatch(/^❌ Not delivered: internal error/);
+    });
+
+    it("доставлено, а запис упав — не просимо надіслати вдруге", async () => {
+        const { service, api, repo } = setup();
+        repo.addLink.mockRejectedValueOnce(new Error("db down"));
+        await expect(service.relaySupportMessage(api, { message: inTopic(52), sender })).resolves.toBe("delivered");
+        expect(api.copyMessage).toHaveBeenCalledTimes(1);
+        const note = api.sendMessage.mock.calls.at(-1)[1];
+        expect(note).toMatch(/^⚠️ Delivered/);
+        expect(note).not.toMatch(/send it again/i);
     });
 
     it("лише постійні теми — стара тема віддається старому обробнику", async () => {

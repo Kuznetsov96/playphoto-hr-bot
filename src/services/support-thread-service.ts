@@ -249,6 +249,13 @@ export class SupportThreadService {
                 }
                 // Уже в архіві, а тема «чекає» — це вона написала після звільнення; не глушити.
                 if (thread.archivedAt) continue;
+                // Написала в день звільнення і чекає відповіді: позначити звільнення в картці,
+                // але не ховати питання за 📁 і не ставити службовий рядок останнім.
+                if (thread.status === "WAITING" || thread.status === "ESCALATED") {
+                    const marked = await this.deps.repo.update(thread.id, { archivedAt: now });
+                    await this.refreshCard(api, marked, now);
+                    continue;
+                }
                 const archived = await this.applyStatus(api, thread, { kind: "archived" });
                 const marked = await this.deps.repo.update(archived.id, { archivedAt: now });
                 await api.sendMessage(Number(thread.chatId), ADMIN_TEXTS["support-thread-archived"]({ day: shortDay(kyivDay(now)) }), {

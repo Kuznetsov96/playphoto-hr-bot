@@ -274,6 +274,23 @@ describe("звільнена пише після архіву", () => {
     });
 });
 
+describe("звільнена написала в день звільнення", () => {
+    it("ранковий архів не ховає її питання: статус лишається, рядка немає, картка про звільнення", async () => {
+        const { service, api, people, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        repo.threads.set(thread.id, { ...repo.threads.get(thread.id), status: "WAITING" });
+        people.getPerson.mockResolvedValue({ ...(await people.getPerson()), isActive: false });
+        api.sendMessage.mockClear();
+        api.editMessageText.mockClear();
+        await service.archiveInactive(api);
+        const after = repo.threads.get(thread.id)!;
+        expect(after.status).toBe("WAITING");
+        expect(after.archivedAt).toBeInstanceOf(Date);
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(api.editMessageText.mock.calls[0]![2].split("\n")[0]).toMatch(/^📦 Employment ended · /);
+    });
+});
+
 describe("повернулась на роботу", () => {
     it("тема виходить з архіву, картка знову показує сьогодні", async () => {
         const { service, api, people, repo } = setup();

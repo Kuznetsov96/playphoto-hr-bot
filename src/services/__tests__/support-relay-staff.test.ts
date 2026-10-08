@@ -252,6 +252,16 @@ describe("повідомлення фотографині в тему", () => {
         expect(api.setMessageReaction).toHaveBeenCalledTimes(1);
     });
 
+    it("альбом дійшов, а запис упав — їй не кажуть «не вдалося»", async () => {
+        const { service, api, repo } = setup();
+        repo.addLink.mockRejectedValue(new Error("db down"));
+        const photo = (id: number): Any => ({ message_id: id, chat: { id: STAFF_CHAT }, media_group_id: "g6", photo: [{}] });
+        await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: photo(48), contexts: [] });
+        await new Promise(resolve => setTimeout(resolve, 5));
+        expect(api.copyMessages).toHaveBeenCalledTimes(1);
+        expect(api.sendMessage).not.toHaveBeenCalledWith(STAFF_CHAT, "FAILED");
+    });
+
     it("альбом не дійшов — фотографиня бачить збій", async () => {
         const { service, api, threads } = setup();
         const photo = (id: number): Any => ({ message_id: id, chat: { id: STAFF_CHAT }, media_group_id: "g4", photo: [{}] });

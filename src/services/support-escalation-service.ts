@@ -97,6 +97,9 @@ export class SupportEscalationService {
             thread.lastQuestionAt && (!thread.lastSupportAt || thread.lastQuestionAt.getTime() > thread.lastSupportAt.getTime()),
         );
         const updated = await this.deps.threads.applyStatus(api, thread, { kind: "back_to_support", hasUnansweredQuestion });
+        // Повернули — нове покликання має спрацювати одразу, а не через 15 с.
+        this.callDedupe.release(`${threadId}:kuznetsov`);
+        this.callDedupe.release(`${threadId}:hupalova`);
         const supportId = this.deps.targets().support;
         const supportMention = supportId ? mention(supportId, LABELS.support) : LABELS.support;
         await api.sendMessage(

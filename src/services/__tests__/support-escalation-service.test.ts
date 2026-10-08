@@ -90,6 +90,14 @@ describe("покликати", () => {
         expect(api.sendMessage.mock.calls.filter((c: Any[]) => c[0] === KUZNETSOV)).toHaveLength(1);
     });
 
+    it("покликали, повернули, покликали знову — друге покликання спрацьовує", async () => {
+        const { service, api } = setup();
+        await service.call(api, "t1", "kuznetsov", caller);
+        await service.backToSupport(api, "t1", { id: KUZNETSOV, firstName: "Vitalii" });
+        await service.call(api, "t1", "kuznetsov", caller);
+        expect(api.sendMessage.mock.calls.filter((c: Any[]) => c[0] === KUZNETSOV)).toHaveLength(2);
+    });
+
     it("ціль не налаштована — помилка, статус не змінюється", async () => {
         const { service, api, thread } = setup({}, { kuznetsov: undefined, hupalova: HUPALOVA, support: SUPPORT });
         await expect(service.call(api, "t1", "kuznetsov", caller)).rejects.toThrow("not configured");

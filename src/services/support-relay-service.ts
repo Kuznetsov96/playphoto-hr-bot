@@ -325,17 +325,23 @@ export class SupportRelayService {
             return "failed";
         }
 
-        await this.deps.repo.addLink({
-            threadId: thread.id,
-            direction: "OUT",
-            topicChatId: BigInt(chatId),
-            topicId,
-            topicMessageId: message.message_id,
-            privateChatId: BigInt(staffChatId),
-            privateMessageId: delivered.messageId,
-            contextText: delivered.contextText,
-        });
-        thread = await this.afterSupportDelivery(api, thread, sender, message);
+        try {
+            await this.deps.repo.addLink({
+                threadId: thread.id,
+                direction: "OUT",
+                topicChatId: BigInt(chatId),
+                topicId,
+                topicMessageId: message.message_id,
+                privateChatId: BigInt(staffChatId),
+                privateMessageId: delivered.messageId,
+                contextText: delivered.contextText,
+            });
+            thread = await this.afterSupportDelivery(api, thread, sender, message);
+        } catch (error) {
+            // Фотографиня вже отримала — «надішли ще раз» продублювало б їй повідомлення.
+            logger.error({ err: error, threadId: thread.id }, "Support reply delivered but not recorded");
+            await note("⚠️ Delivered, but the bot couldn't record it: quotes, edits and reactions won't work for this message.");
+        }
         await this.noticeLegacy(api, resolved, chatId, topicId);
         return "delivered";
     }
@@ -610,6 +616,18 @@ export class SupportRelayService {
                 thread = await this.deps.threads.recreateTopic(api, thread);
                 copied = await api.copyMessages(Number(thread.chatId), chatId, ids, { message_thread_id: thread.topicId });
             }
+            // Далі — лише запис і статус: альбом уже в темі, тож збій тут не «не вдалося» для неї.
+            await this.recordStaffAlbum(api, thread, userId, chatId, messages, copied).catch(error => {
+                logger.error({ err: error, userId, threadId: thread.id }, "Staff album delivered but not recorded");
+            });
+        } catch (error) {
+            logger.error({ err: error, userId }, "Staff album could not reach the support topic");
+            await this.tellStaffItFailed(api, chatId);
+        }
+    }
+
+    private async recordStaffAlbum(api: Api, thread: SupportThread, userId: string, chatId: number, messages: Message[], copied: { message_id: number }[]) {
+        {
             // copyMessages мовчки пропускає те, що не може скопіювати: тоді не вгадуємо пари.
             if (copied.length === messages.length) {
                 for (let index = 0; index < messages.length; index++) {
@@ -625,9 +643,6 @@ export class SupportRelayService {
                 }
             }
             await this.afterStaffDelivery(api, thread, userId, chatId, messages[0]!, false);
-        } catch (error) {
-            logger.error({ err: error, userId }, "Staff album could not reach the support topic");
-            await this.tellStaffItFailed(api, chatId);
         }
     }
 

@@ -16,6 +16,14 @@ import { STAFF_TEXTS } from "../../../constants/staff-texts.js";
  */
 
 const TASK_REPLY_STEP_PREFIX = "awaiting_task_proof_topic_reply_";
+
+/** Вміст від людини, який Telegram не дасть скопіювати (на відміну від службових подій). */
+const UNSUPPORTED_CONTENT_KEYS = ["story", "game", "invoice", "paid_media", "giveaway", "giveaway_winners", "users_shared", "chat_shared", "web_app_data", "passport_data"];
+
+function isUnsupportedContent(message: object): boolean {
+    const record = message as Record<string, unknown>;
+    return UNSUPPORTED_CONTENT_KEYS.some(key => record[key] !== undefined);
+}
 const FINANCE_AUDIT_MARKER = "Потрібне уточнення по фінансах";
 const PREVIEW_LIMIT = 250;
 
@@ -81,7 +89,8 @@ async function collectContexts(ctx: MyContext): Promise<ThreadContext[]> {
         contexts.push({ topicHtml: `💰 <b>Finance audit reply</b>\n<i>${escapeHtml(source)}</i>`, contextText: source });
     }
 
-    session.step = "idle";
+    // Частина альбому: наступні частини мають іти в підтримку, а не в чернетку звіту.
+    session.step = ctx.message?.media_group_id ? "create_ticket" : "idle";
     return contexts;
 }
 
@@ -93,9 +102,10 @@ export async function handleStaffThreadMessage(ctx: MyContext): Promise<boolean>
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(ctx.from.id));
     if (!user?.staffProfile) return false;
 
-    // Історія, розіграш, гра — Telegram не дасть скопіювати. Сказати їй і не витрачати контекст.
+    // Історія, розіграш, гра — Telegram не дасть скопіювати: сказати їй і не витрачати
+    // контекст. Службові події (закріп, фон, таймер) — мовчки, це не повідомлення.
     if (!isRelayable(message)) {
-        await ctx.reply(STAFF_TEXTS["support-thread-unsupported"]).catch(() => undefined);
+        if (isUnsupportedContent(message)) await ctx.reply(STAFF_TEXTS["support-thread-unsupported"]).catch(() => undefined);
         return true;
     }
 
