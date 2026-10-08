@@ -2,6 +2,8 @@ import { Composer } from "grammy";
 import type { MyContext } from "../../types/context.js";
 import { staffHandlers, handleTaskProofMessage } from "./handlers/menu.js";
 import { handleStaffMessage } from "./handlers/support.js";
+import { handleStaffThreadMessage } from "./handlers/support-thread-entry.js";
+import { SUPPORT_THREADS_ENABLED } from "../../config.js";
 import { handlePreferenceComment } from "../../handlers/preferences-flow.js";
 import { bot } from "../../core/bot.js";
 
@@ -18,8 +20,11 @@ staffModule.on("message", async (ctx, next) => {
     // B. Check for Preference Flow Comment first
     if (await handlePreferenceComment(ctx)) return;
 
-    // C. Attempt to handle as staff support message
-    const handled = await handleStaffMessage(ctx, bot);
+    // C. Attempt to handle as staff support message. З постійними темами сюди
+    // доходить усе, що не забрав жоден сценарій, — і йде в тему людини.
+    const handled = SUPPORT_THREADS_ENABLED
+        ? await handleStaffThreadMessage(ctx)
+        : await handleStaffMessage(ctx, bot);
     if (handled) return;
 
     // Continue if not handled

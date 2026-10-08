@@ -100,6 +100,14 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
 
     if (ctx.session.supportData?.step === 'AWAITING_REPLY' && ctx.session.supportData?.replyingToUserId) {
         const targetId = Number(ctx.session.supportData.replyingToUserId);
+        const { userRepository: users } = await import("../../repositories/user-repository.js");
+        const { sendToStaffThreadFromAdmin } = await import("./search.js");
+        const threadTarget = await users.findByTelegramId(BigInt(targetId));
+        if (threadTarget && await sendToStaffThreadFromAdmin(ctx, threadTarget.id)) {
+            delete ctx.session.supportData.step;
+            delete ctx.session.supportData.replyingToUserId;
+            return;
+        }
         const replyText = getAdminOutboundText(ctx.message) || "[Media Reply]";
 
         try {

@@ -40,6 +40,7 @@ vi.mock("../../../../core/logger.js", () => ({
 }));
 
 vi.mock("../../../../config.js", () => ({
+    SUPPORT_THREADS_ENABLED: false,
     RECOVERY_CHAT_ID: -1003873088973,
     SUPPORT_CHAT_ID: 999,
     TEAM_CHATS: { SUPPORT: 999, RECOVERY: -1003873088973 },

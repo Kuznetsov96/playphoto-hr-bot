@@ -272,7 +272,13 @@ commandHandlers.command("start", async (ctx) => {
                 return;
             } else {
                 // Inactive staff — block both staff menu and candidate flow
-                await ctx.reply("🔒 <b>Доступ закрито</b>\n\nТвій профіль співробітника деактивовано.\nДякуємо за час, проведений у команді PlayPhoto, та бажаємо успіхів!", { parse_mode: "HTML" });
+                const { SUPPORT_THREADS_ENABLED } = await import("../config.js");
+                await ctx.reply(
+                    "🔒 <b>Доступ закрито</b>\n\nТвій профіль співробітника деактивовано.\nДякуємо за час, проведений у команді PlayPhoto, та бажаємо успіхів!" +
+                        // Звільнена може написати в підтримку (виплати, документи) — сказати їй про це.
+                        (SUPPORT_THREADS_ENABLED ? "\n\nЯкщо є питання — напиши сюди, передамо в підтримку." : ""),
+                    { parse_mode: "HTML" },
+                );
                 return;
             }
         }

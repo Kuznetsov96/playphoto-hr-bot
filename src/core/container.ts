@@ -8,6 +8,7 @@ import { redis } from './redis.js';
 import { staffRepository } from '../repositories/staff-repository.js';
 import { userRepository } from '../repositories/user-repository.js';
 import { supportRepository } from '../repositories/support-repository.js';
+import { supportThreadRepository } from '../repositories/support-thread-repository.js';
 import { locationRepository } from '../repositories/location-repository.js';
 import { broadcastRepository } from '../repositories/broadcast-repository.js';
 import { taskRepository } from '../repositories/task-repository.js';
@@ -39,6 +40,7 @@ export function configureContainer() {
         staffRepository: asValue(staffRepository),
         userRepository: asValue(userRepository),
         supportRepository: asValue(supportRepository),
+        supportThreadRepository: asValue(supportThreadRepository),
         locationRepository: asValue(locationRepository),
         broadcastRepository: asValue(broadcastRepository),
         taskRepository: asValue(taskRepository),

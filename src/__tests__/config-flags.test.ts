@@ -25,6 +25,28 @@ describe('canonical replacement flags', () => {
   });
 });
 
+describe('support person threads flag', () => {
+  // Старі тікети лишаються робочими, доки власник не ввімкне прапорець у формі деплою.
+  it('defaults SUPPORT_THREADS_ENABLED to false', async () => {
+    const config = await import('../config.js');
+    expect(config.SUPPORT_THREADS_ENABLED).toBe(false);
+  });
+
+  it('reads SUPPORT_THREADS_ENABLED=true', async () => {
+    const previous = process.env.SUPPORT_THREADS_ENABLED;
+    process.env.SUPPORT_THREADS_ENABLED = 'true';
+    vi.resetModules();
+    try {
+      const config = await import('../config.js');
+      expect(config.SUPPORT_THREADS_ENABLED).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SUPPORT_THREADS_ENABLED;
+      else process.env.SUPPORT_THREADS_ENABLED = previous;
+      vi.resetModules();
+    }
+  });
+});
+
 describe('FINANCE_DDS_TARGET derived from the deploy flag', () => {
   // The deploy form can only carry booleans, so production sets
   // AWS_DDS_API_WRITE_ENABLED and the string target is derived here. A fresh

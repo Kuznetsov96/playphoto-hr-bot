@@ -150,6 +150,14 @@ on:
         required: true
         type: boolean
         default: true
+      # Одна постійна тема на співробітницю в чаті підтримки (spec 2026-10-08).
+      # Умовчання `true`, як вимагає контракт; перший викат — зі ЗНЯТОЮ галочкою,
+      # якщо треба викотити код без перемикання підтримки.
+      support_threads_enabled:
+        description: One permanent support topic per employee instead of tickets
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -379,6 +387,7 @@ jobs:
             printf 'AWS_RECRUITING_SLOTS_ENABLED=%q\n' "${{ inputs.recruiting_slots_enabled }}"
             printf 'AWS_RECRUITING_COMMANDS_ENABLED=%q\n' "${{ inputs.recruiting_commands_enabled }}"
             printf 'AWS_RECRUITING_TATTOO_WEB_ENABLED=%q\n' "${{ inputs.recruiting_tattoo_web_enabled }}"
+            printf 'SUPPORT_THREADS_ENABLED=%q\n' "${{ inputs.support_threads_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -478,6 +487,7 @@ jobs:
             echo '- Recruiting canonical interview slots: `${{ inputs.recruiting_slots_enabled }}`'
             echo '- Recruiting webapp commands: `${{ inputs.recruiting_commands_enabled }}`'
             echo '- Recruiting tattoo web routes: `${{ inputs.recruiting_tattoo_web_enabled }}`'
+            echo '- Support person threads: `${{ inputs.support_threads_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'

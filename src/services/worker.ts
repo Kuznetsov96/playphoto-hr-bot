@@ -6,7 +6,7 @@ import { candidateRepository } from "../repositories/candidate-repository.js";
 import { interviewRepository } from "../repositories/interview-repository.js";
 import { trainingRepository } from "../repositories/training-repository.js";
 import { CandidateStatus, FunnelStep } from "@prisma/client";
-import { TEAM_CHATS, HR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED, AWS_RECRUITING_MIRROR_ENABLED } from "../config.js";
+import { TEAM_CHATS, HR_NAME, ADMIN_IDS, AWS_SCHEDULE_NOTIFICATIONS_ENABLED, AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED, AWS_ACCESS_REVOCATIONS_ENABLED, AWS_RECRUITING_COMMANDS_ENABLED, AWS_RECRUITING_MIRROR_ENABLED, SUPPORT_THREADS_ENABLED } from "../config.js";
 import { scheduleNotificationDispatcher } from "./schedule-notification-dispatcher.js";
 import { recruitingCommandDispatcher } from "./recruiting-command-dispatcher.js";
 import { createShootAlertDispatcher } from "./shoot-alert-dispatcher.js";
@@ -1937,4 +1937,54 @@ async function processLegacyAgeLimitCandidates(bot: Bot<MyContext>) {
             logger.error({ err: error, candidateId: cand.id }, "Legacy age-limit cleanup failed");
         }
     }
+}
+
+const SUPPORT_THREAD_JOBS_POLL_MS = 5 * 60 * 1000;
+const SUPPORT_THREAD_MIGRATION_DELAY_MS = 60 * 1000;
+
+/**
+ * Постійні теми підтримки (spec 2026-10-08): через хвилину після старту — разовий
+ * перехід зі старих тем, далі раз на день о 7-й — архів, назви, картки, прибирання.
+ * Без прапорця не запускається нічого.
+ */
+export function startSupportThreadJobs(api: Bot<MyContext>["api"]) {
+    if (!SUPPORT_THREADS_ENABLED) return undefined;
+
+    // Тонкий адаптер: перевантаження ioredis.set не зводяться до простого типу.
+    const redisLike = {
+        get: (key: string) => redis.get(key),
+        set: (key: string, value: string, ...args: (string | number)[]) =>
+            (redis.set as unknown as (...params: (string | number)[]) => Promise<string | null>)(key, value, ...args),
+        del: (key: string) => redis.del(key),
+    };
+
+    const load = async () => {
+        const [runtime, migration, repository, service] = await Promise.all([
+            import("./support-thread-runtime.js"),
+            import("./support-thread-migration.js"),
+            import("../repositories/support-thread-repository.js"),
+            import("./support-thread-service.js"),
+        ]);
+        return { runtime, migration, repo: repository.supportThreadRepository, topicLink: service.topicLink };
+    };
+
+    const tick = () => load()
+        .then(({ runtime, migration, repo, topicLink }) => migration.runSupportThreadTick(
+            api,
+            {
+                redis: redisLike,
+                repo,
+                threads: runtime.supportThreadService,
+                supportChatId: () => TEAM_CHATS.SUPPORT,
+                topicLink,
+                sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+            },
+            { redis: redisLike, threads: runtime.supportThreadService, repo },
+        ))
+        .catch(error => logger.error({ err: error }, "Support thread jobs failed"));
+
+    // Перший крок — через хвилину після старту; далі кожні 5 хвилин. Перехід
+    // повторюється, доки не позначений «готово» (лок не дасть двом крокам іти разом).
+    setTimeout(tick, SUPPORT_THREAD_MIGRATION_DELAY_MS);
+    return setInterval(tick, SUPPORT_THREAD_JOBS_POLL_MS);
 }

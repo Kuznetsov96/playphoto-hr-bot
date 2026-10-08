@@ -2,7 +2,7 @@ import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../../constants/staff-texts.js";
 import { InlineKeyboard, Composer } from "grammy";
 import type { MyContext } from "../../types/context.js";
-import { SUPPORT_CHAT_ID, ADMIN_IDS } from "../../config.js";
+import { SUPPORT_CHAT_ID, ADMIN_IDS, SUPPORT_THREADS_ENABLED } from "../../config.js";
 import { userRepository } from "../../repositories/user-repository.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
 import { supportRepository } from "../../repositories/support-repository.js";
@@ -177,6 +177,8 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
     if (isDirectReplyStep) {
         const targetTgId = step.replace("admin_reply_direct_", "");
         const messageText = getAdminOutboundText(ctx.message) || "[Media Message]";
+        const directTarget = await userRepository.findByTelegramId(BigInt(targetTgId));
+        if (directTarget && await sendToStaffThreadFromAdmin(ctx, directTarget.id)) return;
 
         try {
             const user = await userRepository.findByTelegramId(BigInt(targetTgId));
@@ -298,9 +300,45 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
     await next();
 });
 
+/**
+ * Співробітниці з адмінки — у її постійну тему (spec 2026-10-08), а не окремою
+ * вихідною темою. false — не співробітниця або теми вимкнено: далі старий шлях.
+ */
+export async function sendToStaffThreadFromAdmin(ctx: MyContext, userId: string): Promise<boolean> {
+    if (!SUPPORT_THREADS_ENABLED || !ctx.message || !ctx.chat || !ctx.from) return false;
+    const staff = await staffRepository.findByUserId(userId);
+    if (!staff) return false;
+
+    const backKb = new InlineKeyboard();
+    try {
+        const { supportRelayService } = await import("../../services/support-thread-runtime.js");
+        const sent = await supportRelayService.sendFromAdminPanel(ctx.api, {
+            adminChatId: ctx.chat.id,
+            message: ctx.message,
+            admin: { id: ctx.from.id, firstName: ctx.from.first_name },
+            userId,
+            fallbackSend: staffChatId => sendAdminOutboundMessage(ctx, staffChatId, { prefixText: false }),
+        });
+        await ctx.deleteMessage().catch(() => { });
+        backKb.url(ADMIN_TEXTS["support-thread-btn-open"], sent.topicUrl).row();
+        backKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
+        backKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
+        await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["support-thread-admin-sent"]({ title: escapeHtml(sent.title) }), backKb);
+    } catch (e: any) {
+        logger.error({ err: e, userId }, "Admin message to the staff support topic failed");
+        backKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
+        backKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
+        await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["support-thread-admin-failed"]({ error: escapeHtml(e?.description ?? e?.message ?? String(e)) }), backKb);
+    }
+    if (ctx.session.adminFlow === "SEARCH") delete ctx.session.adminFlow;
+    ctx.session.step = "idle";
+    return true;
+}
+
 async function handleAdminMessageSend(ctx: MyContext, userId: string) {
     const user = await userRepository.findById(userId);
     if (!user) return ctx.reply(ADMIN_TEXTS["admin-history-user-not-found"]);
+    if (await sendToStaffThreadFromAdmin(ctx, userId)) return;
 
     const messageTextStr = getAdminOutboundText(ctx.message) || "[Media Message]";
 

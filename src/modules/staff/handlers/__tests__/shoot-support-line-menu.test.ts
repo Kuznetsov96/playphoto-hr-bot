@@ -29,7 +29,7 @@ vi.mock("../../../../core/logger.js", () => ({
 
 vi.mock("../../../../core/audit-logger.js", () => ({ audit: vi.fn() }));
 vi.mock("../../../../core/log-events.js", () => ({ logAuditEvent: vi.fn(), logBusinessEvent: vi.fn() }));
-vi.mock("../../../../config.js", () => ({ TEAM_CHATS: { SUPPORT: 999 } }));
+vi.mock("../../../../config.js", () => ({ TEAM_CHATS: { SUPPORT: 999 }, SUPPORT_THREADS_ENABLED: false }));
 
 vi.mock("../../../../repositories/user-repository.js", () => ({
     userRepository: {

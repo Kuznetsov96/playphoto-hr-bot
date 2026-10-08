@@ -11,13 +11,12 @@ import { ScreenManager } from "../../../utils/screen-manager.js";
 import { escapeHtml, htmlToPlainText } from "../../../handlers/admin/utils.js";
 import logger from "../../../core/logger.js";
 import { buildSignedCallback } from "../../../utils/signed-callback.js";
-import { TEAM_CHATS } from "../../../config.js";
+import { SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../../../config.js";
 import { shortenName } from "../../../utils/string-utils.js";
 import { formatLocationLabel, getLocationShortcut } from "../../../utils/ticket-card.js";
 import { formatShiftLocationLabel } from "../../../utils/logistics-formatters.js";
 import { replacementService } from "../../../services/replacement-service.js";
-import { getShiftTimeFromLocationSchedule } from "../../../utils/shift-time.js";
-import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../../utils/location-opening-hours.js";
+import { formatStaffShiftTime } from "../../../utils/staff-shift-time.js";
 import { supportConversationService } from "../../../services/support-conversation-service.js";
 import { logBusinessEvent } from "../../../core/log-events.js";
 import {
@@ -62,37 +61,6 @@ function formatShiftColleague(fullName: string, username?: string | null, telegr
     return escapedLabel;
 }
 
-function formatShiftClock(date: Date) {
-    return date.toLocaleTimeString("uk-UA", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "Europe/Kyiv"
-    });
-}
-
-/**
- * Shift times, most authoritative source first:
- *   1. the shift's own start/end, as planned in the webapp;
- *   2. the location's canonical opening hours for that weekday;
- *   3. the legacy hand-seeded text schedule, for locations not yet migrated.
- *
- * Never fall back to an invented default — an unknown time must read as "not set".
- */
-function formatStaffShiftTime(shift: {
-    date: Date;
-    startTime?: Date | null;
-    endTime?: Date | null;
-    location?: { schedule?: string | null; openingHours?: OpeningHoursDay[] | null } | null;
-}) {
-    if (shift.startTime && shift.endTime) {
-        return `${formatShiftClock(shift.startTime)}-${formatShiftClock(shift.endTime)}`;
-    }
-
-    return getShiftTimeFromOpeningHours(shift.location?.openingHours, shift.date)
-        || getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date)
-        || "час не вказано";
-}
-
 function buildTaskProofKeyboard(taskId: string) {
     return new InlineKeyboard()
         .text("✅ Завершити завдання", `staff_task_proof_submit_${taskId}`).row()
@@ -133,8 +101,10 @@ async function renderTaskProofScreen(
  */
 export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
     ctx.session.step = "idle";
-    // Вихід у меню (і «Скасувати», і «🏠 Меню», і /start) закриває звернення з нагадування.
+    // Вихід у меню (і «Скасувати», і «🏠 Меню», і /start) закриває звернення з нагадування
+    // і скасоване уточнення по задачі.
     clearShootSupportLine(ctx.session);
+    delete ctx.session.clarificationTaskId;
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
@@ -496,6 +466,28 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
     const locationCode = locationName ? getLocationShortcut(locationName, locationCity) : "Task";
     const topicTitle = `📎 ${locationCode} | ${shortStaffName} | ${topicDateLabel}`;
 
+    // Звіт по задачі — у постійну тему людини, а не окремою темою (spec 2026-10-08).
+    if (SUPPORT_THREADS_ENABLED) {
+        const plainTask = htmlToPlainText(task.taskText);
+        const head = [
+            "📎 <b>Task report</b>",
+            task.workDate ? workDateLabel : "no date",
+            locationName ? escapeHtml(locationLabel) : "no location",
+        ].join(" · ");
+        const deadline = task.deadlineTime ? `\n🕐 Due ${escapeHtml(task.deadlineTime)}` : "";
+        const { supportRelayService } = await import("../../../services/support-thread-runtime.js");
+        await supportRelayService.postBotContext(
+            ctx.api,
+            staff.userId,
+            {
+                topicHtml: `${head}${deadline}\n<i>${escapeHtml(truncateText(plainTask, 250))}</i>`,
+                contextText: `Завдання${task.workDate ? ` ${workDateLabel}` : ""}: ${truncateText(plainTask, 150)}`,
+            },
+            (chatId, topicId) => sendTaskProofItems(ctx.api, chatId, topicId, task.id, submission.items),
+        ).catch(err => logger.warn({ err, taskId: task.id }, "Task proof delivery to the person's support topic failed"));
+        return;
+    }
+
     let topicId = submission.supportTopicId ?? null;
     if (!topicId || submission.supportTopicStatus === "CLOSED") {
         try {
@@ -526,13 +518,27 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
         logger.warn({ err, taskId: task.id, topicId }, "Task proof summary delivery to support topic failed");
     });
 
-    for (const item of submission.items) {
+    await sendTaskProofItems(ctx.api, TEAM_CHATS.SUPPORT, topicId, task.id, submission.items);
+}
+
+/** Елементи звіту по задачі в тему; повертає id повідомлень для пар «контекст». */
+async function sendTaskProofItems(
+    api: MyContext["api"],
+    chatId: number,
+    topicId: number,
+    taskId: string,
+    items: Awaited<ReturnType<typeof taskProofService.submitDraft>>["items"],
+): Promise<number[]> {
+    const ids: number[] = [];
+    for (const item of items) {
         try {
+            let sent: { message_id: number } | null = null;
             if (item.type === "TEXT" && item.text) {
-                await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `📝 ${escapeHtml(item.text)}`, {
+                sent = await api.sendMessage(chatId, `📝 ${escapeHtml(item.text)}`, {
                     parse_mode: "HTML",
                     message_thread_id: topicId,
                 });
+                ids.push(sent.message_id);
                 continue;
             }
 
@@ -540,39 +546,41 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
             if (!item.telegramFileId) continue;
 
             if (item.type === "PHOTO") {
-                await ctx.api.sendPhoto(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                sent = await api.sendPhoto(chatId, item.telegramFileId, {
                     ...(caption ? { caption, parse_mode: "HTML" } : {}),
                     message_thread_id: topicId,
                 });
             } else if (item.type === "VIDEO") {
-                await ctx.api.sendVideo(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                sent = await api.sendVideo(chatId, item.telegramFileId, {
                     ...(caption ? { caption, parse_mode: "HTML" } : {}),
                     message_thread_id: topicId,
                 });
             } else if (item.type === "DOCUMENT") {
-                await ctx.api.sendDocument(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                sent = await api.sendDocument(chatId, item.telegramFileId, {
                     ...(caption ? { caption, parse_mode: "HTML" } : {}),
                     message_thread_id: topicId,
                 });
             } else if (item.type === "VOICE") {
-                await ctx.api.sendVoice(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                sent = await api.sendVoice(chatId, item.telegramFileId, {
                     message_thread_id: topicId,
                 });
             } else if (item.type === "AUDIO") {
-                await ctx.api.sendAudio(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                sent = await api.sendAudio(chatId, item.telegramFileId, {
                     ...(caption ? { caption, parse_mode: "HTML" } : {}),
                     message_thread_id: topicId,
                 });
             } else if (item.type === "ANIMATION") {
-                await ctx.api.sendAnimation(TEAM_CHATS.SUPPORT, item.telegramFileId, {
+                sent = await api.sendAnimation(chatId, item.telegramFileId, {
                     ...(caption ? { caption, parse_mode: "HTML" } : {}),
                     message_thread_id: topicId,
                 });
             }
+            if (sent) ids.push(sent.message_id);
         } catch (err) {
-            logger.warn({ err, taskId: task.id, proofItemId: item.id, topicId }, "Task proof item delivery to support topic failed");
+            logger.warn({ err, taskId: taskId, proofItemId: item.id, topicId }, "Task proof item delivery to support topic failed");
         }
     }
+    return ids;
 }
 
 export async function handleTaskProofMessage(ctx: MyContext): Promise<boolean> {
@@ -653,6 +661,19 @@ export async function startSupportFlow(ctx: MyContext, options: { shootLine?: st
     // скасованого звернення з нагадування не приліпився до наступного, стороннього питання.
     if (options.shootLine) putShootSupportLine(ctx.session, options.shootLine);
     else clearShootSupportLine(ctx.session);
+
+    // Постійна тема: «запитів» немає — людина просто пише сюди. Крок create_ticket
+    // лишається маркером «пише в підтримку», щоб чернетка звіту не забрала повідомлення.
+    if (SUPPORT_THREADS_ENABLED) {
+        delete ctx.session.clarificationTaskId;
+        // Після відмови від розсилки крок уже чекає причину — його контекст не затирати.
+        if (ctx.session.step !== "broadcast_decline_reason") ctx.session.step = "create_ticket";
+        if (ctx.callbackQuery) await ctx.answerCallbackQuery().catch(() => { });
+        await presentSupportEntry(ctx, STAFF_TEXTS["support-thread-entry"], new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), {
+            pushToStack: true,
+        });
+        return;
+    }
 
     const user = await userRepository.findWithProfilesByTelegramId(BigInt(telegramId));
 
@@ -1006,7 +1027,22 @@ staffHandlers.callbackQuery(/^staff_task_proof_reply_(.+)$/, async (ctx) => {
 
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
     const submission = await taskProofService.getSubmissionById(submissionId);
-    if (!user?.staffProfile || !submission || submission.staffId !== user.staffProfile.id || submission.supportTopicStatus === "CLOSED") {
+    if (!user?.staffProfile || !submission || submission.staffId !== user.staffProfile.id) {
+        return ctx.answerCallbackQuery("Це уточнення вже недоступне");
+    }
+
+    // Після переходу старі теми задач закриті, але кнопка в чаті лишилася: відповідь
+    // однаково має куди піти — у постійну тему.
+    if (SUPPORT_THREADS_ENABLED) {
+        // Стара кнопка під уточненням: відповідь іде в постійну тему з контекстом задачі.
+        ctx.session.step = "create_ticket";
+        ctx.session.clarificationTaskId = submission.taskId;
+        clearShootSupportLine(ctx.session);
+        await ctx.answerCallbackQuery();
+        await ScreenManager.renderScreen(ctx, STAFF_TEXTS["support-thread-entry"], new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { forceNew: true });
+        return;
+    }
+    if (submission.supportTopicStatus === "CLOSED") {
         return ctx.answerCallbackQuery("Це уточнення вже недоступне");
     }
 
@@ -1042,6 +1078,16 @@ staffHandlers.callbackQuery(/^staff_task_help_(.+)$/, async (ctx) => {
     clearShootSupportLine(ctx.session);
 
     const taskPreview = truncateText(htmlToPlainText(task.taskText), 100);
+    if (SUPPORT_THREADS_ENABLED) {
+        await ScreenManager.renderScreen(
+            ctx,
+            STAFF_TEXTS["support-thread-task-entry"]({ task: escapeHtml(taskPreview) }),
+            new InlineKeyboard().text("✖️ Скасувати", "staff_hub_nav").danger(),
+            { pushToStack: true },
+        );
+        await ctx.answerCallbackQuery();
+        return;
+    }
     const text =
         `❓ <b>Уточнення по завданню:</b>\n\n` +
         `<i>"${escapeHtml(taskPreview)}"</i>\n\n` +

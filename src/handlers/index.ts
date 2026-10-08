@@ -10,6 +10,11 @@ import { candidateModule } from "../modules/candidate/index.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { staffSupportHandlers, handleSupportGroupMessage } from "../modules/staff/handlers/support.js";
+import { supportThreadHandlers } from "./support-threads.js";
+import { shouldShieldStaleCallback } from "../utils/stale-callback.js";
+import { handleStaffThreadMessage } from "../modules/staff/handlers/support-thread-entry.js";
+import { sendAdminOutboundMessage } from "./admin/utils.js";
+import { SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../config.js";
 import { supportHandlers, handleSupportMessage } from "./support.js";
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
@@ -68,20 +73,7 @@ handlers.on("callback_query:data", async (ctx, next) => {
     const data = ctx.callbackQuery.data;
 
     // If it's a known new callback or menu callback, let it pass
-    if (data.startsWith("cb:") ||
-        data.startsWith("staff_") || data.startsWith("staff-") || data.startsWith("admin_") || data.startsWith("admin-") ||
-        data.startsWith("hr_") || data.startsWith("hr-") ||
-        data.startsWith("mentor_") || data.startsWith("mentor-") ||
-        data.startsWith("fso_") ||
-        data.startsWith("tas_") || data.startsWith("task_") || data.startsWith("tbk_") || data.startsWith("b_") || data.startsWith("ticket_") ||
-        data.startsWith("broadcast_") || data.startsWith("pref_") || data.startsWith("onb_") ||
-        data.startsWith("gender_") || data.startsWith("city_") || data.startsWith("loc_") || data.startsWith("src_") ||
-        data.startsWith("close_topic_") || data.startsWith("close_ticket_") || data.startsWith("contact_hr") || data.startsWith("contact_recovery") || data.startsWith("recovery_reopen_") ||
-        data.startsWith("end_support_chat") || data.startsWith("view_staff_") ||
-        data.startsWith("view_candidate_") || data.startsWith("approve_") || data.startsWith("reject_") ||
-        data.startsWith("parcel_") ||
-        data.startsWith("confirm_") || data.startsWith("cancel_") || data.startsWith("staging_") ||
-        data.includes("/")) {
+    if (!shouldShieldStaleCallback(data, ctx.chat?.type)) {
         return next();
     }
 
@@ -649,6 +641,8 @@ handlers.callbackQuery(/^broadcast_confirm_decline_(.+)$/, async (ctx) => {
 // Reordered: Support handlers first to avoid Admin/HR Menu interference (greedy matches)
 handlers.use(supportHandlers);
 handlers.use(staffSupportHandlers); // ✅ NEW: Allow Admins to use ticket buttons (ticket_assign, etc.)
+// Постійні теми підтримки: кнопки картки, правки, реакції (порожній без прапорця).
+handlers.use(supportThreadHandlers);
 
 // Replaced global registration with conditional one in routing below
 // handlers.use(adminHandlers); 
@@ -658,6 +652,26 @@ handlers.on("message", async (ctx, next) => {
     // 0. Preferences comment capture
     const { handlePreferenceComment } = await import("./preferences-flow.js");
     if (await handlePreferenceComment(ctx)) return;
+
+    // Постійна тема людини або її стара тема → фотографині. "ignored" — не наша
+    // тема (LOGISTICS, General, тема кандидатки): далі старий обробник.
+    // З вимкненим прапорцем (відкат) відповіді в уже створених постійних темах однаково
+    // доходять — інакше вони б мовчки губились, бо старі тікети вже закриті переходом.
+    if (
+        ctx.message &&
+        ctx.from &&
+        ctx.from.id !== ctx.me.id &&
+        ctx.chat?.id === Number(TEAM_CHATS.SUPPORT)
+    ) {
+        const { supportRelayService } = await import("../services/support-thread-runtime.js");
+        const result = await supportRelayService.relaySupportMessage(ctx.api, {
+            message: ctx.message,
+            sender: { id: ctx.from.id, firstName: ctx.from.first_name },
+            fallbackSend: staffChatId => sendAdminOutboundMessage(ctx, staffChatId, { prefixText: false }),
+            threadsOnly: !SUPPORT_THREADS_ENABLED,
+        });
+        if (result !== "ignored") return;
+    }
 
     // Check if it's an Admin message in Support Group
     // A. For Staff (Returns true if handled)
@@ -719,6 +733,16 @@ handlers.use(async (ctx, next) => {
     if (user?.staffProfile) {
         // Shield: Block deactivated staff from accessing any staff features
         if (!user.staffProfile.isActive) {
+            // Звільнена співробітниця може написати в підтримку (виплати, документи):
+            // повідомлення йде в її тему, кабінет лишається закритим.
+            if (SUPPORT_THREADS_ENABLED && ctx.chat?.type === "private") {
+                if (ctx.message && (await handleStaffThreadMessage(ctx))) return;
+                const text = STAFF_TEXTS["support-thread-inactive-alert"];
+                if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text, show_alert: true });
+                // Відповідаємо лише на її дії, а не на службові оновлення (my_chat_member тощо).
+                else if (ctx.message) await ctx.reply(text);
+                return;
+            }
             if (ctx.chat?.type === "private") {
                 const text = STAFF_TEXTS["staff-deactivated-shield"];
                 if (ctx.callbackQuery) {
