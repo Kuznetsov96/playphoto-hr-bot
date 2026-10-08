@@ -242,3 +242,32 @@ describe("реакції", () => {
         expect(api.setMessageReaction).not.toHaveBeenCalled();
     });
 });
+
+describe("повідомлення з адмінки бота", () => {
+    const ADMIN_CHAT = 3;
+    const adminMessage: Any = { message_id: 70, chat: { id: ADMIN_CHAT }, text: "Завтра заміна" };
+
+    it("фотографині — копія, у тему — рядок і копія, пара OUT, посилання на тему", async () => {
+        const { service, api, links, thread } = setup();
+        const result = await service.sendFromAdminPanel(api, { adminChatId: ADMIN_CHAT, message: adminMessage, admin: { id: SUPPORT_ACCOUNT, firstName: "Olena" }, userId: "u1" });
+        expect(api.copyMessage.mock.calls[0]).toEqual([STAFF_CHAT, ADMIN_CHAT, 70]);
+        expect(api.sendMessage).toHaveBeenCalledWith(SUPPORT_CHAT, "↗ Sent from the bot by Olena", { message_thread_id: 77 });
+        expect(api.copyMessage.mock.calls[1]).toEqual([SUPPORT_CHAT, ADMIN_CHAT, 70, { message_thread_id: 77 }]);
+        expect(links).toContainEqual(expect.objectContaining({ direction: "OUT", topicMessageId: 2003, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 2001 }));
+        expect(thread.lastEvent).toEqual({ kind: "support_reply", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
+        expect(result).toEqual({ topicUrl: "link/77", title: "Бланк · Lviv · Dragon Park 2" });
+    });
+
+    it("фотографині не дійшло — помилка, у тему нічого", async () => {
+        const { service, api } = setup();
+        api.copyMessage.mockRejectedValueOnce(new Error("Forbidden: bot was blocked by the user"));
+        await expect(service.sendFromAdminPanel(api, { adminChatId: ADMIN_CHAT, message: adminMessage, admin: { id: SUPPORT_ACCOUNT, firstName: "Olena" }, userId: "u1" })).rejects.toThrow("blocked");
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("копія в тему не вдалась — повідомлення вже доставлене, не помилка", async () => {
+        const { service, api } = setup();
+        api.copyMessage.mockResolvedValueOnce({ message_id: 2001 }).mockRejectedValueOnce(new Error("Bad Request: not enough rights"));
+        await expect(service.sendFromAdminPanel(api, { adminChatId: ADMIN_CHAT, message: adminMessage, admin: { id: SUPPORT_ACCOUNT, firstName: "Olena" }, userId: "u1" })).resolves.toMatchObject({ topicUrl: "link/77" });
+    });
+});

@@ -1,11 +1,15 @@
-import { ADMIN_IDS, CO_FOUNDER_IDS, TEAM_CHATS } from "../config.js";
+import { ADMIN_IDS, CO_FOUNDER_IDS, SUPPORT_IDS, TEAM_CHATS } from "../config.js";
+import { getAdminRoleByTelegramId, hasPermission } from "../config/roles.js";
+import { AlbumBuffer } from "../utils/album-buffer.js";
+import { SupportRelayService } from "./support-relay-service.js";
+import { SupportEscalationService } from "./support-escalation-service.js";
 import prisma from "../db/core.js";
 import { supportThreadRepository } from "../repositories/support-thread-repository.js";
 import { kyivDay } from "../utils/support-thread-format.js";
 import { formatStaffShiftTime, SHIFT_TIME_NOT_SET } from "../utils/staff-shift-time.js";
 import { supportConversationService } from "./support-conversation-service.js";
 import { resolveThreadIcons } from "./support-thread-icons.js";
-import { SupportThreadService, type ThreadPeople, type ThreadPlace } from "./support-thread-service.js";
+import { SupportThreadService, topicLink, type ThreadPeople, type ThreadPlace } from "./support-thread-service.js";
 
 const DAY_MS = 86_400_000;
 
@@ -64,4 +68,29 @@ export const supportThreadService = new SupportThreadService({
     icons: resolveThreadIcons,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
     callTargets: () => ({ kuznetsov: ADMIN_IDS[0], hupalova: CO_FOUNDER_IDS[0] }),
+});
+
+export const supportRelayService = new SupportRelayService({
+    threads: supportThreadService,
+    repo: supportThreadRepository,
+    timeline: async (userId, author, text, meta) => {
+        const { timelineRepository } = await import("../repositories/timeline-repository.js");
+        await timelineRepository.createEvent(userId, "MESSAGE", author, text, meta);
+    },
+    albums: new AlbumBuffer(),
+    now: () => new Date(),
+    supportChatId: () => TEAM_CHATS.SUPPORT,
+    getStaffChatId: async userId => {
+        const user = await prisma.user.findUnique({ where: { id: userId }, select: { telegramId: true } });
+        return user ? Number(user.telegramId) : null;
+    },
+    isSupportMember: telegramId => hasPermission(getAdminRoleByTelegramId(BigInt(telegramId)), "SUPPORT_CHAT"),
+    topicLink,
+});
+
+export const supportEscalationService = new SupportEscalationService({
+    threads: supportThreadService,
+    repo: supportThreadRepository,
+    targets: () => ({ kuznetsov: ADMIN_IDS[0], hupalova: CO_FOUNDER_IDS[0], support: SUPPORT_IDS[0] }),
+    topicLink,
 });

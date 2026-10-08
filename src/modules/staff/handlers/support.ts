@@ -3,7 +3,7 @@ import { STAFF_TEXTS } from "../../../constants/staff-texts.js";
 import logger from "../../../core/logger.js";
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../../types/context.js";
-import { RECOVERY_CHAT_ID, SUPPORT_CHAT_ID, TEAM_CHATS } from "../../../config.js";
+import { RECOVERY_CHAT_ID, SUPPORT_CHAT_ID, SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../../../config.js";
 import { userRepository } from "../../../repositories/user-repository.js";
 import { supportRepository } from "../../../repositories/support-repository.js";
 import { staffRepository } from "../../../repositories/staff-repository.js";
@@ -143,6 +143,13 @@ staffSupportHandlers.callbackQuery("staff_help", async (ctx) => {
     // Звичайний вхід у підтримку: рядок про зйомку з давнього натискання нагадування
     // не повинен приліпитися до цього, стороннього тікета.
     clearShootSupportLine(ctx.session);
+
+    if (SUPPORT_THREADS_ENABLED) {
+        ctx.session.step = "create_ticket";
+        await ctx.answerCallbackQuery().catch(() => { });
+        await ScreenManager.renderScreen(ctx, STAFF_TEXTS["support-thread-entry"], new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), { pushToStack: true });
+        return;
+    }
 
     // Check if user has active ticket
     const user = await userRepository.findByTelegramId(BigInt(telegramId));

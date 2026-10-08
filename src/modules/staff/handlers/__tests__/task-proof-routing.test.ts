@@ -42,6 +42,7 @@ vi.mock("../../../../core/log-events.js", () => ({
 }));
 
 vi.mock("../../../../config.js", () => ({
+    SUPPORT_THREADS_ENABLED: false,
     TEAM_CHATS: {
         SUPPORT: 999,
     },

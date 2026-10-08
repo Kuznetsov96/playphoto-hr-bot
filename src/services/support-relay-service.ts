@@ -152,6 +152,46 @@ export class SupportRelayService {
         return "delivered";
     }
 
+    /**
+     * Менеджерка пише співробітниці з адмінки бота: фотографині — копія, у тему —
+     * рядок «звідки» і та сама копія, щоб розмова лишалась в одному місці.
+     * Не дійшло фотографині — помилка для екрана адмінки; не вдалась копія в тему —
+     * лише лог, бо повідомлення вже доставлене.
+     */
+    async sendFromAdminPanel(
+        api: Api,
+        input: { adminChatId: number; message: Message; admin: { id: number; firstName: string }; userId: string; fallbackSend?: (staffChatId: number) => Promise<void> },
+    ): Promise<{ topicUrl: string; title: string }> {
+        const { adminChatId, message, admin, userId } = input;
+        let thread = await this.deps.threads.ensureThread(api, userId);
+        const staffChatId = await this.deps.getStaffChatId(userId);
+        if (!staffChatId) throw new Error("This person has no Telegram account in the bot");
+
+        let privateMessageId: number | null = null;
+        if ((message.rich_message || message.checklist) && input.fallbackSend) {
+            await input.fallbackSend(staffChatId);
+        } else {
+            privateMessageId = (await api.copyMessage(staffChatId, adminChatId, message.message_id)).message_id;
+        }
+
+        try {
+            await api.sendMessage(Number(thread.chatId), `↗ Sent from the bot by ${escapeHtml(admin.firstName)}`, { message_thread_id: thread.topicId });
+            const copied = await api.copyMessage(Number(thread.chatId), adminChatId, message.message_id, { message_thread_id: thread.topicId });
+            await this.deps.repo.addLink({
+                threadId: thread.id,
+                direction: "OUT",
+                topicChatId: thread.chatId,
+                topicMessageId: copied.message_id,
+                privateChatId: BigInt(staffChatId),
+                privateMessageId,
+            });
+        } catch (error) {
+            logger.warn({ err: error, threadId: thread.id }, "Admin-panel message could not be mirrored into the support topic");
+        }
+        thread = await this.afterSupportDelivery(api, thread, admin, message);
+        return { topicUrl: this.deps.topicLink(thread.chatId, thread.topicId), title: thread.title };
+    }
+
     /** Пост бота в темі (звіт по задачі, заперечення розсилки) без повідомлення фотографині. */
     async postBotContext(
         api: Api,

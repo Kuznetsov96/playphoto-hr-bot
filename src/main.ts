@@ -28,7 +28,7 @@ import { queues } from "./core/queue.js";
 import { configureContainer } from "./core/container.js";
 import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
-import { ADMIN_IDS, BUSINESS_DATA_SOURCE } from "./config.js";
+import { ADMIN_IDS, BUSINESS_DATA_SOURCE, SUPPORT_THREADS_ENABLED } from "./config.js";
 import { awsBusinessSyncService } from "./services/aws-business-sync.js";
 import { reconcileKnownChats } from "./services/known-chat-reconciler.js";
 
@@ -221,7 +221,12 @@ async function bootstrap() {
         runner = run(bot, {
             runner: {
                 fetch: {
-                    allowed_updates: ["message", "callback_query", "my_chat_member", "chat_member", "chat_join_request"]
+                    // Правки й реакції потрібні лише постійним темам підтримки: без
+                    // прапорця їх не просимо, щоб старий маршрут їх не бачив зовсім.
+                    allowed_updates: [
+                        "message", "callback_query", "my_chat_member", "chat_member", "chat_join_request",
+                        ...(SUPPORT_THREADS_ENABLED ? (["edited_message", "message_reaction"] as const) : []),
+                    ]
                 }
             }
         });

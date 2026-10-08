@@ -10,6 +10,10 @@ import { candidateModule } from "../modules/candidate/index.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { staffSupportHandlers, handleSupportGroupMessage } from "../modules/staff/handlers/support.js";
+import { supportThreadHandlers } from "./support-threads.js";
+import { handleStaffThreadMessage } from "../modules/staff/handlers/support-thread-entry.js";
+import { sendAdminOutboundMessage } from "./admin/utils.js";
+import { SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../config.js";
 import { supportHandlers, handleSupportMessage } from "./support.js";
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
@@ -649,6 +653,8 @@ handlers.callbackQuery(/^broadcast_confirm_decline_(.+)$/, async (ctx) => {
 // Reordered: Support handlers first to avoid Admin/HR Menu interference (greedy matches)
 handlers.use(supportHandlers);
 handlers.use(staffSupportHandlers); // ✅ NEW: Allow Admins to use ticket buttons (ticket_assign, etc.)
+// Постійні теми підтримки: кнопки картки, правки, реакції (порожній без прапорця).
+handlers.use(supportThreadHandlers);
 
 // Replaced global registration with conditional one in routing below
 // handlers.use(adminHandlers); 
@@ -658,6 +664,24 @@ handlers.on("message", async (ctx, next) => {
     // 0. Preferences comment capture
     const { handlePreferenceComment } = await import("./preferences-flow.js");
     if (await handlePreferenceComment(ctx)) return;
+
+    // Постійна тема людини або її стара тема → фотографині. "ignored" — не наша
+    // тема (LOGISTICS, General, тема кандидатки): далі старий обробник.
+    if (
+        SUPPORT_THREADS_ENABLED &&
+        ctx.message &&
+        ctx.from &&
+        ctx.from.id !== ctx.me.id &&
+        ctx.chat?.id === Number(TEAM_CHATS.SUPPORT)
+    ) {
+        const { supportRelayService } = await import("../services/support-thread-runtime.js");
+        const result = await supportRelayService.relaySupportMessage(ctx.api, {
+            message: ctx.message,
+            sender: { id: ctx.from.id, firstName: ctx.from.first_name },
+            fallbackSend: staffChatId => sendAdminOutboundMessage(ctx, staffChatId, { prefixText: false }),
+        });
+        if (result !== "ignored") return;
+    }
 
     // Check if it's an Admin message in Support Group
     // A. For Staff (Returns true if handled)
@@ -719,6 +743,15 @@ handlers.use(async (ctx, next) => {
     if (user?.staffProfile) {
         // Shield: Block deactivated staff from accessing any staff features
         if (!user.staffProfile.isActive) {
+            // Звільнена співробітниця може написати в підтримку (виплати, документи):
+            // повідомлення йде в її тему, кабінет лишається закритим.
+            if (SUPPORT_THREADS_ENABLED && ctx.chat?.type === "private") {
+                if (ctx.message && (await handleStaffThreadMessage(ctx))) return;
+                const text = STAFF_TEXTS["support-thread-inactive-alert"];
+                if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text, show_alert: true });
+                else await ctx.reply(text);
+                return;
+            }
             if (ctx.chat?.type === "private") {
                 const text = STAFF_TEXTS["staff-deactivated-shield"];
                 if (ctx.callbackQuery) {
