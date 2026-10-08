@@ -281,6 +281,17 @@ Are you sure you want to send invitations to all these candidates?`,
 На локації <b>${p.locationName}</b> з’явилося вільне місце.
 Ми готові запросити тебе на коротку online-співбесіду у Google Meet. Скоріше обирай зручний час за кнопкою нижче, поки його не забронювали інші — і я одразу надішлю посилання на зустріч!`,
   "hr-info-waitlist-broadcast-done": (p: { count: string | number, locationName: string | number }) => `📢 Broadcast finished! Invited ${p.count} girls to ${p.locationName}. 🚀`,
+  // Постійна тема в чаті підтримки (spec 2026-10-08): без «запитів» і «тікетів» —
+  // просто розмова з підтримкою в цьому чаті.
+  "support-thread-ack": `Передали в підтримку — відповідь прийде сюди.`,
+  "support-thread-failed": `❌ Не вдалося передати повідомлення в підтримку. Спробуй ще раз за хвилину.`,
+  "support-thread-entry": `<b>Напиши сюди — передамо в підтримку.</b>
+Можна текстом, фото або кружечком.`,
+  "support-thread-task-entry": (p: { task: string }) => `❓ <b>Уточнення по завданню:</b>
+<i>«${p.task}»</i>
+
+Напиши, що саме незрозуміло, — передамо в підтримку.`,
+  "support-thread-inactive-alert": `Кабінет закрито. Напиши сюди — передамо в підтримку.`,
   "support-ans-already-processing": `Твій запит уже обробляється 💛`,
   "support-info-already-open": `<b>Твій діалог з куратором вже відкритий.</b>
 Просто напиши повідомлення сюди, і я миттєво передам його кураторам. ✨`,
