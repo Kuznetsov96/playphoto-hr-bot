@@ -6,6 +6,7 @@ import type { redis } from '../core/redis.js';
 import type { staffRepository } from '../repositories/staff-repository.js';
 import type { userRepository } from '../repositories/user-repository.js';
 import type { supportRepository } from '../repositories/support-repository.js';
+import type { supportThreadRepository } from '../repositories/support-thread-repository.js';
 import type { locationRepository } from '../repositories/location-repository.js';
 import type { broadcastRepository } from '../repositories/broadcast-repository.js';
 import type { taskRepository } from '../repositories/task-repository.js';
@@ -30,6 +31,7 @@ export interface Cradle {
     staffRepository: typeof staffRepository;
     userRepository: typeof userRepository;
     supportRepository: typeof supportRepository;
+    supportThreadRepository: typeof supportThreadRepository;
     locationRepository: typeof locationRepository;
     broadcastRepository: typeof broadcastRepository;
     taskRepository: typeof taskRepository;
