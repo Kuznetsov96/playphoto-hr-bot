@@ -42,12 +42,12 @@ describe("назва постійної теми", () => {
 });
 
 describe("точка в назві", () => {
-    it("філія йде після майданчика", () => {
-        expect(formatThreadPlace({ name: "Smile Park", branch: "Darynok", city: "Kyiv" })).toBe("Kyiv · Smile Park Darynok");
+    it("філія в дужках, як на всіх екранах бота (formatLocation)", () => {
+        expect(formatThreadPlace({ name: "Smile Park", branch: "Darynok", city: "Kyiv" })).toBe("Kyiv · Smile Park (Darynok)");
     });
 
     it("латинське місто береться як є", () => {
-        expect(formatThreadPlace({ name: "Karamel", branch: "Prut", city: "Kolomyia" })).toBe("Kolomyia · Karamel Prut");
+        expect(formatThreadPlace({ name: "Karamel", branch: "Prut", city: "Kolomyia" })).toBe("Kolomyia · Karamel (Prut)");
     });
 
     it("кириличне місто переводиться латиницею", () => {

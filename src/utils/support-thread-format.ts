@@ -1,4 +1,4 @@
-import { normalizeCity } from "./location-label.js";
+import { formatLocation, normalizeCity } from "./location-label.js";
 
 /**
  * Чисті правила постійної теми підтримки (spec 2026-10-08): назва, статус-іконка,
@@ -58,12 +58,12 @@ export function threadNameLabel(
     return firstName ? `${surname} ${firstName[0]}.` : surname;
 }
 
-/** `Kyiv · Smile Park Darynok`. Місто з каталогу вже латиницею; кирилицю перекладає normalizeCity. */
+/** `Kyiv · Smile Park (Darynok)`. Місто з каталогу вже латиницею; кирилицю перекладає normalizeCity. */
 export function formatThreadPlace(location: { name: string; branch: string | null; city: string }): string {
     const rawCity = location.city.trim();
     const city = /^[A-Za-z][A-Za-z\s'-]*$/.test(rawCity) ? rawCity : normalizeCity(rawCity);
-    const venue = location.branch?.trim() ? `${location.name.trim()} ${location.branch.trim()}` : location.name.trim();
-    return `${city} · ${venue}`;
+    // Майданчик із філією — лише через спільний formatLocation (його стереже check-location-labels).
+    return `${city} · ${formatLocation(location, "in-city")}`;
 }
 
 /** Найчастіша точка змін; нічия — та, що трапилась раніше; без змін — точка профілю. */
