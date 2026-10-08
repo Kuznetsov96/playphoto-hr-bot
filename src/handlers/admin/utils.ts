@@ -174,6 +174,8 @@ export function msgToHtml(text: string, entities: any[] = []): string {
         type: string;
         length: number;
         url?: string;
+        language?: string;
+        userId?: number;
     }
 
     const tagMap: Record<string, string> = {
@@ -196,10 +198,13 @@ export function msgToHtml(text: string, entities: any[] = []): string {
             type: entity.type,
             length: Number(entity.length),
             url: entity.url,
+            language: entity.language,
+            userId: entity.user?.id,
         }))
         .filter((entity) => {
             if (!Number.isFinite(entity.start) || !Number.isFinite(entity.end)) return false;
             if (entity.length <= 0 || entity.start < 0 || entity.end > text.length) return false;
+            if (entity.type === "text_mention") return Number.isFinite(entity.userId);
             return Boolean(tagMap[entity.type] || entity.type === "text_link");
         });
 
@@ -213,11 +218,19 @@ export function msgToHtml(text: string, entities: any[] = []): string {
 
     const entityKey = (entity: HtmlEntity) => `${entity.index}:${entity.type}:${entity.start}:${entity.end}:${entity.url || ""}`;
     const entityTag = (entity: HtmlEntity) => tagMap[entity.type] || "a";
+    // Розгорнута цитата, мова коду й згадка без юзернейма раніше губилися дорогою
+    // до фотографині: цитата приходила розкритою, код — без підсвітки, ім'я — текстом.
     const openTag = (entity: HtmlEntity) => {
         if (entity.type === "text_link") return `<a href="${escapeHtmlAttribute(entity.url || "")}">`;
+        if (entity.type === "text_mention") return `<a href="tg://user?id=${entity.userId}">`;
+        if (entity.type === "expandable_blockquote") return "<blockquote expandable>";
+        if (entity.type === "pre" && entity.language) return `<pre><code class="language-${escapeHtmlAttribute(entity.language)}">`;
         return `<${entityTag(entity)}>`;
     };
-    const closeTag = (entity: HtmlEntity) => `</${entityTag(entity)}>`;
+    const closeTag = (entity: HtmlEntity) => {
+        if (entity.type === "pre" && entity.language) return "</code></pre>";
+        return `</${entityTag(entity)}>`;
+    };
     const sortActiveEntities = (active: HtmlEntity[]) => active.sort((a, b) =>
         a.start - b.start ||
         b.end - a.end ||

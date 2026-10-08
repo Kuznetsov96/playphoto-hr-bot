@@ -39,6 +39,18 @@ describe("buildAdminOutboundReplyKeyboard", () => {
 });
 
 describe("msgToHtml", () => {
+    it("keeps an expandable quote collapsed", () => {
+        expect(msgToHtml("Long quote", [{ type: "expandable_blockquote", offset: 0, length: 10 }])).toBe("<blockquote expandable>Long quote</blockquote>");
+    });
+
+    it("keeps the language of a code block", () => {
+        expect(msgToHtml("x = 1", [{ type: "pre", offset: 0, length: 5, language: "python" }])).toBe('<pre><code class="language-python">x = 1</code></pre>');
+    });
+
+    it("keeps a mention of a user without a username", () => {
+        expect(msgToHtml("Олена", [{ type: "text_mention", offset: 0, length: 5, user: { id: 42 } }])).toBe('<a href="tg://user?id=42">Олена</a>');
+    });
+
     it("keeps nested Telegram entities valid when they start at the same offset", () => {
         const html = msgToHtml("Hello world", [
             { type: "bold", offset: 0, length: 5 },

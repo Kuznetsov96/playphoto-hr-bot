@@ -1,10 +1,11 @@
 import type { Api } from "grammy";
-import type { Message } from "grammy/types";
+import type { Message, MessageEntity, MessageReactionUpdated, ReactionTypeEmoji } from "grammy/types";
 import type { SupportThread } from "@prisma/client";
 import logger from "../core/logger.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import type { SupportThreadRepository } from "../repositories/support-thread-repository.js";
 import { isAcknowledgement } from "../utils/support-thread-format.js";
+import { escapeHtml, msgToHtml } from "../handlers/admin/utils.js";
 import type { AlbumBuffer } from "../utils/album-buffer.js";
 import { isTopicGoneError, type SupportThreadService } from "./support-thread-service.js";
 
@@ -23,12 +24,48 @@ export type ThreadContext = {
 
 export type RelayDeps = {
     threads: Pick<SupportThreadService, "ensureThread" | "applyStatus" | "refreshCardIfStale" | "noticeIfAway" | "recreateTopic">;
-    repo: Pick<SupportThreadRepository, "addLink" | "findLinkByPrivateMessage" | "findLinkByTopicMessage" | "update">;
+    repo: Pick<SupportThreadRepository, "addLink" | "findLinkByPrivateMessage" | "findLinkByTopicMessage" | "update" | "findByTopic" | "findLegacyUserByTopic">;
     timeline: (userId: string, author: "USER" | "ADMIN", text: string, meta: Record<string, unknown>) => Promise<void>;
     albums: AlbumBuffer<Message>;
     now: () => Date;
     albumDelayMs?: number;
+    supportChatId: () => number;
+    /** Приватний чат співробітниці (її telegramId). */
+    getStaffChatId: (userId: string) => Promise<number | null>;
+    /** Ролі підтримки: лише їхні повідомлення в темі йдуть фотографині. */
+    isSupportMember: (telegramId: number) => boolean;
+    topicLink: (chatId: bigint, topicId: number) => string;
 };
+
+/** Від імені групи Telegram підставляє цей службовий акаунт. */
+const ANONYMOUS_ADMIN_ID = 1087968824;
+/** Цитата контексту не довша за це — щоб підпис фото вліз у 1024 символи. */
+const CONTEXT_QUOTE_LIMIT = 200;
+
+/** Що з повідомлення в темі має сенс для фотографині; решта — службове. */
+const RELAYABLE_KEYS = [
+    "text", "photo", "video", "document", "voice", "video_note", "audio", "animation", "sticker",
+    "contact", "location", "venue", "poll", "dice", "rich_message", "checklist",
+] as const;
+
+function isRelayable(message: Message): boolean {
+    const record = message as unknown as Record<string, unknown>;
+    return RELAYABLE_KEYS.some(key => record[key] !== undefined);
+}
+
+function contextQuoteHtml(contextText: string): string {
+    const trimmed = contextText.length > CONTEXT_QUOTE_LIMIT ? `${contextText.slice(0, CONTEXT_QUOTE_LIMIT - 1)}…` : contextText;
+    return `<blockquote>${escapeHtml(trimmed)}</blockquote>\n`;
+}
+
+function emojiReactions(reactions: MessageReactionUpdated["new_reaction"]): ReactionTypeEmoji[] {
+    return reactions.filter((reaction): reaction is ReactionTypeEmoji => reaction.type === "emoji").map(reaction => ({ type: "emoji", emoji: reaction.emoji }));
+}
+
+function isBlockedError(error: unknown): boolean {
+    const value = error as { error_code?: number } | undefined;
+    return value?.error_code === 403 || /blocked|deactivated/i.test(describeError(error));
+}
 
 /** Текстове підтвердження — лише після такої тиші, щоб не відповідати на кожне повідомлення. */
 const ACK_QUIET_MS = 6 * 60 * 60 * 1000;
@@ -132,6 +169,240 @@ export class SupportRelayService {
             }
         }
         thread = await this.deps.threads.applyStatus(api, thread, { kind: "bot_context" });
+    }
+
+    /**
+     * Повідомлення команди в темі людини (або в її старій темі) → фотографині.
+     * "ignored" — не наша тема чи службове повідомлення; обробник віддає далі.
+     */
+    async relaySupportMessage(
+        api: Api,
+        input: { message: Message; sender: { id: number; firstName: string }; fallbackSend?: (staffChatId: number) => Promise<void> },
+    ): Promise<"delivered" | "ignored" | "failed"> {
+        const { message, sender } = input;
+        const chatId = this.deps.supportChatId();
+        const topicId = message.is_topic_message ? message.message_thread_id : undefined;
+        if (!topicId || !isRelayable(message)) return "ignored";
+
+        const resolved = await this.resolveTopic(api, chatId, topicId);
+        if (!resolved) return "ignored";
+        let { thread } = resolved;
+
+        const note = (text: string) => api.sendMessage(chatId, text, {
+            message_thread_id: topicId,
+            reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+        }).catch(error => logger.warn({ err: error, threadId: thread.id }, "Support delivery note failed"));
+
+        if (sender.id === ANONYMOUS_ADMIN_ID || message.sender_chat) {
+            await note("⚠️ Not delivered: you're posting anonymously. Turn off “Remain anonymous” in your admin rights and send again.");
+            return "failed";
+        }
+        if (!this.deps.isSupportMember(sender.id)) {
+            await note("⚠️ Not delivered: you're not on the support team list. Ask the owner to add your Telegram ID.");
+            return "failed";
+        }
+
+        const staffChatId = await this.deps.getStaffChatId(thread.userId);
+        if (!staffChatId) {
+            await note("❌ Not delivered: this person has no Telegram account in the bot.");
+            return "failed";
+        }
+
+        if ((message.rich_message || message.checklist) && input.fallbackSend) {
+            try {
+                await input.fallbackSend(staffChatId);
+            } catch (error) {
+                await note(this.deliveryFailureText(thread, error));
+                return "failed";
+            }
+            await this.afterSupportDelivery(api, thread, sender, message);
+            await this.noticeLegacy(api, resolved, chatId, topicId);
+            return "delivered";
+        }
+
+        if (message.media_group_id) {
+            const key = `${chatId}:${message.media_group_id}`;
+            this.deps.albums.add(key, message, items => this.flushSupportAlbum(api, thread, staffChatId, sender, items), this.deps.albumDelayMs ?? 1000);
+            await this.noticeLegacy(api, resolved, chatId, topicId);
+            return "delivered";
+        }
+
+        let delivered: { messageId: number; contextText: string | null };
+        try {
+            delivered = await this.sendToStaff(api, thread, chatId, staffChatId, message);
+        } catch (error) {
+            logger.warn({ err: error, threadId: thread.id }, "Support reply could not reach the photographer");
+            await note(this.deliveryFailureText(thread, error));
+            return "failed";
+        }
+
+        await this.deps.repo.addLink({
+            threadId: thread.id,
+            direction: "OUT",
+            topicChatId: BigInt(chatId),
+            topicMessageId: message.message_id,
+            privateChatId: BigInt(staffChatId),
+            privateMessageId: delivered.messageId,
+            contextText: delivered.contextText,
+        });
+        thread = await this.afterSupportDelivery(api, thread, sender, message);
+        await this.noticeLegacy(api, resolved, chatId, topicId);
+        return "delivered";
+    }
+
+    async relayEdit(api: Api, message: Message, side: "staff" | "support"): Promise<void> {
+        const link = side === "staff"
+            ? await this.deps.repo.findLinkByPrivateMessage(BigInt(message.chat.id), message.message_id)
+            : await this.deps.repo.findLinkByTopicMessage(BigInt(message.chat.id), message.message_id);
+        if (!link) return;
+        const expected = side === "staff" ? "IN" : "OUT";
+        if (link.direction !== expected) return;
+
+        const [targetChat, targetMessage] = side === "staff"
+            ? [Number(link.topicChatId), link.topicMessageId]
+            : [Number(link.privateChatId), link.privateMessageId];
+        if (!targetChat || !targetMessage) return;
+
+        const context = side === "support" ? link.contextText : null;
+        try {
+            if (message.text !== undefined) {
+                if (context) {
+                    await api.editMessageText(targetChat, targetMessage, contextQuoteHtml(context) + msgToHtml(message.text, message.entities ?? []), { parse_mode: "HTML" });
+                } else {
+                    await api.editMessageText(targetChat, targetMessage, message.text, { entities: message.entities ?? [] });
+                }
+            } else if (message.caption !== undefined) {
+                if (context) {
+                    await api.editMessageCaption(targetChat, targetMessage, { caption: contextQuoteHtml(context) + msgToHtml(message.caption, message.caption_entities ?? []), parse_mode: "HTML" });
+                } else {
+                    await api.editMessageCaption(targetChat, targetMessage, { caption: message.caption, caption_entities: message.caption_entities ?? [] });
+                }
+            } else {
+                logger.info({ side, messageId: message.message_id }, "Support edit without text or caption is not relayed");
+            }
+        } catch (error) {
+            if (!/message is not modified/i.test(describeError(error))) {
+                logger.warn({ err: error, side, messageId: message.message_id }, "Support edit could not be relayed");
+            }
+        }
+    }
+
+    async relayReaction(api: Api, update: MessageReactionUpdated, side: "staff" | "support"): Promise<void> {
+        if (update.user?.is_bot) return;
+        const reactions = emojiReactions(update.new_reaction);
+
+        if (side === "support") {
+            if (!update.user || !this.deps.isSupportMember(update.user.id)) return;
+            const link = await this.deps.repo.findLinkByTopicMessage(BigInt(update.chat.id), update.message_id);
+            if (!link || link.direction !== "IN" || !link.privateChatId || !link.privateMessageId) return;
+            await api.setMessageReaction(Number(link.privateChatId), link.privateMessageId, reactions).catch(error => {
+                logger.debug({ err: error }, "Support reaction could not be mirrored to the photographer");
+            });
+            if (reactions.some(reaction => reaction.emoji === "👍") && link.thread) {
+                await this.deps.threads.applyStatus(api, link.thread, { kind: "support_thumbs_up", actorTelegramId: BigInt(update.user.id) });
+            }
+            return;
+        }
+
+        const link = await this.deps.repo.findLinkByPrivateMessage(BigInt(update.chat.id), update.message_id);
+        if (!link || link.direction !== "OUT") return;
+        await api.setMessageReaction(Number(link.topicChatId), link.topicMessageId, reactions).catch(error => {
+            logger.debug({ err: error }, "Photographer reaction could not be mirrored to the topic");
+        });
+    }
+
+    private async resolveTopic(api: Api, chatId: number, topicId: number): Promise<{ thread: SupportThread; legacyTopicId: number | null } | null> {
+        const thread = await this.deps.repo.findByTopic(BigInt(chatId), topicId);
+        if (thread) return { thread, legacyTopicId: null };
+        const legacyUserId = await this.deps.repo.findLegacyUserByTopic(BigInt(chatId), topicId);
+        if (!legacyUserId) return null;
+        try {
+            return { thread: await this.deps.threads.ensureThread(api, legacyUserId), legacyTopicId: topicId };
+        } catch (error) {
+            // Стара тема кандидатки чи людини без профілю — нехай її веде старий обробник.
+            logger.debug({ err: error, topicId }, "Legacy support topic has no staff thread");
+            return null;
+        }
+    }
+
+    private readonly legacyNoticeDays = new Map<number, string>();
+
+    /** Раз на день у старій темі — де тепер розмова. */
+    private async noticeLegacy(api: Api, resolved: { thread: SupportThread; legacyTopicId: number | null }, chatId: number, topicId: number) {
+        if (resolved.legacyTopicId === null) return;
+        const day = this.deps.now().toISOString().slice(0, 10);
+        if (this.legacyNoticeDays.get(topicId) === day) return;
+        this.legacyNoticeDays.set(topicId, day);
+        await api.sendMessage(chatId, `➡️ This conversation now lives here: ${this.deps.topicLink(resolved.thread.chatId, resolved.thread.topicId)}`, {
+            message_thread_id: topicId,
+        }).catch(error => logger.warn({ err: error, topicId }, "Legacy topic notice failed"));
+    }
+
+    private async sendToStaff(api: Api, thread: SupportThread, chatId: number, staffChatId: number, message: Message): Promise<{ messageId: number; contextText: string | null }> {
+        const repliedId = message.reply_to_message?.message_id;
+        const isTopicRoot = !repliedId || repliedId === message.message_thread_id || Boolean(message.reply_to_message?.forum_topic_created);
+        const link = isTopicRoot ? null : await this.deps.repo.findLinkByTopicMessage(BigInt(chatId), repliedId!);
+
+        if (link?.direction === "CONTEXT" && link.contextText) {
+            const prefix = contextQuoteHtml(link.contextText);
+            if (message.text !== undefined) {
+                const sent = await api.sendMessage(staffChatId, prefix + msgToHtml(message.text, message.entities ?? []), { parse_mode: "HTML" });
+                return { messageId: sent.message_id, contextText: link.contextText };
+            }
+            const caption = prefix + msgToHtml(message.caption ?? "", message.caption_entities ?? []);
+            const copied = await api.copyMessage(staffChatId, chatId, message.message_id, { caption, parse_mode: "HTML" });
+            return { messageId: copied.message_id, contextText: link.contextText };
+        }
+
+        const reply = link && link.privateMessageId && link.privateChatId && Number(link.privateChatId) === staffChatId
+            ? withQuote({ message_id: link.privateMessageId, allow_sending_without_reply: true }, message)
+            : undefined;
+        try {
+            const copied = await api.copyMessage(staffChatId, chatId, message.message_id, reply ? { reply_parameters: reply } : {});
+            return { messageId: copied.message_id, contextText: null };
+        } catch (error) {
+            if (!reply?.quote || !isQuoteError(error)) throw error;
+            const { quote: _quote, quote_position: _position, ...plain } = reply;
+            const copied = await api.copyMessage(staffChatId, chatId, message.message_id, { reply_parameters: plain });
+            return { messageId: copied.message_id, contextText: null };
+        }
+    }
+
+    private async flushSupportAlbum(api: Api, thread: SupportThread, staffChatId: number, sender: { id: number; firstName: string }, items: Message[]) {
+        const messages = [...items].sort((a, b) => a.message_id - b.message_id);
+        const chatId = this.deps.supportChatId();
+        try {
+            const copied = await api.copyMessages(staffChatId, chatId, messages.map(item => item.message_id));
+            for (let index = 0; index < messages.length && index < copied.length; index++) {
+                await this.deps.repo.addLink({
+                    threadId: thread.id,
+                    direction: "OUT",
+                    topicChatId: BigInt(chatId),
+                    topicMessageId: messages[index]!.message_id,
+                    privateChatId: BigInt(staffChatId),
+                    privateMessageId: copied[index]!.message_id,
+                });
+            }
+            await this.afterSupportDelivery(api, thread, sender, messages[0]!);
+        } catch (error) {
+            await api.sendMessage(chatId, this.deliveryFailureText(thread, error), { message_thread_id: messages[0]!.message_thread_id ?? thread.topicId })
+                .catch(noteError => logger.warn({ err: noteError }, "Support album failure note failed"));
+        }
+    }
+
+    private async afterSupportDelivery(api: Api, thread: SupportThread, sender: { id: number }, message: Message): Promise<SupportThread> {
+        const updated = await this.deps.threads.applyStatus(api, thread, { kind: "support_reply", actorTelegramId: BigInt(sender.id) });
+        await this.deps.repo.update(updated.id, { lastSupportAt: this.deps.now() });
+        await this.deps.timeline(thread.userId, "ADMIN", messagePreview(message), { threadId: thread.id, adminId: sender.id }).catch(error => {
+            logger.warn({ err: error, threadId: thread.id }, "Support timeline event failed");
+        });
+        return updated;
+    }
+
+    private deliveryFailureText(thread: SupportThread, error: unknown): string {
+        const name = thread.title.split(" · ")[0] ?? "The photographer";
+        if (isBlockedError(error)) return `❌ Not delivered: ${name} blocked the bot.`;
+        return `❌ Not delivered: ${describeError(error)}`;
     }
 
     private async postContext(api: Api, thread: SupportThread, context: ThreadContext) {
