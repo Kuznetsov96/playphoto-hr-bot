@@ -36,6 +36,7 @@ vi.mock("../parcel-canonical-read.js", () => ({
         findActive: vi.fn().mockResolvedValue([{
             ttn: "20451549178727", status: "IN_TRANSIT", locationId: null,
             npAddress: "Відділення №5", npCity: "Київ", scheduledDate: null, arrivedAt: null,
+            deliveryType: "Address",
         }]),
     },
 }));
@@ -71,5 +72,16 @@ describe("new parcel without a location", () => {
         await logisticsService.syncActiveParcelsStatus();
 
         expect(sendMessage).not.toHaveBeenCalled();
+    });
+});
+
+// Тип доставки знає вебапп: за npAddress бот записував кур'єрську як 'Warehouse'.
+describe("new parcel row", () => {
+    it("takes the delivery type from the web app, not from the presence of an NP address", async () => {
+        findUnique.mockResolvedValue(null);
+
+        await logisticsService.syncActiveParcelsStatus();
+
+        expect(create.mock.calls[0]![0].data.deliveryType).toBe("Address");
     });
 });

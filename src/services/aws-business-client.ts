@@ -327,6 +327,9 @@ const parcelsSchema = z.object({
             npCity: z.string().nullable(),
             scheduledDate: z.string().nullable(),
             arrivedAt: z.string().nullable(),
+            // 'Warehouse' | 'Address'. Вебапп виходить першим, але бот не має
+            // падати на старішій версії без цього поля.
+            deliveryType: z.string().nullable().optional(),
         }),
     ),
 });

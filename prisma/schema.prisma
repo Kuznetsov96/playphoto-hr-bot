@@ -505,6 +505,16 @@ model Parcel {
   shiftEndReminderSentAt DateTime? // When the shift-end pickup reminder was sent
   staleAlertSentAt       DateTime? // When the "parcel delayed" support alert was sent
 
+  // Мить входу в DELIVERED / VERIFYING: від неї рахується 3-денний сигнал
+  // підтримці (updatedAt рухає будь-яка правка рядка).
+  deliveredAt    DateTime?
+  verifyingSince DateTime?
+
+  claimPromptedAt          DateTime? // Кур'єрська посилка: коли зміні (2+ людини) запропонували взяти її на фото
+  outsidePickupAlertSentAt DateTime? // Підтримці: НП видала посилку, а через бота її ніхто не забирав
+  photoOverdueAlertSentAt  DateTime? // Підтримці: 3 дні без фото вмісту
+  reviewOverdueAlertSentAt DateTime? // Підтримці: фото 3 дні чекають підтвердження
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -39,6 +39,35 @@ describe("ParcelCanonicalReadService", () => {
         expect(result).toHaveLength(1);
         expect(result[0]!.locationId).toBe("local-aaaaaaaa-1111-1111-1111-111111111111");
         expect(result[0]!.arrivedAt).toEqual(new Date("2026-08-20T10:00:00.000Z"));
+        // Старіший вебапп без поля: бот не падає й не вигадує тип.
+        expect(result[0]!.deliveryType).toBeNull();
+    });
+
+    it("передає тип доставки від вебаппа", async () => {
+        const client = {
+            parcels: vi.fn().mockResolvedValue({
+                schemaVersion: 1,
+                generatedAt: "2026-10-08T10:00:00.000Z",
+                parcels: [
+                    {
+                        ttn: "20450000000003",
+                        status: "DELIVERED",
+                        locationPublicId: null,
+                        npAddress: "вул. Шевченка, 1",
+                        npCity: "Київ",
+                        scheduledDate: null,
+                        arrivedAt: null,
+                        deliveryType: "Address"
+                    }
+                ]
+            })
+        };
+        const db = { location: { findMany: vi.fn() } };
+
+        const service = new ParcelCanonicalReadService(client as never, db as never);
+        const result = await service.findActive();
+
+        expect(result[0]!.deliveryType).toBe("Address");
     });
 
     it("залишає locationId порожнім, якщо локація веба не зіставлена з локацією бота", async () => {
