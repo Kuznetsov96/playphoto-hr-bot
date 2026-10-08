@@ -54,6 +54,7 @@ function setup(threadOverrides: Any = {}) {
         getStaffChatId: async () => STAFF_CHAT,
         isSupportMember: (id: number) => id === KUZNETSOV || id === SUPPORT_ACCOUNT,
         topicLink: (_c: Any, topicId: number) => `link/${topicId}`,
+        ignoredTopicIds: () => [7350],
     } as Any);
     return { service, api, thread, links, repo, threads };
 }
@@ -88,6 +89,14 @@ describe("відповідь із теми фотографині", () => {
         await expect(service.relaySupportMessage(api, { message: inTopic(34, { message_thread_id: 7350 }), sender })).resolves.toBe("ignored");
         await expect(service.relaySupportMessage(api, { message: inTopic(35, { message_thread_id: undefined, is_topic_message: undefined }), sender })).resolves.toBe("ignored");
         expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("тема LOGISTICS не шукається серед старих тікетів", async () => {
+        const { service, api, repo } = setup();
+        repo.findLegacyUserByTopic.mockResolvedValue("u1");
+        await expect(service.relaySupportMessage(api, { message: inTopic(49, { message_thread_id: 7350 }), sender })).resolves.toBe("ignored");
+        expect(repo.findLegacyUserByTopic).not.toHaveBeenCalled();
+        expect(api.copyMessage).not.toHaveBeenCalled();
     });
 
     it("анонімний адмін — пояснення в темі, фотографині нічого", async () => {
@@ -230,6 +239,31 @@ describe("реакції", () => {
         expect(thread.lastEvent).toEqual({ kind: "support_thumbs_up", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
     });
 
+    it("кілька реакцій — переноситься лише щойно додана", async () => {
+        const { service, api, repo, thread } = setup();
+        repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 500, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 11 });
+        const update = { ...reaction(SUPPORT_CHAT, 500, SUPPORT_ACCOUNT, ["❤", "👍"]), old_reaction: [{ type: "emoji", emoji: "❤" }] };
+        await service.relayReaction(api, update, "support");
+        expect(api.setMessageReaction).toHaveBeenCalledWith(STAFF_CHAT, 11, [{ type: "emoji", emoji: "👍" }]);
+        expect(thread.lastEvent).toEqual({ kind: "support_thumbs_up", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
+    });
+
+    it("зняли одну з двох — лишається та, що є", async () => {
+        const { service, api, repo } = setup();
+        repo.findLinkByPrivateMessage.mockResolvedValue({ direction: "OUT", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 31, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 2001 });
+        const update = { ...reaction(STAFF_CHAT, 2001, 555, ["❤"]), old_reaction: [{ type: "emoji", emoji: "❤" }, { type: "emoji", emoji: "🔥" }] };
+        await service.relayReaction(api, update, "staff");
+        expect(api.setMessageReaction).toHaveBeenCalledWith(SUPPORT_CHAT, 31, [{ type: "emoji", emoji: "❤" }]);
+    });
+
+    it("👍 уже стояв, додали ще одну — статус не чіпаємо вдруге", async () => {
+        const { service, api, repo, thread } = setup();
+        repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 500, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 11 });
+        const update = { ...reaction(SUPPORT_CHAT, 500, SUPPORT_ACCOUNT, ["👍", "❤"]), old_reaction: [{ type: "emoji", emoji: "👍" }] };
+        await service.relayReaction(api, update, "support");
+        expect(thread.lastEvent).toBeUndefined();
+    });
+
     it("інша реакція підтримки статус не змінює", async () => {
         const { service, api, repo, thread } = setup();
         repo.findLinkByTopicMessage.mockResolvedValue({ thread, threadId: "t1", direction: "IN", topicChatId: BigInt(SUPPORT_CHAT), topicMessageId: 500, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 11 });
@@ -268,11 +302,17 @@ describe("повідомлення з адмінки бота", () => {
         const { service, api, links, thread } = setup();
         const result = await service.sendFromAdminPanel(api, { adminChatId: ADMIN_CHAT, message: adminMessage, admin: { id: SUPPORT_ACCOUNT, firstName: "Olena" }, userId: "u1" });
         expect(api.copyMessage.mock.calls[0]).toEqual([STAFF_CHAT, ADMIN_CHAT, 70]);
-        expect(api.sendMessage).toHaveBeenCalledWith(SUPPORT_CHAT, "↗ Sent from the bot by Olena", { message_thread_id: 77 });
+        expect(api.sendMessage).toHaveBeenCalledWith(SUPPORT_CHAT, "↗ Sent from the bot by Olena", { message_thread_id: 77, parse_mode: "HTML" });
         expect(api.copyMessage.mock.calls[1]).toEqual([SUPPORT_CHAT, ADMIN_CHAT, 70, { message_thread_id: 77 }]);
         expect(links).toContainEqual(expect.objectContaining({ direction: "OUT", topicMessageId: 2003, privateChatId: BigInt(STAFF_CHAT), privateMessageId: 2001 }));
         expect(thread.lastEvent).toEqual({ kind: "support_reply", actorTelegramId: BigInt(SUPPORT_ACCOUNT) });
         expect(result).toEqual({ topicUrl: "link/77", title: "Бланк · Lviv · Dragon Park 2" });
+    });
+
+    it("ім'я менеджера з «&» показується як є", async () => {
+        const { service, api } = setup();
+        await service.sendFromAdminPanel(api, { adminChatId: ADMIN_CHAT, message: adminMessage, admin: { id: SUPPORT_ACCOUNT, firstName: "Olena & Co" }, userId: "u1" });
+        expect(api.sendMessage).toHaveBeenCalledWith(SUPPORT_CHAT, "↗ Sent from the bot by Olena &amp; Co", { message_thread_id: 77, parse_mode: "HTML" });
     });
 
     it("фотографині не дійшло — помилка, у тему нічого", async () => {

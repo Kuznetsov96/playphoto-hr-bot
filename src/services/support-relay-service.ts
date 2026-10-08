@@ -29,6 +29,8 @@ export type RelayDeps = {
     albums: AlbumBuffer<Message>;
     now: () => Date;
     albumDelayMs?: number;
+    /** Теми чату, які ніколи не належать людині (LOGISTICS). */
+    ignoredTopicIds?: () => number[];
     supportChatId: () => number;
     /** Приватний чат співробітниці (її telegramId). */
     getStaffChatId: (userId: string) => Promise<number | null>;
@@ -53,6 +55,8 @@ function isRelayable(message: Message): boolean {
     return RELAYABLE_KEYS.some(key => record[key] !== undefined);
 }
 
+/** Скільки чекати наступну частину альбому: на проді частина проходить усю ланку middleware. */
+const ALBUM_WAIT_MS = 2_000;
 const TEXT_LIMIT = 4096;
 const CAPTION_LIMIT = 1024;
 
@@ -67,6 +71,18 @@ function contextQuoteHtml(contextText: string): string {
 
 function emojiReactions(reactions: MessageReactionUpdated["new_reaction"]): ReactionTypeEmoji[] {
     return reactions.filter((reaction): reaction is ReactionTypeEmoji => reaction.type === "emoji").map(reaction => ({ type: "emoji", emoji: reaction.emoji }));
+}
+
+/**
+ * Бот може поставити лише одну реакцію, тож на пару йде одна: щойно додана, а якщо
+ * реакцію зняли — остання з тих, що лишились (або нічого).
+ */
+function reactionToMirror(update: MessageReactionUpdated): { mirror: ReactionTypeEmoji[]; added: ReactionTypeEmoji[] } {
+    const now = emojiReactions(update.new_reaction);
+    const before = new Set(emojiReactions(update.old_reaction).map(reaction => reaction.emoji));
+    const added = now.filter(reaction => !before.has(reaction.emoji));
+    const pick = added.at(-1) ?? now.at(-1);
+    return { mirror: pick ? [pick] : [], added };
 }
 
 function isBlockedError(error: unknown): boolean {
@@ -135,7 +151,7 @@ export class SupportRelayService {
 
         if (message.media_group_id) {
             const key = `${chatId}:${message.media_group_id}`;
-            this.deps.albums.add(key, message, items => this.flushStaffAlbum(api, userId, chatId, items), this.deps.albumDelayMs ?? 1000);
+            this.deps.albums.add(key, message, items => this.flushStaffAlbum(api, userId, chatId, items), this.deps.albumDelayMs ?? ALBUM_WAIT_MS);
             return "delivered";
         }
 
@@ -186,7 +202,7 @@ export class SupportRelayService {
         }
 
         try {
-            await api.sendMessage(Number(thread.chatId), `↗ Sent from the bot by ${escapeHtml(admin.firstName)}`, { message_thread_id: thread.topicId });
+            await api.sendMessage(Number(thread.chatId), `↗ Sent from the bot by ${escapeHtml(admin.firstName)}`, { message_thread_id: thread.topicId, parse_mode: "HTML" });
             const copied = await api.copyMessage(Number(thread.chatId), adminChatId, message.message_id, { message_thread_id: thread.topicId });
             await this.deps.repo.addLink({
                 threadId: thread.id,
@@ -273,7 +289,7 @@ export class SupportRelayService {
 
         if (message.media_group_id) {
             const key = `${chatId}:${message.media_group_id}`;
-            this.deps.albums.add(key, message, items => this.flushSupportAlbum(api, thread, staffChatId, sender, items), this.deps.albumDelayMs ?? 1000);
+            this.deps.albums.add(key, message, items => this.flushSupportAlbum(api, thread, staffChatId, sender, items), this.deps.albumDelayMs ?? ALBUM_WAIT_MS);
             await this.noticeLegacy(api, resolved, chatId, topicId);
             return "delivered";
         }
@@ -340,7 +356,7 @@ export class SupportRelayService {
 
     async relayReaction(api: Api, update: MessageReactionUpdated, side: "staff" | "support"): Promise<void> {
         if (update.user?.is_bot) return;
-        const reactions = emojiReactions(update.new_reaction);
+        const { mirror: reactions, added } = reactionToMirror(update);
 
         if (side === "support") {
             if (!update.user || !this.deps.isSupportMember(update.user.id)) return;
@@ -349,7 +365,7 @@ export class SupportRelayService {
             await api.setMessageReaction(Number(link.privateChatId), link.privateMessageId, reactions).catch(error => {
                 logger.debug({ err: error }, "Support reaction could not be mirrored to the photographer");
             });
-            if (reactions.some(reaction => reaction.emoji === "👍") && link.thread) {
+            if (added.some(reaction => reaction.emoji === "👍") && link.thread) {
                 await this.deps.threads.applyStatus(api, link.thread, { kind: "support_thumbs_up", actorTelegramId: BigInt(update.user.id) });
             }
             return;
@@ -363,6 +379,7 @@ export class SupportRelayService {
     }
 
     private async resolveTopic(api: Api, chatId: number, topicId: number): Promise<{ thread: SupportThread; legacyTopicId: number | null } | null> {
+        if (this.deps.ignoredTopicIds?.().includes(topicId)) return null;
         const thread = await this.deps.repo.findByTopic(BigInt(chatId), topicId);
         if (thread) return { thread, legacyTopicId: null };
         const legacyUserId = await this.deps.repo.findLegacyUserByTopic(BigInt(chatId), topicId);

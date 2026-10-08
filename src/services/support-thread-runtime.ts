@@ -80,6 +80,7 @@ export const supportRelayService = new SupportRelayService({
     albums: new AlbumBuffer(),
     now: () => new Date(),
     supportChatId: () => TEAM_CHATS.SUPPORT,
+    ignoredTopicIds: () => (TEAM_CHATS.LOGISTICS ? [TEAM_CHATS.LOGISTICS] : []),
     getStaffChatId: async userId => {
         const user = await prisma.user.findUnique({ where: { id: userId }, select: { telegramId: true } });
         return user ? Number(user.telegramId) : null;

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../core/logger.js", () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
-const { migrateLegacyConversations, runDailySupportThreadJobs } = await import("../support-thread-migration.js");
+const { migrateLegacyConversations, runDailySupportThreadJobs, runSupportThreadTick } = await import("../support-thread-migration.js");
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -87,6 +87,18 @@ describe("перехід на постійні теми", () => {
         expect(store.has("support:threads:migration:lease")).toBe(false);
     });
 
+    it("лок переходу короткий і продовжується на кожній людині — після падіння процесу повтор за хвилини", async () => {
+        const { deps, api, redis } = setup([
+            { userId: "u1", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [] },
+            { userId: "u2", topics: [], ticketIds: [2], outgoingIds: [], proofIds: [] },
+        ]);
+        await migrateLegacyConversations(api, deps);
+        const leaseCalls = redis.set.mock.calls.filter((c: Any[]) => c[0] === "support:threads:migration:lease");
+        expect(leaseCalls[0]).toEqual(["support:threads:migration:lease", expect.any(String), "PX", 300_000, "NX"]);
+        expect(leaseCalls.length).toBeGreaterThanOrEqual(3);
+        expect(leaseCalls.slice(1).every((c: Any[]) => c[2] === "PX" && c[3] === 300_000 && !c.includes("NX"))).toBe(true);
+    });
+
     it("пауза між людьми — щоб не впертися в ліміт групи", async () => {
         const { deps, api } = setup([
             { userId: "u1", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [] },
@@ -131,5 +143,28 @@ describe("щоденні задачі", () => {
     it("не о 7-й — нічого", async () => {
         const { deps } = daily("2026-10-08T09:00:00Z");
         await expect(runDailySupportThreadJobs({} as Any, deps, new Date("2026-10-08T09:00:00Z"))).resolves.toBe(false);
+    });
+});
+
+describe("цикл кожні 5 хвилин", () => {
+    it("недороблений перехід повторюється, поки не позначений «готово»", async () => {
+        const { deps, api, repo, store } = setup([{ userId: "broken", topics: [], ticketIds: [1], outgoingIds: [], proofIds: [] }]);
+        const daily: Any = { redis: { set: vi.fn(async () => null) }, threads: {}, repo: {} };
+        await runSupportThreadTick(api, deps, daily, new Date("2026-10-08T09:00:00Z"));
+        await runSupportThreadTick(api, deps, daily, new Date("2026-10-08T09:05:00Z"));
+        expect(repo.listLegacyActive).toHaveBeenCalledTimes(2);
+        expect(store.has("support:threads:migrated:v1")).toBe(false);
+    });
+
+    it("збій переходу не зриває щоденні задачі", async () => {
+        const { deps, api, repo } = setup([]);
+        repo.listLegacyActive.mockRejectedValue(new Error("db down"));
+        const daily: Any = {
+            redis: { set: vi.fn(async () => "OK") },
+            threads: { archiveInactive: vi.fn(async () => undefined), dailyRefresh: vi.fn(async () => undefined) },
+            repo: { deleteLinksOlderThan: vi.fn(async () => ({ count: 0 })) },
+        };
+        await runSupportThreadTick(api, deps, daily, new Date("2026-10-08T04:01:00Z"));
+        expect(daily.threads.dailyRefresh).toHaveBeenCalled();
     });
 });

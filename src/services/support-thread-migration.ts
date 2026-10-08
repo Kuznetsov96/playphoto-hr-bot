@@ -12,7 +12,8 @@ import type { SupportThreadService } from "./support-thread-service.js";
 
 const DONE_KEY = "support:threads:migrated:v1";
 const LEASE_KEY = "support:threads:migration:lease";
-const LEASE_MS = 2 * 60 * 60 * 1000;
+/** Короткий лок, що продовжується на кожній людині: упав процес — повтор за хвилини, а не за години. */
+const LEASE_MS = 5 * 60 * 1000;
 /**
  * Ліміт Telegram — 20 повідомлень на хвилину в групі, а на людину йде 4–6
  * (тема, картка, закріп, «Previous», «Moved» у кожну стару). 20 с — щоб перехід
@@ -45,6 +46,7 @@ export async function migrateLegacyConversations(api: Api, deps: MigrationDeps):
         const rows = await deps.repo.listLegacyActive(BigInt(deps.supportChatId()));
         for (const [index, row] of rows.entries()) {
             if (index > 0) await deps.sleep(PAUSE_BETWEEN_PEOPLE_MS);
+            await deps.redis.set(LEASE_KEY, String(process.pid), "PX", LEASE_MS);
             let thread;
             try {
                 thread = await deps.threads.ensureThread(api, row.userId);
@@ -97,4 +99,22 @@ export async function runDailySupportThreadJobs(api: Api, deps: DailyDeps, now: 
     await deps.threads.dailyRefresh(api, now);
     await deps.repo.deleteLinksOlderThan(new Date(now.getTime() - LINK_RETENTION_MS));
     return true;
+}
+
+/**
+ * Один крок фонового циклу: перехід (якщо ще не позначений «готово» — коштує
+ * одне читання Redis) і щоденні задачі. Збій одного не зриває іншого.
+ */
+export async function runSupportThreadTick(api: Api, migration: MigrationDeps, daily: DailyDeps, now: Date = new Date()): Promise<void> {
+    // Щоденні — першими: перехід може тривати пів години й не має з'їсти вікно о 7-й.
+    try {
+        await runDailySupportThreadJobs(api, daily, now);
+    } catch (error) {
+        logger.error({ err: error }, "Support thread daily jobs failed");
+    }
+    try {
+        await migrateLegacyConversations(api, migration);
+    } catch (error) {
+        logger.error({ err: error }, "Support thread migration tick failed");
+    }
 }

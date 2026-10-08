@@ -207,6 +207,23 @@ describe("повідомлення фотографині в тему", () => {
         expect(api.sendMessage).not.toHaveBeenCalled();
     });
 
+    it("альбом без явної затримки чекає 2 с — повільна частина не розриває його", async () => {
+        vi.useFakeTimers();
+        try {
+            const { service, api } = setup();
+            (service as Any).deps.albumDelayMs = undefined;
+            const photo = (id: number): Any => ({ message_id: id, chat: { id: STAFF_CHAT }, media_group_id: "g2", photo: [{}] });
+            await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: photo(31), contexts: [] });
+            await vi.advanceTimersByTimeAsync(1500);
+            await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: photo(32), contexts: [] });
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(api.copyMessages).toHaveBeenCalledTimes(1);
+            expect(api.copyMessages.mock.calls[0][2]).toEqual([31, 32]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("історія пишеться в timeline", async () => {
         const { service, api, timeline } = setup();
         await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(24, "Питання"), contexts: [] });

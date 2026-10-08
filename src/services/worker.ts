@@ -1968,22 +1968,23 @@ export function startSupportThreadJobs(api: Bot<MyContext>["api"]) {
         return { runtime, migration, repo: repository.supportThreadRepository, topicLink: service.topicLink };
     };
 
-    setTimeout(() => {
-        load()
-            .then(({ runtime, migration, repo, topicLink }) => migration.migrateLegacyConversations(api, {
+    const tick = () => load()
+        .then(({ runtime, migration, repo, topicLink }) => migration.runSupportThreadTick(
+            api,
+            {
                 redis: redisLike,
                 repo,
                 threads: runtime.supportThreadService,
                 supportChatId: () => TEAM_CHATS.SUPPORT,
                 topicLink,
                 sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
-            }))
-            .catch(error => logger.error({ err: error }, "Support thread migration crashed"));
-    }, SUPPORT_THREAD_MIGRATION_DELAY_MS);
+            },
+            { redis: redisLike, threads: runtime.supportThreadService, repo },
+        ))
+        .catch(error => logger.error({ err: error }, "Support thread jobs failed"));
 
-    return setInterval(() => {
-        load()
-            .then(({ runtime, migration, repo }) => migration.runDailySupportThreadJobs(api, { redis: redisLike, threads: runtime.supportThreadService, repo }))
-            .catch(error => logger.error({ err: error }, "Support thread daily jobs failed"));
-    }, SUPPORT_THREAD_JOBS_POLL_MS);
+    // Перший крок — через хвилину після старту; далі кожні 5 хвилин. Перехід
+    // повторюється, доки не позначений «готово» (лок не дасть двом крокам іти разом).
+    setTimeout(tick, SUPPORT_THREAD_MIGRATION_DELAY_MS);
+    return setInterval(tick, SUPPORT_THREAD_JOBS_POLL_MS);
 }
