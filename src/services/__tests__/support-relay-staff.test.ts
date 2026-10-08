@@ -177,6 +177,36 @@ describe("повідомлення фотографині в тему", () => {
         expect(links.filter(l => l.direction === "IN")).toHaveLength(3);
     });
 
+    it("видалена тема на пості контексту — нова тема, контекст і повідомлення доходять", async () => {
+        const { service, api, threads } = setup();
+        api.sendMessage.mockRejectedValueOnce(Object.assign(new Error("x"), { description: "Bad Request: message thread not found" }));
+        const result = await service.relayStaffMessage(api, {
+            userId: "u1", chatId: STAFF_CHAT, message: text(25, "Питання"),
+            contexts: [{ topicHtml: "❓ ctx", contextText: "ctx" }],
+        });
+        expect(result).toBe("delivered");
+        expect(threads.recreateTopic).toHaveBeenCalled();
+        expect(api.sendMessage.mock.calls[1]).toEqual([TOPIC_CHAT, "❓ ctx", { message_thread_id: 88, parse_mode: "HTML" }]);
+        expect(api.copyMessage.mock.calls[0][3]).toEqual({ message_thread_id: 88 });
+    });
+
+    it("звіт бота у видалену тему — нова тема і звіт доходить", async () => {
+        const { service, api, threads } = setup();
+        api.sendMessage.mockRejectedValueOnce(Object.assign(new Error("x"), { description: "Bad Request: TOPIC_DELETED" }));
+        await service.postBotContext(api, "u1", { topicHtml: "📎 report", contextText: "r" });
+        expect(threads.recreateTopic).toHaveBeenCalled();
+        expect(api.sendMessage).toHaveBeenLastCalledWith(TOPIC_CHAT, "📎 report", { message_thread_id: 88, parse_mode: "HTML" });
+    });
+
+    it("службова подія в приватному чаті (закріп) — нікуди не йде і без «не вдалося»", async () => {
+        const { service, api, threads } = setup();
+        const result = await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: { message_id: 26, chat: { id: STAFF_CHAT }, pinned_message: {} } as Any, contexts: [] });
+        expect(result).toBe("ignored");
+        expect(threads.ensureThread).not.toHaveBeenCalled();
+        expect(api.copyMessage).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
     it("історія пишеться в timeline", async () => {
         const { service, api, timeline } = setup();
         await service.relayStaffMessage(api, { userId: "u1", chatId: STAFF_CHAT, message: text(24, "Питання"), contexts: [] });

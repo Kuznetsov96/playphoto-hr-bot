@@ -135,6 +135,23 @@ describe("відповідь із теми фотографині", () => {
         expect(api.copyMessage.mock.calls[0][3]).toEqual({ caption: "<blockquote>Завдання</blockquote>\nОсь так", parse_mode: "HTML" });
     });
 
+    it("стікер у відповідь на контекст — цитата окремо, стікер копією", async () => {
+        const { service, api, repo, links } = setup();
+        repo.findLinkByTopicMessage.mockResolvedValue({ threadId: "t1", direction: "CONTEXT", topicMessageId: 600, contextText: "Завдання" });
+        await expect(service.relaySupportMessage(api, { message: inTopic(47, { text: undefined, sticker: { emoji: "👍" }, reply_to_message: { message_id: 600 } }), sender })).resolves.toBe("delivered");
+        expect(api.sendMessage).toHaveBeenCalledWith(STAFF_CHAT, "<blockquote>Завдання</blockquote>", { parse_mode: "HTML" });
+        expect(api.copyMessage).toHaveBeenCalledWith(STAFF_CHAT, SUPPORT_CHAT, 47, {});
+        expect(links).toContainEqual(expect.objectContaining({ direction: "OUT", privateMessageId: 2002 }));
+    });
+
+    it("довгий текст у відповідь на контекст — цитата окремо, текст копією", async () => {
+        const { service, api, repo } = setup();
+        repo.findLinkByTopicMessage.mockResolvedValue({ threadId: "t1", direction: "CONTEXT", topicMessageId: 600, contextText: "Завдання" });
+        await service.relaySupportMessage(api, { message: inTopic(48, { text: "я".repeat(4090), reply_to_message: { message_id: 600 } }), sender });
+        expect(api.sendMessage.mock.calls[0]).toEqual([STAFF_CHAT, "<blockquote>Завдання</blockquote>", { parse_mode: "HTML" }]);
+        expect(api.copyMessage).toHaveBeenCalledWith(STAFF_CHAT, SUPPORT_CHAT, 48, {});
+    });
+
     it("відповідь того, кого покликали, передає його id у статус", async () => {
         const { service, api, thread } = setup({ status: "ESCALATED", escalatedToTelegramId: BigInt(KUZNETSOV) });
         await service.relaySupportMessage(api, { message: inTopic(42, { from: { id: KUZNETSOV, first_name: "Vitalii" } }), sender: { id: KUZNETSOV, firstName: "Vitalii" } });

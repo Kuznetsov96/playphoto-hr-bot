@@ -93,7 +93,8 @@ describe("перехід на постійні теми", () => {
             { userId: "u2", topics: [], ticketIds: [2], outgoingIds: [], proofIds: [] },
         ]);
         await migrateLegacyConversations(api, deps);
-        expect(deps.sleep).toHaveBeenCalledWith(3000);
+        // ~5 повідомлень на людину при ліміті 20/хв у групі
+        expect(deps.sleep).toHaveBeenCalledWith(20_000);
     });
 });
 

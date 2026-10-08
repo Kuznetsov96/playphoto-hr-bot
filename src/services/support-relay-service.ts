@@ -53,6 +53,13 @@ function isRelayable(message: Message): boolean {
     return RELAYABLE_KEYS.some(key => record[key] !== undefined);
 }
 
+const TEXT_LIMIT = 4096;
+const CAPTION_LIMIT = 1024;
+
+function canCarryCaption(message: Message): boolean {
+    return Boolean(message.photo || message.video || message.document || message.audio || message.animation || message.voice);
+}
+
 function contextQuoteHtml(contextText: string): string {
     const trimmed = contextText.length > CONTEXT_QUOTE_LIMIT ? `${contextText.slice(0, CONTEXT_QUOTE_LIMIT - 1)}…` : contextText;
     return `<blockquote>${escapeHtml(trimmed)}</blockquote>\n`;
@@ -105,8 +112,10 @@ export class SupportRelayService {
     async relayStaffMessage(
         api: Api,
         input: { userId: string; chatId: number; message: Message; contexts: ThreadContext[] },
-    ): Promise<"delivered" | "failed"> {
+    ): Promise<"delivered" | "failed" | "ignored"> {
         const { userId, chatId, message } = input;
+        // Службові події приватного чату (закріп, фон, таймер) — не повідомлення людині.
+        if (!isRelayable(message)) return "ignored";
         let thread: SupportThread;
         try {
             thread = await this.deps.threads.ensureThread(api, userId);
@@ -115,7 +124,9 @@ export class SupportRelayService {
                 logger.warn({ err: error, threadId: thread.id }, "Support away notice failed");
                 return thread;
             });
-            for (const context of input.contexts) await this.postContext(api, thread, context);
+            for (const context of input.contexts) {
+                thread = await this.onTopic(api, thread, target => this.postContext(api, target, context));
+            }
         } catch (error) {
             logger.error({ err: error, userId }, "Support thread could not be prepared for a staff message");
             await this.tellStaffItFailed(api, chatId);
@@ -201,7 +212,7 @@ export class SupportRelayService {
     ): Promise<void> {
         let thread = await this.deps.threads.ensureThread(api, userId);
         await this.deps.threads.refreshCardIfStale(api, thread).catch(() => undefined);
-        await this.postContext(api, thread, context);
+        thread = await this.onTopic(api, thread, target => this.postContext(api, target, context));
         if (sendItems) {
             const ids = await sendItems(Number(thread.chatId), thread.topicId);
             for (const id of ids) {
@@ -386,12 +397,22 @@ export class SupportRelayService {
         if (link?.direction === "CONTEXT" && link.contextText) {
             const prefix = contextQuoteHtml(link.contextText);
             if (message.text !== undefined) {
-                const sent = await api.sendMessage(staffChatId, prefix + msgToHtml(message.text, message.entities ?? []), { parse_mode: "HTML" });
-                return { messageId: sent.message_id, contextText: link.contextText };
+                const html = prefix + msgToHtml(message.text, message.entities ?? []);
+                if (html.length <= TEXT_LIMIT) {
+                    const sent = await api.sendMessage(staffChatId, html, { parse_mode: "HTML" });
+                    return { messageId: sent.message_id, contextText: link.contextText };
+                }
+            } else if (canCarryCaption(message)) {
+                const caption = prefix + msgToHtml(message.caption ?? "", message.caption_entities ?? []);
+                if (caption.length <= CAPTION_LIMIT) {
+                    const copied = await api.copyMessage(staffChatId, chatId, message.message_id, { caption, parse_mode: "HTML" });
+                    return { messageId: copied.message_id, contextText: link.contextText };
+                }
             }
-            const caption = prefix + msgToHtml(message.caption ?? "", message.caption_entities ?? []);
-            const copied = await api.copyMessage(staffChatId, chatId, message.message_id, { caption, parse_mode: "HTML" });
-            return { messageId: copied.message_id, contextText: link.contextText };
+            // Стікер, кружечок, задовгий текст: цитата окремим повідомленням, потім копія як є.
+            await api.sendMessage(staffChatId, prefix.trimEnd(), { parse_mode: "HTML" });
+            const copied = await api.copyMessage(staffChatId, chatId, message.message_id, {});
+            return { messageId: copied.message_id, contextText: null };
         }
 
         const reply = link && link.privateMessageId && link.privateChatId && Number(link.privateChatId) === staffChatId
@@ -443,6 +464,19 @@ export class SupportRelayService {
         const name = thread.title.split(" · ")[0] ?? "The photographer";
         if (isBlockedError(error)) return `❌ Not delivered: ${name} blocked the bot.`;
         return `❌ Not delivered: ${describeError(error)}`;
+    }
+
+    /** Дія в темі; тему видалили руками — нова тема і ще одна спроба. */
+    private async onTopic(api: Api, thread: SupportThread, action: (target: SupportThread) => Promise<unknown>): Promise<SupportThread> {
+        try {
+            await action(thread);
+            return thread;
+        } catch (error) {
+            if (!isTopicGoneError(error)) throw error;
+            const recreated = await this.deps.threads.recreateTopic(api, thread);
+            await action(recreated);
+            return recreated;
+        }
     }
 
     private async postContext(api: Api, thread: SupportThread, context: ThreadContext) {

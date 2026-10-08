@@ -16,6 +16,7 @@ CREATE TABLE "SupportThread" (
     "lastStaffAt" TIMESTAMP(3),
     "lastQuestionAt" TIMESTAMP(3),
     "lastSupportAt" TIMESTAMP(3),
+    "archivedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

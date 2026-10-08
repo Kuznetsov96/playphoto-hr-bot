@@ -13,8 +13,12 @@ import type { SupportThreadService } from "./support-thread-service.js";
 const DONE_KEY = "support:threads:migrated:v1";
 const LEASE_KEY = "support:threads:migration:lease";
 const LEASE_MS = 2 * 60 * 60 * 1000;
-/** Ліміт Telegram — 20 повідомлень на хвилину в групі; на людину йде до 4–5. */
-const PAUSE_BETWEEN_PEOPLE_MS = 3_000;
+/**
+ * Ліміт Telegram — 20 повідомлень на хвилину в групі, а на людину йде 4–6
+ * (тема, картка, закріп, «Previous», «Moved» у кожну стару). 20 с — щоб перехід
+ * не придушив живу підтримку на весь свій час.
+ */
+const PAUSE_BETWEEN_PEOPLE_MS = 20_000;
 const LINK_RETENTION_MS = 90 * 86_400_000;
 
 type RedisLike = {

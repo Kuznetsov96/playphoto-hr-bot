@@ -115,6 +115,27 @@ describe("створення теми", () => {
     });
 });
 
+describe("лок створення зайнятий", () => {
+    it("чекає, поки інший процес створить тему, а не падає", async () => {
+        const { service, api, repo } = setup({
+            lock: async () => { throw new Error("Support conversation for u1 is being created by another process"); },
+            sleep: async () => undefined,
+        });
+        const created = { id: "other", userId: "u1", chatId: -1001234n, topicId: 99 };
+        repo.findByUserId.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(created as Row);
+        await expect(service.ensureThread(api, "u1")).resolves.toBe(created);
+        expect(api.createForumTopic).not.toHaveBeenCalled();
+    });
+
+    it("інший процес так і не створив — помилка", async () => {
+        const { service, api } = setup({
+            lock: async () => { throw new Error("Support conversation for u1 is being created by another process"); },
+            sleep: async () => undefined,
+        });
+        await expect(service.ensureThread(api, "u1")).rejects.toThrow("another process");
+    });
+});
+
 describe("статус-іконка", () => {
     it("зміна статусу міняє іконку", async () => {
         const { service, api } = setup();
@@ -213,6 +234,32 @@ describe("звільнення", () => {
         expect(repo.threads.get(thread.id)!.status).toBe("ARCHIVED");
         const texts = api.sendMessage.mock.calls.map((c: any[]) => c[1]);
         expect(texts.filter((t: string) => t.startsWith("📦 Employment ended"))).toHaveLength(1);
+    });
+});
+
+describe("звільнена пише після архіву", () => {
+    it("повторно в архів не кладемо і рядок не дублюємо", async () => {
+        const { service, api, people, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        people.getPerson.mockResolvedValue({ ...(await people.getPerson()), isActive: false });
+        await service.archiveInactive(api);
+        // вона написала — тема знову чекає відповіді
+        repo.threads.set(thread.id, { ...repo.threads.get(thread.id), status: "WAITING" });
+        api.sendMessage.mockClear();
+        await service.archiveInactive(api);
+        expect(repo.threads.get(thread.id)!.status).toBe("WAITING");
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("картка показує звільнення і тоді, коли тема чекає відповіді", async () => {
+        const { service, api, people, repo } = setup();
+        const thread = await service.ensureThread(api, "u1");
+        people.getPerson.mockResolvedValue({ ...(await people.getPerson()), isActive: false });
+        await service.archiveInactive(api);
+        repo.threads.set(thread.id, { ...repo.threads.get(thread.id), status: "WAITING" });
+        api.editMessageText.mockClear();
+        await service.refreshCard(api, repo.threads.get(thread.id)!);
+        expect(api.editMessageText.mock.calls[0]![2].split("\n")[0]).toMatch(/^📦 Employment ended /);
     });
 });
 

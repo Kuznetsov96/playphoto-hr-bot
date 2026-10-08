@@ -54,6 +54,10 @@ export type ThreadDeps = {
     callTargets: () => { kuznetsov: number | undefined; hupalova: number | undefined };
 };
 
+/** Скільки чекати чужого створення теми: createForumTopic + картка + закріп — кілька секунд. */
+const LOCK_WAIT_STEP_MS = 250;
+const LOCK_WAIT_ATTEMPTS = 60;
+
 /** Пауза між темами у фонових обходах: ліміт Telegram — 20 повідомлень на хвилину в групі. */
 const SWEEP_PAUSE_MS = 3_000;
 
@@ -80,6 +84,22 @@ export class SupportThreadService {
         const existing = await this.deps.repo.findByUserId(userId);
         if (existing) return existing;
 
+        try {
+            return await this.createUnderLock(api, userId);
+        } catch (error) {
+            // Лок тримає інший процес (адмінка, міграція, друга людина пише тій самій):
+            // він уже створює тему — дочекатися її, а не лякати фотографиню збоєм.
+            if (!/another process/i.test(String((error as Error)?.message))) throw error;
+            for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt++) {
+                await this.deps.sleep(LOCK_WAIT_STEP_MS);
+                const created = await this.deps.repo.findByUserId(userId);
+                if (created) return created;
+            }
+            throw error;
+        }
+    }
+
+    private createUnderLock(api: Api, userId: string): Promise<SupportThread> {
         return this.deps.lock(userId, async () => {
             const again = await this.deps.repo.findByUserId(userId);
             if (again) return again;
@@ -115,7 +135,7 @@ export class SupportThreadService {
     async refreshCard(api: Api, thread: SupportThread, now: Date = new Date()): Promise<void> {
         const person = await this.deps.people.getPerson(thread.userId);
         if (!person) return;
-        const view = await this.describe(person, now, thread.status === "ARCHIVED" ? shortDay(kyivDay(thread.updatedAt)) : null);
+        const view = await this.describe(person, now, thread.archivedAt ? shortDay(kyivDay(thread.archivedAt)) : null);
 
         if (thread.cardMessageId) {
             try {
@@ -211,12 +231,20 @@ export class SupportThreadService {
         for (const thread of threads) {
             try {
                 const person = await this.deps.people.getPerson(thread.userId);
-                if (!person || person.isActive) continue;
+                if (!person) continue;
+                if (person.isActive) {
+                    // Повернулась на роботу — наступне звільнення знову буде видно.
+                    if (thread.archivedAt) await this.deps.repo.update(thread.id, { archivedAt: null });
+                    continue;
+                }
+                // Уже в архіві, а тема «чекає» — це вона написала після звільнення; не глушити.
+                if (thread.archivedAt) continue;
                 const archived = await this.applyStatus(api, thread, { kind: "archived" });
+                const marked = await this.deps.repo.update(archived.id, { archivedAt: now });
                 await api.sendMessage(Number(thread.chatId), ADMIN_TEXTS["support-thread-archived"]({ day: shortDay(kyivDay(now)) }), {
                     message_thread_id: thread.topicId,
                 });
-                await this.refreshCard(api, { ...archived, updatedAt: now }, now);
+                await this.refreshCard(api, marked, now);
             } catch (error) {
                 logger.warn({ err: error, threadId: thread.id }, "Support thread archive failed");
             }
