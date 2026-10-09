@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const workShiftRepository = {
     findWithRelationsByDateRange: vi.fn()
@@ -23,7 +23,12 @@ const redisMock = {
     del: vi.fn()
 };
 
+const awsBusinessClient = {
+    shootsToday: vi.fn()
+};
+
 vi.mock("../../repositories/work-shift-repository.js", () => ({ workShiftRepository }));
+vi.mock("../aws-business-client.js", () => ({ awsBusinessClient }));
 vi.mock("../replacement-service.js", () => ({ replacementService }));
 vi.mock("../task-service.js", () => ({ taskService }));
 vi.mock("../../db/core.js", () => ({ default: prismaMock }));
@@ -47,6 +52,7 @@ describe("shift reminder service", () => {
         prismaMock.parcel.count.mockResolvedValue(0);
         redisMock.set.mockResolvedValue("OK");
         redisMock.del.mockResolvedValue(1);
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "1970-01-01", items: [], invalidCount: 0 });
     });
 
     it("schedules 08:00 Kyiv correctly in summer and winter", async () => {
@@ -373,5 +379,145 @@ describe("shift reminder catch-up window has an end", () => {
 
         // 17:00 Київ — зміни ще тривають, але нагадувати про початок дня пізно.
         expect(isShiftReminderDue(new Date("2026-07-19T14:00:00.000Z"))).toBe(false);
+    });
+});
+
+/** Строка «🎂 19:00–20:00 — зйомка ДН»: у нагадуванні про зміну, а без зміни — окреме повідомлення. */
+describe("shoot of the day", () => {
+    const LEOLAND = "4dbbaf0a-3c37-4e20-845b-8baa0217149b";
+    const shoot = (overrides: Record<string, unknown> = {}) => ({
+        telegramId: "144952810",
+        firstName: "Анастасія",
+        intervals: [{ start: "19:00", end: "20:00" }],
+        location: { publicId: LEOLAND, name: "Leoland", city: "Lviv", branch: null },
+        ...overrides
+    });
+    const shift = (awsPublicId: string) => ({
+        id: "shift-1",
+        staffId: "staff-1",
+        locationId: "location-1",
+        date: new Date("2026-10-10T00:00:00.000Z"),
+        staff: { id: "staff-1", fullName: "Амброскіна Анастасія", user: { telegramId: 144952810n } },
+        location: { id: "location-1", name: "Leoland", city: "Lviv", awsPublicId }
+    });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([]);
+        replacementService.listAcceptedAssignmentsByDateRange.mockResolvedValue([]);
+        taskService.getStaffActiveTasks.mockResolvedValue([]);
+        prismaMock.parcel.count.mockResolvedValue(0);
+        redisMock.set.mockResolvedValue("OK");
+        redisMock.del.mockResolvedValue(1);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-10-10T05:00:00.000Z"));
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("adds the shoot line to the shift reminder without repeating the shift location", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([shift(LEOLAND)]);
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "2026-10-10", items: [shoot()], invalidCount: 0 });
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        const text = sendMessage.mock.calls[0]?.[1] as string;
+        expect(text).toContain("Вдалого дня та гарних знімків! ✨\n\n🎂 19:00–20:00 — зйомка ДН");
+        expect(text).not.toContain("📍");
+    });
+
+    it("names the shoot location when it is not where the shift is", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([
+            shift("0f8fad5b-d9cb-469f-a165-70867728950e")
+        ]);
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "2026-10-10", items: [shoot()], invalidCount: 0 });
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage.mock.calls[0]?.[1]).toContain("🎂 19:00–20:00 — зйомка ДН\n📍 Leoland (Lviv)");
+    });
+
+    it("sends a separate morning message when there is a shoot but no shift", async () => {
+        awsBusinessClient.shootsToday.mockResolvedValue({
+            date: "2026-10-10",
+            items: [shoot({ intervals: [{ start: "11:30", end: "13:00" }] }), shoot()],
+            invalidCount: 0
+        });
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage).toHaveBeenCalledWith(
+            144952810,
+            "👋 <b>Доброго ранку, Анастасія!</b>\n\n" +
+                "🎂 11:30–13:00 — зйомка ДН\n📍 Leoland (Lviv)\n" +
+                "🎂 19:00–20:00 — зйомка ДН\n📍 Leoland (Lviv)",
+            { parse_mode: "HTML" }
+        );
+        expect(redisMock.set).toHaveBeenCalledWith("shoot-today:2026-10-10:144952810", "sending", "EX", expect.any(Number), "NX");
+    });
+
+    it("does not send the shoot-only message twice in one day", async () => {
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "2026-10-10", items: [shoot()], invalidCount: 0 });
+        redisMock.set.mockResolvedValue(null);
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("releases the shoot-only claim when Telegram refuses, so the next run retries", async () => {
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "2026-10-10", items: [shoot()], invalidCount: 0 });
+        const sendMessage = vi.fn().mockRejectedValue(new Error("Too Many Requests"));
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(redisMock.del).toHaveBeenCalledWith("shoot-today:2026-10-10:144952810");
+    });
+
+    it("still sends the shift reminder when the webapp is unavailable", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([shift(LEOLAND)]);
+        awsBusinessClient.shootsToday.mockRejectedValue(new Error("ECONNREFUSED"));
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0]?.[1]).not.toContain("🎂");
+    });
+
+    it("ignores an answer for another day", async () => {
+        workShiftRepository.findWithRelationsByDateRange.mockResolvedValue([shift(LEOLAND)]);
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "2026-10-11", items: [shoot()], invalidCount: 0 });
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0]?.[1]).not.toContain("🎂");
+    });
+
+    it("a shoot without a start time is still named", async () => {
+        awsBusinessClient.shootsToday.mockResolvedValue({ date: "2026-10-10", items: [shoot({ intervals: [] })], invalidCount: 0 });
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        const { sendDailyShiftReminders } = await import("../shift-reminder-service.js");
+        await sendDailyShiftReminders({ api: { sendMessage } } as any);
+
+        expect(sendMessage.mock.calls[0]?.[1]).toContain("🎂 Зйомка ДН\n📍 Leoland (Lviv)");
     });
 });

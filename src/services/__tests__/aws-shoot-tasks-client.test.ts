@@ -88,6 +88,22 @@ describe("AwsBusinessClient shoot tasks", () => {
         ).toBe(false);
     });
 
+    it("reads today's shoots, skipping a broken row instead of dropping the morning", async () => {
+        const today = {
+            telegramId: "144952810",
+            firstName: "Анастасія",
+            intervals: [{ start: "19:00", end: "20:00" }],
+            location: { publicId: "4dbbaf0a-3c37-4e20-845b-8baa0217149b", name: "Leoland", city: "Lviv", branch: null },
+        };
+        vi.mocked(fetch).mockResolvedValue(
+            ok({ date: "2026-10-10", items: [today, { ...today, phone: "+380671231301" }, { ...today, telegramId: "x" }] }),
+        );
+        const result = await new AwsBusinessClient().shootsToday();
+        expect(vi.mocked(fetch).mock.calls[0]![0]).toBe("https://api.example.test/api/v1/internal/bot/shoot-tasks/today");
+        // Поле поза контрактом (тут телефон) — рядок відкинуто: строга схема, як у pending.
+        expect(result).toEqual({ date: "2026-10-10", items: [today], invalidCount: 2 });
+    });
+
     it("exports the failure reasons the dispatcher and the webapp agree on", () => {
         expect(SHOOT_TASK_FAILURE_REASONS).toEqual({
             BLOCKED: "TG_403",

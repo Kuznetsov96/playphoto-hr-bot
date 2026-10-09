@@ -575,6 +575,33 @@ export const shootTaskSchema = z
 export type AwsShootTask = z.infer<typeof shootTaskSchema>;
 export type AwsShootTaskKind = AwsShootTask["kind"];
 
+/**
+ * Сьогоднішня зйомка фотографа для ранкового повідомлення, контракт `BotShootTodayView` вебаппа:
+ * лише інтервали й точка — ні клієнта, ні телефону. `location.publicId` звіряється з точкою
+ * зміни (`Location.awsPublicId`), щоб не повторювати точку, де фотограф і так працює.
+ */
+export const shootTodaySchema = z
+    .object({
+        telegramId: z.string().regex(/^\d{1,20}$/u),
+        firstName: z.string(),
+        intervals: z.array(
+            z.object({ start: z.string().regex(SHOOT_TIME), end: z.string().regex(SHOOT_TIME).nullable() }).strict(),
+        ),
+        location: z
+            .object({ publicId: z.string().uuid(), name: z.string().min(1), city: z.string(), branch: z.string().nullable() })
+            .strict(),
+    })
+    .strict();
+export type AwsShootToday = z.infer<typeof shootTodaySchema>;
+
+const shootsTodayEnvelopeSchema = z.object({ date: z.string().regex(SHOOT_DATE), items: z.array(z.unknown()) }).strict();
+
+export interface AwsShootsToday {
+    date: string;
+    items: AwsShootToday[];
+    invalidCount: number;
+}
+
 export interface AwsPendingShootTasks {
     items: AwsShootTask[];
     invalidPublicIds: string[];
@@ -1403,6 +1430,23 @@ export class AwsBusinessClient {
         }
 
         return { items, invalidPublicIds, unidentifiableCount };
+    }
+
+    /**
+     * Зйомки на сьогодні за Києвом — один запит на весь ранок. Зламаний рядок не валить решту:
+     * його пропущено й пораховано в invalidCount — гірше втратити рядок усім, ніж одному.
+     */
+    async shootsToday(): Promise<AwsShootsToday> {
+        const value = await this.request("/shoot-tasks/today", { method: "GET" }, 10_000);
+        const envelope = shootsTodayEnvelopeSchema.parse(value);
+        const items: AwsShootToday[] = [];
+        let invalidCount = 0;
+        for (const row of envelope.items) {
+            const parsed = shootTodaySchema.safeParse(row);
+            if (parsed.success) items.push(parsed.data);
+            else invalidCount += 1;
+        }
+        return { date: envelope.date, items, invalidCount };
     }
 
     /** messageId потрібен вебаппу, щоб REDACT потім знайшов повідомлення з телефоном. */

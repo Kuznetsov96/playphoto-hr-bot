@@ -56,9 +56,10 @@ describe("renderShootTask", () => {
             shoot: { ...base.shoot, clientName: "Олена", childName: "Марійка", phone: "+380671231301", notes: "Торт" },
         });
         expect(text).toContain("🕐 15:00–16:00 (1 год)");
-        expect(text).toContain("Клієнт: Олена, +380671231301");
+        // Номер моноширинний — копіюється одним дотиком.
+        expect(text).toContain("Клієнт: Олена, <code>+380671231301</code>");
         expect(text).toContain("Іменинник: Марійка");
-        expect(text).toContain("Побажання: Торт");
+        expect(text).toContain("Побажання:\n<blockquote>Торт</blockquote>");
         expect(text).toContain("Фото — до вт 19.03 включно.");
     });
 
@@ -91,7 +92,13 @@ describe("renderShootTask", () => {
     it("free text is clipped before it is escaped", () => {
         const notes = `${"&".repeat(499)}${"<".repeat(101)}`;
         const { text } = renderShootTask({ ...base, kind: "ASSIGNED", shoot: { ...base.shoot, notes } });
-        expect(text).toContain(`\nПобажання: ${"&amp;".repeat(499)}…\n`);
+        expect(text).toContain(`\nПобажання:\n<blockquote>${"&amp;".repeat(499)}…</blockquote>\n`);
+    });
+
+    it("multi-line wishes stay inside one quote", () => {
+        const notes = "на 10.10 фотограф 19:00 - 20:00\nкімната Панда\nЗамовниця Ірина 0676084373";
+        const { text } = renderShootTask({ ...base, kind: "ASSIGNED", shoot: { ...base.shoot, notes } });
+        expect(text).toContain(`Побажання:\n<blockquote>${notes}</blockquote>`);
     });
 
     it("the location goes through the listing label with its branch", () => {
