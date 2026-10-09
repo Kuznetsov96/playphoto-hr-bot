@@ -411,6 +411,31 @@ describe("renderDeliveryGroup", () => {
         expect(text).not.toContain("Знято зміну");
     });
 
+    // З 09.10.2026 вебапп шле підсумок підміни одразу (URGENT), щоб кнопка
+    // скасування приходила, поки вікно відкрите. Прийняту зміну людина щойно
+    // взяла сама — «🚨 Термінова зміна» тут злякала б, а не повідомила.
+    it("does not call a replacement the photographer just took an urgent change", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REASSIGNED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: { after: snapshot(), role: "accepted", offerPublicId: "o1", replacementPublicId: "r1" },
+            },
+        ]);
+
+        const text = renderDeliveryGroup(group!);
+
+        expect(text).toContain("Оновлення у твоєму графіку");
+        expect(text).not.toContain("Термінова");
+        expect(text).toContain("Зміну передано тобі: ");
+        const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+        expect(buttons).toHaveLength(2);
+    });
+
     it("keeps an ordinary removal urgent when it is not a replacement", () => {
         const [group] = groupForDelivery([
             {

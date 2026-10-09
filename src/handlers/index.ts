@@ -290,6 +290,14 @@ async function performOwnerRevert(
 
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
     await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-done"]);
+
+    // Копія заявки в боті стоїть FOUND: без звірки «Мій графік» прийнятої ще
+    // показував би зміну як свою (Dragon Park, 05–08.10.2026). Сверка раз на
+    // п'ять хвилин теж це виправить — тут лише щоб не чекати.
+    const { replacementService } = await import("../services/replacement-service.js");
+    await replacementService.syncCanonicalRequest(ctx.api, requestPublicId).catch((err: unknown) => {
+        logger.warn({ err, requestPublicId }, "Local replacement copy sync after owner revert failed");
+    });
 }
 
 // The accepting photographer's own undo button, attached to her
@@ -328,8 +336,17 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_UNDO_CALLBACK_CODE}:`), asy
         client: awsBusinessClient,
     });
 
+    // Вікно закрите назавжди: кнопка, що відповідає ледь помітним тостом,
+    // виглядає зламаною — 06.10.2026 фотографиня тиснула її 14 разів. Тому
+    // пояснення плашкою з «ОК» і кнопка зникає.
     if (outcome === "window_closed") {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-window-closed"]);
+        await ctx.editMessageReplyMarkup({
+            reply_markup: new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav")
+        }).catch(() => { });
+        return ctx.answerCallbackQuery({
+            text: STAFF_TEXTS["staff-replacement-undo-ans-window-closed"],
+            show_alert: true,
+        });
     }
     if (outcome === "failed") {
         return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);

@@ -187,7 +187,7 @@ describe("syncCanonicalRequests", () => {
 
         expect(result).toEqual({ checked: 2, settled: 1, failed: 0 });
         expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-            where: { status: "ACTIVE", awsReplacementPublicId: { not: null } },
+            where: expect.objectContaining({ awsReplacementPublicId: { not: null } }),
         }));
         expect(updateMany).toHaveBeenCalledWith({
             where: { id: "req-local-2", status: "ACTIVE" },

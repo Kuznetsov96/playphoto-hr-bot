@@ -1091,12 +1091,24 @@ export class ReplacementService {
      * хвиль бота зупиняється разом із ним. Виклик хвилі для закритої заявки нічого
      * не змінює в бекенді — він лише повертає її стан; для активної, у якої хвиля
      * ще не настала, відповідає 409 з часом наступної.
+     *
+     * FOUND теж не кінцевий: власник може скасувати прийняту підміну, і вебапп
+     * поверне заявку в пошук. Без звірки копія лишалась FOUND назавжди — «Мій
+     * графік» прийнятої показував чужу зміну як свою, а авторка не дізнавалась,
+     * що пошук після скасування закрився нічим (Dragon Park, 05–08.10.2026).
+     * Тому звіряються й FOUND-копії змін, які ще не минули.
      */
     async syncCanonicalRequests(api: Api, batchSize: number = 50) {
         const requests = await prisma.replacementRequest.findMany({
             where: {
-                status: ReplacementRequestStatus.ACTIVE,
-                awsReplacementPublicId: { not: null }
+                awsReplacementPublicId: { not: null },
+                OR: [
+                    { status: ReplacementRequestStatus.ACTIVE },
+                    {
+                        status: ReplacementRequestStatus.FOUND,
+                        shiftDate: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+                    }
+                ]
             },
             include: {
                 location: true,
@@ -1110,23 +1122,144 @@ export class ReplacementService {
         let settled = 0;
         let failed = 0;
         for (const request of requests) {
-            const result = await dispatchCanonicalWave(request.awsReplacementPublicId!);
-            if (!result.ok) {
-                failed++;
-                continue;
-            }
-            if (await this.settleCanonicalRequest(api, request, result)) {
-                settled++;
-            } else {
-                // Відкрита заявка: позначаємо, що її перевірено, щоб наступний прохід
-                // брав інші першими, а не впирався в ті самі 50 рядків.
-                await prisma.replacementRequest.updateMany({
-                    where: { id: request.id, status: ReplacementRequestStatus.ACTIVE },
-                    data: { updatedAt: new Date() }
-                });
-            }
+            const outcome = await this.syncCanonicalCopy(api, request);
+            if (outcome === "failed") failed++;
+            if (outcome === "changed") settled++;
         }
         return { checked: requests.length, settled, failed };
+    }
+
+    /**
+     * Одна заявка, одразу після скасування з бота: екран і завдання мають
+     * показати правду зараз, а не через п'ять хвилин сверки.
+     */
+    async syncCanonicalRequest(api: Api, awsReplacementPublicId: string) {
+        const [request] = await prisma.replacementRequest.findMany({
+            where: {
+                awsReplacementPublicId,
+                status: { in: [ReplacementRequestStatus.ACTIVE, ReplacementRequestStatus.FOUND] }
+            },
+            include: {
+                location: true,
+                requester: { include: { user: true } },
+                replacement: { include: { user: true } }
+            },
+            take: 1
+        });
+        if (!request) return;
+        await this.syncCanonicalCopy(api, request);
+    }
+
+    private async syncCanonicalCopy(
+        api: Api,
+        request: RequestWithRelations
+    ): Promise<"changed" | "unchanged" | "failed"> {
+        const result = await dispatchCanonicalWave(request.awsReplacementPublicId!);
+        if (!result.ok) return "failed";
+
+        const changed = request.status === ReplacementRequestStatus.FOUND
+            ? await this.reconcileFoundCopy(api, request, result)
+            : await this.settleCanonicalRequest(api, request, result);
+        if (changed) return "changed";
+
+        // Перевірено без змін: позначаємо, щоб наступний прохід брав інші
+        // першими, а не впирався в ті самі 50 рядків.
+        await prisma.replacementRequest.updateMany({
+            where: { id: request.id, status: request.status },
+            data: { updatedAt: new Date() }
+        });
+        return "unchanged";
+    }
+
+    /**
+     * FOUND-копія проти того, що каже вебапп. Повертає `true`, коли копію змінено.
+     *
+     * Завдання зміни при підтвердженні переїхали до прийнятої — при відкаті вони
+     * мусять повернутись до авторки, інакше дайджест і пінги отримує людина, яка
+     * на зміну не вийде.
+     */
+    private async reconcileFoundCopy(
+        api: Api,
+        request: RequestWithRelations,
+        result: { status: string; acceptedEmployeePublicId?: string | null }
+    ): Promise<boolean> {
+        const moveTasks = async (fromStaffId: string | null, toStaffId: string | null) => {
+            if (!fromStaffId || !toStaffId || fromStaffId === toStaffId) return;
+            const { taskService } = await import("./task-service.js");
+            await taskService.reassignShiftTasks({
+                fromStaffId,
+                toStaffId,
+                shiftDate: request.shiftDate,
+                city: request.location.city,
+                locationName: request.location.name,
+            });
+        };
+        const log = (localStatus: string) => logBusinessEvent({
+            event: "bot.replacement_canonical.found_copy_reconciled",
+            actorType: "system",
+            actorRole: "system",
+            result: "success",
+            module: "replacement-service",
+            operation: "reconcileFoundCopy",
+            safeContext: { requestId: request.id, canonicalStatus: result.status, localStatus }
+        });
+        const leaveFound = async (status: ReplacementRequestStatus, closedReason: string | null) => {
+            const updated = await prisma.replacementRequest.updateMany({
+                where: { id: request.id, status: ReplacementRequestStatus.FOUND },
+                data: status === ReplacementRequestStatus.ACTIVE
+                    ? { status, replacementStaffId: null, completedAt: null, closedReason: null, nextWaveAt: null }
+                    : { status, replacementStaffId: null, completedAt: new Date(), closedReason, nextWaveAt: null }
+            });
+            if (updated.count !== 1) return false;
+            await moveTasks(request.replacementStaffId, request.requesterStaffId);
+            log(status);
+            return true;
+        };
+
+        switch (result.status) {
+            case "CONFIRMED": {
+                const accepted = result.acceptedEmployeePublicId
+                    ? await prisma.staffProfile.findFirst({
+                        where: { awsEmployeePublicId: result.acceptedEmployeePublicId },
+                        select: { id: true }
+                    })
+                    : null;
+                if (!accepted || accepted.id === request.replacementStaffId) return false;
+                // Після відкату підміну взяла інша — зміна й завдання йдуть за нею.
+                const updated = await prisma.replacementRequest.updateMany({
+                    where: {
+                        id: request.id,
+                        status: ReplacementRequestStatus.FOUND,
+                        replacementStaffId: request.replacementStaffId
+                    },
+                    data: { replacementStaffId: accepted.id }
+                });
+                if (updated.count !== 1) return false;
+                await moveTasks(request.replacementStaffId, accepted.id);
+                log("FOUND");
+                return true;
+            }
+            case "ACTIVE":
+            case "PENDING_APPROVAL":
+                // Відкат: пошук знову йде, і далі копію веде звичайна сверка ACTIVE.
+                return leaveFound(ReplacementRequestStatus.ACTIVE, null);
+            case "FAILED": {
+                const closed = await leaveFound(ReplacementRequestStatus.FAILED, "all_waves_completed");
+                if (closed && this.getShiftStartAt(request) > new Date()) {
+                    await this.notifyRequesterFailed(api, request);
+                    await this.notifyAdminFailed(api, request.id);
+                }
+                return closed;
+            }
+            case "EXPIRED":
+                return leaveFound(ReplacementRequestStatus.EXPIRED, "shift_started");
+            case "CANCELLED":
+                return leaveFound(ReplacementRequestStatus.CANCELLED, "cancelled_in_webapp");
+            case "SUPERSEDED":
+                return leaveFound(ReplacementRequestStatus.CLOSED_BY_SCHEDULE_SYNC, "schedule_changed");
+            default:
+                return false;
+        }
     }
 
     async reconcileRequestsChangedBySchedule(api: Api) {

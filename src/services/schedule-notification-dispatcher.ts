@@ -111,7 +111,7 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     const lines: string[] = [
         group.notifications.every(isReplacementGiven)
             ? STAFF_TEXTS["schedule-notif-replacement-found-title"]
-            : group.urgency === "URGENT"
+            : group.urgency === "URGENT" && !group.notifications.every(isReplacementTaken)
             ? STAFF_TEXTS["schedule-notif-urgent-title"]
             : STAFF_TEXTS["schedule-notif-normal-title"],
         ""
@@ -141,6 +141,16 @@ function isReplacementGiven(notification: AwsScheduleNotification): boolean {
     return notification.payload.role === "requester"
         && notification.payload.before !== undefined
         && (notification.changeKind === "SHIFT_REMOVED" || notification.changeKind === "SHIFT_REASSIGNED");
+}
+
+/**
+ * The accepting photographer's copy of a replacement. It answers a tap she has
+ * just made, and since 09.10.2026 the backend sends it at once (URGENT) so the
+ * undo button arrives while the window is open — the urgent title would read
+ * as an alarm about a shift she chose herself.
+ */
+function isReplacementTaken(notification: AwsScheduleNotification): boolean {
+    return notification.payload.role === "accepted" && notification.changeKind === "SHIFT_REASSIGNED";
 }
 
 /**
