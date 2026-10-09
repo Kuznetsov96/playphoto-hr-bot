@@ -347,8 +347,10 @@ export class ReplacementNotificationDispatcher {
 
         // `exactOptionalPropertyTypes` rejects an explicit `reply_markup:
         // undefined`, so the key is only added at all when there is a keyboard.
+        // OFFER_REOPENED — той самий оффер, знову відкритий після скасування
+        // підміни: без кнопок відповісти на «зміна знову вільна» нічим.
         const offerKeyboard =
-            row.kind === "OFFER"
+            row.kind === "OFFER" || row.kind === "OFFER_REOPENED"
                 ? buildOfferKeyboard(row.payload)
                 : row.kind === "OPEN_SHIFT_OFFER"
                   ? buildOpenShiftKeyboard(row.payload)

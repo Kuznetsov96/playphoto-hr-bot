@@ -854,6 +854,56 @@ describe("answerReplacementOffer", () => {
  * about herself, and it ends with "just ignore this if you can't", which
  * contradicts the decline button now sitting under it.
  */
+// Dragon Park, 09.10.2026: після скасування підміни вебапп повертає оффер
+// людям, у яких його зняло прийняття, і пише «зміна знову вільна». Без кнопок
+// відповісти на це було нічим — «пошук продовжується» лишався на папері.
+describe("OFFER_REOPENED carries answer buttons", () => {
+    const reopenedRow = (payloadOverrides: Record<string, unknown> = {}) => ({
+        publicId: "n-reopened-1",
+        kind: "OFFER_REOPENED" as const,
+        telegramId: "333",
+        payload: {
+            startsAtLocal: "2026-08-15T14:00",
+            endsAtLocal: "2026-08-15T21:00",
+            timezone: "Europe/Kyiv",
+            locationPublicId: "loc-1",
+            locationName: "Smile Park",
+            locationCity: "Kyiv",
+            replacementPublicId: "req-1",
+            offerPublicId: "offer-7",
+            ...payloadOverrides,
+        },
+    });
+    const send = async (row: ReturnType<typeof reopenedRow>) => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([row]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+        await dispatcher.dispatchPending();
+        return sendMessage.mock.calls[0]!;
+    };
+
+    it("lets the photographer take the shift straight from the reopened message", async () => {
+        const [, text, options] = await send(reopenedRow());
+        const buttons = ((options as { reply_markup?: { inline_keyboard: unknown[][] } }).reply_markup?.inline_keyboard ?? [])
+            .flat() as Array<{ callback_data: string }>;
+
+        expect(text).toContain("знову вільна");
+        expect(buttons).toHaveLength(2);
+        expect(buttons.every((button) => button.callback_data.includes("offer-7"))).toBe(true);
+    });
+
+    it("still goes out as plain text when an older row has no offer id", async () => {
+        const [, , options] = await send(reopenedRow({ offerPublicId: undefined }));
+        expect((options as { reply_markup?: unknown }).reply_markup).toBeUndefined();
+    });
+});
+
 describe("OFFER wording follows the candidate's stated availability", () => {
     const offerFor = (availabilityKind?: string) => ({
         publicId: "n-offer-1",
