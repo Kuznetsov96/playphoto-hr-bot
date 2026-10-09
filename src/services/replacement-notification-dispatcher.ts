@@ -284,12 +284,25 @@ export class ReplacementNotificationDispatcher {
     constructor(
         private readonly client: ReplacementNotificationClient,
         private readonly api: Pick<Api, "sendMessage">,
-        options: { adminIds?: number[] } = {},
+        options: {
+            adminIds?: number[];
+            /**
+             * Called once per reverted request after its ACCEPTANCE_REVERTED went
+             * out. A revert made in the webapp or by the candidate reaches the bot
+             * only through this row; without the hook the bot's copy stayed FOUND
+             * until the five-minute sweep, and the accepting photographer's
+             * schedule still showed the shift as hers.
+             */
+            onAcceptanceReverted?: (replacementPublicId: string) => Promise<void>;
+        } = {},
     ) {
         // Defaults to the bot's real admin list; a test may override it so it
         // never depends on process env for the owner-routing assertions.
         this.adminIds = options.adminIds ?? ADMIN_IDS;
+        this.onAcceptanceReverted = options.onAcceptanceReverted;
     }
+
+    private readonly onAcceptanceReverted: ((replacementPublicId: string) => Promise<void>) | undefined;
 
     /**
      * One dispatch pass: fetch the pending batch, send each row, report the
@@ -303,10 +316,32 @@ export class ReplacementNotificationDispatcher {
         let delivered = 0;
         let failed = 0;
 
+        const reverted = new Set<string>();
         for (const row of rows) {
             const outcome = await this.deliverRow(row);
             if (outcome === "delivered") delivered += 1;
             else failed += 1;
+            if (outcome === "delivered" && row.kind === "ACCEPTANCE_REVERTED" && row.payload.replacementPublicId) {
+                reverted.add(row.payload.replacementPublicId);
+            }
+        }
+
+        // After the messages, not before: the person reads "скасовано" first,
+        // and a slow sync must never hold up the rest of the batch.
+        for (const replacementPublicId of reverted) {
+            await this.onAcceptanceReverted?.(replacementPublicId).catch((error: unknown) => {
+                logBusinessEvent({
+                    event: "bot.replacement_notifications.revert_sync_failed",
+                    level: "warn",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    module: "replacement-notification-dispatcher",
+                    operation: "dispatchPending",
+                    safeContext: { replacementPublicId },
+                    error,
+                });
+            });
         }
 
         return { delivered, failed };
@@ -515,7 +550,12 @@ const awsReplacementNotificationClient: ReplacementNotificationClient = {
 export function createReplacementNotificationDispatcher(
     api: Pick<Api, "sendMessage">,
 ): ReplacementNotificationDispatcher {
-    return new ReplacementNotificationDispatcher(awsReplacementNotificationClient, api);
+    return new ReplacementNotificationDispatcher(awsReplacementNotificationClient, api, {
+        onAcceptanceReverted: async (replacementPublicId) => {
+            const { replacementService } = await import("./replacement-service.js");
+            await replacementService.syncCanonicalRequest(api as never, replacementPublicId);
+        },
+    });
 }
 
 /** Just the client surface the undo handler needs. */

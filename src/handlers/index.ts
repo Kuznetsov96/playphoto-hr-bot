@@ -1,6 +1,5 @@
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
-import { buildAnsweredOfferText } from "../services/replacement-offer-answered-text.js";
-import { Composer, InlineKeyboard } from "grammy";
+import { Composer } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { adminMenu, adminHandlers } from "./admin/index.js";
 import { commandHandlers } from "./commands.js";
@@ -36,7 +35,6 @@ import { logBusinessEvent } from "../core/log-events.js";
 import prisma from "../db/core.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
 import {
-    answerReplacementOffer,
     OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE,
     OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE,
     OPEN_SHIFT_UNDO_CALLBACK_CODE,
@@ -44,11 +42,15 @@ import {
     REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE,
     REPLACEMENT_REVERT_CALLBACK_CODE,
     REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE,
-    revertReplacementIfOwner,
     undoOpenShiftAcceptanceAsCandidate,
-    undoReplacementAcceptanceAsCandidate
 } from "../services/replacement-notification-dispatcher.js";
 import { REPLACEMENT_UNDO_CALLBACK_CODE } from "../services/schedule-notification-dispatcher.js";
+import {
+    answerOfferCallback,
+    defaultReplacementCallbackDeps,
+    ownerRevertCallback,
+    undoAcceptanceCallback,
+} from "./replacement-callbacks.js";
 
 export const handlers = new Composer<MyContext>();
 
@@ -216,7 +218,7 @@ handlers.callbackQuery(/^cb:(snack|sndec):/, async (ctx) => {
 //
 // The backend cannot verify who pressed this: its service token proves only
 // "this is the bot", and there is no telegramId on the owner (User) model to
-// check against. `revertReplacementIfOwner` is the ONLY gate — it must run,
+// check against. `revertReplacementIfOwner` (via `ownerRevertCallback`) is the ONLY gate — it must run,
 // and must run before any API call, every single time. See its doc comment
 // in `services/replacement-notification-dispatcher.js` for the full reasoning.
 //
@@ -232,7 +234,7 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CALLBACK_CODE}:`), a
         return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-notification-expired"]);
     }
 
-    await performOwnerRevert(ctx, requestPublicId, false);
+    await ownerRevertCallback(ctx, requestPublicId, false, defaultReplacementCallbackDeps);
 });
 
 // Second tap: the owner already saw the late-revert warning and confirmed.
@@ -243,118 +245,14 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CONFIRM_CALLBACK_COD
         return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-notification-expired"]);
     }
 
-    await performOwnerRevert(ctx, requestPublicId, true);
+    await ownerRevertCallback(ctx, requestPublicId, true, defaultReplacementCallbackDeps);
 });
 
-async function performOwnerRevert(
-    ctx: MyContext,
-    requestPublicId: string,
-    acknowledgeLateRevert: boolean
-): Promise<void> {
-    const outcome = await revertReplacementIfOwner({
-        telegramId: ctx.from?.id,
-        requestPublicId,
-        acknowledgeLateRevert,
-        client: awsBusinessClient,
-    });
-
-    if (outcome === "denied") {
-        await ctx.answerCallbackQuery(STAFF_TEXTS["admin-err-access-denied"]);
-        return;
-    }
-    if (outcome === "needs_acknowledgement") {
-        // Replace the original revert button with a warning and an explicit
-        // second confirmation — the owner is told *why* it didn't just work,
-        // not left thinking the tap failed.
-        await ctx
-            .editMessageReplyMarkup({
-                reply_markup: new InlineKeyboard()
-                    .text(
-                        ADMIN_TEXTS["admin-replacement-revert-late-btn-confirm"],
-                        buildSignedCallback(REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE, requestPublicId)
-                    )
-                    .row()
-                    .text(ADMIN_TEXTS["admin-replacement-revert-late-btn-cancel"], "staff_hub_nav")
-            })
-            .catch(() => { });
-        await ctx.answerCallbackQuery({
-            text: ADMIN_TEXTS["admin-replacement-revert-late-warning"],
-            show_alert: true
-        });
-        return;
-    }
-    if (outcome === "failed") {
-        await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-replacement-revert-failed"]);
-        return;
-    }
-
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-replacement-revert-done"]);
-
-    // Копія заявки в боті стоїть FOUND: без звірки «Мій графік» прийнятої ще
-    // показував би зміну як свою (Dragon Park, 05–08.10.2026). Сверка раз на
-    // п'ять хвилин теж це виправить — тут лише щоб не чекати.
-    const { replacementService } = await import("../services/replacement-service.js");
-    await replacementService.syncCanonicalRequest(ctx.api, requestPublicId).catch((err: unknown) => {
-        logger.warn({ err, requestPublicId }, "Local replacement copy sync after owner revert failed");
-    });
-}
-
-// The accepting photographer's own undo button, attached to her
-// SHIFT_REASSIGNED confirmation message (see buildDeliveryKeyboard in
-// schedule-notification-dispatcher.js — the replacement dispatcher only ever
-// messages the owner, never the candidate, so this button has to live on the
-// pre-existing schedule-change message instead of a replacement-specific one).
-//
-// Unlike the owner revert button, the backend CAN verify who is pressing
-// this: the offer is looked up by (offerPublicId, employeePublicId,
-// telegramId) and undoByCandidate re-checks ownership itself, so the window
-// and ownership checks are deliberately not duplicated here — same division
-// of responsibility as accept/decline.
-handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_UNDO_CALLBACK_CODE}:`), async (ctx) => {
-    const data = ctx.callbackQuery.data ?? "";
-    const offerPublicId = readCallbackPayload(data, { code: REPLACEMENT_UNDO_CALLBACK_CODE });
-    if (!offerPublicId) {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
-    }
-
-    const telegramId = ctx.from?.id;
-    const staff = telegramId
-        ? await prisma.staffProfile.findFirst({
-            where: { user: { telegramId: BigInt(telegramId) } },
-            select: { awsEmployeePublicId: true }
-        })
-        : null;
-    if (!staff?.awsEmployeePublicId || telegramId === undefined) {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);
-    }
-
-    const outcome = await undoReplacementAcceptanceAsCandidate({
-        offerPublicId,
-        employeePublicId: staff.awsEmployeePublicId,
-        telegramId,
-        client: awsBusinessClient,
-    });
-
-    // Вікно закрите назавжди: кнопка, що відповідає ледь помітним тостом,
-    // виглядає зламаною — 06.10.2026 фотографиня тиснула її 14 разів. Тому
-    // пояснення плашкою з «ОК» і кнопка зникає.
-    if (outcome === "window_closed") {
-        await ctx.editMessageReplyMarkup({
-            reply_markup: new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav")
-        }).catch(() => { });
-        return ctx.answerCallbackQuery({
-            text: STAFF_TEXTS["staff-replacement-undo-ans-window-closed"],
-            show_alert: true,
-        });
-    }
-    if (outcome === "failed") {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-ans-failed"]);
-    }
-
-    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-undo-done"]);
-});
+// The accepting photographer's own undo button, on the answered offer card
+// itself (replacement-callbacks.ts).
+handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_UNDO_CALLBACK_CODE}:`), (ctx) =>
+    undoAcceptanceCallback(ctx, defaultReplacementCallbackDeps),
+);
 
 // Скасування згоди на вакансію. Окремий обробник, а не гілка в тому, що вище:
 // ендпойнти різні, і код «вікно минуло» в них теж різний.
@@ -398,118 +296,6 @@ handlers.callbackQuery(new RegExp(`^cb:${OPEN_SHIFT_UNDO_CALLBACK_CODE}:`), asyn
     await ctx.answerCallbackQuery(STAFF_TEXTS["staff-open-shift-undo-done"]);
 });
 
-// A candidate answering a canonical OFFER. Both buttons route here; the code
-// they were signed with is the only thing that distinguishes yes from no.
-//
-// The backend owns the outcome: it re-verifies that the offer belongs to this
-// employee and is still open, so neither check is repeated here — the same
-// division of responsibility as the undo button above. The keyboard is cleared
-// on every terminal answer, including "gone", so a message that can no longer
-// be acted on never keeps a live-looking button.
-async function handleOfferAnswer(ctx: MyContext, answer: "accept" | "decline") {
-    const data = ctx.callbackQuery?.data ?? "";
-    const code =
-        answer === "accept"
-            ? REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE
-            : REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE;
-    const offerPublicId = readCallbackPayload(data, { code });
-    if (!offerPublicId) {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
-    }
-
-    const telegramId = ctx.from?.id;
-    const staff = telegramId
-        ? await prisma.staffProfile.findFirst({
-            where: { user: { telegramId: BigInt(telegramId) } },
-            select: { awsEmployeePublicId: true }
-        })
-        : null;
-    if (!staff?.awsEmployeePublicId || telegramId === undefined) {
-        // Тот же случай, что и у подтверждения графика выше: без канонического id
-        // ответ отправить некуда. Молчать нельзя — снаружи это выглядит как
-        // сломанная кнопка, а причина видна только в данных.
-        logBusinessEvent({
-            event: "bot.replacement_notifications.answer_failed",
-            level: "warn",
-            telegramId,
-            actorType: "staff",
-            actorRole: "staff",
-            result: "failure",
-            reasonCode: "EMPLOYEE_NOT_MAPPED",
-            module: "replacement-notification-dispatcher",
-            operation: "answerReplacementOffer",
-            safeContext: { offerPublicId, answer },
-        });
-        return ctx.answerCallbackQuery({
-            text: STAFF_TEXTS["staff-replacement-offer-error-alert"],
-            show_alert: true,
-        });
-    }
-
-    const outcome = await answerReplacementOffer({
-        offerPublicId,
-        employeePublicId: staff.awsEmployeePublicId,
-        telegramId,
-        answer,
-        client: awsBusinessClient,
-    });
-
-    // show_alert: узкая всплывашка обрезает текст примерно на 45 символах, и
-    // фотограф видела «...Спробуй ще раз за хви...» — то есть ровно ту часть, где
-    // сказано, что делать, до неё и не доходило. Ошибка — единственный случай,
-    // когда ей нужно что-то предпринять, поэтому она показывается плашкой с
-    // кнопкой «ОК», а успешные ответы остаются ненавязчивым тостом.
-    if (outcome === "failed") {
-        return ctx.answerCallbackQuery({
-            text: STAFF_TEXTS["staff-replacement-offer-error-alert"],
-            show_alert: true,
-        });
-    }
-
-    // Сообщение переписывается на месте: исход должен читаться там же, где
-    // названа смена. Отдельное сообщение оторвало бы «Зміна твоя» от того, о чём
-    // оно, а при девятнадцяти оферах на один пошук ще й засмітило б стрічку.
-    //
-    // Детали берутся из текста самого сообщения, а не из ответа бэкенда: тот
-    // отдаёт время в UTC, и зміна на 14:00 за Києвом показалась б як 11:00.
-    const originalText = ctx.callbackQuery?.message?.text ?? "";
-    const rewritten = buildAnsweredOfferText(originalText, outcome);
-    const edited = await ctx
-        .editMessageText(rewritten, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } })
-        .then(() => true)
-        .catch(() => false);
-    if (!edited) {
-        // Telegram отказывает по своим причинам — сообщение старше 48 часов, гонка
-        // двух нажатий. Тогда хотя бы снимаем кнопки, чтобы мёртвая не выглядела
-        // живой; бэкенд всё равно поглотит повторное нажатие.
-        //
-        // Ответ фотографе при этом уже сохранён, так что это не сбой операции, а
-        // расхождение того, что она видит, с тем, что записано. Пишется warn, а не
-        // error: если такие строки пойдут потоком, значит правка перестала
-        // проходить и карточки остаются с живыми на вид кнопками.
-        logBusinessEvent({
-            event: "bot.replacement_notifications.answer_message_not_rewritten",
-            level: "warn",
-            telegramId,
-            actorType: "staff",
-            actorRole: "staff",
-            result: "failure",
-            reasonCode: "MESSAGE_EDIT_REJECTED",
-            module: "replacement-notification-dispatcher",
-            operation: "answerReplacementOffer",
-            safeContext: { offerPublicId, answer, outcome },
-        });
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-    }
-
-    const answered =
-        outcome === "accepted"
-            ? STAFF_TEXTS["staff-replacement-offer-accepted"]
-            : outcome === "declined"
-              ? STAFF_TEXTS["staff-replacement-offer-declined"]
-              : STAFF_TEXTS["staff-replacement-offer-gone"];
-    await ctx.answerCallbackQuery(answered);
-}
 
 
 /**
@@ -605,11 +391,11 @@ handlers.callbackQuery(new RegExp(`^cb:${OPEN_SHIFT_OFFER_DECLINE_CALLBACK_CODE}
 );
 
 handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_OFFER_ACCEPT_CALLBACK_CODE}:`), (ctx) =>
-    handleOfferAnswer(ctx, "accept"),
+    answerOfferCallback(ctx, "accept", defaultReplacementCallbackDeps),
 );
 
 handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_OFFER_DECLINE_CALLBACK_CODE}:`), (ctx) =>
-    handleOfferAnswer(ctx, "decline"),
+    answerOfferCallback(ctx, "decline", defaultReplacementCallbackDeps),
 );
 
 // Global Broadcast Receipt Confirmation

@@ -123,6 +123,9 @@ ${p.details}
 📅 ${p.date}`,
   // Когда разбор карточки не удался: деталей нет, но сообщение обязано
   // перестать выглядеть действующим.
+  // Після «Це помилка, скасувати» на тій самій карточці (09.10.2026).
+  "staff-replacement-offer-answered-undone": (p: { location: string; date: string }) => `↩️ Ти скасувала — ${p.location}, ${p.date}`,
+  "staff-replacement-offer-answered-undone-bare": `↩️ Ти скасувала цю зміну`,
   "staff-replacement-offer-answered-accepted-bare": `✅ Ти виходиш на цю зміну. Перевір «Мій графік» 💛`,
   "staff-replacement-offer-answered-declined-bare": `🚫 Ти відмовилась від цієї зміни`,
   "staff-replacement-offer-answered-gone-bare": `⌛️ Зміну вже закрито — хтось відгукнувся раніше`,

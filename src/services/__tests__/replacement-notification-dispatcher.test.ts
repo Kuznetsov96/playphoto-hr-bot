@@ -854,6 +854,55 @@ describe("answerReplacementOffer", () => {
  * about herself, and it ends with "just ignore this if you can't", which
  * contradicts the decline button now sitting under it.
  */
+// Скасування зроблене в вебаппі або самою фотографинею боту не повідомляється
+// інакше як цим сповіщенням. Без хука копія заявки лишалась FOUND до
+// п'ятихвилинної сверки, і «Мій графік» прийнятої ще показував зміну як її.
+describe("ACCEPTANCE_REVERTED syncs the bot's copy at once", () => {
+    const revertedRow = (publicId: string, telegramId: string) => ({
+        publicId,
+        kind: "ACCEPTANCE_REVERTED" as const,
+        telegramId,
+        payload: { ...pendingRow.payload, replacementPublicId: "req-9", revertedBy: "owner" as const },
+    });
+
+    it("syncs each reverted request once per pass, after delivering both messages", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const onAcceptanceReverted = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([
+                    revertedRow("n-r1", "111"),
+                    revertedRow("n-r2", "222"),
+                ]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+            { onAcceptanceReverted },
+        );
+
+        const result = await dispatcher.dispatchPending();
+
+        expect(result).toEqual({ delivered: 2, failed: 0 });
+        expect(onAcceptanceReverted).toHaveBeenCalledTimes(1);
+        expect(onAcceptanceReverted).toHaveBeenCalledWith("req-9");
+    });
+
+    it("keeps the delivery counted when the sync itself fails", async () => {
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([revertedRow("n-r1", "111")]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage: vi.fn().mockResolvedValue(undefined) } as never,
+            { onAcceptanceReverted: vi.fn().mockRejectedValue(new Error("backend down")) },
+        );
+
+        await expect(dispatcher.dispatchPending()).resolves.toEqual({ delivered: 1, failed: 0 });
+    });
+});
+
 // Dragon Park, 09.10.2026: після скасування підміни вебапп повертає оффер
 // людям, у яких його зняло прийняття, і пише «зміна знову вільна». Без кнопок
 // відповісти на це було нічим — «пошук продовжується» лишався на папері.
