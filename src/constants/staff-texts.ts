@@ -752,7 +752,9 @@ Please check bot permissions (Manage Topics).`,
   "shoot-task-no-phone": `телефону ще немає — адміністратор додасть його.`,
   "shoot-task-phone-hidden": `телефон приховано.`,
   "shoot-task-child": (p: { name: string }) => `Іменинник: ${p.name}`,
-  "shoot-task-notes": (p: { notes: string }) => `Побажання: ${p.notes}`,
+  // Побажання — вільний текст адміністратора, часто в кілька рядків: цитата відділяє його від
+  // службових рядків. Приходить уже екранованим.
+  "shoot-task-notes": (p: { notes: string }) => `Побажання:\n<blockquote>${p.notes}</blockquote>`,
   "shoot-task-assigned-head": `Тобі призначено зйомку.`,
   "shoot-task-assigned-due": (p: { due: string }) =>
     `Фото — до ${p.due} включно. Надішли їх у касі цієї точки: «Надіслати фото».`,
@@ -773,6 +775,11 @@ Please check bot permissions (Manage Topics).`,
   "shoot-task-cancelled": `Зйомку скасовано — від тебе нічого не потрібно.`,
   // Лише коли payload каже, що шлях Б увімкнено (SHOOT_PHOTOS_SESSION_ENABLED у вебаппі).
   "shoot-task-path-b": `Якщо зміни немає — на екрані PIN-коду натисни «Надіслати фото ДН».`,
+  // Ранкове повідомлення в день зйомки: рядок у нагадуванні про зміну, а без зміни — окреме
+  // повідомлення з точкою. Час — інтервали з вебаппа, як у «Тобі призначено зйомку».
+  "shoot-today-line": (p: { time: string }) => `🎂 ${p.time} — зйомка ДН`,
+  "shoot-today-line-no-time": `🎂 Зйомка ДН`,
+  "shoot-today-greeting": (p: { name: string }) => `👋 <b>Доброго ранку, ${p.name}!</b>`,
   "shoot-task-pick-due": (p: { current: string }) =>
     `Зараз термін — ${p.current}. Обери новий.\nПеренести можна один раз — далі лише через адміністратора.`,
   "shoot-task-confirm-due": (p: { due: string }) =>

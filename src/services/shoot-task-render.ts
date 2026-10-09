@@ -34,10 +34,13 @@ export function shootBlock(item: AwsShootTask): string {
     return [title, locationLine(item), `📅 ${time === "" ? day : `${day}, ${time}`}`].join("\n");
 }
 
-/** Телефон — лише в ASSIGNED; REDACT той самий текст, але «телефон приховано.». */
+/**
+ * Телефон — лише в ASSIGNED; REDACT той самий текст, але «телефон приховано.». Моноширинний:
+ * Telegram копіює `<code>` одним дотиком. Схема пускає лише E.164 — екранувати нічого.
+ */
 function clientLine(item: AwsShootTask): string {
     const client = safe(item.shoot.clientName, NAME_LIMIT);
-    const phone = item.kind === "ASSIGNED" ? item.shoot.phone : null;
+    const phone = item.kind === "ASSIGNED" && item.shoot.phone !== null ? `<code>${item.shoot.phone}</code>` : null;
     if (phone !== null) {
         return STAFF_TEXTS["shoot-task-client"]({ client: client === null ? phone : `${client}, ${phone}` });
     }
