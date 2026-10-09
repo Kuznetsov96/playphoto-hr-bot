@@ -60,7 +60,7 @@ adminStepHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) 
         }
     } catch (error: any) {
         logger.error({ err: error, step, userId: ctx.from?.id }, "Error in admin step handler");
-        await ScreenManager.renderScreen(ctx, `❌ Помилка: ${error.message}`, "admin-main");
+        await ScreenManager.renderScreen(ctx, `❌ Error: ${error.message}`, "admin-main");
         ctx.session.step = "idle";
     }
 

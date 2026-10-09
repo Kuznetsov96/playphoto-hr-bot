@@ -1,4 +1,30 @@
 export const ADMIN_TEXTS = {
+  // Підміна очима власника (09.10.2026): англійською і мінімально — хто, коли,
+  // де; рядок дії лише там, де від власника щось потрібно.
+  "admin-replacement-confirmed": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `✅ <b>Replacement confirmed</b>
+
+${p.requesterName} → ${p.candidateName}
+${p.date} · ${p.time}
+${p.location}`,
+  "admin-replacement-needs-review": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `⚠️ <b>Replacement needs your decision</b>
+
+${p.requesterName} → ${p.candidateName}
+${p.date} · ${p.time}
+${p.location}
+
+Automatic checks failed. Approve it in the admin panel or revert.`,
+  "admin-replacement-btn-revert": `↩️ Revert`,
+  "admin-replacement-revert-done": `Reverted. The search goes on.`,
+  "admin-replacement-revert-failed": `Didn't work. Try the admin panel.`,
+  "admin-replacement-revert-late-warning": `⚠️ The shift starts in under 2 hours — a replacement may not be found in time.
+
+Revert anyway?`,
+  "admin-replacement-revert-late-btn-confirm": `↩️ Revert anyway`,
+  "admin-replacement-revert-late-btn-cancel": `Keep it`,
+  "admin-notification-expired": `This notification is out of date.`,
+  "admin-error-generic": `<b>Something went wrong</b>\n\nTap /start and try again.`,
+  "admin-error-stale-screen": `This screen is out of date. Tap /start for the current menu.`,
+  "admin-error-toast": `Technical error 🛠️`,
   // Постійна тема співробітниці в чаті підтримки (spec 2026-10-08).
   "support-thread-btn-call-kuznetsov": `🔔 Kuznetsov`,
   "support-thread-btn-call-hupalova": `🔔 Hupalova`,

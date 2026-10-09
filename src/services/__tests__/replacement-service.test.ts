@@ -187,14 +187,15 @@ describe("ReplacementService", () => {
         const { ReplacementService } = await import("../replacement-service.js");
         await new ReplacementService().dispatchNextWave(api as any, request.id);
 
+        // Мінімально, як просив власник 09.10.2026: хто, коли, де і одна дія.
+        // Дата англійською — «18 жовтня» в англійському повідомленні був шум.
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            expect.stringContaining("Replacement not found."),
-            { parse_mode: "HTML" }
-        );
-        expect(api.sendMessage).toHaveBeenCalledWith(
-            107794048,
-            expect.stringContaining("Photographer: Бланк Анастасія\n\n"),
+            "⚠️ <b>No replacement found</b>\n\n" +
+                "Бланк Анастасія\n" +
+                "Sat, May 11 · 14:00–21:00\n" +
+                "Dragon Park, Львів\n\n" +
+                "Contact the photographer to sort it out.",
             { parse_mode: "HTML" }
         );
         expect(api.sendMessage).not.toHaveBeenCalledWith(
@@ -313,14 +314,11 @@ describe("ReplacementService", () => {
 
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            expect.stringContaining("Replacement search started."),
+            expect.stringContaining("🔁 <b>Replacement search started</b>\n\nБланк Анастасія\n"),
             { parse_mode: "HTML" }
         );
-        expect(api.sendMessage).toHaveBeenCalledWith(
-            107794048,
-            expect.stringContaining("Photographer: Бланк Анастасія\n\n"),
-            { parse_mode: "HTML" }
-        );
+        // Пошук іде сам — дія від власника не потрібна, рядка дії немає.
+        expect(api.sendMessage.mock.calls[0]![1]).not.toMatch(/monitor|help manually|Next step/);
     });
 
     it("notifies the main admin in English when the requester cancels a replacement search", async () => {
@@ -363,12 +361,11 @@ describe("ReplacementService", () => {
         expect(result).toBe(true);
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            expect.stringContaining("Replacement search cancelled."),
-            { parse_mode: "HTML" }
-        );
-        expect(api.sendMessage).toHaveBeenCalledWith(
-            107794048,
-            expect.stringContaining("Photographer: Смірнова Дарина\n\n"),
+            "🛑 <b>Replacement search cancelled</b>\n\n" +
+                "Смірнова Дарина\n" +
+                "Sun, May 12 · 14:00–21:00\n" +
+                "Fantasy Town, Черкаси\n\n" +
+                "Cancelled by the photographer.",
             { parse_mode: "HTML" }
         );
         expect(api.editMessageText).toHaveBeenCalledWith(
@@ -554,7 +551,7 @@ describe("ReplacementService", () => {
         });
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            expect.stringContaining("empty shift, started by main admin"),
+            expect.stringContaining("🔁 <b>Replacement search started</b>\n\nOpen shift\n"),
             { parse_mode: "HTML" }
         );
     });

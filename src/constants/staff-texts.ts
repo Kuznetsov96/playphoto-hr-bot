@@ -123,6 +123,9 @@ ${p.details}
 📅 ${p.date}`,
   // Когда разбор карточки не удался: деталей нет, но сообщение обязано
   // перестать выглядеть действующим.
+  // Після «Це помилка, скасувати» на тій самій карточці (09.10.2026).
+  "staff-replacement-offer-answered-undone": (p: { location: string; date: string }) => `↩️ Ти скасувала — ${p.location}, ${p.date}`,
+  "staff-replacement-offer-answered-undone-bare": `↩️ Ти скасувала цю зміну`,
   "staff-replacement-offer-answered-accepted-bare": `✅ Ти виходиш на цю зміну. Перевір «Мій графік» 💛`,
   "staff-replacement-offer-answered-declined-bare": `🚫 Ти відмовилась від цієї зміни`,
   "staff-replacement-offer-answered-gone-bare": `⌛️ Зміну вже закрито — хтось відгукнувся раніше`,
@@ -185,34 +188,6 @@ ${p.details}
   "staff-replacement-undo-ans-failed": `Не вийшло. Спробуй ще раз.`,
   "staff-replacement-reverted-by-owner": (p: { location: string; date: string }) => `Підміну на ${p.location} ${p.date} скасовано адміністратором. Пошук продовжується.`,
   "staff-replacement-reverted-by-candidate": (p: { location: string; date: string }) => `Домовленість на ${p.location} ${p.date} скасувалася — фотографиня, яка погодилась, відмінила це одразу. Пошук заміни триває.`,
-  "staff-replacement-owner-review-confirmed": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `✅ <b>Підміну автоматично підтверджено</b>
-
-${p.requesterName} → ${p.candidateName}
-📍 ${p.location}
-📅 ${p.date}
-🕐 ${p.time}
-
-Зміна вже переведена на нового фотографа. Якщо потрібно скасувати — натисни кнопку нижче.`,
-  "staff-replacement-owner-review-needs-review": (p: { requesterName: string; candidateName: string; location: string; date: string; time: string }) => `⚠️ <b>Підміну прийнято, потрібне твоє рішення</b>
-
-${p.requesterName} → ${p.candidateName}
-📍 ${p.location}
-📅 ${p.date}
-🕐 ${p.time}
-
-Автоматичні перевірки не пройшли — підтвердь або скасуй вручну в адмін-панелі. Кнопка нижче скасовує прийняту пропозицію.`,
-  "staff-replacement-owner-review-btn-revert": `↩️ Скасувати підміну`,
-  "staff-replacement-revert-ans-done": `Скасовано. Пошук підміни продовжується.`,
-  "staff-replacement-revert-ans-failed": `Не вийшло — спробуй з адмін-панелі.`,
-  // Second tap of the owner revert button, shown when the backend answers
-  // REPLACEMENT_REVERT_NEEDS_ACKNOWLEDGEMENT: the shift starts soon enough
-  // that a replacement may not be found in time, and the owner must
-  // knowingly confirm rather than be told the action simply "failed".
-  "staff-replacement-revert-late-warning": `⚠️ Зміна починається менш ніж за 2 години — заміну можуть не встигнути знайти.
-
-Скасувати підміну попри це?`,
-  "staff-replacement-revert-late-btn-confirm": `✅ Так, скасувати`,
-  "staff-replacement-revert-late-btn-cancel": `Залишити як є`,
   "hr-help-decisions": `<b>Candidate Decisions</b> ⚖️`,
   "hr-label-all-decisions-made": `✅ All decisions made!`,
   "hr-label-error-id-not-found": `Error: ID not found`,
@@ -822,7 +797,7 @@ Please check bot permissions (Manage Topics).`,
   "shoot-task-ans-moved-to": (p: { due: string }) => `Новий термін — ${p.due}.`,
   "shoot-task-support-prefix": (p: { line: string }) => `❓ <b>Питання по зйомці:</b>\n${p.line}`,
   "shoot-task-support-open-topic": (p: { line: string }) =>
-    `❓ Звернення з нагадування про зйомку: ${p.line}`,
+    `❓ From a shoot reminder: ${p.line}`,
 
   /**
    * Загальний екран збою для співробітниці — пара до candidate-error-generic

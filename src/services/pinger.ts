@@ -63,7 +63,7 @@ async function handleBlockedUser(bot: Bot<MyContext>, telegramId: number) {
                 if (adminId) {
                     const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
                         `👤 <b>${escapeHtml(staffName)}</b> blocked the bot.\n\n` +
-                        `Статус сотрудника в AWS <b>не изменён автоматически</b>. Проверьте ситуацию и, если сотрудник действительно уволен, деактивируйте его в основной базе.`;
+                        `Their status in the webapp was <b>not</b> changed. If they've left, deactivate them there.`;
                     await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => { });
                 }
                 return;

@@ -65,7 +65,7 @@ describe("shoot support line", () => {
         expect(await forwardShootLineToTopic(api as never, 55, "Зйомка · Олена")).toBe(true);
         expect(api.sendMessage).toHaveBeenCalledWith(
             999,
-            "❓ Звернення з нагадування про зйомку: Зйомка · Олена",
+            "❓ From a shoot reminder: Зйомка · Олена",
             { message_thread_id: 55, parse_mode: "HTML" },
         );
     });
@@ -73,7 +73,7 @@ describe("shoot support line", () => {
     it("escapes the line posted into the open topic", async () => {
         const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
         await forwardShootLineToTopic(api as never, 55, "Зйомка · <Олена>");
-        expect(api.sendMessage.mock.calls[0]![1]).toBe("❓ Звернення з нагадування про зйомку: Зйомка · &lt;Олена&gt;");
+        expect(api.sendMessage.mock.calls[0]![1]).toBe("❓ From a shoot reminder: Зйомка · &lt;Олена&gt;");
     });
 
     it("does nothing without a topic", async () => {

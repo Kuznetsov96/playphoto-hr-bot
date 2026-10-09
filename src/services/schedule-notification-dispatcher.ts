@@ -11,7 +11,6 @@ import {
     monthNameOf,
     type ScheduleMessageShift
 } from "../utils/format-schedule-message.js";
-import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
     awsBusinessClient,
     type AwsScheduleNotification,
@@ -111,7 +110,7 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
     const lines: string[] = [
         group.notifications.every(isReplacementGiven)
             ? STAFF_TEXTS["schedule-notif-replacement-found-title"]
-            : group.urgency === "URGENT"
+            : group.urgency === "URGENT" && !group.notifications.every(isReplacementTaken)
             ? STAFF_TEXTS["schedule-notif-urgent-title"]
             : STAFF_TEXTS["schedule-notif-normal-title"],
         ""
@@ -141,6 +140,16 @@ function isReplacementGiven(notification: AwsScheduleNotification): boolean {
     return notification.payload.role === "requester"
         && notification.payload.before !== undefined
         && (notification.changeKind === "SHIFT_REMOVED" || notification.changeKind === "SHIFT_REASSIGNED");
+}
+
+/**
+ * The accepting photographer's copy of a replacement. It answers a tap she has
+ * just made, and since 09.10.2026 the backend sends it at once (URGENT) so the
+ * undo button arrives while the window is open — the urgent title would read
+ * as an alarm about a shift she chose herself.
+ */
+function isReplacementTaken(notification: AwsScheduleNotification): boolean {
+    return notification.payload.role === "accepted" && notification.changeKind === "SHIFT_REASSIGNED";
 }
 
 /**
@@ -245,57 +254,36 @@ function formatLocalTime(localDateTime: string): string {
 }
 
 /**
- * Signed-callback code for the accepting photographer's own undo button.
- * Exported so the Telegram callback handler in `handlers/index.ts` matches on
- * the exact same string this dispatcher signs with, rather than a second
- * hardcoded copy — mirrors `REPLACEMENT_REVERT_CALLBACK_CODE`.
+ * Signed-callback code for the accepting photographer's own undo button. The
+ * button lives on the answered offer card (handlers/replacement-callbacks.ts);
+ * the code stays here so messages already sitting in chats keep matching.
  */
 export const REPLACEMENT_UNDO_CALLBACK_CODE = "replun";
 
 /**
- * The undo button belongs only on the one message that is unambiguously "you
- * just accepted a replacement, moments ago": a group of exactly one
- * SHIFT_REASSIGNED notification, addressed to the accepting candidate, whose
- * payload carries the offer id the undo endpoint needs.
- *
- * Deliberately refuses a batched group (`notifications.length > 1`): a NORMAL
- * SHIFT_REASSIGNED can be batched with unrelated schedule changes before
- * delivery, and attaching an undo button there would let a tap on one bullet
- * point undo a different, unrelated shift assignment. The bot never verifies
- * the undo window itself either — that stays the backend's job — so this is
- * purely about not offering the button where it cannot mean what it says.
+ * The accepting photographer's own echo of a replacement she just took by
+ * tapping «Можу» on the offer card. The card is already rewritten to
+ * «✅ Ти виходиш на цю зміну» and carries the undo button
+ * (handlers/replacement-callbacks.ts), so a separate «Зміну передано тобі»
+ * would say the same thing a second time (owner, 09.10.2026). Only the
+ * auto-confirm path carries `offerPublicId`; an owner's later approval has
+ * none and is real news, so it is still sent.
  */
-function findUndoableAcceptance(
-    group: ScheduleNotificationDeliveryGroup
-): { offerPublicId: string } | null {
-    if (group.notifications.length !== 1) return null;
-    const [notification] = group.notifications;
-    if (notification!.changeKind !== "SHIFT_REASSIGNED") return null;
-    if (notification!.payload.role !== "accepted") return null;
-    const offerPublicId = notification!.payload.offerPublicId;
-    if (!offerPublicId) return null;
-    return { offerPublicId };
+export function isAcceptanceEcho(notification: AwsScheduleNotification): boolean {
+    return notification.changeKind === "SHIFT_REASSIGNED"
+        && notification.payload.role === "accepted"
+        && Boolean(notification.payload.offerPublicId);
 }
 
 /**
- * One keyboard for every schedule message: "My schedule", plus the undo
- * button on the single message where undo can mean what it says. Urgent
- * messages differ only by title — the acknowledgement buttons were removed
- * on 29.08.2026 because nobody reads the answers; the `snack`/`sndec`
- * handlers stay for messages already sitting in chats.
+ * One keyboard for every schedule message: "My schedule". The undo button
+ * moved to the offer card itself (09.10.2026). Urgent messages differ only by
+ * title — the acknowledgement buttons were removed on 29.08.2026 because
+ * nobody reads the answers; the `snack`/`sndec` handlers stay for messages
+ * already sitting in chats.
  */
-export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
-    const keyboard = new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
-    const undoable = findUndoableAcceptance(group);
-    if (undoable) {
-        keyboard
-            .row()
-            .text(
-                STAFF_TEXTS["staff-replacement-accepted-btn-undo"],
-                buildSignedCallback(REPLACEMENT_UNDO_CALLBACK_CODE, undoable.offerPublicId)
-            );
-    }
-    return keyboard;
+export function buildDeliveryKeyboard(_group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
+    return new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
 }
 
 /**
@@ -386,7 +374,13 @@ export class ScheduleNotificationDispatcher {
             // instead of the whole pass.
             await this.reportInvalid(pending.invalidPublicIds, pending.unidentifiableCount);
 
-            const groups = groupForDelivery(pending.items);
+            // The echo of her own tap is already on the offer card — it counts as
+            // delivered without a second message.
+            const echoes = pending.items.filter(isAcceptanceEcho);
+            await this.report(echoes.map(item => item.publicId), publicId =>
+                awsBusinessClient.markScheduleNotificationDelivered(publicId)
+            );
+            const groups = groupForDelivery(pending.items.filter(item => !isAcceptanceEcho(item)));
 
             for (const group of groups) {
                 await this.deliverGroup(api, group);

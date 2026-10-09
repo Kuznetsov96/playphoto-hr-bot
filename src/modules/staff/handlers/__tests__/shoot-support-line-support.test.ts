@@ -31,7 +31,7 @@ vi.mock("../../../../constants/staff-texts.js", () => ({
         "staff-btn-home": "Меню",
         "hr-btn-cancel": "Скасувати",
         "shoot-task-support-prefix": (p: { line: string }) => `❓ <b>Питання по зйомці:</b>\n${p.line}`,
-        "shoot-task-support-open-topic": (p: { line: string }) => `❓ Звернення з нагадування про зйомку: ${p.line}`,
+        "shoot-task-support-open-topic": (p: { line: string }) => `❓ From a shoot reminder: ${p.line}`,
     },
 }));
 
@@ -198,7 +198,7 @@ describe("shoot support line in staff messages", () => {
 
         expect(ctx.api.sendMessage).toHaveBeenCalledWith(
             999,
-            `❓ Звернення з нагадування про зйомку: ${ESCAPED}`,
+            `❓ From a shoot reminder: ${ESCAPED}`,
             { message_thread_id: 17030, parse_mode: "HTML" },
         );
         expect(ctx.api.sendMessage.mock.invocationCallOrder[0]).toBeLessThan(ctx.api.copyMessage.mock.invocationCallOrder[0]);
@@ -227,7 +227,7 @@ describe("shoot support line in staff messages", () => {
         const at = Date.now() - 60_000;
         const ctx = staffMessageCtx({ shootSupportLine: { line: LINE, at } });
         ctx.api.sendMessage.mockRejectedValueOnce(Object.assign(new Error("Too Many Requests: retry after 3"), {
-            payload: { text: `❓ Звернення з нагадування про зйомку: ${ESCAPED}` },
+            payload: { text: `❓ From a shoot reminder: ${ESCAPED}` },
         }));
 
         expect(await handleStaffMessage(ctx, {} as any)).toBe(true);

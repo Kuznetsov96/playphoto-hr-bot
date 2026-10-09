@@ -14,7 +14,7 @@ vi.mock("../../../../constants/staff-texts.js", () => ({
         "support-ans-already-processing": "Твій запит вже обробляється!",
         "support-info-already-open": "<b>Твій діалог вже відкритий.</b>",
         "support-ask-issue": "<b>Напиши своє питання.</b>",
-        "shoot-task-support-open-topic": (p: { line: string }) => `❓ Звернення з нагадування про зйомку: ${p.line}`,
+        "shoot-task-support-open-topic": (p: { line: string }) => `❓ From a shoot reminder: ${p.line}`,
     },
 }));
 vi.mock("../../../../core/logger.js", () => ({

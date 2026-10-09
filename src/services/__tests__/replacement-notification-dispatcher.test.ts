@@ -161,7 +161,7 @@ describe("ReplacementNotificationDispatcher", () => {
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         expect(sendMessage.mock.calls[0]![0]).toBe(555);
-        expect(sendMessage.mock.calls[0]![1]).toMatch(/автоматично підтверджено/u);
+        expect(sendMessage.mock.calls[0]![1]).toMatch(/Replacement confirmed/u);
         expect(markDelivered).toHaveBeenCalledWith("n-owner-1");
         expect(result).toEqual({ delivered: 1, failed: 0 });
     });
@@ -192,8 +192,8 @@ describe("ReplacementNotificationDispatcher", () => {
 
         await dispatcher.dispatchPending();
 
-        expect(sendMessage.mock.calls[0]![1]).toMatch(/потрібне твоє рішення/u);
-        expect(sendMessage.mock.calls[0]![1]).not.toMatch(/автоматично підтверджено/u);
+        expect(sendMessage.mock.calls[0]![1]).toMatch(/needs your decision/u);
+        expect(sendMessage.mock.calls[0]![1]).not.toMatch(/Replacement confirmed/u);
     });
 
     it("escapes names and locations, since the message is sent as HTML", async () => {
@@ -854,6 +854,105 @@ describe("answerReplacementOffer", () => {
  * about herself, and it ends with "just ignore this if you can't", which
  * contradicts the decline button now sitting under it.
  */
+// Скасування зроблене в вебаппі або самою фотографинею боту не повідомляється
+// інакше як цим сповіщенням. Без хука копія заявки лишалась FOUND до
+// п'ятихвилинної сверки, і «Мій графік» прийнятої ще показував зміну як її.
+describe("ACCEPTANCE_REVERTED syncs the bot's copy at once", () => {
+    const revertedRow = (publicId: string, telegramId: string) => ({
+        publicId,
+        kind: "ACCEPTANCE_REVERTED" as const,
+        telegramId,
+        payload: { ...pendingRow.payload, replacementPublicId: "req-9", revertedBy: "owner" as const },
+    });
+
+    it("syncs each reverted request once per pass, after delivering both messages", async () => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const onAcceptanceReverted = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([
+                    revertedRow("n-r1", "111"),
+                    revertedRow("n-r2", "222"),
+                ]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+            { onAcceptanceReverted },
+        );
+
+        const result = await dispatcher.dispatchPending();
+
+        expect(result).toEqual({ delivered: 2, failed: 0 });
+        expect(onAcceptanceReverted).toHaveBeenCalledTimes(1);
+        expect(onAcceptanceReverted).toHaveBeenCalledWith("req-9");
+    });
+
+    it("keeps the delivery counted when the sync itself fails", async () => {
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([revertedRow("n-r1", "111")]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage: vi.fn().mockResolvedValue(undefined) } as never,
+            { onAcceptanceReverted: vi.fn().mockRejectedValue(new Error("backend down")) },
+        );
+
+        await expect(dispatcher.dispatchPending()).resolves.toEqual({ delivered: 1, failed: 0 });
+    });
+});
+
+// Dragon Park, 09.10.2026: після скасування підміни вебапп повертає оффер
+// людям, у яких його зняло прийняття, і пише «зміна знову вільна». Без кнопок
+// відповісти на це було нічим — «пошук продовжується» лишався на папері.
+describe("OFFER_REOPENED carries answer buttons", () => {
+    const reopenedRow = (payloadOverrides: Record<string, unknown> = {}) => ({
+        publicId: "n-reopened-1",
+        kind: "OFFER_REOPENED" as const,
+        telegramId: "333",
+        payload: {
+            startsAtLocal: "2026-08-15T14:00",
+            endsAtLocal: "2026-08-15T21:00",
+            timezone: "Europe/Kyiv",
+            locationPublicId: "loc-1",
+            locationName: "Smile Park",
+            locationCity: "Kyiv",
+            replacementPublicId: "req-1",
+            offerPublicId: "offer-7",
+            ...payloadOverrides,
+        },
+    });
+    const send = async (row: ReturnType<typeof reopenedRow>) => {
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const dispatcher = new ReplacementNotificationDispatcher(
+            {
+                pendingReplacementNotifications: vi.fn().mockResolvedValue([row]),
+                markReplacementNotificationDelivered: vi.fn().mockResolvedValue(undefined),
+                markReplacementNotificationFailed: vi.fn(),
+            } as never,
+            { sendMessage } as never,
+        );
+        await dispatcher.dispatchPending();
+        return sendMessage.mock.calls[0]!;
+    };
+
+    it("lets the photographer take the shift straight from the reopened message", async () => {
+        const [, text, options] = await send(reopenedRow());
+        const buttons = ((options as { reply_markup?: { inline_keyboard: unknown[][] } }).reply_markup?.inline_keyboard ?? [])
+            .flat() as Array<{ callback_data: string }>;
+
+        expect(text).toContain("знову вільна");
+        expect(buttons).toHaveLength(2);
+        expect(buttons.every((button) => button.callback_data.includes("offer-7"))).toBe(true);
+    });
+
+    it("still goes out as plain text when an older row has no offer id", async () => {
+        const [, , options] = await send(reopenedRow({ offerPublicId: undefined }));
+        expect((options as { reply_markup?: unknown }).reply_markup).toBeUndefined();
+    });
+});
+
 describe("OFFER wording follows the candidate's stated availability", () => {
     const offerFor = (availabilityKind?: string) => ({
         publicId: "n-offer-1",

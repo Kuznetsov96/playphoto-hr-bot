@@ -28,7 +28,7 @@ export async function updateTicketVisuals(ctx: MyContext, ticketId: number) {
         const { buildTopicTitle } = await import("../utils/ticket-card.js");
         const isClarification = ticket.issueText.includes("Уточнення по завданню");
         const adminRole = ticket.assignedAdmin?.adminRole || null;
-        const newTitle = buildTopicTitle(ticketId, user.staffProfile?.fullName || "Невідомо", locationName, ticket.status as TicketStatus, ticket.isUrgent, isClarification, locationCity, ticket.assignedAdminId, adminRole);
+        const newTitle = buildTopicTitle(ticketId, user.staffProfile?.fullName || "Unknown", locationName, ticket.status as TicketStatus, ticket.isUrgent, isClarification, locationCity, ticket.assignedAdminId, adminRole);
         try {
             await ctx.api.editForumTopic(TEAM_CHATS.SUPPORT, ticket.topicId, { name: newTitle });
         } catch (e) {

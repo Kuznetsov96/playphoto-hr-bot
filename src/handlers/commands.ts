@@ -63,7 +63,7 @@ commandHandlers.callbackQuery("cancel_step", async (ctx) => {
         const adminRole = await getUserAdminRole(BigInt(telegramId));
 
         if (adminRole) {
-            await ctx.answerCallbackQuery("Дію скасовано ❌");
+            await ctx.answerCallbackQuery("Cancelled ❌");
 
             if (ctx.chat?.type !== "private") {
                 await ctx.deleteMessage().catch(() => { });
@@ -85,16 +85,16 @@ commandHandlers.callbackQuery("cancel_step", async (ctx) => {
         }
     }
 
-    await ctx.answerCallbackQuery("Дію скасовано ❌");
+    await ctx.answerCallbackQuery("Cancelled ❌");
     await ctx.deleteMessage().catch(() => { });
 });
 
 commandHandlers.command("test_birthdays", async (ctx) => {
     try { await ctx.deleteMessage(); } catch (e) { }
     if (!ADMIN_IDS.includes(ctx.from?.id || 0)) return;
-    await ctx.reply("Запускаю ручну перевірку днів народження...");
+    await ctx.reply("Running the birthday check…");
     await checkBirthdays(ctx.api as any); // bot was passed as Bot<MyContext>, ctx.api is close enough if we change service
-    await ctx.reply("Перевірку завершено.");
+    await ctx.reply("Birthday check done.");
 });
 
 commandHandlers.command("staff", async (ctx) => {
@@ -403,7 +403,7 @@ commandHandlers.command("admin", requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPO
             updateId: ctx.update.update_id,
             error: e,
         });
-        await ctx.reply(`💥 Помилка: ${e.message}`);
+        await ctx.reply(`💥 Error: ${e.message}`);
     }
 });
 
@@ -489,7 +489,7 @@ commandHandlers.command("reset_me", async (ctx) => {
         const user = await userRepository.findWithProfilesByTelegramId(targetId);
 
         if (!user) {
-            return await ctx.reply(`Користувача з ID ${targetId} не знайдено в базі. 🤷‍♀️`);
+            return await ctx.reply(`No user with ID ${targetId} in the database.`);
         }
 
         // 1. Delete Candidate Data
@@ -535,7 +535,7 @@ commandHandlers.command("reset_me", async (ctx) => {
         ctx.session.step = "idle";
         ctx.session.candidateData = {};
 
-        await ctx.reply(`🧹 <b>Дані для ID ${targetId} повністю очищено!</b>\n\nТепер можна натиснути /start для початку з чистого листа. ✨`, { parse_mode: "HTML" });
+        await ctx.reply(`🧹 <b>ID ${targetId} has been reset</b>\n\nTap /start to begin from scratch.`, { parse_mode: "HTML" });
     } catch (e: any) {
         logger.error({ err: e, targetId }, "Reset user command failed");
         logAuditEvent({
@@ -550,7 +550,7 @@ commandHandlers.command("reset_me", async (ctx) => {
             safeContext: { targetTelegramId: targetId.toString() },
             error: e,
         });
-        await ctx.reply(`❌ Помилка при скиданні: ${e.message}`);
+        await ctx.reply(`❌ Reset failed: ${e.message}`);
     }
 });
 

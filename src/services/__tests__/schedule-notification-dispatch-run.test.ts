@@ -105,6 +105,49 @@ describe("ScheduleNotificationDispatcher.runOnce", () => {
         expect(awsBusinessClientMock.markScheduleNotificationFailed).not.toHaveBeenCalled();
     });
 
+    // Прийнята щойно сама натиснула «Можу», і карточка вже переписана на
+    // «✅ Ти виходиш на цю зміну» з кнопкою скасування. Окреме «Зміну передано
+    // тобі» повторювало б те саме другим повідомленням (власник, 09.10.2026).
+    it("does not send the accepting photographer a second message about the shift she just took", async () => {
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([
+            {
+                ...urgentNotification,
+                publicId: "echo",
+                changeKind: "SHIFT_REASSIGNED" as const,
+                payload: { after: shiftSnapshot, role: "accepted", offerPublicId: "offer-1", replacementPublicId: "r1" }
+            },
+            { ...urgentNotification, publicId: "other", employeePublicId: "e-2", telegramId: "200" }
+        ]));
+        const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        await new ScheduleNotificationDispatcher().runOnce({ sendMessage });
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0]![0]).toBe(200);
+        expect(awsBusinessClientMock.markScheduleNotificationDelivered.mock.calls.map(call => call[0]).sort())
+            .toEqual(["echo", "other"]);
+    });
+
+    it("still tells the photographer when the owner approved her acceptance later", async () => {
+        // Схвалення власником — новина: на момент натискання зміна ще не була її.
+        awsBusinessClientMock.pendingScheduleNotifications.mockResolvedValue(pendingResult([
+            {
+                ...urgentNotification,
+                publicId: "approved",
+                changeKind: "SHIFT_REASSIGNED" as const,
+                payload: { after: shiftSnapshot, role: "accepted", replacementPublicId: "r1" }
+            }
+        ]));
+        const { ScheduleNotificationDispatcher } = await import("../schedule-notification-dispatcher.js");
+        const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
+
+        await new ScheduleNotificationDispatcher().runOnce({ sendMessage });
+
+        expect(sendMessage).toHaveBeenCalledTimes(1);
+        expect(sendMessage.mock.calls[0]![1]).toContain("Зміну передано тобі");
+    });
+
     /**
      * Three Zaporizhzhia venues are all named "Volkland" and differ only by branch, so a schedule
      * change that does not name it leaves the photographer unable to tell which shift moved.

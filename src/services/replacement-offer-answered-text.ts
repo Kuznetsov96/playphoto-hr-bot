@@ -1,7 +1,7 @@
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 
-export type AnsweredOfferOutcome = "accepted" | "declined" | "gone";
+export type AnsweredOfferOutcome = "accepted" | "declined" | "gone" | "undone";
 
 /**
  * Детали смены, вытащенные из текста самого сообщения.

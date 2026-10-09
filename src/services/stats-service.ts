@@ -693,22 +693,22 @@ export const statsService = {
         const topDeficitLocations = prioritizedLocations.filter((location) => location.gap > 0).slice(0, 2);
 
         if (1 - invalidRate >= 0.45) {
-            actions.push("Перевірити джерела трафіку та pre-screening: занадто високий відсів до валідної бази.");
+            actions.push("Check traffic sources and pre-screening: too many drop out before the valid pool.");
         }
         if (health.staleScreening > 5) {
-            actions.push("Розвантажити screening чергу: є кандидати без руху понад 48 годин.");
+            actions.push("Clear the screening queue: some candidates have not moved for over 48 hours.");
         }
         if (health.stalledAccepted + health.overdueDiscovery + health.overdueTraining > 3) {
-            actions.push("Підсилити handoff у mentor track: accepted/discovery/training зависають довше SLA.");
+            actions.push("Tighten the mentor-track handoff: accepted/discovery/training stall past SLA.");
         }
         if (topDeficitLocations.length > 0) {
-            actions.push(`Закрити дефіцит по локаціях: ${topDeficitLocations.map((location) => `${normalizeCity(location.city)} / ${formatLocation(location, "in-city")}`).join(", ")}.`);
+            actions.push(`Fill the gap at: ${topDeficitLocations.map((location) => `${normalizeCity(location.city)} / ${formatLocation(location, "in-city")}`).join(", ")}.`);
         }
         if (reserveValidPool > activeValidPool && reserveValidPool >= 10) {
-            actions.push("Переглянути логіку waitlist: резерв уже більший за активний робочий пул.");
+            actions.push("Review the waitlist: the reserve is already larger than the active pool.");
         }
         if (actions.length === 0) {
-            actions.push("Критичних відхилень не виявлено. Сфокусуйтесь на підтриманні швидкості обробки та локаційного балансу.");
+            actions.push("Nothing critical. Keep processing speed and location balance steady.");
         }
 
         return {
@@ -746,11 +746,11 @@ export const statsService = {
 
         const alertLines = [
             data.health.staleScreening > 0 ? `• Screening stale >48h: <b>${data.health.staleScreening}</b>` : null,
-            data.health.stalledAccepted > 0 ? `• Accepted без booking: <b>${data.health.stalledAccepted}</b>` : null,
+            data.health.stalledAccepted > 0 ? `• Accepted, no booking: <b>${data.health.stalledAccepted}</b>` : null,
             (data.health.overdueDiscovery + data.health.overdueTraining) > 0
                 ? `• Mentor / training overdue: <b>${data.health.overdueDiscovery + data.health.overdueTraining}</b>`
                 : null,
-            data.health.blockers > 0 ? `• Blockers у флоу: <b>${data.health.blockers}</b>` : null,
+            data.health.blockers > 0 ? `• Flow blockers: <b>${data.health.blockers}</b>` : null,
             data.health.staleFinalStep > 0 ? `• Final step stale: <b>${data.health.staleFinalStep}</b>` : null,
         ].filter(Boolean);
 
@@ -800,9 +800,9 @@ export const statsService = {
             `<b>Losses By Stage</b>\n` +
             `${lossLines.join("\n")}\n\n` +
             `<b>Alerts</b>\n` +
-            `${alertLines.length > 0 ? alertLines.join("\n") : "• Критичних SLA-відхилень зараз немає"}\n\n` +
+            `${alertLines.length > 0 ? alertLines.join("\n") : "• No SLA breaches right now"}\n\n` +
             `<b>Locations</b>\n` +
-            `${locationLines.length > 0 ? locationLines.join("\n") : "• Немає активних локацій у вибраному зрізі"}\n\n` +
+            `${locationLines.length > 0 ? locationLines.join("\n") : "• No active locations in this view"}\n\n` +
             `<b>Recommended Actions</b>\n` +
             `${actionLines.join("\n")}`;
     },

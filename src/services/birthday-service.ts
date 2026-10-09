@@ -291,7 +291,7 @@ export async function getBirthdaysByMonth(month?: number): Promise<string> {
         const locPart = locName ? ` • ${locName}` : (locCity ? ` • ${locCity}` : "");
 
         if (!grouped[m]) grouped[m] = [];
-        grouped[m]!.push(`  ${day}.${mon} — <b>${s.fullName}</b>${locPart} (${age} р.)`);
+        grouped[m]!.push(`  ${day}.${mon} — <b>${s.fullName}</b>${locPart} (${age})`);
     }
 
     const monthName = month ? t(`month-${month}`) : undefined;

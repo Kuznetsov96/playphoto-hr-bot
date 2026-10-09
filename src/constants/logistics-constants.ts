@@ -70,20 +70,20 @@ export const LOGISTICS_TEXTS_ADMIN = {
     'menu_title': '📦 Logistics Management',
     'parcel_details': (ttn: string, status: string, loc: string) => `<b>Parcel:</b> <code>${ttn}</code>\n<b>Location:</b> ${loc}\n<b>Status:</b> ${status}`,
     'btn_mark_picked_up_manual': '📬 Picked Up Manually',
-    'btn_mark_manual_proxy_done': '✅ Доручення оформлено',
+    'btn_mark_manual_proxy_done': '✅ Proxy done',
     'btn_verify': '✅ Everything is fine',
     'btn_view_photo': '🖼 View Content Photo',
     'alert_not_picked_up': (ttn: string, days: number) => `⚠️ <b>ALARM:</b> Parcel <code>${ttn}</code> has not been picked up for ${days} days!`,
     'confirmed': '✅ Parcel confirmed and cleared from active list.',
     'manual_pickup_marked': '📬 Parcel marked as picked up manually. Staff should now finish the photo step.',
     'manual_proxy_requested': (p: { ttn: string; loc: string; staff: string; phone: string }) =>
-        `📝 <b>Потрібно оформити доручення вручну</b>\n\n` +
-        `ТТН: <code>${p.ttn}</code>\n` +
-        `Локація: <b>${p.loc}</b>\n` +
-        `Фотограф: ${p.staff}\n` +
-        `Номер для доручення: <code>${p.phone}</code>\n\n` +
-        `Після оформлення натисни кнопку нижче, щоб відкрити фотографу наступний крок.`,
-    'manual_proxy_marked': '✅ Доручення підтверджено. Фотограф може переходити до фото вмісту.',
+        `📝 <b>Set up a Nova Poshta proxy by hand</b>\n\n` +
+        `TTN: <code>${p.ttn}</code>\n` +
+        `Location: <b>${p.loc}</b>\n` +
+        `Photographer: ${p.staff}\n` +
+        `Proxy phone: <code>${p.phone}</code>\n\n` +
+        `Tap the button below once it's done to unlock the photographer's next step.`,
+    'manual_proxy_marked': '✅ Proxy confirmed. The photographer can move on to the content photo.',
     'new_photo_alert': (ttn: string, loc: string) => `📸 <b>New Content Photo Received!</b>\n\nParcel: <code>${ttn}</code>\nLocation: ${loc}\n\nPlease verify the contents.`,
     'new_photo_caption': (p: { ttn: string, location: string, sender: string }) =>
         `📸 <b>Content Photo for TTN:</b> <code>${p.ttn}</code>\n` +

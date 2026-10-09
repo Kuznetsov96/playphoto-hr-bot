@@ -456,10 +456,10 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
     const shortStaffName = shortenName(staff.fullName);
     const locationName = task.locationName || staff.location?.name || null;
     const locationCity = task.city || staff.location?.city || null;
-    const locationLabel = locationName ? formatLocationLabel(locationName, locationCity) : "Локація не вказана";
+    const locationLabel = locationName ? formatLocationLabel(locationName, locationCity) : "No location";
     const workDateLabel = task.workDate
         ? task.workDate.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" })
-        : "Без дати";
+        : "No date";
     const topicDateLabel = task.workDate
         ? task.workDate.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", timeZone: "Europe/Kyiv" })
         : "??.??";
@@ -506,14 +506,14 @@ async function notifySupportAboutTaskProof(ctx: MyContext, submission: Awaited<R
         `👤 <b>${escapeHtml(shortStaffName)}</b>\n` +
         `📍 <b>${escapeHtml(locationLabel)}</b>\n` +
         `📅 <b>${escapeHtml(workDateLabel)}</b>\n` +
-        (task.deadlineTime ? `🕐 <b>До ${escapeHtml(task.deadlineTime)}</b>\n` : "") +
+        (task.deadlineTime ? `🕐 <b>Due ${escapeHtml(task.deadlineTime)}</b>\n` : "") +
         `\n<i>${escapeHtml(truncateText(taskPreview, 250))}</i>\n\n` +
-        `<i>Відповідь у цьому треді буде доставлена фотографу.</i>`;
+        `<i>Replies in this thread go to the photographer.</i>`;
 
     await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, topicHeader, {
         parse_mode: "HTML",
         message_thread_id: topicId,
-        reply_markup: new InlineKeyboard().text("✅ Закрити уточнення", `task_proof_close_${submission.id}`),
+        reply_markup: new InlineKeyboard().text("✅ Close", `task_proof_close_${submission.id}`),
     }).catch((err) => {
         logger.warn({ err, taskId: task.id, topicId }, "Task proof summary delivery to support topic failed");
     });

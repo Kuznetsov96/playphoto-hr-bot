@@ -51,7 +51,8 @@ describe("shoot task texts", () => {
 
     it("open a support topic with a neutral line, not a guess about who wrote", () => {
         const line = (STAFF_TEXTS["shoot-task-support-open-topic"] as (p: typeof sample) => string)(sample);
-        expect(line).toBe("❓ Звернення з нагадування про зйомку: Зйомка · Олена");
-        expect(line).not.toContain("відкрила");
+        // Тему читає підтримка — англійською (AGENTS.md, аудит 09.10.2026).
+        expect(line).toBe("❓ From a shoot reminder: Зйомка · Олена");
+        expect(line).not.toContain("opened");
     });
 });
