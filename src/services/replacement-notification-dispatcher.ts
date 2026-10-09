@@ -1,6 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { ADMIN_IDS } from "../config.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { formatLocation } from "../utils/location-label.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
@@ -148,21 +149,21 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
  */
 function renderOwnerReviewMessage(payload: AwsReplacementNotificationPayload): string {
     const { location, date } = formatLocationLine(payload);
-    const time = `${formatLocalTime(payload.startsAtLocal)}-${formatLocalTime(payload.endsAtLocal)}`;
+    const time = `${formatLocalTime(payload.startsAtLocal)}–${formatLocalTime(payload.endsAtLocal)}`;
     // Escaped for the same reason as the location: this message is sent with
     // `parse_mode: "HTML"`, and a name carrying an angle bracket would make
     // Telegram reject it outright.
     const requesterName = escapeHtml(payload.requesterDisplayName ?? "?");
     const candidateName = escapeHtml(payload.candidateDisplayName ?? "?");
     return payload.outcome === "confirmed"
-        ? STAFF_TEXTS["staff-replacement-owner-review-confirmed"]({
+        ? ADMIN_TEXTS["admin-replacement-confirmed"]({
               requesterName,
               candidateName,
               location,
               date,
               time,
           })
-        : STAFF_TEXTS["staff-replacement-owner-review-needs-review"]({
+        : ADMIN_TEXTS["admin-replacement-needs-review"]({
               requesterName,
               candidateName,
               location,
@@ -250,7 +251,7 @@ function buildOpenShiftUndoKeyboard(payload: AwsReplacementNotificationPayload):
 
 function buildOwnerReviewKeyboard(payload: AwsReplacementNotificationPayload): InlineKeyboard {
     return new InlineKeyboard().text(
-        STAFF_TEXTS["staff-replacement-owner-review-btn-revert"],
+        ADMIN_TEXTS["admin-replacement-btn-revert"],
         buildSignedCallback(REPLACEMENT_REVERT_CALLBACK_CODE, payload.replacementPublicId),
     );
 }

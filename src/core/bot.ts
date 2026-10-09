@@ -241,9 +241,10 @@ bot.catch(async (err) => {
         if (ctx.chat?.type === "private") {
             // Раніше всім ішло «Ой, щось пішло не так!» на «ти» з 🐾 і ✨ —
             // і кандидатці теж. Тексти погоджено власником 01.10.2026.
-            const fallbackMsg = getErrorScreenTexts(ctx.dbUser).generic;
+            const errorTexts = getErrorScreenTexts(ctx.dbUser);
+            const fallbackMsg = errorTexts.generic;
             if (ctx.callbackQuery) {
-                await ctx.answerCallbackQuery("Відбулася технічна помилка 🛠️").catch(() => {});
+                await ctx.answerCallbackQuery(errorTexts.toast).catch(() => {});
                 await ctx.reply(fallbackMsg, { parse_mode: "HTML" }).catch(() => {});
             } else if (ctx.message) {
                 await ctx.reply(fallbackMsg, { parse_mode: "HTML" }).catch(() => {});

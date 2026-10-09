@@ -142,7 +142,7 @@ async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
     delete ctx.session.adminFlow;
 }
 
-export const LOCATION_LEVERS_IN_WEBAPP = "Видимість для кандидаток, місто й потреба змінюються в картці локації у вебаппі.";
+export const LOCATION_LEVERS_IN_WEBAPP = "Candidate visibility, city and demand are edited on the location card in the webapp.";
 
 // --- CITY SELECTION FOR UPDATE ---
 export const selectCityForLocMenu = new Menu<MyContext>("admin-select-city-for-loc");

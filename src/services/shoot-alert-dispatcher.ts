@@ -16,9 +16,9 @@ const NO_ADMIN = "SHOOT_ALERT_NO_ADMIN_CONFIGURED";
 const INVALID = "SHOOT_ALERT_PAYLOAD_INVALID";
 
 const HEADERS: Record<AwsShootAlert["kind"], string> = {
-    DAILY_DIGEST: "📸 Зйомки без фотографа на найближчі 3 дні",
-    EVE_OF_SHOOT: "⚠️ Завтра зйомка, а фотографа досі немає",
-    LATE_CREATED: "📸 Нова зйомка без фотографа",
+    DAILY_DIGEST: "📸 Shoots without a photographer · next 3 days",
+    EVE_OF_SHOOT: "⚠️ Shoot tomorrow, still no photographer",
+    LATE_CREATED: "📸 New shoot without a photographer",
 };
 
 /** `YYYY-MM-DD` → `ДД.ММ` текстом: через Date дата зсунулась би в поясі процесу. */
@@ -81,7 +81,7 @@ export function createShootAlertDispatcher(
                 try {
                     await api.sendMessage(target, renderShootAlert(alert), {
                         parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().url("Відкрити", alert.payload.openUrl),
+                        reply_markup: new InlineKeyboard().url("Open", alert.payload.openUrl),
                     });
                 } catch (error: unknown) {
                     // Только код ошибки: сырой текст Telegram может нести лишнее.

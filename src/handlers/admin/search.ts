@@ -78,7 +78,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
 
     const user = await userRepository.findById(userId);
     if (!user) {
-        return ScreenManager.renderScreen(ctx, "⚠️ Дані користувача відсутні в базі. Зверніться до адміна.", new InlineKeyboard().text("← Back", "admin_main_back"));
+        return ScreenManager.renderScreen(ctx, "⚠️ This user is not in the database.", new InlineKeyboard().text("← Back", "admin_main_back"));
     }
 
     const candidate = await candidateRepository.findByUserId(userId);

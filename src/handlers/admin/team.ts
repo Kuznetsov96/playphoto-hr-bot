@@ -46,7 +46,7 @@ function formatScheduleNotificationShiftTime(shift: {
 
     return getShiftTimeFromOpeningHours(shift.location?.openingHours, shift.date)
         || getShiftTimeFromLocationSchedule(shift.location?.schedule, shift.date)
-        || "час не вказано";
+        || "time not set";
 }
 
 

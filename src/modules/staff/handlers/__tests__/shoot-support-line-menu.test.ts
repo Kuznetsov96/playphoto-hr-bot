@@ -18,7 +18,7 @@ vi.mock("../../../../constants/staff-texts.js", () => ({
         "support-info-already-open": "<b>Твій діалог вже відкритий.</b>",
         "support-ask-issue": "<b>Напиши своє питання.</b>",
         "shoot-task-support-prefix": (p: { line: string }) => `❓ <b>Питання по зйомці:</b>\n${p.line}`,
-        "shoot-task-support-open-topic": (p: { line: string }) => `❓ Звернення з нагадування про зйомку: ${p.line}`,
+        "shoot-task-support-open-topic": (p: { line: string }) => `❓ From a shoot reminder: ${p.line}`,
     },
 }));
 
@@ -129,7 +129,7 @@ describe("startSupportFlow with a shoot line", () => {
 
         expect(ctx.api.sendMessage).toHaveBeenCalledWith(
             999,
-            `❓ Звернення з нагадування про зйомку: ${LINE}`,
+            `❓ From a shoot reminder: ${LINE}`,
             { message_thread_id: 33298, parse_mode: "HTML" },
         );
         expect("shootSupportLine" in ctx.session).toBe(false);
@@ -175,7 +175,7 @@ describe("startSupportFlow with a shoot line", () => {
         const { startSupportFlow } = await import("../menu.js");
         const ctx = makeCtx();
         const refusal = Object.assign(new Error("Bad Request: message thread not found"), {
-            payload: { text: `❓ Звернення з нагадування про зйомку: ${LINE}` },
+            payload: { text: `❓ From a shoot reminder: ${LINE}` },
         });
         ctx.api.sendMessage.mockRejectedValue(refusal);
 

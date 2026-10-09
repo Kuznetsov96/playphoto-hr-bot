@@ -69,7 +69,7 @@ export function requireRole(...roles: AdminRole[]) {
             if (ctx.callbackQuery) {
                 await ctx.answerCallbackQuery({ text: "❌ No access to this function.", show_alert: true });
             } else if (ctx.chat?.type === "private") {
-                await ctx.reply("❌ У вас немає доступу до цієї функції.");
+                await ctx.reply("❌ No access to this function.");
             }
             return;
         }
@@ -128,7 +128,7 @@ export function requirePermission(permission: Parameters<typeof hasPermission>[1
                 context: { permission }
             });
             if (ctx.chat?.type === "private") {
-                await ctx.reply("❌ У вас немає доступу до цієї функції.");
+                await ctx.reply("❌ No access to this function.");
             }
             return;
         }

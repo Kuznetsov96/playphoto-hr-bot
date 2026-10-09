@@ -588,6 +588,19 @@ function formatBookedSlot(startTime: Date | string | null | undefined): string {
     return `${day} о ${time}`;
 }
 
+/** `Oct 9, 14:30` — для англійського повідомлення власнику. */
+function formatBookedSlotForAdmin(startTime: Date | string | null | undefined): string {
+    if (!startTime) return "time unknown";
+    return new Date(startTime).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Europe/Kyiv"
+    });
+}
+
 /**
  * «Я на зв'язку, HR ще немає» — з'являється замість переносу, щойно
  * співбесіда почалась. Нічого не рухає у воронці: лише кладе сигнал у тред
@@ -620,7 +633,7 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             logger.error({ err: error, telegramId: ctx.from.id, slotId }, "Waiting-for-HR signal could not reach the web thread");
             const target = ADMIN_IDS[0];
             if (target !== undefined) {
-                ctx.api.sendMessage(target, `Кандидатка ${escapeHtml(candidate.fullName ?? String(ctx.from.id))} на зв’язку й чекає HR — співбесіда ${at}. Сигнал у вебапп не дійшов.`).catch(() => {});
+                ctx.api.sendMessage(target, `⏳ ${escapeHtml(candidate.fullName ?? String(ctx.from.id))} is waiting for HR · interview ${formatBookedSlotForAdmin(candidate.interviewSlot?.startTime)}\n\nThe signal did not reach the webapp.`).catch(() => {});
             }
         });
     }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../../constants/staff-texts.js";
 
 /**
@@ -23,8 +24,6 @@ const TOAST_TEXTS = [
     "staff-replacement-undo-ans-failed",
     "schedule-notif-ans-expired",
     "schedule-notif-ans-unavailable",
-    "staff-replacement-revert-ans-failed",
-    "staff-replacement-revert-ans-done",
     "shoot-task-ans-not-yours",
     "shoot-task-ans-cancelled",
     "shoot-task-ans-received",
@@ -33,6 +32,23 @@ const TOAST_TEXTS = [
     "shoot-task-ans-retry",
     "shoot-task-ans-moving",
 ] as const;
+
+/** Те же плашки у владельца — после кнопок в его уведомлениях о подмене. */
+const ADMIN_TOAST_TEXTS = [
+    "admin-replacement-revert-done",
+    "admin-replacement-revert-failed",
+    "admin-notification-expired",
+] as const;
+
+describe("тексты владельца во всплывающей плашке", () => {
+    for (const key of ADMIN_TOAST_TEXTS) {
+        it(`«${key}» помещается в одну строку и написан по-английски`, () => {
+            const text = ADMIN_TEXTS[key];
+            expect(text.length).toBeLessThanOrEqual(TOAST_LIMIT);
+            expect(text).not.toMatch(/[А-Яа-яІіЇїЄєҐґ]/u);
+        });
+    }
+});
 
 describe("тексты, показываемые всплывающей плашкой", () => {
     for (const key of TOAST_TEXTS) {

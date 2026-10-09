@@ -71,22 +71,22 @@ function isDuplicateSupportAction(actionKey: string) {
 }
 
 function getSupportMessageTypeLabel(message: NonNullable<MyContext["message"]>): string {
-    if (message.text) return "текст";
+    if (message.text) return "text";
     if (message.rich_message) return "rich message";
-    if (message.photo) return "фото";
-    if (message.video) return "відео";
-    if (message.document) return "документ";
-    if (message.sticker) return "стікер";
-    if (message.voice) return "голосове повідомлення";
-    if (message.video_note) return "відеокружечок";
-    if (message.contact) return "контакт";
-    if (message.location) return "локація";
-    if (message.animation) return "анімація";
-    if (message.audio) return "аудіо";
-    if (message.poll) return "опитування";
+    if (message.photo) return "photo";
+    if (message.video) return "video";
+    if (message.document) return "document";
+    if (message.sticker) return "sticker";
+    if (message.voice) return "voice message";
+    if (message.video_note) return "video note";
+    if (message.contact) return "contact";
+    if (message.location) return "location";
+    if (message.animation) return "animation";
+    if (message.audio) return "audio";
+    if (message.poll) return "poll";
     if (message.dice) return "dice";
     if (message.venue) return "venue";
-    return "непідтримуваний тип повідомлення";
+    return "unsupported message type";
 }
 
 function getSupportMessagePreview(message: NonNullable<MyContext["message"]>): string {
@@ -98,10 +98,10 @@ function getSupportMessagePreview(message: NonNullable<MyContext["message"]>): s
 function buildSupportFallbackBody(message: NonNullable<MyContext["message"]>): string {
     const text = message.text || message.caption || getRichMessagePlainText(message.rich_message);
     if (text) {
-        return `📝 <b>Вміст повідомлення</b>\n${escapeHtml(text)}`;
+        return `📝 <b>Message</b>\n${escapeHtml(text)}`;
     }
 
-    return `⚠️ <b>Повідомлення не вдалося автоматично переслати</b>\nТип: <b>${escapeHtml(getSupportMessageTypeLabel(message))}</b>`;
+    return `⚠️ <b>Could not forward this message</b>\nType: <b>${escapeHtml(getSupportMessageTypeLabel(message))}</b>`;
 }
 
 function classifySupportForwardingError(error: any) {
@@ -284,7 +284,7 @@ staffSupportHandlers.callbackQuery(/^ticket_reply_close_(\d+)$/, async (ctx) => 
 staffSupportHandlers.callbackQuery(/^ticket_urgent_(\d+)$/, async (ctx) => {
     const ticketId = Number(ctx.match[1]);
     if (isDuplicateSupportAction(`ticket-urgent:${ctx.from?.id}:${ticketId}`)) {
-        await ctx.answerCallbackQuery("Зачекай, прапорець терміновості вже оновлюється.");
+        await ctx.answerCallbackQuery("Hold on, updating urgency…");
         return;
     }
 
@@ -328,7 +328,7 @@ staffSupportHandlers.callbackQuery(/^task_proof_close_([a-zA-Z0-9]+)$/, async (c
     const submissionId = ctx.match[1]!;
     const submission = await taskProofService.getSubmissionById(submissionId);
     if (!submission || !submission.supportTopicId || !submission.supportChatId) {
-        await ctx.answerCallbackQuery("Уточнення вже закрито або topic не знайдено.");
+        await ctx.answerCallbackQuery("Already closed or topic not found.");
         return;
     }
 
@@ -624,7 +624,7 @@ staffSupportHandlers.callbackQuery(/^ticket_transfer_(\d+)_(\d+)$/, async (ctx) 
         }
 
         // Format name to Surname + Name
-        const fullFullName = creator.staffProfile?.fullName || "Невідомо";
+        const fullFullName = creator.staffProfile?.fullName || "Unknown";
         const formattedName = fullFullName.split(' ').slice(0, 2).join(' ');
 
         const locationText = creator.staffProfile?.location
@@ -758,7 +758,7 @@ async function closeTicket(ctx: MyContext, ticketId: number, initiator: "USER" |
                 const { buildTopicTitle } = await import("../../../utils/ticket-card.js");
                 const locationName = user.staffProfile?.location?.name || null;
                 const locationCity = user.staffProfile?.location?.city || null;
-                closedTitle = buildTopicTitle(ticketId, user.staffProfile?.fullName || "Невідомо", locationName, TicketStatus.CLOSED, ticket.isUrgent, false, locationCity);
+                closedTitle = buildTopicTitle(ticketId, user.staffProfile?.fullName || "Unknown", locationName, TicketStatus.CLOSED, ticket.isUrgent, false, locationCity);
             }
 
             // Unified UI Closure
@@ -981,7 +981,7 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             await supportRepository.updateTicket(ticket.id, { topicId: topic.message_thread_id });
 
             // Send context to topic
-            await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `💰 <b>Finance Audit Reply</b>\n👤 Staff: ${user.staffProfile.fullName}\n\n${sourceText}\n\n<b>Відповідь:</b> ${answerText}`, {
+            await ctx.api.sendMessage(TEAM_CHATS.SUPPORT, `💰 <b>Finance Audit Reply</b>\n👤 Staff: ${user.staffProfile.fullName}\n\n${sourceText}\n\n<b>Reply:</b> ${answerText}`, {
                 message_thread_id: topic.message_thread_id,
                 parse_mode: "HTML",
                 reply_markup: new InlineKeyboard().text("🔒 Resolve & Close", `admin_close_ticket_${ticket.id}`)
@@ -1326,11 +1326,11 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
 
                 // Send Intro Card
                 await ctx.api.sendMessage(TEAM_CHATS.SUPPORT,
-                    `<b>Відновлений тікет #${activeTicket.id}</b>\n👤 <b>${user.staffProfile.fullName}</b> (@${ctx.from?.username || "no_user"})\n\n📄 <i>${activeTicket.issueText}</i>`,
+                    `<b>Restored ticket #${activeTicket.id}</b>\n👤 <b>${user.staffProfile.fullName}</b> (@${ctx.from?.username || "no_user"})\n\n📄 <i>${activeTicket.issueText}</i>`,
                     {
                         message_thread_id: topicId,
                         parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().text("🔒 Закрити", `admin_close_ticket_${activeTicket.id}`)
+                        reply_markup: new InlineKeyboard().text("🔒 Close", `admin_close_ticket_${activeTicket.id}`)
                     }
                 );
             } catch (e: any) {
@@ -1427,15 +1427,15 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
                         }, "Support topic forwarding fallback activated");
 
                         const fallbackReasonText = isTopicError
-                            ? "Топік не знайдений або недоступний, дублюю в General"
+                            ? "Topic not found or unavailable, posting in General"
                             : isNotForwardable
-                                ? "Telegram не дозволив переслати цей тип повідомлення, дублюю в General"
-                                : "Не вдалося доставити повідомлення в топік, дублюю в General";
+                                ? "Telegram can't forward this message type, posting in General"
+                                : "Could not deliver to the topic, posting in General";
                         const fallbackIntro = activeTicket
-                            ? `🆘 <b>Повідомлення від фотографа до тікету #${activeTicket.id}</b>\n` +
+                            ? `🆘 <b>Photographer message · ticket #${activeTicket.id}</b>\n` +
                             `👤 <b>${user.staffProfile.fullName}</b>\n` +
                             `<i>(${fallbackReasonText})</i>`
-                            : `🆘 <b>Відповідь фотографа (Outgoing Topic conversation)</b>\n` +
+                            : `🆘 <b>Photographer reply · outgoing topic</b>\n` +
                             `👤 <b>${user.staffProfile.fullName}</b>\n` +
                             `<i>(${fallbackReasonText})</i>`;
 
@@ -1535,8 +1535,8 @@ async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): 
             } catch (e: any) {
                 logger.error({ err: e, topicId, submissionId: proofSubmission.id }, "Task proof support reply forwarding failed");
                 const errorMsg = e.description?.includes("blocked")
-                    ? "❌ Не вдалося доставити уточнення: фотограф заблокував бота."
-                    : "❌ Не вдалося доставити уточнення фотографу.";
+                    ? "❌ Not delivered: the photographer blocked the bot."
+                    : "❌ Not delivered to the photographer.";
                 await ctx.reply(errorMsg, { message_thread_id: topicId });
                 return true;
             }

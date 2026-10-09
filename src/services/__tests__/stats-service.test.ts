@@ -70,7 +70,7 @@ describe("statsService.formatManagementDashboard", () => {
                 }
             ],
             actions: [
-                "Перевірити джерела трафіку та pre-screening: занадто високий відсів до валідної бази.",
+                "Check traffic sources and pre-screening: too many drop out before the valid pool.",
                 "Підсилити handoff у mentor track: accepted/discovery/training зависають довше SLA.",
             ],
         } as any, "Warsaw", "Smile Park");
@@ -81,7 +81,7 @@ describe("statsService.formatManagementDashboard", () => {
         expect(text).toContain("Losses By Stage");
         expect(text).toContain("Recommended Actions");
         expect(text).toContain("Warsaw / Smile Park");
-        expect(text).toContain("Accepted без booking");
+        expect(text).toContain("Accepted, no booking");
     });
 
     it("shows empty alerts fallback when no SLA issues exist", () => {
@@ -131,12 +131,12 @@ describe("statsService.formatManagementDashboard", () => {
             },
             locations: [],
             actions: [
-                "Критичних відхилень не виявлено. Сфокусуйтесь на підтриманні швидкості обробки та локаційного балансу."
+                "Nothing critical. Keep processing speed and location balance steady."
             ],
         } as any);
 
-        expect(text).toContain("Критичних SLA-відхилень зараз немає");
-        expect(text).toContain("Немає активних локацій");
+        expect(text).toContain("No SLA breaches right now");
+        expect(text).toContain("No active locations");
     });
 
     it("renders Ukrainian city names in English for the HR stats UI", () => {
@@ -197,7 +197,7 @@ describe("statsService.formatManagementDashboard", () => {
                 }
             ],
             actions: [
-                "Критичних відхилень не виявлено. Сфокусуйтесь на підтриманні швидкості обробки та локаційного балансу."
+                "Nothing critical. Keep processing speed and location balance steady."
             ],
         } as any, "Київ");
 

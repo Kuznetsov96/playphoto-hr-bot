@@ -1996,11 +1996,14 @@ export class ReplacementService {
         return `${this.formatDate(request.shiftDate)}\n${escapeHtml(formatLocation(request.location, "in-city"))}\n${escapeHtml(this.formatShiftTime(request))}`;
     }
 
-    private formatShiftTime(request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: ShiftDisplayLocation }) {
+    private formatShiftTime(
+        request: { shiftStartTime?: Date | null | undefined; shiftEndTime?: Date | null | undefined; shiftDate: Date; location?: ShiftDisplayLocation },
+        unknown: string = "час не вказано"
+    ) {
         if (request.shiftStartTime && request.shiftEndTime) {
             return `${this.formatTime(request.shiftStartTime)}-${this.formatTime(request.shiftEndTime)}`;
         }
-        return getShiftTimeFromLocationSchedule(request.location?.schedule, request.shiftDate) || "час не вказано";
+        return getShiftTimeFromLocationSchedule(request.location?.schedule, request.shiftDate) || unknown;
     }
 
     formatShiftButtonLabel(shift: { date: Date; location: ShiftDisplayLocation }) {
@@ -2051,7 +2054,7 @@ export class ReplacementService {
 
             text +=
                 `\n<b>${index + 1}. ${escapeHtml(formatLocation(request.location, "in-city"))}</b> · ${escapeHtml(request.city)} · ${status}\n` +
-                `📅 ${this.formatDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request))}\n` +
+                `📅 ${this.formatAdminDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set"))}\n` +
                 `👤 ${escapeHtml(photographer)}${replacement} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
                 `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
         });
@@ -2059,39 +2062,47 @@ export class ReplacementService {
         return text;
     }
 
+    /**
+     * Повідомлення власнику — англійською (AGENTS.md) і мінімально: заголовок,
+     * хто, коли, де, і рядок дії лише там, де від власника щось потрібно.
+     * Секції «Shift / People / Next step» з емодзі на кожному рядку і дата
+     * «18 жовтня» посеред англійського тексту були шумом (власник, 09.10.2026).
+     */
     private formatAdminNotification(kind: "started" | "found" | "failed" | "cancelled", request: RequestWithRelations) {
         const titleByKind = {
-            started: "🔁 <b>Replacement search started.</b>",
-            found: "✅ <b>Replacement found.</b>",
-            failed: "⚠️ <b>Replacement not found.</b>",
-            cancelled: "🛑 <b>Replacement search cancelled.</b>"
+            started: "🔁 <b>Replacement search started</b>",
+            found: "✅ <b>Replacement found</b>",
+            failed: "⚠️ <b>No replacement found</b>",
+            cancelled: "🛑 <b>Replacement search cancelled</b>"
         };
-        const actionByKind = {
-            started: "The request is open. Search waves will run automatically; monitor it and help manually if needed.",
-            found: "Please update the schedule manually and sync the changes.",
-            failed: "All available search waves finished without a result. Please contact the photographer and resolve manually.",
-            cancelled: "The photographer cancelled this request. If they restart later, a new search request will be opened."
+        const actionByKind: Record<typeof kind, string | null> = {
+            started: null,
+            found: "Update the schedule by hand.",
+            failed: "Contact the photographer to sort it out.",
+            cancelled: "Cancelled by the photographer."
         };
 
-        const replacementLine = request.replacement
-            ? `\n✅ Replacement photographer: ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
-            : "";
-        const requesterLine = request.requester
-            ? `👤 Photographer: ${escapeHtml(this.formatShortName(request.requester.fullName))}${replacementLine}`
-            : `👤 Photographer: <i>empty shift, started by main admin</i>${replacementLine}`;
+        const requester = request.requester
+            ? escapeHtml(this.formatShortName(request.requester.fullName))
+            : "Open shift";
+        const who = request.replacement
+            ? `${requester} → ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
+            : requester;
+        const when = `${this.formatAdminDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}`;
+        const where = `${escapeHtml(formatLocation(request.location, "in-city"))}, ${escapeHtml(request.city)}`;
+        const action = actionByKind[kind];
 
-        return (
-            `${titleByKind[kind]}\n\n` +
-            `<b>Shift</b>\n` +
-            `📅 Date: <b>${this.formatDate(request.shiftDate)}</b>\n` +
-            `🕒 Time: <b>${escapeHtml(this.formatShiftTime(request))}</b>\n` +
-            `📍 Location: <b>${escapeHtml(formatLocation(request.location, "in-city"))}</b>\n` +
-            `🏙 City: ${escapeHtml(request.city)}\n\n` +
-            `<b>People</b>\n` +
-            `${requesterLine}\n\n` +
-            `<b>Next step</b>\n` +
-            `${actionByKind[kind]}`
-        );
+        return `${titleByKind[kind]}\n\n${who}\n${when}\n${where}` + (action ? `\n\n${action}` : "");
+    }
+
+    /** `Sat, Oct 18` — дата для англійських повідомлень власнику. */
+    private formatAdminDate(date: Date) {
+        return date.toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            timeZone: KYIV_TIMEZONE
+        });
     }
 
     private formatRequesterFailureText(request: RequestWithRelations) {

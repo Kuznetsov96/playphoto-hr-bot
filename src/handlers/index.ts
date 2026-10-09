@@ -229,7 +229,7 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CALLBACK_CODE}:`), a
     const data = ctx.callbackQuery.data ?? "";
     const requestPublicId = readCallbackPayload(data, { code: REPLACEMENT_REVERT_CALLBACK_CODE });
     if (!requestPublicId) {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+        return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-notification-expired"]);
     }
 
     await performOwnerRevert(ctx, requestPublicId, false);
@@ -240,7 +240,7 @@ handlers.callbackQuery(new RegExp(`^cb:${REPLACEMENT_REVERT_CONFIRM_CALLBACK_COD
     const data = ctx.callbackQuery.data ?? "";
     const requestPublicId = readCallbackPayload(data, { code: REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE });
     if (!requestPublicId) {
-        return ctx.answerCallbackQuery(STAFF_TEXTS["schedule-notif-ans-expired"]);
+        return ctx.answerCallbackQuery(ADMIN_TEXTS["admin-notification-expired"]);
     }
 
     await performOwnerRevert(ctx, requestPublicId, true);
@@ -270,26 +270,26 @@ async function performOwnerRevert(
             .editMessageReplyMarkup({
                 reply_markup: new InlineKeyboard()
                     .text(
-                        STAFF_TEXTS["staff-replacement-revert-late-btn-confirm"],
+                        ADMIN_TEXTS["admin-replacement-revert-late-btn-confirm"],
                         buildSignedCallback(REPLACEMENT_REVERT_CONFIRM_CALLBACK_CODE, requestPublicId)
                     )
                     .row()
-                    .text(STAFF_TEXTS["staff-replacement-revert-late-btn-cancel"], "staff_hub_nav")
+                    .text(ADMIN_TEXTS["admin-replacement-revert-late-btn-cancel"], "staff_hub_nav")
             })
             .catch(() => { });
         await ctx.answerCallbackQuery({
-            text: STAFF_TEXTS["staff-replacement-revert-late-warning"],
+            text: ADMIN_TEXTS["admin-replacement-revert-late-warning"],
             show_alert: true
         });
         return;
     }
     if (outcome === "failed") {
-        await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-failed"]);
+        await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-replacement-revert-failed"]);
         return;
     }
 
     await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => { });
-    await ctx.answerCallbackQuery(STAFF_TEXTS["staff-replacement-revert-ans-done"]);
+    await ctx.answerCallbackQuery(ADMIN_TEXTS["admin-replacement-revert-done"]);
 
     // Копія заявки в боті стоїть FOUND: без звірки «Мій графік» прийнятої ще
     // показував би зміну як свою (Dragon Park, 05–08.10.2026). Сверка раз на

@@ -169,13 +169,13 @@ describe("staff support forwarding fallback", () => {
         expect(ctx.api.sendMessage).toHaveBeenNthCalledWith(
             1,
             999,
-            expect.stringContaining("Telegram не дозволив переслати цей тип повідомлення"),
+            expect.stringContaining("Telegram can't forward this message type"),
             { parse_mode: "HTML" }
         );
         expect(ctx.api.sendMessage).toHaveBeenNthCalledWith(
             2,
             999,
-            expect.stringContaining("Тип: <b>стікер</b>"),
+            expect.stringContaining("Type: <b>sticker</b>"),
             { parse_mode: "HTML" }
         );
         expect(loggerError).toHaveBeenCalledWith(

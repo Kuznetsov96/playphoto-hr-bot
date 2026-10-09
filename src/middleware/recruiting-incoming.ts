@@ -255,10 +255,10 @@ function forwardCandidateMessage(ctx: MyContext): void {
             const who = ctx.from?.username ? `@${ctx.from.username}` : `id ${telegramId}`;
             await ctx.api.sendMessage(
                 Number(target),
-                `⚠️ <b>Зеркало не сработало — обращение НЕ дошло до вебапа</b>\n` +
+                `⚠️ <b>Message did not reach the webapp</b>\n` +
                 `👤 ${escapeHtml(who)}\n` +
-                (attachment === null ? "" : `📎 Вложение: ${attachment.kind}\n`) +
-                `\n<b>Текст:</b> ${escapeHtml(body)}`,
+                (attachment === null ? "" : `📎 Attachment: ${attachment.kind}\n`) +
+                `\n${escapeHtml(body)}`,
                 { parse_mode: "HTML" },
             );
         } catch {

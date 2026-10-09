@@ -161,7 +161,7 @@ describe("ReplacementNotificationDispatcher", () => {
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         expect(sendMessage.mock.calls[0]![0]).toBe(555);
-        expect(sendMessage.mock.calls[0]![1]).toMatch(/автоматично підтверджено/u);
+        expect(sendMessage.mock.calls[0]![1]).toMatch(/Replacement confirmed/u);
         expect(markDelivered).toHaveBeenCalledWith("n-owner-1");
         expect(result).toEqual({ delivered: 1, failed: 0 });
     });
@@ -192,8 +192,8 @@ describe("ReplacementNotificationDispatcher", () => {
 
         await dispatcher.dispatchPending();
 
-        expect(sendMessage.mock.calls[0]![1]).toMatch(/потрібне твоє рішення/u);
-        expect(sendMessage.mock.calls[0]![1]).not.toMatch(/автоматично підтверджено/u);
+        expect(sendMessage.mock.calls[0]![1]).toMatch(/needs your decision/u);
+        expect(sendMessage.mock.calls[0]![1]).not.toMatch(/Replacement confirmed/u);
     });
 
     it("escapes names and locations, since the message is sent as HTML", async () => {
