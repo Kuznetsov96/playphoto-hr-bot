@@ -14,6 +14,7 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { redis } from "../core/redis.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
+import { readShootsToday, shootOnlyMorningText, shootTodayLines, type ShootsToday } from "./shoot-today.js";
 import {
     classifyAcceptedReplacement,
     getScheduleSlotKey
@@ -225,9 +226,11 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             }
         };
 
-        const [scheduledShifts, acceptedAssignments] = await Promise.all([
+        const today = startOfDay.toISOString().slice(0, 10);
+        const [scheduledShifts, acceptedAssignments, shootsToday] = await Promise.all([
             readShifts(),
-            replacementService.listAcceptedAssignmentsByDateRange(startOfDay, endOfDay)
+            replacementService.listAcceptedAssignmentsByDateRange(startOfDay, endOfDay),
+            readShootsToday(today)
         ]);
 
         const coveredStaffIds = new Set(scheduledShifts.map(shift => shift.staffId));
@@ -268,10 +271,14 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
         ));
         const todayShifts = [...effectiveScheduledShifts, ...acceptedPendingSync];
 
-        if (todayShifts.length === 0) {
+        if (todayShifts.length === 0 && shootsToday.size === 0) {
             logger.debug({ date: startOfDay.toISOString() }, "Shift reminders skipped because no shifts were found");
             return;
         }
+
+        // Рядок про зйомку — лише в першому нагадуванні фотографа: дві зміни за день рідкість,
+        // а двічі той самий рядок — шум. Хто не отримав його тут, отримає окреме повідомлення.
+        const shootsTold = new Set<string>();
 
         for (const shift of todayShifts) {
             const staff = shift.staff;
@@ -321,13 +328,19 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
                 const firstName = staff.fullName?.split(' ')[1] || staff.fullName?.split(' ')[0] || 'фотографине';
                 const greeting = `👋 <b>Доброго ранку, ${escapeHtml(firstName)}!</b>\n\nОсь твій робочий хаб на сьогодні:`;
 
-                const fullText = `${greeting}\n\n${shiftText}${taskSummary}${parcelsSummary}`;
+                const shoots = shootsToday.get(String(telegramId)) ?? [];
+                const shootsSummary = shoots.length > 0 && !shootsTold.has(String(telegramId))
+                    ? `\n\n${shootTodayLines(shoots, (shift.location as { awsPublicId?: string | null } | null)?.awsPublicId)}`
+                    : "";
+
+                const fullText = `${greeting}\n\n${shiftText}${shootsSummary}${taskSummary}${parcelsSummary}`;
                 const kb = new InlineKeyboard().text("🚀 Відкрити Хаб", "staff_hub_nav");
 
                 await bot.api.sendMessage(Number(telegramId), fullText, {
                     parse_mode: "HTML",
                     reply_markup: kb
                 });
+                if (shootsSummary !== "") shootsTold.add(String(telegramId));
                 logger.debug({ telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder sent");
             } catch (err) {
                 logger.error({ err, telegramId, staffId: staff.id, locationId: shift.locationId }, "Shift reminder delivery failed");
@@ -339,6 +352,8 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             }
         }
 
+        const shootOnlySent = await sendShootOnlyReminders(bot, today, shootsToday, shootsTold, todayShifts);
+
         logBusinessEvent({
             event: "staff.shift_reminders.completed",
             actorType: "system",
@@ -349,7 +364,9 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             safeContext: {
                 shiftsCount: todayShifts.length,
                 scheduledShiftsCount: effectiveScheduledShifts.length,
-                acceptedPendingSyncCount: acceptedPendingSync.length
+                acceptedPendingSyncCount: acceptedPendingSync.length,
+                shootPhotographersCount: shootsToday.size,
+                shootOnlySent
             },
         });
     } catch (error) {
@@ -366,6 +383,49 @@ export async function sendDailyShiftReminders(bot: Bot<MyContext>) {
             error,
         });
     }
+}
+
+/**
+ * Зйомка є, а нагадування про зміну з її рядком не пішло: зміни сьогодні немає (або її
+ * нагадування впало чи вже пішло раніше). Окреме повідомлення, свій ключ у Redis — повторний
+ * прогін вікна не дублює, а впале відпускає ключ, як і нагадування про зміну.
+ *
+ * Хто має зміну сьогодні, окремого не отримує, навіть якщо його нагадування не дійшло: те
+ * нагадування ще повториться наступним прогоном разом із рядком про зйомку.
+ */
+async function sendShootOnlyReminders(
+    bot: Bot<MyContext>,
+    today: string,
+    shootsToday: ShootsToday,
+    shootsTold: ReadonlySet<string>,
+    todayShifts: ReadonlyArray<{ staff: unknown }>
+): Promise<number> {
+    const onShift = new Set(
+        todayShifts
+            .map(shift => (shift.staff as { user?: { telegramId?: bigint | null } | null }).user?.telegramId)
+            .filter((id): id is bigint => id != null)
+            .map(String)
+    );
+    let sent = 0;
+    for (const [telegramId, shoots] of shootsToday) {
+        if (shootsTold.has(telegramId) || onShift.has(telegramId)) continue;
+        const key = `shoot-today:${today}:${telegramId}`;
+        let claimed = false;
+        try {
+            if (await redis.set(key, "sending", "EX", 3 * 24 * 60 * 60, "NX") !== "OK") continue;
+            claimed = true;
+            await bot.api.sendMessage(Number(telegramId), shootOnlyMorningText(shoots), { parse_mode: "HTML" });
+            sent += 1;
+        } catch (err) {
+            logger.error({ err, telegramId }, "Shoot-only morning reminder delivery failed");
+            if (claimed) {
+                await redis.del(key).catch(deleteError => {
+                    logger.error({ err: deleteError, key }, "Failed to release shoot reminder claim");
+                });
+            }
+        }
+    }
+    return sent;
 }
 
 /**
