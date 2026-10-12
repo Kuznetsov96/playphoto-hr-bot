@@ -5,6 +5,8 @@ import {
     renderDeliveryGroup,
     toSafeFailureReason
 } from "../schedule-notification-dispatcher.js";
+import { shiftKey, type MonthContext } from "../schedule-month-context.js";
+import type { AwsScheduleChangeKind } from "../aws-business-client.js";
 
 describe("groupForDelivery", () => {
     it("combines one employee's batched changes into a single message", () => {
@@ -244,10 +246,9 @@ describe("renderDeliveryGroup", () => {
         expect(text).not.toContain(FALLBACK_LINE);
     });
 
-    it("renders a published month as a calendar with a summary, not as a change log", () => {
-        // Публікація — пакет із самих «додано». Людині потрібен календар і
-        // підсумок по всіх локаціях (вихідні — найкасовіші, їх порівнюють),
-        // а не одинадцять однакових заголовків «➕ Додано зміну».
+    it("without the month at hand, lists added shifts as new ones — never as the whole month", () => {
+        // Місяць прочитати не вдалося: «готовий» і «Змін: 4» читалися б як
+        // увесь графік, а решти місяця бот не знає (інцидент 12.10.2026).
         const [group] = groupForDelivery(
             [
                 ["2026-09-08T10:00:00", "Dragon Park 2"], // вт, навмисно не за порядком
@@ -274,15 +275,16 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("Графік на вересень готовий");
-        expect(text).toContain("Змін: <b>4</b> · у вихідні: <b>2</b>");
+        expect(text).toContain("Нові зміни на вересень");
+        expect(text).not.toContain("готовий");
+        expect(text).not.toMatch(/Змін: |у вихідні/u);
+        expect(text).toContain("Повний графік — у «Мій графік».");
         expect(text).not.toContain("Додано зміну");
         expect(text).not.toContain("Тепер:");
         // За датою, з локацією і часом; вихідні виділені.
         expect(text.indexOf("01.09")).toBeLessThan(text.indexOf("05.09"));
         expect(text).toContain("<b>сб 05.09</b> · Dragon Park (Lviv) · 10:00–20:00");
         expect(text).toContain("вт 08.09 · Dragon Park 2 (Lviv) · 10:00–20:00");
-        expect(text).toContain("попроси підміну");
     });
 
     it("keeps a mixed batch as a change log, even when it contains added shifts", () => {
@@ -571,7 +573,9 @@ describe("renderDeliveryGroup", () => {
         expect(renderDeliveryGroup(group!)).toContain(FALLBACK_LINE);
     });
 
-    it("summarises the count for a batched message", () => {
+    it("never prints the number of events as a total", () => {
+        // «Всього змін: 19» під 14 знятими й 5 доданими читалося як 19 робочих
+        // днів. Без місяця числа немає взагалі, лише куди дивитися.
         const [group] = groupForDelivery([
             {
                 publicId: "a",
@@ -593,7 +597,10 @@ describe("renderDeliveryGroup", () => {
             },
         ]);
 
-        expect(renderDeliveryGroup(group!)).toContain("Всього змін: <b>2</b>");
+        const text = renderDeliveryGroup(group!);
+        expect(text).not.toContain("Всього");
+        expect(text).not.toMatch(/<b>2<\/b>/u);
+        expect(text).toContain("Повний графік — у «Мій графік».");
     });
 });
 
@@ -666,5 +673,221 @@ describe("toSafeFailureReason", () => {
 
         expect(reason).toBe("TELEGRAM_DELIVERY_FAILED");
         expect(reason).not.toMatch(/380|Петренко/u);
+    });
+});
+
+const KARAMEL = "33333333-3333-4333-8333-333333333333";
+const DRAGON = "44444444-4444-4444-8444-444444444444";
+
+function sambirSnapshot(localDate: string, start = "14:00", end = "20:00", location = KARAMEL) {
+    return {
+        startsAtLocal: `${localDate}T${start}:00`,
+        endsAtLocal: `${localDate}T${end}:00`,
+        timezone: "Europe/Kyiv",
+        locationPublicId: location,
+        locationName: location === KARAMEL ? "Karamel" : "Dragon Park",
+        locationBranch: location === KARAMEL ? "Atlant" : undefined,
+        locationCity: location === KARAMEL ? "Sambir" : "Lviv",
+    };
+}
+
+/** The person's month as the webapp reports it right now. */
+function monthOf(month: string, shifts: Array<[string, string?, string?, string?]>): MonthContext {
+    return new Map([[month, shifts.map(([localDate, start = "14:00", end = "20:00", location = KARAMEL]) => ({
+        key: shiftKey(location, localDate, start),
+        locationKey: location,
+        shift: {
+            localDate,
+            locationLabel: location === KARAMEL ? "Karamel (Atlant) (Sambir)" : "Dragon Park (Lviv)",
+            startsAtLocal: start,
+            endsAtLocal: end,
+        },
+    }))]]);
+}
+
+function batch(rows: Array<{ kind: AwsScheduleChangeKind; before?: string; after?: string; role?: "accepted" | "requester" }>, urgency: "NORMAL" | "URGENT" = "NORMAL") {
+    const [group] = groupForDelivery(rows.map((row, index) => ({
+        publicId: `n${index}`,
+        employeePublicId: "e1",
+        telegramId: "100",
+        changeKind: row.kind,
+        urgency,
+        batchId: urgency === "NORMAL" ? "b1" : null,
+        payload: {
+            ...(row.before ? { before: sambirSnapshot(row.before) } : {}),
+            ...(row.after ? { after: sambirSnapshot(row.after) } : {}),
+            ...(row.role ? { role: row.role } : {}),
+        },
+    })));
+    return group!;
+}
+
+/** Visible text of one line, as Telegram shows it. */
+const visible = (line: string) => line.replace(/<[^>]+>/gu, "").replace(/&amp;/gu, "&");
+
+describe("renderDeliveryGroup with the person's month", () => {
+    it("shows shifts written into a published month as a change of the whole month (incident 12.10.2026)", () => {
+        // 07.10 вона отримала 12, 21, 26.10; 09.10 дописали 20 і 27.10.
+        // Друге повідомлення мусить читатися як увесь жовтень, а не як ще один «готовий».
+        const group = batch([
+            { kind: "SHIFT_ADDED", after: "2026-10-20" },
+            { kind: "SHIFT_ADDED", after: "2026-10-27" },
+        ]);
+        const months = monthOf("2026-10", [["2026-10-12"], ["2026-10-20"], ["2026-10-21"], ["2026-10-26"], ["2026-10-27"]]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).toContain("Графік на жовтень змінено");
+        expect(text).not.toContain("готовий");
+        expect(text).toContain("Тепер у тебе <b>5</b> змін");
+        expect(text).toContain("📍 Karamel (Atlant) (Sambir)");
+        expect(text).toContain("➕ вт 20.10 · 14:00–20:00");
+        expect(text).toContain("➕ вт 27.10 · 14:00–20:00");
+        expect(text).toContain("\nпн 12.10 · 14:00–20:00");
+        expect(text).toContain("➕ — нова");
+        expect(text.indexOf("12.10")).toBeLessThan(text.indexOf("20.10"));
+    });
+
+    it("calls a month «готовий» only when the message carries all of it", () => {
+        const group = batch([
+            { kind: "SHIFT_ADDED", after: "2026-10-12" },
+            { kind: "SHIFT_ADDED", after: "2026-10-18" },
+            { kind: "SHIFT_ADDED", after: "2026-10-26" },
+        ]);
+        const months = monthOf("2026-10", [["2026-10-12"], ["2026-10-18"], ["2026-10-26"]]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).toContain("Графік на жовтень готовий");
+        expect(text).toContain("У тебе <b>3</b> зміни · у вихідні: <b>1</b>");
+        expect(text).not.toContain("➕");
+        expect(text).toContain("<b>нд 18.10</b> · 14:00–20:00");
+        expect(text).toContain("попроси підміну");
+    });
+
+    it("lists removed shifts above the month and counts only what is left", () => {
+        // Тершак, 29.09: 14 знято, 5 додано — повідомлення сказало «Всього змін: 19».
+        const group = batch([
+            { kind: "SHIFT_REMOVED", before: "2026-10-03" },
+            { kind: "SHIFT_REMOVED", before: "2026-10-04" },
+            { kind: "SHIFT_ADDED", after: "2026-10-10" },
+        ]);
+        const months = monthOf("2026-10", [["2026-10-10"], ["2026-10-15"]]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).toContain("Графік на жовтень змінено");
+        expect(text).toContain("➖ Знято: <b>сб 03.10</b> · 14:00–20:00");
+        expect(text).toContain("➖ Знято: <b>нд 04.10</b> · 14:00–20:00");
+        expect(text).toContain("Тепер у тебе <b>2</b> зміни");
+        expect(text).toContain("➕ <b>сб 10.10</b> · 14:00–20:00");
+        expect(text).not.toMatch(/<b>3<\/b>/u);
+    });
+
+    it("shows a changed shift as its old form above and the marked new one in the month", () => {
+        const group = batch([{ kind: "SHIFT_MOVED", before: "2026-10-13", after: "2026-10-14" }]);
+        const months = monthOf("2026-10", [["2026-10-14"], ["2026-10-20"]]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).toContain("🔄 Було: вт 13.10 · 14:00–20:00");
+        expect(text).toContain("🔄 ср 14.10 · 14:00–20:00");
+        expect(text).toContain("🔄 — змінена");
+        expect(text).not.toContain("Стало");
+    });
+
+    it("shows a shift the owner reassigned to her as new, without someone else's «Було»", () => {
+        const group = batch([
+            { kind: "SHIFT_REASSIGNED", before: "2026-10-14", after: "2026-10-14" },
+            { kind: "SHIFT_ADDED", after: "2026-10-20" },
+        ]);
+        const months = monthOf("2026-10", [["2026-10-14"], ["2026-10-20"], ["2026-10-22"]]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).toContain("➕ ср 14.10 · 14:00–20:00");
+        expect(text).not.toContain("Було");
+    });
+
+    it("says plainly when nothing is left in the month", () => {
+        const group = batch([
+            { kind: "SHIFT_REMOVED", before: "2026-10-14" },
+            { kind: "SHIFT_REMOVED", before: "2026-10-20" },
+        ]);
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", []));
+
+        expect(text).toContain("У жовтні змін у тебе більше немає.");
+        expect(text).not.toContain("Тепер у тебе");
+    });
+
+    it("keeps the location in every line when the month spans two venues", () => {
+        const group = batch([
+            { kind: "SHIFT_ADDED", after: "2026-10-20" },
+            { kind: "SHIFT_ADDED", after: "2026-10-21" },
+        ]);
+        const months = monthOf("2026-10", [["2026-10-12", "10:00", "20:00", DRAGON], ["2026-10-20"], ["2026-10-21"]]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).not.toContain("📍");
+        expect(text).toContain("пн 12.10 · Dragon Park (Lviv) · 10:00–20:00");
+        expect(text).toContain("➕ вт 20.10 · Karamel (Atlant) (Sambir) · 14:00–20:00");
+    });
+
+    it("in a long changed month shows the marked lines and says how many are not shown", () => {
+        const days = Array.from({ length: 20 }, (_, index) => `2026-10-${String(index + 1).padStart(2, "0")}`);
+        const group = batch([
+            { kind: "SHIFT_ADDED", after: "2026-10-19" },
+            { kind: "SHIFT_ADDED", after: "2026-10-20" },
+        ]);
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", days.map(day => [day] as [string])));
+
+        expect(text).toContain("Тепер у тебе <b>20</b> змін");
+        expect(text).toContain("➕ пн 19.10");
+        expect(text).toContain("➕ вт 20.10");
+        expect(text).not.toContain("01.10");
+        expect(text).toContain("та ще 18 — у «Мій графік»");
+    });
+
+    it("gives every month its own section when the changes span two", () => {
+        const group = batch([
+            { kind: "SHIFT_ADDED", after: "2026-10-30" },
+            { kind: "SHIFT_ADDED", after: "2026-11-02" },
+        ]);
+        const months: MonthContext = new Map([
+            ...monthOf("2026-10", [["2026-10-12"], ["2026-10-30"]]),
+            ...monthOf("2026-11", [["2026-11-02"]]),
+        ]);
+
+        const text = renderDeliveryGroup(group, months);
+
+        expect(text).toContain("Графік на жовтень змінено");
+        expect(text).toContain("Графік на листопад готовий");
+        expect(text.indexOf("жовтень")).toBeLessThan(text.indexOf("листопад"));
+    });
+
+    it("ends an urgent change with the month total instead of a list", () => {
+        const group = batch([{ kind: "SHIFT_REMOVED", before: "2026-10-13" }], "URGENT");
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", [["2026-10-20"], ["2026-10-21"], ["2026-10-26"], ["2026-10-27"]]));
+
+        expect(text).toContain("Термінова зміна у графіку");
+        expect(text).toContain("➖ Знято зміну:");
+        expect(text).toContain("Тепер у тебе в жовтні <b>4</b> зміни.");
+        expect(text).not.toContain("➕");
+    });
+
+    it("fits a phone: every list line of a single-venue month stays short", () => {
+        const group = batch([{ kind: "SHIFT_ADDED", after: "2026-10-20" }, { kind: "SHIFT_REMOVED", before: "2026-10-18" }]);
+        const days = ["2026-10-04", "2026-10-11", "2026-10-12", "2026-10-20", "2026-10-25", "2026-10-31"];
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", days.map(day => [day] as [string])));
+
+        const lines = text.split("\n").filter(line => /\d{2}\.\d{2}/u.test(line));
+        expect(lines.length).toBeGreaterThan(0);
+        for (const line of lines) expect(visible(line).length).toBeLessThanOrEqual(34);
+        expect(text.split("\n").length).toBeLessThanOrEqual(20);
     });
 });

@@ -630,7 +630,9 @@ Please check bot permissions (Manage Topics).`,
   "schedule-notif-removed-unknown": `➖ Знято зміну — деталі уточнюються`,
   "schedule-notif-moved-unknown": `🔀 Перенесено зміну — деталі уточнюються`,
   "schedule-notif-changed-unknown": `🔄 Змінено зміну — деталі уточнюються`,
-  "schedule-notif-summary": (p: { count: string | number }) => `Всього змін: <b>${p.count}</b>`,
+  // Підсумок, коли місяць прочитати не вдалося: число подій тут не пишемо —
+  // «Всього змін: 19» читалося як 19 робочих днів.
+  "schedule-notif-see-schedule": `Повний графік — у «Мій графік».`,
   "schedule-notif-btn-schedule": `🗓 Мій графік`,
   "schedule-notif-ans-confirmed": `Дякуємо! Підтвердження записали 💛`,
   "schedule-notif-ans-declined": `Дякуємо, відповідь записали. Щоб змінити цю зміну, напиши в підтримку.`,

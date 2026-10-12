@@ -19,11 +19,27 @@ const MONTHS_UK_NOMINATIVE = [
     "грудень",
 ] as const;
 
-/** До скількох змін показується повний список. */
+/** До скількох змін показується повний список — довше не вміщується на екран телефона. */
 const FULL_LIST_LIMIT = 15;
 
 /** Скільки рядків лишається, коли список не вміщується цілком. */
 const LIST_HEAD = 10;
+
+/** «Тепер у тебе в жовтні …» — місцевий відмінок. */
+const MONTHS_UK_LOCATIVE = [
+    "січні",
+    "лютому",
+    "березні",
+    "квітні",
+    "травні",
+    "червні",
+    "липні",
+    "серпні",
+    "вересні",
+    "жовтні",
+    "листопаді",
+    "грудні",
+] as const;
 
 export type ScheduleMessageShift = {
     /** `YYYY-MM-DD` — локальна дата зміни. */
@@ -59,7 +75,7 @@ export function monthNameOf(localDate: string): string {
  * розповзаються на кожному рядку. Підпис локації екранується — результат
  * іде в Telegram як HTML.
  */
-export function formatShiftLine(shift: ScheduleMessageShift): string {
+export function formatShiftLine(shift: ScheduleMessageShift, options: { withLocation?: boolean } = {}): string {
     const weekday = WEEKDAY_SHORT_UK[weekdayOf(shift.localDate)];
     const dayMonth = `${shift.localDate.slice(8)}.${shift.localDate.slice(5, 7)}`;
     const day = isWeekend(shift.localDate) ? `<b>${weekday} ${dayMonth}</b>` : `${weekday} ${dayMonth}`;
@@ -67,48 +83,164 @@ export function formatShiftLine(shift: ScheduleMessageShift): string {
         shift.startsAtLocal && shift.endsAtLocal
             ? `${shift.startsAtLocal}–${shift.endsAtLocal}`
             : shift.startsAtLocal;
-    return [day, escapeHtml(shift.locationLabel), time].filter((part) => part.length > 0).join(" · ");
+    const location = options.withLocation === false ? "" : escapeHtml(shift.locationLabel);
+    return [day, location, time].filter((part) => part.length > 0).join(" · ");
+}
+
+
+/** `2026-10-12` -> «жовтні». Порожньо, якщо дата не читається. */
+export function monthLocativeOf(localDate: string): string {
+    const month = Number(localDate.slice(5, 7));
+    return MONTHS_UK_LOCATIVE[month - 1] ?? "";
+}
+
+/** 1 зміна · 3 зміни · 5 змін · 11 змін · 21 зміна. */
+export function shiftsWord(count: number): string {
+    const tens = count % 100;
+    const ones = count % 10;
+    if (ones === 1 && tens !== 11) return "зміна";
+    if (ones >= 2 && ones <= 4 && (tens < 12 || tens > 14)) return "зміни";
+    return "змін";
 }
 
 /**
- * Повідомлення фотографу про те, що графік місяця опубліковано.
- *
- * Будова — за ієрархією читання: що сталося → скільки і скільки з них у
- * вихідні (саме це люди порівнюють між собою, бо вихідні найкасовіші) →
- * календар → що робити далі. Підсумок рахується по ВСІХ локаціях людини
- * разом: на дошці однієї локації її частка виглядає меншою, ніж є.
- *
- * Вихідні в списку виділені, щоб їх було видно з одного погляду, а не
- * рахувати по датах. Список іде за датою незалежно від порядку входу.
- *
- * Список обрізається за числом РЯДКІВ, а не за символами. Ліміт Telegram —
- * 4096 знаків, і повідомлення понад нього не відправляється взагалі: людина
- * просто не дізнається свій графік у день публікації. Різати за символами
- * не можна — обрубок дати гірший за чесне «та ще N».
- *
- * Підписи локацій приходять із каталогу і екрануються тут, бо результат іде
- * в Telegram як HTML.
+ * «Тепер у тебе в жовтні 4 зміни.» — підсумок місяця під повідомленням про
+ * окрему подію (термінова зміна, підміна). Без нього людина не знає, чи
+ * лишилося в неї щось у цьому місяці, і звіряє з попередніми повідомленнями.
  */
-export function formatScheduleMessage(input: { monthName: string; shifts: ScheduleMessageShift[] }): string {
-    const ordered = [...input.shifts].sort((left, right) => left.localDate.localeCompare(right.localDate));
-    const total = ordered.length;
-    const weekends = ordered.filter((shift) => isWeekend(shift.localDate)).length;
-    const shown = total <= FULL_LIST_LIMIT ? ordered : ordered.slice(0, LIST_HEAD);
+export function formatMonthTotal(localDate: string, count: number): string {
+    const month = monthLocativeOf(localDate);
+    if (count === 0) return `У ${month} змін у тебе більше немає.`;
+    return `Тепер у тебе в ${month} <b>${count}</b> ${shiftsWord(count)}.`;
+}
 
-    const rows = shown.map((shift) => formatShiftLine(shift)).join("\n");
+/** Позначка рядка в списку місяця: що саме в ньому нове. */
+export type MonthRowMark = "added" | "moved";
 
-    const tail = total > FULL_LIST_LIMIT ? `\n\nта ще ${total - LIST_HEAD} — дивись у розділі «Мій графік»` : "";
-    const title = input.monthName ? `Графік на ${input.monthName} готовий` : "Графік готовий";
-    const summary =
-        weekends > 0
-            ? `Змін: <b>${total}</b> · у вихідні: <b>${weekends}</b>`
-            : `Змін: <b>${total}</b>`;
+export type MonthRow = {
+    shift: ScheduleMessageShift;
+    /** Однаковий для однієї локації; за ним локація виноситься в шапку. */
+    locationKey: string;
+    mark?: MonthRowMark;
+};
 
-    return `✅ <b>${title}</b>
+/**
+ * Те, чого в списку місяця вже немає, але людина мусить про це дізнатися:
+ * знята зміна, попередній вигляд зміненої, віддана через підміну.
+ */
+export type MonthNote = {
+    kind: "removed" | "movedFrom" | "given";
+    shift: ScheduleMessageShift;
+    locationKey: string;
+};
 
-${summary}
+const MARK_PREFIX: Record<MonthRowMark, string> = { added: "➕ ", moved: "🔄 " };
+const MARK_LEGEND: Record<MonthRowMark, string> = { added: "➕ — нова", moved: "🔄 — змінена" };
+const NOTE_PREFIX: Record<MonthNote["kind"], string> = {
+    removed: "➖ Знято: ",
+    movedFrom: "🔄 Було: ",
+    given: "✅ Підміну знайдено: ",
+};
 
-${rows}${tail}
+/**
+ * Повідомлення про графік одного місяця — завжди з УСІМ місяцем людини.
+ *
+ * Інцидент 12.10.2026: фотографка отримала «Графік на жовтень готовий» двічі
+ * (3 зміни, потім ще 2 дописані) і вирішила, що останнє повідомлення — це
+ * весь її місяць. Читати останнє повідомлення як повний графік — природно,
+ * тому тепер так і є: кожне повідомлення показує весь місяць на зараз, а нове
+ * в ньому позначене. Заголовок розрізняє першу публікацію («готовий») і
+ * зміну вже опублікованого («змінено»), а число завжди означає робочі дні
+ * людини, ніколи — кількість подій («Всього змін: 19» при 14 знятих і 5
+ * доданих).
+ *
+ * Локація, спільна для всіх рядків, виноситься в шапку: рядок зміни вміщується
+ * в один рядок екрана телефона, і місяць видно без прокрутки. Список обрізається
+ * за числом РЯДКІВ (не символів — обрубок дати гірший за чесне «та ще N»), і в
+ * зміненому місяці показуються саме позначені рядки.
+ */
+export function formatMonthSection(input: {
+    mode: "published" | "updated";
+    /** Будь-яка дата цього місяця — з неї беруться назви місяця. */
+    monthDate: string;
+    rows: MonthRow[];
+    notes: MonthNote[];
+}): string {
+    // У першій публікації нове все, тож позначки там лише шум.
+    const rows = input.rows
+        .map((row) => (input.mode === "published" ? { ...row, mark: undefined } : row))
+        .sort((left, right) => compareShifts(left.shift, right.shift));
+    const notes = [...input.notes].sort((left, right) => compareShifts(left.shift, right.shift));
+    const locationKeys = new Set([...rows, ...notes].map((item) => item.locationKey));
+    const sharedLabel = locationKeys.size === 1 ? (rows[0] ?? notes[0])?.shift.locationLabel : undefined;
+    const withLocation = sharedLabel === undefined;
+    const line = (shift: ScheduleMessageShift) => formatShiftLine(shift, { withLocation });
 
-Якщо якийсь день не підійде — відкрий «Мій графік» і попроси підміну.`;
+    const blocks: string[] = [
+        input.mode === "published"
+            ? `✅ <b>Графік на ${monthNameOf(input.monthDate)} готовий</b>`
+            : `🗓 <b>Графік на ${monthNameOf(input.monthDate)} змінено</b>`,
+    ];
+
+    if (notes.length > 0) {
+        blocks.push(notes.map((note) => `${NOTE_PREFIX[note.kind]}${line(note.shift)}`).join("\n"));
+    }
+
+    const total = rows.length;
+    if (total === 0) {
+        blocks.push(`У ${monthLocativeOf(input.monthDate)} змін у тебе більше немає.`);
+        return blocks.join("\n\n");
+    }
+
+    const weekends = rows.filter((row) => isWeekend(row.shift.localDate)).length;
+    const count = `<b>${total}</b> ${shiftsWord(total)}`;
+    const summary = [
+        `${input.mode === "published" ? "У тебе" : "Тепер у тебе"} ${count}${weekends > 0 ? ` · у вихідні: <b>${weekends}</b>` : ""}`,
+    ];
+    if (sharedLabel !== undefined) summary.push(`📍 ${escapeHtml(sharedLabel)}`);
+    blocks.push(summary.join("\n"));
+
+    const marked = rows.filter((row) => row.mark !== undefined);
+    const shown =
+        total <= FULL_LIST_LIMIT
+            ? rows
+            : input.mode === "updated" && marked.length > 0
+            ? marked.slice(0, LIST_HEAD)
+            : rows.slice(0, LIST_HEAD);
+    const list = shown.map((row) => `${row.mark ? MARK_PREFIX[row.mark] : ""}${line(row.shift)}`);
+    if (shown.length < total) list.push(`та ще ${total - shown.length} — у «Мій графік»`);
+    blocks.push(list.join("\n"));
+
+    const legend = (Object.keys(MARK_LEGEND) as MonthRowMark[])
+        .filter((mark) => shown.some((row) => row.mark === mark))
+        .map((mark) => MARK_LEGEND[mark]);
+    if (legend.length > 0) blocks.push(legend.join(" · "));
+
+    if (input.mode === "published") {
+        blocks.push("Якщо якийсь день не підійде — відкрий «Мій графік» і попроси підміну.");
+    }
+
+    return blocks.join("\n\n");
+}
+
+function compareShifts(left: ScheduleMessageShift, right: ScheduleMessageShift): number {
+    return left.localDate.localeCompare(right.localDate) || left.startsAtLocal.localeCompare(right.startsAtLocal);
+}
+
+/**
+ * Нові зміни, коли весь місяць прочитати не вдалося. Без «готовий» і без
+ * числа: ні те, ні інше не можна сказати, не знаючи решти місяця, а саме вони
+ * читалися як «це весь мій графік».
+ */
+export function formatNewShiftsList(shifts: ScheduleMessageShift[]): string {
+    const ordered = [...shifts].sort(compareShifts);
+    const months = new Set(ordered.map((shift) => shift.localDate.slice(0, 7)));
+    const title =
+        months.size === 1 && ordered[0] !== undefined
+            ? `🗓 <b>Нові зміни на ${monthNameOf(ordered[0].localDate)}</b>`
+            : "🗓 <b>Нові зміни у графіку</b>";
+    const shown = ordered.length <= FULL_LIST_LIMIT ? ordered : ordered.slice(0, LIST_HEAD);
+    const list = shown.map((shift) => formatShiftLine(shift));
+    if (shown.length < ordered.length) list.push(`та ще ${ordered.length - shown.length}`);
+    return `${title}\n\n${list.join("\n")}\n\nПовний графік — у «Мій графік».`;
 }

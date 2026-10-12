@@ -6,11 +6,15 @@ import { redis } from "../core/redis.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
 import {
-    formatScheduleMessage,
+    formatMonthSection,
+    formatMonthTotal,
+    formatNewShiftsList,
     formatShiftLine,
-    monthNameOf,
+    type MonthNote,
+    type MonthRow,
     type ScheduleMessageShift
 } from "../utils/format-schedule-message.js";
+import { loadMonthContext, shiftKey, type MonthContext } from "./schedule-month-context.js";
 import {
     awsBusinessClient,
     type AwsScheduleNotification,
@@ -94,18 +98,38 @@ export function groupForDelivery(
 /**
  * Pure rendering of one delivery group into Telegram HTML.
  *
- * Structure follows how a person reads it: what happened (title) → one
- * sentence per event with the shift line. No footer duplicating the button
- * below, and no request to answer: an urgent change is a fact the owner has
- * already decided, and nobody reads the acknowledgements (owner, 29.08.2026).
+ * With the person's current month at hand (`months`), a normal message shows
+ * the WHOLE month with what is new marked — the last schedule message always
+ * reads as her full month, which is how people read it anyway (incident
+ * 12.10.2026). Urgent changes and replacements stay one sentence per event and
+ * end with the month total instead of a list.
+ *
+ * Without the month (the read failed), nothing may claim to be a total: the
+ * text names only what changed and points to «Мій графік».
+ *
+ * Structure follows how a person reads it: what happened (title) → events or
+ * the month → total. No request to answer: an urgent change is a fact the
+ * owner has already decided, and nobody reads the acknowledgements (owner,
+ * 29.08.2026).
  */
-export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): string {
-    // Публікація місяця — це пакет, де кожен рядок «додано зміну». Для нього
-    // формат окремих змін («➕ Додано зміну / Тепер: …» одинадцять разів
-    // поспіль) не читається: людині потрібен календар і підсумок, а не
-    // журнал подій. Поодинокі зміни і змішані пакети лишаються журналом.
-    const publication = asPublication(group);
-    if (publication !== null) return formatScheduleMessage(publication);
+export function renderDeliveryGroup(
+    group: ScheduleNotificationDeliveryGroup,
+    months: MonthContext | null = null
+): string {
+    const replacementOnly = group.notifications.every(
+        notification => isReplacementGiven(notification) || isReplacementTaken(notification)
+    );
+    if (months !== null && group.urgency === "NORMAL" && !replacementOnly) {
+        const sections = renderMonthSections(group, months);
+        if (sections !== null) return sections;
+    }
+
+    // Без місяця пакет «самих додань» лишається календарем, але без слова
+    // «готовий» і без числа, яке читалося б як увесь місяць.
+    if (months === null) {
+        const added = asAddedList(group);
+        if (added !== null) return formatNewShiftsList(added);
+    }
 
     const lines: string[] = [
         group.notifications.every(isReplacementGiven)
@@ -123,11 +147,140 @@ export function renderDeliveryGroup(group: ScheduleNotificationDeliveryGroup): s
         lines.push("");
     }
 
-    if (group.notifications.length > 1) {
-        lines.push(STAFF_TEXTS["schedule-notif-summary"]({ count: group.notifications.length }));
+    // Підсумок — це завжди кількість змін людини в місяці, ніколи не кількість
+    // подій: «Всього змін: 19» під 14 знятими й 5 доданими читалося як 19
+    // робочих днів.
+    if (months !== null) {
+        for (const month of monthsOf(group)) {
+            const rows = months.get(month);
+            if (rows !== undefined) lines.push(formatMonthTotal(`${month}-01`, rows.length));
+        }
+    } else if (group.notifications.length > 1) {
+        lines.push(STAFF_TEXTS["schedule-notif-see-schedule"]);
     }
 
     return lines.join("\n").trimEnd();
+}
+
+/** `YYYY-MM` of every shift a group touches, before and after, in order. */
+export function monthsOf(group: ScheduleNotificationDeliveryGroup): string[] {
+    const months = new Set<string>();
+    for (const notification of group.notifications) {
+        for (const snapshot of [notification.payload.before, notification.payload.after]) {
+            const shift = snapshot === undefined ? null : toShift(snapshot);
+            if (shift !== null) months.add(shift.localDate.slice(0, 7));
+        }
+    }
+    return [...months].sort();
+}
+
+/**
+ * One section per touched month: the month's current shifts, with the events
+ * of this group marked in it (added, changed) or listed above it (removed,
+ * the old date of a changed shift, given away through a replacement).
+ *
+ * «Готовий» only when this group is the person's whole month — every shift she
+ * has in it arrives right now. Shifts written into an already published month
+ * read «змінено», even when all of them are additions. Null when an event
+ * carries no readable snapshot: then the event text is the honest fallback.
+ */
+function renderMonthSections(
+    group: ScheduleNotificationDeliveryGroup,
+    months: MonthContext
+): string | null {
+    const sections = new Map<string, { rows: MonthRow[]; byKey: Map<string, MonthRow>; notes: MonthNote[] }>();
+    const sectionOf = (month: string) => {
+        let section = sections.get(month);
+        if (section === undefined) {
+            const rows: MonthRow[] = (months.get(month) ?? []).map(item => ({
+                shift: item.shift,
+                locationKey: item.locationKey
+            }));
+            const byKey = new Map((months.get(month) ?? []).map((item, index) => [item.key, rows[index]!] as const));
+            section = { rows, byKey, notes: [] };
+            sections.set(month, section);
+        }
+        return section;
+    };
+    const mark = (event: KeyedShift, value: NonNullable<MonthRow["mark"]>) => {
+        const row = sectionOf(event.month).byKey.get(event.key);
+        // Зміни вже немає в тому вигляді (її встигли змінити ще раз) —
+        // список місяця і так показує, як є зараз.
+        if (row !== undefined) row.mark = value;
+    };
+    const note = (event: KeyedShift, kind: MonthNote["kind"]) => {
+        sectionOf(event.month).notes.push({ kind, shift: event.shift, locationKey: event.locationKey });
+    };
+
+    for (const notification of group.notifications) {
+        const before = keyed(notification.payload.before);
+        const after = keyed(notification.payload.after);
+
+        if (isReplacementGiven(notification)) {
+            if (before === null) return null;
+            note(before, "given");
+            continue;
+        }
+
+        switch (notification.changeKind) {
+            // Переназначення на неї — для неї це нова зміна: «Було» в ньому
+            // описувало б чужу зміну.
+            case "SHIFT_ADDED":
+            case "SHIFT_REASSIGNED":
+                if (after === null) return null;
+                sectionOf(after.month);
+                mark(after, "added");
+                break;
+            case "SHIFT_MOVED":
+                if (after === null && before === null) return null;
+                if (after !== null) {
+                    sectionOf(after.month);
+                    mark(after, "moved");
+                }
+                if (before !== null && (after === null || before.key !== after.key || !sameShift(before, after))) {
+                    note(before, after === null ? "removed" : "movedFrom");
+                }
+                break;
+            case "SHIFT_REMOVED":
+                if (before === null) return null;
+                note(before, "removed");
+                break;
+        }
+    }
+
+    const everythingAdded = group.notifications.every(notification => notification.changeKind === "SHIFT_ADDED");
+    return [...sections.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([month, section]) => formatMonthSection({
+            mode: everythingAdded
+                && section.notes.length === 0
+                && section.rows.length > 0
+                && section.rows.every(row => row.mark === "added")
+                ? "published"
+                : "updated",
+            monthDate: `${month}-01`,
+            rows: section.rows,
+            notes: section.notes
+        }))
+        .join("\n\n");
+}
+
+type KeyedShift = { month: string; key: string; locationKey: string; shift: ScheduleMessageShift };
+
+function keyed(snapshot: AwsScheduleNotificationShiftSnapshot | undefined): KeyedShift | null {
+    if (snapshot === undefined) return null;
+    const shift = toShift(snapshot);
+    if (shift === null) return null;
+    return {
+        month: shift.localDate.slice(0, 7),
+        key: shiftKey(snapshot.locationPublicId, shift.localDate, shift.startsAtLocal),
+        locationKey: snapshot.locationPublicId,
+        shift
+    };
+}
+
+function sameShift(left: KeyedShift, right: KeyedShift): boolean {
+    return left.shift.startsAtLocal === right.shift.startsAtLocal && left.shift.endsAtLocal === right.shift.endsAtLocal;
 }
 
 /**
@@ -205,13 +358,11 @@ function describeChange(notification: AwsScheduleNotification): string[] {
 }
 
 /**
- * A batched group made only of added shifts with snapshots — what publishing
- * a month produces. Anything else (single change, removals, moves, a row
- * without a snapshot) is not a publication and renders as a change log.
+ * A batched group made only of added shifts with snapshots — a published month
+ * or shifts written into one. Anything else (single change, removals, moves, a
+ * row without a snapshot) renders as a change log.
  */
-function asPublication(
-    group: ScheduleNotificationDeliveryGroup
-): { monthName: string; shifts: ScheduleMessageShift[] } | null {
+function asAddedList(group: ScheduleNotificationDeliveryGroup): ScheduleMessageShift[] | null {
     if (group.urgency !== "NORMAL" || group.notifications.length < 2) return null;
     const shifts: ScheduleMessageShift[] = [];
     for (const notification of group.notifications) {
@@ -221,8 +372,7 @@ function asPublication(
         if (shift === null) return null;
         shifts.push(shift);
     }
-    const first = [...shifts].sort((left, right) => left.localDate.localeCompare(right.localDate))[0]!;
-    return { monthName: monthNameOf(first.localDate), shifts };
+    return shifts;
 }
 
 /**
@@ -489,8 +639,28 @@ export class ScheduleNotificationDispatcher {
             });
         }
 
+        // Увесь місяць людини на зараз — з того ж джерела, що «Мій графік».
+        // Збій читання не зупиняє доставку: текст тоді називає лише події.
+        let months: MonthContext | null = null;
         try {
-            await api.sendMessage(Number(group.telegramId), renderDeliveryGroup(group), {
+            months = await loadMonthContext(group.employeePublicId, monthsOf(group));
+        } catch (error) {
+            logBusinessEvent({
+                event: "bot.schedule_notifications.month_read_failed",
+                level: "warn",
+                actorType: "system",
+                actorRole: "system",
+                telegramId: group.telegramId,
+                result: "failed",
+                module: "schedule-notification-dispatcher",
+                operation: "deliverGroup",
+                safeContext: { employeePublicId: group.employeePublicId },
+                error
+            });
+        }
+
+        try {
+            await api.sendMessage(Number(group.telegramId), renderDeliveryGroup(group, months), {
                 parse_mode: "HTML",
                 reply_markup: buildDeliveryKeyboard(group)
             });
