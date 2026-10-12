@@ -10,8 +10,11 @@ import {
     formatMonthTotal,
     formatNewShiftsList,
     formatShiftLine,
+    formatChangeLine,
+    updateMark,
     type MonthNote,
     type MonthRow,
+    type ShiftChange,
     type ScheduleMessageShift
 } from "../utils/format-schedule-message.js";
 import { loadMonthContext, shiftKey, type MonthContext } from "./schedule-month-context.js";
@@ -208,13 +211,8 @@ function renderMonthSections(
         // список місяця і так показує, як є зараз.
         if (row !== undefined) row.mark = value;
     };
-    const note = (event: KeyedShift, kind: MonthNote["kind"], to?: KeyedShift) => {
-        sectionOf(event.month).notes.push({
-            kind,
-            shift: event.shift,
-            locationKey: event.locationKey,
-            ...(to === undefined ? {} : { to: to.shift })
-        });
+    const note = (event: KeyedShift, change: ShiftChange) => {
+        sectionOf(event.month).notes.push({ change, localDate: event.shift.localDate, locationKey: event.locationKey });
     };
 
     for (const notification of group.notifications) {
@@ -223,13 +221,13 @@ function renderMonthSections(
 
         if (isReplacementGiven(notification)) {
             if (before === null) return null;
-            note(before, "given");
+            note(before, { kind: "given", shift: before.shift });
             continue;
         }
 
         switch (notification.changeKind) {
-            // Переназначення на неї — для неї це нова зміна: «Було» в ньому
-            // описувало б чужу зміну.
+            // Переназначення на неї — для неї це нова зміна: попередній вигляд
+            // описував би чужу зміну.
             case "SHIFT_ADDED":
             case "SHIFT_REASSIGNED":
                 if (after === null) return null;
@@ -238,19 +236,19 @@ function renderMonthSections(
                 break;
             case "SHIFT_MOVED":
                 if (after === null && before === null) return null;
-                if (after !== null) {
-                    sectionOf(after.month);
-                    // «Перенесена» — лише коли змінилася дата; інакше «змінена».
-                    mark(after, before !== null && before.shift.localDate !== after.shift.localDate ? "moved" : "changed");
+                if (after === null) {
+                    note(before!, { kind: "removed", shift: before!.shift });
+                    break;
                 }
-                if (before !== null && (after === null || before.key !== after.key || !sameShift(before, after))) {
-                    if (after === null) note(before, "removed");
-                    else note(before, "movedFrom", after);
+                sectionOf(after.month);
+                mark(after, before === null ? "updated" : updateMark(before.shift, after.shift));
+                if (before !== null && (before.key !== after.key || !sameShift(before, after))) {
+                    note(after, { kind: "updated", from: before.shift, to: after.shift });
                 }
                 break;
             case "SHIFT_REMOVED":
                 if (before === null) return null;
-                note(before, "removed");
+                note(before, { kind: "removed", shift: before.shift });
                 break;
         }
     }
@@ -320,12 +318,6 @@ function isReplacementTaken(notification: AwsScheduleNotification): boolean {
 function describeChange(notification: AwsScheduleNotification): string[] {
     const before = notification.payload.before === undefined ? null : toShift(notification.payload.before);
     const after = notification.payload.after === undefined ? null : toShift(notification.payload.after);
-    const wasNow = (title: string) => {
-        const rows = [title];
-        if (before) rows.push(STAFF_TEXTS["schedule-notif-line-was"]({ details: formatShiftLine(before) }));
-        if (after) rows.push(STAFF_TEXTS["schedule-notif-line-now"]({ details: formatShiftLine(after) }));
-        return rows;
-    };
 
     if (isReplacementGiven(notification) && before) {
         return [STAFF_TEXTS["schedule-notif-replacement-given"]({
@@ -339,28 +331,24 @@ function describeChange(notification: AwsScheduleNotification): string[] {
     switch (notification.changeKind) {
         case "SHIFT_ADDED":
             return after
-                ? [STAFF_TEXTS["schedule-notif-added"]({ shift: formatShiftLine(after) })]
+                ? [formatChangeLine({ kind: "added", shift: after })]
                 : [STAFF_TEXTS["schedule-notif-added-unknown"]];
         case "SHIFT_REMOVED":
             return before
-                ? [STAFF_TEXTS["schedule-notif-removed"]({ shift: formatShiftLine(before) })]
+                ? [formatChangeLine({ kind: "removed", shift: before })]
                 : [STAFF_TEXTS["schedule-notif-removed-unknown"]];
         case "SHIFT_MOVED":
-            if (before && after) return wasNow(STAFF_TEXTS["schedule-notif-moved-title"]);
-            return before || after
-                ? wasNow(STAFF_TEXTS["schedule-notif-moved-title"])
-                : [STAFF_TEXTS["schedule-notif-moved-unknown"]];
-        case "SHIFT_REASSIGNED": {
-            const role = notification.payload.role;
-            if (role === "accepted" && after) {
-                return [STAFF_TEXTS["schedule-notif-replacement-taken"]({ shift: formatShiftLine(after) })];
+            if (after) return [formatChangeLine({ kind: "updated", ...(before ? { from: before } : {}), to: after })];
+            return before
+                ? [formatChangeLine({ kind: "removed", shift: before })]
+                : [STAFF_TEXTS["schedule-notif-updated-unknown"]];
+        // Переназначення на неї — для неї це нова зміна: «було» описувало б
+        // чужу зміну.
+        case "SHIFT_REASSIGNED":
+            if (after) {
+                return [formatChangeLine({ kind: notification.payload.role === "accepted" ? "taken" : "added", shift: after })];
             }
-            if (before && after) return wasNow(STAFF_TEXTS["schedule-notif-changed-title"]);
-            const only = after ?? before;
-            return only
-                ? [STAFF_TEXTS["schedule-notif-changed"]({ shift: formatShiftLine(only) })]
-                : [STAFF_TEXTS["schedule-notif-changed-unknown"]];
-        }
+            return [STAFF_TEXTS["schedule-notif-added-unknown"]];
     }
 }
 

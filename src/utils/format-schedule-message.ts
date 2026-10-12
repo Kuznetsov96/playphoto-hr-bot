@@ -120,8 +120,74 @@ export function formatMonthTotal(localDate: string, count: number): string {
     return `Тепер у тебе в ${month} <b>${count}</b> ${shiftsWord(count)}.`;
 }
 
+/**
+ * Одна подія графіка — так, як її читає фотографка.
+ *
+ * Слово «зміна» в цих текстах означає лише робочий день. Для дії — «оновлено»,
+ * «новий», «знято»: «Термінова зміна у графіку», «Змінено зміну» і «змінена»
+ * поруч із «4 зміни» читалися подвійно (аудит 12.10.2026).
+ */
+export type ShiftChange =
+    | { kind: "added" | "removed" | "taken" | "given"; shift: ScheduleMessageShift }
+    | { kind: "updated"; from?: ScheduleMessageShift; to: ScheduleMessageShift };
+
+/**
+ * Рядок події — один стиль для всіх повідомлень: «Що сталося: день · точка · час»,
+ * а в оновленій зміні стрілка стоїть лише біля того, що змінилося. Без значків:
+ * значок на початку рядка нічого не пояснював («🔄 Було: …») і зсував дати.
+ *
+ * Дату зміни в кабінеті не змінити — редагуються лише час, точка й людина,
+ * тож «Нова дата» лишається тільки на випадок правки в обхід кабінету.
+ */
+export function formatChangeLine(change: ShiftChange, options: { withLocation?: boolean } = {}): string {
+    const line = (shift: ScheduleMessageShift) => formatShiftLine(shift, options);
+    switch (change.kind) {
+        case "added":
+            return `Нова зміна: ${line(change.shift)}`;
+        case "removed":
+            return `Знято зміну: ${line(change.shift)}`;
+        case "taken":
+            return `Зміну передано тобі: ${line(change.shift)}`;
+        case "given":
+            return `Підміну знайдено: ${line(change.shift)}`;
+        case "updated":
+            break;
+    }
+
+    const { from, to } = change;
+    if (from === undefined) return `Зміну оновлено: ${line(to)}`;
+    const day = dayLabel(to.localDate);
+    const withLocation = options.withLocation !== false;
+    const fromPlace = escapeHtml(from.locationLabel);
+    const toPlace = escapeHtml(to.locationLabel);
+    const newTime = timeLabel(from) !== timeLabel(to);
+    const newPlace = from.locationLabel !== to.locationLabel;
+
+    if (from.localDate !== to.localDate) return `Нова дата: ${dayLabel(from.localDate)} → ${line(to)}`;
+    if (newTime && newPlace) {
+        return `Нова точка і час: ${day} · ${fromPlace}, ${timeLabel(from)} → ${toPlace}, ${timeLabel(to)}`;
+    }
+    if (newPlace) return `Нова точка: ${day} · ${fromPlace} → ${toPlace} · ${timeLabel(to)}`;
+    if (newTime) {
+        return [`Новий час: ${day}`, withLocation ? toPlace : "", `${timeLabel(from)} → ${timeLabel(to)}`]
+            .filter((part) => part.length > 0)
+            .join(" · ");
+    }
+    return `Зміну оновлено: ${line(to)}`;
+}
+
 /** Позначка рядка в списку місяця: що саме в ньому нове. */
-export type MonthRowMark = "added" | "moved" | "changed";
+export type MonthRowMark = "added" | "time" | "place" | "updated";
+
+/** Яку позначку дати оновленій зміні — та сама логіка, що й у рядку події. */
+export function updateMark(from: ScheduleMessageShift, to: ScheduleMessageShift): MonthRowMark {
+    if (from.localDate !== to.localDate) return "updated";
+    const newTime = timeLabel(from) !== timeLabel(to);
+    const newPlace = from.locationLabel !== to.locationLabel;
+    if (newTime && !newPlace) return "time";
+    if (newPlace && !newTime) return "place";
+    return "updated";
+}
 
 export type MonthRow = {
     shift: ScheduleMessageShift;
@@ -131,15 +197,15 @@ export type MonthRow = {
 };
 
 /**
- * Те, чого в списку місяця вже немає, але людина мусить про це дізнатися:
- * знята зміна, попередній вигляд зміненої, віддана через підміну.
+ * Подія над списком місяця — те, чого в самому списку не видно: знята зміна,
+ * попередній вигляд оновленої, віддана через підміну. Додані видно в списку
+ * за позначкою «нова», окремим рядком вони не дублюються.
  */
 export type MonthNote = {
-    kind: "removed" | "movedFrom" | "given";
-    shift: ScheduleMessageShift;
+    change: ShiftChange;
+    /** Дата, за якою подія стає в порядок. */
+    localDate: string;
     locationKey: string;
-    /** Для `movedFrom`: якою зміна стала — з цього видно, що саме змінилося. */
-    to?: ScheduleMessageShift;
 };
 
 /**
@@ -147,26 +213,12 @@ export type MonthNote = {
  * лише в позначених рядках, і стовпчик дат «скакав» (власник, 12.10.2026).
  * Слово зрозуміле без легенди.
  */
-const MARK_WORD: Record<MonthRowMark, string> = { added: "нова", moved: "перенесена", changed: "змінена" };
-
-/**
- * Рядок над списком — повним реченням без значків: «🔄 Було: чт 22.10» не
- * казало, що саме було і куди воно ділося (власник, 12.10.2026). Для зміненої
- * зміни називається саме те, що змінилося, а новий вигляд — у списку нижче.
- */
-function formatNote(note: MonthNote, line: (shift: ScheduleMessageShift) => string): string {
-    if (note.kind === "removed") return `Знято: ${line(note.shift)}`;
-    if (note.kind === "given") return `Підміну знайдено: ${line(note.shift)}`;
-    const to = note.to;
-    if (to === undefined) return `Знято: ${line(note.shift)}`;
-    if (to.localDate !== note.shift.localDate) {
-        return `Перенесено: ${dayLabel(note.shift.localDate)} → ${dayLabel(to.localDate)}`;
-    }
-    if (timeLabel(to) !== timeLabel(note.shift)) {
-        return `Змінено час: ${dayLabel(to.localDate)}, було ${timeLabel(note.shift)}`;
-    }
-    return `Змінено точку: ${dayLabel(to.localDate)}, було ${escapeHtml(note.shift.locationLabel)}`;
-}
+const MARK_WORD: Record<MonthRowMark, string> = {
+    added: "нова",
+    time: "новий час",
+    place: "нова точка",
+    updated: "оновлена",
+};
 
 /**
  * Повідомлення про графік одного місяця — завжди з УСІМ місяцем людини.
@@ -176,14 +228,14 @@ function formatNote(note: MonthNote, line: (shift: ScheduleMessageShift) => stri
  * весь її місяць. Читати останнє повідомлення як повний графік — природно,
  * тому тепер так і є: кожне повідомлення показує весь місяць на зараз, а нове
  * в ньому позначене. Заголовок розрізняє першу публікацію («готовий») і
- * зміну вже опублікованого («змінено»), а число завжди означає робочі дні
+ * правку вже опублікованого («оновлено»), а число завжди означає робочі дні
  * людини, ніколи — кількість подій («Всього змін: 19» при 14 знятих і 5
  * доданих).
  *
  * Локація, спільна для всіх рядків, виноситься в шапку: рядок зміни вміщується
  * в один рядок екрана телефона, і місяць видно без прокрутки. Список обрізається
  * за числом РЯДКІВ (не символів — обрубок дати гірший за чесне «та ще N»), і в
- * зміненому місяці показуються саме позначені рядки.
+ * оновленому місяці показуються саме позначені рядки.
  */
 export function formatMonthSection(input: {
     mode: "published" | "updated";
@@ -196,20 +248,20 @@ export function formatMonthSection(input: {
     const rows = input.rows
         .map((row) => (input.mode === "published" ? { ...row, mark: undefined } : row))
         .sort((left, right) => compareShifts(left.shift, right.shift));
-    const notes = [...input.notes].sort((left, right) => compareShifts(left.shift, right.shift));
+    const notes = [...input.notes].sort((left, right) => left.localDate.localeCompare(right.localDate));
     const locationKeys = new Set([...rows, ...notes].map((item) => item.locationKey));
-    const sharedLabel = locationKeys.size === 1 ? (rows[0] ?? notes[0])?.shift.locationLabel : undefined;
+    const sharedLabel = locationKeys.size === 1 ? rows[0]?.shift.locationLabel ?? noteLabel(notes[0]) : undefined;
     const withLocation = sharedLabel === undefined;
     const line = (shift: ScheduleMessageShift) => formatShiftLine(shift, { withLocation });
 
     const blocks: string[] = [
         input.mode === "published"
             ? `✅ <b>Графік на ${monthNameOf(input.monthDate)} готовий</b>`
-            : `🗓 <b>Графік на ${monthNameOf(input.monthDate)} змінено</b>`,
+            : `🗓 <b>Графік на ${monthNameOf(input.monthDate)} оновлено</b>`,
     ];
 
     if (notes.length > 0) {
-        blocks.push(notes.map((note) => formatNote(note, line)).join("\n"));
+        blocks.push(notes.map((note) => formatChangeLine(note.change, { withLocation })).join("\n"));
     }
 
     const total = rows.length;
@@ -242,6 +294,11 @@ export function formatMonthSection(input: {
     }
 
     return blocks.join("\n\n");
+}
+
+function noteLabel(note: MonthNote | undefined): string | undefined {
+    if (note === undefined) return undefined;
+    return note.change.kind === "updated" ? note.change.to.locationLabel : note.change.shift.locationLabel;
 }
 
 function compareShifts(left: ScheduleMessageShift, right: ScheduleMessageShift): number {

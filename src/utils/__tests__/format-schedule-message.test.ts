@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    formatChangeLine,
     formatMonthSection,
     formatMonthTotal,
     formatNewShiftsList,
@@ -98,6 +99,38 @@ describe("formatMonthSection", () => {
 
         expect(published).toContain("попроси підміну");
         expect(updated).not.toContain("попроси підміну");
+    });
+});
+
+describe("formatChangeLine", () => {
+    const shift = rows(1)[0]!.shift;
+    const later = { ...shift, startsAtLocal: "12:00" };
+    const elsewhere = { ...shift, locationLabel: "Dragon Park (Lviv)" };
+
+    it("пишет каждое событие одним стилем: «Что: день · точка · время», без значков", () => {
+        const lines = [
+            formatChangeLine({ kind: "added", shift }),
+            formatChangeLine({ kind: "removed", shift }),
+            formatChangeLine({ kind: "taken", shift }),
+            formatChangeLine({ kind: "given", shift }),
+            formatChangeLine({ kind: "updated", from: shift, to: later }),
+            formatChangeLine({ kind: "updated", from: shift, to: elsewhere }),
+        ];
+
+        expect(lines).toEqual([
+            "Нова зміна: вт 01.09 · Fantasy Town Черкаси · 10:00–20:00",
+            "Знято зміну: вт 01.09 · Fantasy Town Черкаси · 10:00–20:00",
+            "Зміну передано тобі: вт 01.09 · Fantasy Town Черкаси · 10:00–20:00",
+            "Підміну знайдено: вт 01.09 · Fantasy Town Черкаси · 10:00–20:00",
+            "Новий час: вт 01.09 · Fantasy Town Черкаси · 10:00–20:00 → 12:00–20:00",
+            "Нова точка: вт 01.09 · Fantasy Town Черкаси → Dragon Park (Lviv) · 10:00–20:00",
+        ]);
+    });
+
+    it("не говорит «зміна» о действии — только о рабочем дне", () => {
+        const updated = formatChangeLine({ kind: "updated", from: shift, to: later });
+
+        expect(updated).not.toMatch(/Змінено|змінена|Було|Стало/u);
     });
 });
 

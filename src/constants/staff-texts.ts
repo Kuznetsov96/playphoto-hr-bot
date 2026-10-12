@@ -603,18 +603,12 @@ Please check bot permissions (Manage Topics).`,
   "support-error-ticket-not-found": "⚠️ Ticket not found.",
   "support-info-admin-reply-to-topic": (p: { replyText: string | number }) => `💬 <b>Response:</b> \n${p.replyText}`,
   "staff-deactivated-shield": `<b>Account Inactive</b>\nAccess to PlayPhoto services has been discontinued.`,
-  "schedule-notif-normal-title": `🗓 <b>Оновлення у твоєму графіку</b>`,
-  "schedule-notif-urgent-title": `🚨 <b>Термінова зміна у графіку</b>`,
-  // Кожна подія — одне речення з рядком зміни, а не «Було/Стало» там, де
-  // сторона одна: для нової зміни «стало» ні з чого не випливає.
-  "schedule-notif-added": (p: { shift: string | number }) => `➕ Нова зміна: ${p.shift}`,
-  "schedule-notif-removed": (p: { shift: string | number }) => `➖ Знято зміну: ${p.shift}`,
-  "schedule-notif-moved-title": `🔀 Перенесено зміну`,
-  "schedule-notif-changed-title": `🔄 Змінено зміну`,
-  "schedule-notif-changed": (p: { shift: string | number }) => `🔄 Змінено зміну: ${p.shift}`,
-  // Заміни: система знає роль людини в них і каже це прямо.
-  "schedule-notif-replacement-taken": (p: { shift: string | number }) =>
-    `🔄 Зміну передано тобі: ${p.shift}`,
+  // «Зміна» в текстах графіка — лише робочий день; дія — «оновлено»: заголовок
+  // «Термінова зміна у графіку» поруч із «4 зміни» читався подвійно (12.10.2026).
+  // Рядки подій — formatChangeLine у utils/format-schedule-message.ts: один стиль
+  // і для сповіщення з місяцем, і для термінового.
+  "schedule-notif-normal-title": `🗓 <b>Графік оновлено</b>`,
+  "schedule-notif-urgent-title": `🚨 <b>Терміново: графік оновлено</b>`,
   // Для тієї, хто просила підміну, це добра новина, а не аварія: заголовок
   // «Термінова зміна у графіку» і «➖ Знято зміну» читалися як те, що зміну
   // забрали. Ім’я кажемо, бо саме його вона спитає першим — кому передати
@@ -624,12 +618,11 @@ Please check bot permissions (Manage Topics).`,
     `${p.shift}\n` +
     (p.name ? `Зміну бере ${p.name}. ` : `Зміну передано колезі. `) +
     `Цей день у тебе тепер вільний.`,
-  "schedule-notif-line-was": (p: { details: string | number }) => `Було: ${p.details}`,
-  "schedule-notif-line-now": (p: { details: string | number }) => `Стало: ${p.details}`,
-  "schedule-notif-added-unknown": `➕ Додано зміну — деталі уточнюються`,
-  "schedule-notif-removed-unknown": `➖ Знято зміну — деталі уточнюються`,
-  "schedule-notif-moved-unknown": `🔀 Перенесено зміну — деталі уточнюються`,
-  "schedule-notif-changed-unknown": `🔄 Змінено зміну — деталі уточнюються`,
+  // Без знімка зміни: обіцяти «деталі уточнюються» не можна — ніхто їх не
+  // надішле. Подробиці є лише в «Мій графік».
+  "schedule-notif-added-unknown": `Нова зміна — подробиці в «Мій графік».`,
+  "schedule-notif-removed-unknown": `Знято зміну — подробиці в «Мій графік».`,
+  "schedule-notif-updated-unknown": `Зміну оновлено — подробиці в «Мій графік».`,
   // Підсумок, коли місяць прочитати не вдалося: число подій тут не пишемо —
   // «Всього змін: 19» читалося як 19 робочих днів.
   "schedule-notif-see-schedule": `Повний графік — у «Мій графік».`,

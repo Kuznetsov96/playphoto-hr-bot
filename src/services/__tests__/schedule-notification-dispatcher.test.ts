@@ -153,7 +153,7 @@ describe("groupForDelivery", () => {
     });
 });
 
-const FALLBACK_LINE = "деталі уточнюються";
+const FALLBACK_LINE = "подробиці в «Мій графік»";
 
 /** Mirrors the backend's ScheduleNotificationShiftSnapshot contract. */
 function snapshot(overrides: Record<string, string> = {}) {
@@ -180,9 +180,10 @@ describe("renderDeliveryGroup", () => {
                 batchId: null,
                 payload: {
                     before: snapshot(),
+                    // Дату в кабінеті не змінити — лише час, точку й людину.
                     after: snapshot({
-                        startsAtLocal: "2026-08-11T12:00:00",
-                        endsAtLocal: "2026-08-11T20:00:00",
+                        startsAtLocal: "2026-08-10T12:00:00",
+                        endsAtLocal: "2026-08-10T20:00:00",
                         locationPublicId: "22222222-2222-4222-8222-222222222222",
                         locationName: "Ocean Plaza",
                         locationCity: "Київ",
@@ -199,8 +200,8 @@ describe("renderDeliveryGroup", () => {
         expect(text).toContain("10.08");
         expect(text).toContain("10:00");
         expect(text).toContain("18:00");
-        expect(text).toContain("11.08");
-        expect(text).toContain("12:00");
+        expect(text).toContain("Нова точка і час: пн 10.08 · Гулівер (Kyiv), 10:00–18:00 → Ocean Plaza (Kyiv), 12:00–20:00");
+        expect(text).not.toMatch(/Було|Стало/u);
         expect(text).toContain("20:00");
         // Причина власника — внутрішня помітка, фотографу не показується.
         expect(text).not.toContain("хвороба колеги");
@@ -349,7 +350,7 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("➕ Нова зміна: <b>сб 12.09</b> · Гулівер (Kyiv) · 10:00–20:00");
+        expect(text).toContain("Нова зміна: <b>сб 12.09</b> · Гулівер (Kyiv) · 10:00–20:00");
         expect(text).not.toContain("Стало:");
         // Дія живе в кнопці «Мій графік», текст її не дублює.
         expect(text).not.toContain("Загляни у");
@@ -431,7 +432,7 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("Оновлення у твоєму графіку");
+        expect(text).toContain("Графік оновлено");
         expect(text).not.toContain("Термінова");
         expect(text).toContain("Зміну передано тобі: ");
     });
@@ -451,8 +452,8 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("Термінова зміна у графіку");
-        expect(text).toContain("➖ Знято зміну: ");
+        expect(text).toContain("Терміново: графік оновлено");
+        expect(text).toContain("\nЗнято зміну: ");
     });
 
     it("states an urgent change as a fact: no question and no answer buttons", () => {
@@ -472,7 +473,7 @@ describe("renderDeliveryGroup", () => {
 
         const text = renderDeliveryGroup(group!);
 
-        expect(text).toContain("Термінова зміна у графіку");
+        expect(text).toContain("Терміново: графік оновлено");
         expect(text).not.toContain("Підтверди");
         const buttons = buildDeliveryKeyboard(group!).inline_keyboard.flat();
         expect(buttons.map((button) => button.text)).toEqual(["🗓 Мій графік"]);
@@ -737,7 +738,7 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         const text = renderDeliveryGroup(group, months);
 
-        expect(text).toContain("Графік на жовтень змінено");
+        expect(text).toContain("Графік на жовтень оновлено");
         expect(text).not.toContain("готовий");
         expect(text).toContain("Тепер у тебе <b>5</b> змін");
         expect(text).toContain("📍 Karamel (Atlant) (Sambir)");
@@ -776,24 +777,23 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         const text = renderDeliveryGroup(group, months);
 
-        expect(text).toContain("Графік на жовтень змінено");
-        expect(text).toContain("\nЗнято: <b>сб 03.10</b> · 14:00–20:00");
-        expect(text).toContain("\nЗнято: <b>нд 04.10</b> · 14:00–20:00");
+        expect(text).toContain("Графік на жовтень оновлено");
+        expect(text).toContain("\nЗнято зміну: <b>сб 03.10</b> · 14:00–20:00");
+        expect(text).toContain("\nЗнято зміну: <b>нд 04.10</b> · 14:00–20:00");
         expect(text).toContain("Тепер у тебе <b>2</b> зміни");
         expect(text).toContain("\n<b>сб 10.10</b> · 14:00–20:00 · нова");
         expect(text).not.toMatch(/<b>3<\/b>/u);
     });
 
-    it("says where a moved shift went, and marks it in the month", () => {
+    it("names a new date only for a change made around the owner's form, which cannot move a date", () => {
         const group = batch([{ kind: "SHIFT_MOVED", before: "2026-10-13", after: "2026-10-14" }]);
         const months = monthOf("2026-10", [["2026-10-14"], ["2026-10-20"]]);
 
         const text = renderDeliveryGroup(group, months);
 
-        expect(text).toContain("Перенесено: вт 13.10 → ср 14.10");
-        expect(text).toContain("\nср 14.10 · 14:00–20:00 · перенесена");
-        expect(text).not.toMatch(/Було|🔄|➖/u);
-        expect(text).not.toContain("Стало");
+        expect(text).toContain("Нова дата: вт 13.10 → ср 14.10 · 14:00–20:00");
+        expect(text).toContain("\nср 14.10 · 14:00–20:00 · оновлена");
+        expect(text).not.toMatch(/Було|Стало|🔄|➖|перенес/u);
     });
 
     it("names exactly what changed when the date stays: the time, or the venue", () => {
@@ -802,16 +802,18 @@ describe("renderDeliveryGroup with the person's month", () => {
             payload: { before: sambirSnapshot("2026-10-14"), after: sambirSnapshot("2026-10-14", "12:00") },
         }]);
         const time = renderDeliveryGroup(timeGroup!, monthOf("2026-10", [["2026-10-14", "12:00"]]));
-        expect(time).toContain("Змінено час: ср 14.10, було 14:00–20:00");
-        expect(time).toContain("\nср 14.10 · 12:00–20:00 · змінена");
+        expect(time).toContain("Новий час: ср 14.10 · 14:00–20:00 → 12:00–20:00");
+        expect(time).toContain("\nср 14.10 · 12:00–20:00 · новий час");
 
         const [venueGroup] = groupForDelivery([{
             publicId: "a", employeePublicId: "e1", telegramId: "100", changeKind: "SHIFT_MOVED", urgency: "NORMAL", batchId: "b1",
             payload: { before: sambirSnapshot("2026-10-14", "10:00", "20:00", DRAGON), after: sambirSnapshot("2026-10-14", "10:00") },
         }]);
         const venue = renderDeliveryGroup(venueGroup!, monthOf("2026-10", [["2026-10-14", "10:00"]]));
-        expect(venue).toContain("Змінено точку: ср 14.10, було Dragon Park (Lviv)");
-        expect(venue).toContain("ср 14.10 · Karamel (Atlant) (Sambir) · 10:00–20:00 · змінена");
+        expect(venue).toContain("Нова точка: ср 14.10 · Dragon Park (Lviv) → Karamel (Atlant) (Sambir) · 10:00–20:00");
+        // Точка тепер одна на весь місяць — вона в шапці, а рядок лишається коротким.
+        expect(venue).toContain("📍 Karamel (Atlant) (Sambir)");
+        expect(venue).toContain("\nср 14.10 · 10:00–20:00 · нова точка");
     });
 
     it("shows a shift the owner reassigned to her as new, without someone else's «Було»", () => {
@@ -893,7 +895,7 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         const text = renderDeliveryGroup(group, months);
 
-        expect(text).toContain("Графік на жовтень змінено");
+        expect(text).toContain("Графік на жовтень оновлено");
         expect(text).toContain("Графік на листопад готовий");
         expect(text.indexOf("жовтень")).toBeLessThan(text.indexOf("листопад"));
     });
@@ -903,8 +905,9 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         const text = renderDeliveryGroup(group, monthOf("2026-10", [["2026-10-20"], ["2026-10-21"], ["2026-10-26"], ["2026-10-27"]]));
 
-        expect(text).toContain("Термінова зміна у графіку");
-        expect(text).toContain("➖ Знято зміну:");
+        expect(text).toContain("Терміново: графік оновлено");
+        expect(text).toContain("\nЗнято зміну:");
+        expect(text).not.toMatch(/➖|➕|🔄|🔀/u);
         expect(text).toContain("Тепер у тебе в жовтні <b>4</b> зміни.");
         expect(text).not.toContain("➕");
     });
@@ -926,7 +929,8 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         const lines = text.split("\n").filter(line => /\d{2}\.\d{2}/u.test(line));
         expect(lines.length).toBeGreaterThan(0);
-        for (const line of lines) expect(visible(line).length).toBeLessThanOrEqual(34);
+        // На скрині 12.10 у рядок iPhone вміщалося «пн 12.10 · Karamel (Atlant) (Sambir) ·» — 38 знаків.
+        for (const line of lines) expect(visible(line).length).toBeLessThanOrEqual(38);
         expect(text.split("\n").length).toBeLessThanOrEqual(20);
     });
 });
