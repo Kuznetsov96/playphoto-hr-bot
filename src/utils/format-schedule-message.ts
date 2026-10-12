@@ -134,8 +134,12 @@ export type MonthNote = {
     locationKey: string;
 };
 
-const MARK_PREFIX: Record<MonthRowMark, string> = { added: "➕ ", moved: "🔄 " };
-const MARK_LEGEND: Record<MonthRowMark, string> = { added: "➕ — нова", moved: "🔄 — змінена" };
+/**
+ * Позначка — словом у кінці рядка, а не значком попереду: значок зсував дату
+ * лише в позначених рядках, і стовпчик дат «скакав» (власник, 12.10.2026).
+ * Слово зрозуміле без легенди.
+ */
+const MARK_WORD: Record<MonthRowMark, string> = { added: "нова", moved: "змінена" };
 const NOTE_PREFIX: Record<MonthNote["kind"], string> = {
     removed: "➖ Знято: ",
     movedFrom: "🔄 Було: ",
@@ -207,14 +211,9 @@ export function formatMonthSection(input: {
             : input.mode === "updated" && marked.length > 0
             ? marked.slice(0, LIST_HEAD)
             : rows.slice(0, LIST_HEAD);
-    const list = shown.map((row) => `${row.mark ? MARK_PREFIX[row.mark] : ""}${line(row.shift)}`);
+    const list = shown.map((row) => (row.mark ? `${line(row.shift)} · ${MARK_WORD[row.mark]}` : line(row.shift)));
     if (shown.length < total) list.push(`та ще ${total - shown.length} — у «Мій графік»`);
     blocks.push(list.join("\n"));
-
-    const legend = (Object.keys(MARK_LEGEND) as MonthRowMark[])
-        .filter((mark) => shown.some((row) => row.mark === mark))
-        .map((mark) => MARK_LEGEND[mark]);
-    if (legend.length > 0) blocks.push(legend.join(" · "));
 
     if (input.mode === "published") {
         blocks.push("Якщо якийсь день не підійде — відкрий «Мій графік» і попроси підміну.");

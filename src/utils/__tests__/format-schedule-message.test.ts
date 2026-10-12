@@ -22,7 +22,7 @@ function rows(count: number, location = "Fantasy Town Черкаси"): MonthRow
 
 /** Рядки списку починаються з дня тижня (можливо, після позначки). */
 const listRows = (text: string) =>
-    text.split("\n").filter((row) => /^(➕ |🔄 )?(<b>)?(нд|пн|вт|ср|чт|пт|сб) /u.test(row));
+    text.split("\n").filter((row) => /^(<b>)?(нд|пн|вт|ср|чт|пт|сб) /u.test(row));
 
 describe("formatMonthSection", () => {
     it("перечисляет весь месяц, когда смен немного", () => {
@@ -55,7 +55,7 @@ describe("formatMonthSection", () => {
         month[18]!.mark = "added";
         const text = formatMonthSection({ mode: "updated", monthDate: "2026-09-01", rows: month, notes: [] });
 
-        expect(text).toContain("➕ <b>сб 19.09</b>");
+        expect(text).toContain("<b>сб 19.09</b> · 10:00–20:00 · нова");
         expect(text).toContain("та ще 19 — у «Мій графік»");
     });
 
@@ -78,7 +78,7 @@ describe("formatMonthSection", () => {
         const month = rows(2).map((row) => ({ ...row, mark: "added" as const }));
         const text = formatMonthSection({ mode: "published", monthDate: "2026-09-01", rows: month, notes: [] });
 
-        expect(text).not.toContain("➕");
+        expect(text).not.toContain("нова");
     });
 
     it("экранирует название локации: результат уходит в Telegram как HTML", () => {

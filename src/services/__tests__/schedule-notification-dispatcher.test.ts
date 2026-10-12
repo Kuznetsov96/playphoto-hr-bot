@@ -741,10 +741,10 @@ describe("renderDeliveryGroup with the person's month", () => {
         expect(text).not.toContain("готовий");
         expect(text).toContain("Тепер у тебе <b>5</b> змін");
         expect(text).toContain("📍 Karamel (Atlant) (Sambir)");
-        expect(text).toContain("➕ вт 20.10 · 14:00–20:00");
-        expect(text).toContain("➕ вт 27.10 · 14:00–20:00");
+        expect(text).toContain("\nвт 20.10 · 14:00–20:00 · нова");
+        expect(text).toContain("\nвт 27.10 · 14:00–20:00 · нова");
         expect(text).toContain("\nпн 12.10 · 14:00–20:00");
-        expect(text).toContain("➕ — нова");
+        expect(text).not.toContain("➕");
         expect(text.indexOf("12.10")).toBeLessThan(text.indexOf("20.10"));
     });
 
@@ -760,7 +760,7 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         expect(text).toContain("Графік на жовтень готовий");
         expect(text).toContain("У тебе <b>3</b> зміни · у вихідні: <b>1</b>");
-        expect(text).not.toContain("➕");
+        expect(text).not.toContain("нова");
         expect(text).toContain("<b>нд 18.10</b> · 14:00–20:00");
         expect(text).toContain("попроси підміну");
     });
@@ -780,7 +780,7 @@ describe("renderDeliveryGroup with the person's month", () => {
         expect(text).toContain("➖ Знято: <b>сб 03.10</b> · 14:00–20:00");
         expect(text).toContain("➖ Знято: <b>нд 04.10</b> · 14:00–20:00");
         expect(text).toContain("Тепер у тебе <b>2</b> зміни");
-        expect(text).toContain("➕ <b>сб 10.10</b> · 14:00–20:00");
+        expect(text).toContain("\n<b>сб 10.10</b> · 14:00–20:00 · нова");
         expect(text).not.toMatch(/<b>3<\/b>/u);
     });
 
@@ -791,8 +791,8 @@ describe("renderDeliveryGroup with the person's month", () => {
         const text = renderDeliveryGroup(group, months);
 
         expect(text).toContain("🔄 Було: вт 13.10 · 14:00–20:00");
-        expect(text).toContain("🔄 ср 14.10 · 14:00–20:00");
-        expect(text).toContain("🔄 — змінена");
+        expect(text).toContain("\nср 14.10 · 14:00–20:00 · змінена");
+        expect(text).not.toMatch(/^🔄 ср/mu);
         expect(text).not.toContain("Стало");
     });
 
@@ -805,7 +805,7 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         const text = renderDeliveryGroup(group, months);
 
-        expect(text).toContain("➕ ср 14.10 · 14:00–20:00");
+        expect(text).toContain("\nср 14.10 · 14:00–20:00 · нова");
         expect(text).not.toContain("Було");
     });
 
@@ -832,7 +832,7 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         expect(text).not.toContain("📍");
         expect(text).toContain("пн 12.10 · Dragon Park (Lviv) · 10:00–20:00");
-        expect(text).toContain("➕ вт 20.10 · Karamel (Atlant) (Sambir) · 14:00–20:00");
+        expect(text).toContain("вт 20.10 · Karamel (Atlant) (Sambir) · 14:00–20:00 · нова");
     });
 
     it("in a long changed month shows the marked lines and says how many are not shown", () => {
@@ -845,8 +845,8 @@ describe("renderDeliveryGroup with the person's month", () => {
         const text = renderDeliveryGroup(group, monthOf("2026-10", days.map(day => [day] as [string])));
 
         expect(text).toContain("Тепер у тебе <b>20</b> змін");
-        expect(text).toContain("➕ пн 19.10");
-        expect(text).toContain("➕ вт 20.10");
+        expect(text).toContain("пн 19.10 · 14:00–20:00 · нова");
+        expect(text).toContain("вт 20.10 · 14:00–20:00 · нова");
         expect(text).not.toContain("01.10");
         expect(text).toContain("та ще 18 — у «Мій графік»");
     });
@@ -877,6 +877,15 @@ describe("renderDeliveryGroup with the person's month", () => {
         expect(text).toContain("➖ Знято зміну:");
         expect(text).toContain("Тепер у тебе в жовтні <b>4</b> зміни.");
         expect(text).not.toContain("➕");
+    });
+
+    it("keeps the date column straight: every list line starts with the weekday", () => {
+        const group = batch([{ kind: "SHIFT_ADDED", after: "2026-10-20" }, { kind: "SHIFT_MOVED", before: "2026-10-22", after: "2026-10-23" }]);
+        const text = renderDeliveryGroup(group, monthOf("2026-10", [["2026-10-12"], ["2026-10-20"], ["2026-10-23"]]));
+
+        const list = text.split("\n").filter(line => /\d{2}\.\d{2} · \d{2}:\d{2}/u.test(line) && !line.includes(":"+" "));
+        expect(list).toHaveLength(3);
+        for (const line of list) expect(line).toMatch(/^(<b>)?(пн|вт|ср|чт|пт|сб|нд) /u);
     });
 
     it("fits a phone: every list line of a single-venue month stays short", () => {
