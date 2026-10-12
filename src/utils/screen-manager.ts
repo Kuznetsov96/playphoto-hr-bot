@@ -33,7 +33,19 @@ export class ScreenManager {
         ctx: MyContext, 
         text: string, 
         reply_markup?: any, 
-        options: { pushToStack?: boolean; forceNew?: boolean; photoId?: string | null; manualMenuId?: string } | boolean = {}
+        options: {
+            pushToStack?: boolean;
+            forceNew?: boolean;
+            photoId?: string | null;
+            manualMenuId?: string;
+            /**
+             * Не чіпати повідомлення, під яким натиснули кнопку: новий екран іде
+             * окремим повідомленням. Для кнопок під сповіщеннями — без цього
+             * «🗓 Мій графік» переписував саме сповіщення про графік меню, і
+             * людина втрачала текст, який хотіла звірити (аудит 12.10.2026).
+             */
+            keepTapped?: boolean;
+        } | boolean = {}
     ) {
         const chatId = ctx.chat?.id;
         if (!chatId) return;
@@ -42,6 +54,7 @@ export class ScreenManager {
         let forceNew = false;
         let photoId: string | null = null;
         let manualMenuId: string | null = null;
+        let keepTapped = false;
 
         if (typeof options === 'boolean') {
             forceNew = options;
@@ -50,6 +63,8 @@ export class ScreenManager {
             forceNew = options.forceNew || false;
             photoId = options.photoId || null;
             manualMenuId = options.manualMenuId || null;
+            keepTapped = options.keepTapped || false;
+            if (keepTapped) forceNew = true;
         }
 
         // 1. Manage Navigation Stack
@@ -120,7 +135,9 @@ export class ScreenManager {
                     reply_markup: markup || undefined,
                     link_preview_options: { is_disabled: true }
                 });
-            } else {                if (ctx.callbackQuery && ctx.callbackQuery.message) {
+            } else {
+                // keepTapped: сповіщення, під яким натиснули, лишається в чаті як є.
+                if (!keepTapped && ctx.callbackQuery && ctx.callbackQuery.message) {
                     await ctx.api.deleteMessage(chatId, ctx.callbackQuery.message.message_id).catch(() => {});
                 } else if (previousMsgId) {
                     await ctx.api.deleteMessage(chatId, previousMsgId).catch(() => {});

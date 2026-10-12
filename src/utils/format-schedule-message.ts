@@ -110,14 +110,43 @@ export function shiftsWord(count: number): string {
 }
 
 /**
- * «Тепер у тебе в жовтні 4 зміни.» — підсумок місяця під повідомленням про
+ * «Тепер у тебе в листопаді 4 зміни.» — підсумок місяця під повідомленням про
  * окрему подію (термінова зміна, підміна). Без нього людина не знає, чи
  * лишилося в неї щось у цьому місяці, і звіряє з попередніми повідомленнями.
+ *
+ * Рахуються лише зміни від сьогодні — як і в «Мій графік», де минулих днів
+ * немає. Тому в поточному місяці — «Попереду»: «у тебе 4» при трьох видимих
+ * у «Мій графік» було б новою розбіжністю.
  */
-export function formatMonthTotal(localDate: string, count: number): string {
+export function formatMonthTotal(localDate: string, count: number, current: boolean): string {
     const month = monthLocativeOf(localDate);
+    if (current) {
+        return count === 0
+            ? `До кінця ${monthGenitiveOf(localDate)} змін у тебе немає.`
+            : `Попереду в ${month} <b>${count}</b> ${shiftsWord(count)}.`;
+    }
     if (count === 0) return `У ${month} змін у тебе більше немає.`;
     return `Тепер у тебе в ${month} <b>${count}</b> ${shiftsWord(count)}.`;
+}
+
+/** «До кінця жовтня» — родовий відмінок. */
+const MONTHS_UK_GENITIVE = [
+    "січня",
+    "лютого",
+    "березня",
+    "квітня",
+    "травня",
+    "червня",
+    "липня",
+    "серпня",
+    "вересня",
+    "жовтня",
+    "листопада",
+    "грудня",
+] as const;
+
+function monthGenitiveOf(localDate: string): string {
+    return MONTHS_UK_GENITIVE[Number(localDate.slice(5, 7)) - 1] ?? "";
 }
 
 /**
@@ -241,8 +270,11 @@ export function formatMonthSection(input: {
     mode: "published" | "updated";
     /** Будь-яка дата цього місяця — з неї беруться назви місяця. */
     monthDate: string;
+    /** Зміни від сьогодні — минулих днів немає і в «Мій графік». */
     rows: MonthRow[];
     notes: MonthNote[];
+    /** Місяць уже йде: підсумок — «Попереду», а не «у тебе». */
+    current?: boolean;
 }): string {
     // У першій публікації нове все, тож позначки там лише шум.
     const rows = input.rows
@@ -266,14 +298,14 @@ export function formatMonthSection(input: {
 
     const total = rows.length;
     if (total === 0) {
-        blocks.push(`У ${monthLocativeOf(input.monthDate)} змін у тебе більше немає.`);
+        blocks.push(formatMonthTotal(input.monthDate, 0, input.current === true));
         return blocks.join("\n\n");
     }
 
     const weekends = rows.filter((row) => isWeekend(row.shift.localDate)).length;
     const count = `<b>${total}</b> ${shiftsWord(total)}`;
     const summary = [
-        `${input.mode === "published" ? "У тебе" : "Тепер у тебе"} ${count}${weekends > 0 ? ` · у вихідні: <b>${weekends}</b>` : ""}`,
+        `${input.current === true ? "Попереду" : input.mode === "published" ? "У тебе" : "Тепер у тебе"} ${count}${weekends > 0 ? ` · у вихідні: <b>${weekends}</b>` : ""}`,
     ];
     if (sharedLabel !== undefined) summary.push(`📍 ${escapeHtml(sharedLabel)}`);
     blocks.push(summary.join("\n"));
@@ -290,7 +322,10 @@ export function formatMonthSection(input: {
     blocks.push(list.join("\n"));
 
     if (input.mode === "published") {
-        blocks.push("Якщо якийсь день не підійде — відкрий «Мій графік» і попроси підміну.");
+        // Підміну просять кнопкою «Шукати підміну» (вона під повідомленням і в
+        // меню), а не в «Мій графік»: там лише список, без дій. Стара фраза
+        // посилала людину на екран, де підміни немає.
+        blocks.push("Якщо якийсь день не підійде — натисни «Шукати підміну».");
     }
 
     return blocks.join("\n\n");

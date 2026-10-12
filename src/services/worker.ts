@@ -1,4 +1,5 @@
 import logger from "../core/logger.js";
+import { SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK } from "../constants/schedule-notification-callbacks.js";
 import { InlineKeyboard, Bot } from "grammy";
 import type { MyContext } from "../types/context.js";
 import prisma from "../db/core.js";
@@ -1316,7 +1317,7 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                 if (totalTasks > 0) {
                     kb.text("📋 Мої завдання", "staff_hub_tasks_redirect");
                 } else {
-                    kb.text("🗓 Мій графік", "staff_hub_nav"); // Will show hub which shows today's shift
+                    kb.text("🗓 Мій графік", SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK);
                 }
 
                 await bot.api.sendMessage(Number(s.user.telegramId), text, {

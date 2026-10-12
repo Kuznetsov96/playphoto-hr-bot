@@ -10,6 +10,12 @@ describe("schedule month context", () => {
         expect(monthWindow("2026-12")).toEqual({ from: "2026-12-01", to: "2026-12-31" });
     });
 
+    it("starts the running month today, as «Мій графік» does, and skips a month that is over", () => {
+        expect(monthWindow("2026-10", "2026-10-15")).toEqual({ from: "2026-10-15", to: "2026-10-31" });
+        expect(monthWindow("2026-11", "2026-10-15")).toEqual({ from: "2026-11-01", to: "2026-11-30" });
+        expect(monthWindow("2026-09", "2026-10-15")).toBeNull();
+    });
+
     it("reads instants in Kyiv time and builds the same key as an event snapshot", () => {
         const [row] = toMonthShifts(
             [{

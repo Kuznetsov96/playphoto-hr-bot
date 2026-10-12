@@ -8,6 +8,7 @@
  * `defaultReplacementCallbackDeps`.
  */
 import { InlineKeyboard } from "grammy";
+import { SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK } from "../constants/schedule-notification-callbacks.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { logBusinessEvent } from "../core/log-events.js";
@@ -190,7 +191,7 @@ export async function undoAcceptanceCallback(
     if (outcome === "window_closed") {
         await ctx
             .editMessageReplyMarkup({
-                reply_markup: new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav"),
+                reply_markup: new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK),
             })
             .catch(() => { });
         await ctx.answerCallbackQuery({ text: STAFF_TEXTS["staff-replacement-undo-ans-window-closed"], show_alert: true });

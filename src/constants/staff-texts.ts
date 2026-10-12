@@ -627,6 +627,8 @@ Please check bot permissions (Manage Topics).`,
   // «Всього змін: 19» читалося як 19 робочих днів.
   "schedule-notif-see-schedule": `Повний графік — у «Мій графік».`,
   "schedule-notif-btn-schedule": `🗓 Мій графік`,
+  // Та сама назва, що в меню: людина шукає підміну під одним іменем.
+  "schedule-notif-btn-replacement": `🔁 Шукати підміну`,
   "schedule-notif-ans-confirmed": `Дякуємо! Підтвердження записали 💛`,
   "schedule-notif-ans-declined": `Дякуємо, відповідь записали. Щоб змінити цю зміну, напиши в підтримку.`,
   "schedule-notif-ans-expired": `Це сповіщення вже неактуальне.`,

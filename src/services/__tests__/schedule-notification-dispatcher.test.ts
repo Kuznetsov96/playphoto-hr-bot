@@ -606,7 +606,7 @@ describe("renderDeliveryGroup", () => {
 });
 
 describe("buildDeliveryKeyboard", () => {
-    it("gives urgent and normal messages the same single button — nobody reads acknowledgements", () => {
+    it("gives no acknowledgement buttons; a whole-month message also offers a replacement", () => {
         const [urgent] = groupForDelivery([
             {
                 publicId: "a",
@@ -633,8 +633,28 @@ describe("buildDeliveryKeyboard", () => {
         const urgentButtons = buildDeliveryKeyboard(urgent!).inline_keyboard.flat();
         expect(urgentButtons.map(button => button.text)).toEqual(["🗓 Мій графік"]);
 
+        // Опублікований місяць називає цю кнопку в тексті — вона мусить бути під ним.
         const normalButtons = buildDeliveryKeyboard(normal!).inline_keyboard.flat();
-        expect(normalButtons.map(button => button.text)).toEqual(["🗓 Мій графік"]);
+        expect(normalButtons.map(button => button.text)).toEqual(["🗓 Мій графік", "🔁 Шукати підміну"]);
+    });
+
+    // «🗓 Мій графік» вела в меню (staff_hub_nav) і переписувала саме сповіщення.
+    it("opens the schedule itself, never the menu, from under a notification", () => {
+        const [group] = groupForDelivery([
+            {
+                publicId: "a",
+                employeePublicId: "e1",
+                telegramId: "100",
+                changeKind: "SHIFT_REMOVED",
+                urgency: "URGENT",
+                batchId: null,
+                payload: {},
+            },
+        ]);
+
+        const [schedule] = buildDeliveryKeyboard(group!).inline_keyboard.flat();
+
+        expect(schedule).toMatchObject({ text: "🗓 Мій графік", callback_data: "sched_notif_schedule" });
     });
 
     // Кнопка скасування переїхала на саму карточку оффера (replacement-callbacks.ts):
@@ -763,7 +783,7 @@ describe("renderDeliveryGroup with the person's month", () => {
         expect(text).toContain("У тебе <b>3</b> зміни · у вихідні: <b>1</b>");
         expect(text).not.toContain("нова");
         expect(text).toContain("<b>нд 18.10</b> · 14:00–20:00");
-        expect(text).toContain("попроси підміну");
+        expect(text).toContain("натисни «Шукати підміну»");
     });
 
     it("lists removed shifts above the month and counts only what is left", () => {
@@ -898,6 +918,23 @@ describe("renderDeliveryGroup with the person's month", () => {
         expect(text).toContain("Графік на жовтень оновлено");
         expect(text).toContain("Графік на листопад готовий");
         expect(text.indexOf("жовтень")).toBeLessThan(text.indexOf("листопад"));
+    });
+
+    it("in the running month counts only days ahead, as «Мій графік» shows them", () => {
+        const group = batch([{ kind: "SHIFT_ADDED", after: "2026-10-20" }, { kind: "SHIFT_ADDED", after: "2026-10-27" }]);
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", [["2026-10-20"], ["2026-10-21"], ["2026-10-27"]]), "2026-10-15");
+
+        expect(text).toContain("Попереду <b>3</b> зміни");
+        expect(text).not.toContain("Тепер у тебе");
+    });
+
+    it("ends an urgent change in the running month with what is ahead", () => {
+        const group = batch([{ kind: "SHIFT_REMOVED", before: "2026-10-16" }], "URGENT");
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", [["2026-10-20"], ["2026-10-26"]]), "2026-10-15");
+
+        expect(text).toContain("Попереду в жовтні <b>2</b> зміни.");
     });
 
     it("ends an urgent change with the month total instead of a list", () => {

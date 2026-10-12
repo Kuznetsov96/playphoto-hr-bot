@@ -18,6 +18,11 @@ import {
     type ScheduleMessageShift
 } from "../utils/format-schedule-message.js";
 import { loadMonthContext, shiftKey, type MonthContext } from "./schedule-month-context.js";
+import { kyivDateStr } from "../utils/format-deadline.js";
+import {
+    SCHEDULE_NOTIFICATION_REPLACEMENT_CALLBACK,
+    SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK
+} from "../constants/schedule-notification-callbacks.js";
 import {
     awsBusinessClient,
     type AwsScheduleNotification,
@@ -117,13 +122,12 @@ export function groupForDelivery(
  */
 export function renderDeliveryGroup(
     group: ScheduleNotificationDeliveryGroup,
-    months: MonthContext | null = null
+    months: MonthContext | null = null,
+    /** Київське «сьогодні» `YYYY-MM-DD`: місяць, що вже йде, рахується «Попереду». */
+    today: string | null = null
 ): string {
-    const replacementOnly = group.notifications.every(
-        notification => isReplacementGiven(notification) || isReplacementTaken(notification)
-    );
-    if (months !== null && group.urgency === "NORMAL" && !replacementOnly) {
-        const sections = renderMonthSections(group, months);
+    if (months !== null && usesMonthFormat(group)) {
+        const sections = renderMonthSections(group, months, today);
         if (sections !== null) return sections;
     }
 
@@ -156,13 +160,27 @@ export function renderDeliveryGroup(
     if (months !== null) {
         for (const month of monthsOf(group)) {
             const rows = months.get(month);
-            if (rows !== undefined) lines.push(formatMonthTotal(`${month}-01`, rows.length));
+            if (rows !== undefined) lines.push(formatMonthTotal(`${month}-01`, rows.length, isCurrent(month, today)));
         }
     } else if (group.notifications.length > 1) {
         lines.push(STAFF_TEXTS["schedule-notif-see-schedule"]);
     }
 
     return lines.join("\n").trimEnd();
+}
+
+/**
+ * Normal changes show the whole month; urgent changes and replacement outcomes
+ * stay one sentence per event with the month total.
+ */
+function usesMonthFormat(group: ScheduleNotificationDeliveryGroup): boolean {
+    return group.urgency === "NORMAL" && !group.notifications.every(
+        notification => isReplacementGiven(notification) || isReplacementTaken(notification)
+    );
+}
+
+function isCurrent(month: string, today: string | null): boolean {
+    return today !== null && today.slice(0, 7) === month;
 }
 
 /** `YYYY-MM` of every shift a group touches, before and after, in order. */
@@ -189,7 +207,8 @@ export function monthsOf(group: ScheduleNotificationDeliveryGroup): string[] {
  */
 function renderMonthSections(
     group: ScheduleNotificationDeliveryGroup,
-    months: MonthContext
+    months: MonthContext,
+    today: string | null
 ): string | null {
     const sections = new Map<string, { rows: MonthRow[]; byKey: Map<string, MonthRow>; notes: MonthNote[] }>();
     const sectionOf = (month: string) => {
@@ -265,7 +284,8 @@ function renderMonthSections(
                 : "updated",
             monthDate: `${month}-01`,
             rows: section.rows,
-            notes: section.notes
+            notes: section.notes,
+            current: isCurrent(month, today)
         }))
         .join("\n\n");
 }
@@ -421,14 +441,23 @@ export function isAcceptanceEcho(notification: AwsScheduleNotification): boolean
 }
 
 /**
- * One keyboard for every schedule message: "My schedule". The undo button
- * moved to the offer card itself (09.10.2026). Urgent messages differ only by
- * title — the acknowledgement buttons were removed on 29.08.2026 because
- * nobody reads the answers; the `snack`/`sndec` handlers stay for messages
- * already sitting in chats.
+ * Buttons under a schedule message. Each opens exactly what it says, as a new
+ * message, and leaves the notification in the chat: «🗓 Мій графік» used to
+ * open the main menu in place of the notification itself, so the text a
+ * person wanted to compare against was gone (audit 12.10.2026). A message
+ * with the whole month also offers «Шукати підміну» — the published one names
+ * that button. Urgent changes have no acknowledgement buttons since
+ * 29.08.2026; the undo button lives on the offer card (09.10.2026).
  */
-export function buildDeliveryKeyboard(_group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
-    return new InlineKeyboard().text(STAFF_TEXTS["schedule-notif-btn-schedule"], "staff_hub_nav");
+export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup): InlineKeyboard {
+    const keyboard = new InlineKeyboard().text(
+        STAFF_TEXTS["schedule-notif-btn-schedule"],
+        SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK
+    );
+    if (usesMonthFormat(group)) {
+        keyboard.row().text(STAFF_TEXTS["schedule-notif-btn-replacement"], SCHEDULE_NOTIFICATION_REPLACEMENT_CALLBACK);
+    }
+    return keyboard;
 }
 
 /**
@@ -636,9 +665,10 @@ export class ScheduleNotificationDispatcher {
 
         // Увесь місяць людини на зараз — з того ж джерела, що «Мій графік».
         // Збій читання не зупиняє доставку: текст тоді називає лише події.
+        const today = kyivDateStr(new Date());
         let months: MonthContext | null = null;
         try {
-            months = await loadMonthContext(group.employeePublicId, monthsOf(group));
+            months = await loadMonthContext(group.employeePublicId, monthsOf(group), today);
         } catch (error) {
             logBusinessEvent({
                 event: "bot.schedule_notifications.month_read_failed",
@@ -655,7 +685,7 @@ export class ScheduleNotificationDispatcher {
         }
 
         try {
-            await api.sendMessage(Number(group.telegramId), renderDeliveryGroup(group, months), {
+            await api.sendMessage(Number(group.telegramId), renderDeliveryGroup(group, months, today), {
                 parse_mode: "HTML",
                 reply_markup: buildDeliveryKeyboard(group)
             });

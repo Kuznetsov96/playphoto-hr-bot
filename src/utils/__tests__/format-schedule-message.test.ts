@@ -97,8 +97,8 @@ describe("formatMonthSection", () => {
         const published = formatMonthSection({ mode: "published", monthDate: "2026-09-01", rows: rows(2), notes: [] });
         const updated = formatMonthSection({ mode: "updated", monthDate: "2026-09-01", rows: rows(2), notes: [] });
 
-        expect(published).toContain("попроси підміну");
-        expect(updated).not.toContain("попроси підміну");
+        expect(published).toContain("натисни «Шукати підміну»");
+        expect(updated).not.toContain("Шукати підміну");
     });
 });
 
@@ -151,8 +151,13 @@ describe("подписи", () => {
     });
 
     it("подводит итог месяца в местном падеже", () => {
-        expect(formatMonthTotal("2026-10-01", 4)).toBe("Тепер у тебе в жовтні <b>4</b> зміни.");
-        expect(formatMonthTotal("2026-11-01", 0)).toBe("У листопаді змін у тебе більше немає.");
+        expect(formatMonthTotal("2026-11-01", 4, false)).toBe("Тепер у тебе в листопаді <b>4</b> зміни.");
+        expect(formatMonthTotal("2026-11-01", 0, false)).toBe("У листопаді змін у тебе більше немає.");
+    });
+
+    it("в идущем месяце считает только то, что впереди — как «Мій графік»", () => {
+        expect(formatMonthTotal("2026-10-01", 2, true)).toBe("Попереду в жовтні <b>2</b> зміни.");
+        expect(formatMonthTotal("2026-10-01", 0, true)).toBe("До кінця жовтня змін у тебе немає.");
     });
 
     it("без месяца не называет числа и не говорит «готовий»", () => {

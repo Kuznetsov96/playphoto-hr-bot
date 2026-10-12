@@ -1,4 +1,5 @@
 import { Composer, InlineKeyboard, type NextFunction } from "grammy";
+import { SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK } from "../../constants/schedule-notification-callbacks.js";
 import type { MyContext } from "../../types/context.js";
 import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { getUserAdminRole } from "../../middleware/role-check.js";
@@ -142,8 +143,10 @@ async function handleSyncOtherSheet(ctx: MyContext, text: string) {
             });
             for (const s of staffToNotify) {
                 if (!s.user) continue;
-                const updateMsg = `📅 <b>Графік оновлено!</b>\n\nПереглянь свої зміни — можливо, є зміни у датах чи локації. ✨`;
-                const updateKb = new InlineKeyboard().text("🗓 Мій графік", "staff_hub_nav");
+                // «Переглянь свої зміни — можливо, є зміни у датах» читалося
+                // подвійно: «зміна» в текстах графіка — лише робочий день.
+                const updateMsg = `🗓 <b>Графік оновлено</b>\n\nАктуальні дати й точки — у «Мій графік».`;
+                const updateKb = new InlineKeyboard().text("🗓 Мій графік", SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK);
                 await ctx.api.sendMessage(Number(s.user.telegramId), updateMsg, { parse_mode: "HTML", reply_markup: updateKb }).catch(() => { });
                 staffNotified++;
             }

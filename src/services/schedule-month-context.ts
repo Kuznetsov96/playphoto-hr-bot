@@ -22,11 +22,17 @@ export function shiftKey(locationPublicId: string, localDate: string, startsAt: 
     return `${locationPublicId}|${localDate}|${startsAt}`;
 }
 
-/** `2026-10` -> `{ from: 2026-10-01, to: 2026-10-31 }`. */
-export function monthWindow(month: string): { from: string; to: string } {
+/**
+ * `2026-10` -> `{ from: 2026-10-01, to: 2026-10-31 }`; з `today` початок не
+ * раніше сьогодні — минулих днів немає і в «Мій графік». Null — місяць минув.
+ */
+export function monthWindow(month: string, today?: string): { from: string; to: string } | null {
     const [year, monthNumber] = month.split("-").map(Number) as [number, number];
     const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
-    return { from: `${month}-01`, to: `${month}-${String(lastDay).padStart(2, "0")}` };
+    const first = `${month}-01`;
+    const to = `${month}-${String(lastDay).padStart(2, "0")}`;
+    const from = today !== undefined && today > first ? today : first;
+    return from > to ? null : { from, to };
 }
 
 /** Миттєвість -> `14:00` за київським часом: усі локації мережі в Україні. */
@@ -77,9 +83,17 @@ export function toMonthShifts(
  * same source as «Мій графік», so the message and the screen cannot disagree.
  * Throws on any failure; the caller falls back to the event-only text.
  */
-export async function loadMonthContext(employeePublicId: string, months: string[]): Promise<MonthContext> {
+export async function loadMonthContext(
+    employeePublicId: string,
+    months: string[],
+    /** Київське «сьогодні»: минулі дні не рахуються, як і в «Мій графік». */
+    today: string
+): Promise<MonthContext> {
     const schedules = await Promise.all(months.map(async month => {
-        const { from, to } = monthWindow(month);
+        const window = monthWindow(month, today);
+        // Місяць, що вже минув, — порожній: запит із from > to вебапп відхилив би.
+        if (window === null) return [month, [] as AwsEmployeeSchedule["shifts"]] as const;
+        const { from, to } = window;
         const schedule = await awsBusinessClient.employeeSchedule(employeePublicId, from, to, {
             timeoutMs: READ_TIMEOUT_MS,
         });
