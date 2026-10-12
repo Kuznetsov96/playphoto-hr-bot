@@ -777,23 +777,41 @@ describe("renderDeliveryGroup with the person's month", () => {
         const text = renderDeliveryGroup(group, months);
 
         expect(text).toContain("Графік на жовтень змінено");
-        expect(text).toContain("➖ Знято: <b>сб 03.10</b> · 14:00–20:00");
-        expect(text).toContain("➖ Знято: <b>нд 04.10</b> · 14:00–20:00");
+        expect(text).toContain("\nЗнято: <b>сб 03.10</b> · 14:00–20:00");
+        expect(text).toContain("\nЗнято: <b>нд 04.10</b> · 14:00–20:00");
         expect(text).toContain("Тепер у тебе <b>2</b> зміни");
         expect(text).toContain("\n<b>сб 10.10</b> · 14:00–20:00 · нова");
         expect(text).not.toMatch(/<b>3<\/b>/u);
     });
 
-    it("shows a changed shift as its old form above and the marked new one in the month", () => {
+    it("says where a moved shift went, and marks it in the month", () => {
         const group = batch([{ kind: "SHIFT_MOVED", before: "2026-10-13", after: "2026-10-14" }]);
         const months = monthOf("2026-10", [["2026-10-14"], ["2026-10-20"]]);
 
         const text = renderDeliveryGroup(group, months);
 
-        expect(text).toContain("🔄 Було: вт 13.10 · 14:00–20:00");
-        expect(text).toContain("\nср 14.10 · 14:00–20:00 · змінена");
-        expect(text).not.toMatch(/^🔄 ср/mu);
+        expect(text).toContain("Перенесено: вт 13.10 → ср 14.10");
+        expect(text).toContain("\nср 14.10 · 14:00–20:00 · перенесена");
+        expect(text).not.toMatch(/Було|🔄|➖/u);
         expect(text).not.toContain("Стало");
+    });
+
+    it("names exactly what changed when the date stays: the time, or the venue", () => {
+        const [timeGroup] = groupForDelivery([{
+            publicId: "a", employeePublicId: "e1", telegramId: "100", changeKind: "SHIFT_MOVED", urgency: "NORMAL", batchId: "b1",
+            payload: { before: sambirSnapshot("2026-10-14"), after: sambirSnapshot("2026-10-14", "12:00") },
+        }]);
+        const time = renderDeliveryGroup(timeGroup!, monthOf("2026-10", [["2026-10-14", "12:00"]]));
+        expect(time).toContain("Змінено час: ср 14.10, було 14:00–20:00");
+        expect(time).toContain("\nср 14.10 · 12:00–20:00 · змінена");
+
+        const [venueGroup] = groupForDelivery([{
+            publicId: "a", employeePublicId: "e1", telegramId: "100", changeKind: "SHIFT_MOVED", urgency: "NORMAL", batchId: "b1",
+            payload: { before: sambirSnapshot("2026-10-14", "10:00", "20:00", DRAGON), after: sambirSnapshot("2026-10-14", "10:00") },
+        }]);
+        const venue = renderDeliveryGroup(venueGroup!, monthOf("2026-10", [["2026-10-14", "10:00"]]));
+        expect(venue).toContain("Змінено точку: ср 14.10, було Dragon Park (Lviv)");
+        expect(venue).toContain("ср 14.10 · Karamel (Atlant) (Sambir) · 10:00–20:00 · змінена");
     });
 
     it("shows a shift the owner reassigned to her as new, without someone else's «Було»", () => {
@@ -807,6 +825,18 @@ describe("renderDeliveryGroup with the person's month", () => {
 
         expect(text).toContain("\nср 14.10 · 14:00–20:00 · нова");
         expect(text).not.toContain("Було");
+    });
+
+    it("names a shift given away through a replacement without a status emoji", () => {
+        const group = batch([
+            { kind: "SHIFT_REMOVED", before: "2026-10-14", role: "requester" },
+            { kind: "SHIFT_ADDED", after: "2026-10-20" },
+        ]);
+
+        const text = renderDeliveryGroup(group, monthOf("2026-10", [["2026-10-20"]]));
+
+        expect(text).toContain("\nПідміну знайдено: ср 14.10 · 14:00–20:00");
+        expect(text).not.toMatch(/✅|➖/u);
     });
 
     it("says plainly when nothing is left in the month", () => {

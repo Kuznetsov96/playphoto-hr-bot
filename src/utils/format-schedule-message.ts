@@ -76,17 +76,23 @@ export function monthNameOf(localDate: string): string {
  * іде в Telegram як HTML.
  */
 export function formatShiftLine(shift: ScheduleMessageShift, options: { withLocation?: boolean } = {}): string {
-    const weekday = WEEKDAY_SHORT_UK[weekdayOf(shift.localDate)];
-    const dayMonth = `${shift.localDate.slice(8)}.${shift.localDate.slice(5, 7)}`;
-    const day = isWeekend(shift.localDate) ? `<b>${weekday} ${dayMonth}</b>` : `${weekday} ${dayMonth}`;
-    const time =
-        shift.startsAtLocal && shift.endsAtLocal
-            ? `${shift.startsAtLocal}–${shift.endsAtLocal}`
-            : shift.startsAtLocal;
+    const day = dayLabel(shift.localDate);
+    const time = timeLabel(shift);
     const location = options.withLocation === false ? "" : escapeHtml(shift.locationLabel);
     return [day, location, time].filter((part) => part.length > 0).join(" · ");
 }
 
+
+/** `2026-10-03` -> `<b>сб 03.10</b>`; вихідні виділені. */
+function dayLabel(localDate: string): string {
+    const weekday = WEEKDAY_SHORT_UK[weekdayOf(localDate)];
+    const dayMonth = `${localDate.slice(8)}.${localDate.slice(5, 7)}`;
+    return isWeekend(localDate) ? `<b>${weekday} ${dayMonth}</b>` : `${weekday} ${dayMonth}`;
+}
+
+function timeLabel(shift: ScheduleMessageShift): string {
+    return shift.startsAtLocal && shift.endsAtLocal ? `${shift.startsAtLocal}–${shift.endsAtLocal}` : shift.startsAtLocal;
+}
 
 /** `2026-10-12` -> «жовтні». Порожньо, якщо дата не читається. */
 export function monthLocativeOf(localDate: string): string {
@@ -115,7 +121,7 @@ export function formatMonthTotal(localDate: string, count: number): string {
 }
 
 /** Позначка рядка в списку місяця: що саме в ньому нове. */
-export type MonthRowMark = "added" | "moved";
+export type MonthRowMark = "added" | "moved" | "changed";
 
 export type MonthRow = {
     shift: ScheduleMessageShift;
@@ -132,6 +138,8 @@ export type MonthNote = {
     kind: "removed" | "movedFrom" | "given";
     shift: ScheduleMessageShift;
     locationKey: string;
+    /** Для `movedFrom`: якою зміна стала — з цього видно, що саме змінилося. */
+    to?: ScheduleMessageShift;
 };
 
 /**
@@ -139,12 +147,26 @@ export type MonthNote = {
  * лише в позначених рядках, і стовпчик дат «скакав» (власник, 12.10.2026).
  * Слово зрозуміле без легенди.
  */
-const MARK_WORD: Record<MonthRowMark, string> = { added: "нова", moved: "змінена" };
-const NOTE_PREFIX: Record<MonthNote["kind"], string> = {
-    removed: "➖ Знято: ",
-    movedFrom: "🔄 Було: ",
-    given: "✅ Підміну знайдено: ",
-};
+const MARK_WORD: Record<MonthRowMark, string> = { added: "нова", moved: "перенесена", changed: "змінена" };
+
+/**
+ * Рядок над списком — повним реченням без значків: «🔄 Було: чт 22.10» не
+ * казало, що саме було і куди воно ділося (власник, 12.10.2026). Для зміненої
+ * зміни називається саме те, що змінилося, а новий вигляд — у списку нижче.
+ */
+function formatNote(note: MonthNote, line: (shift: ScheduleMessageShift) => string): string {
+    if (note.kind === "removed") return `Знято: ${line(note.shift)}`;
+    if (note.kind === "given") return `Підміну знайдено: ${line(note.shift)}`;
+    const to = note.to;
+    if (to === undefined) return `Знято: ${line(note.shift)}`;
+    if (to.localDate !== note.shift.localDate) {
+        return `Перенесено: ${dayLabel(note.shift.localDate)} → ${dayLabel(to.localDate)}`;
+    }
+    if (timeLabel(to) !== timeLabel(note.shift)) {
+        return `Змінено час: ${dayLabel(to.localDate)}, було ${timeLabel(note.shift)}`;
+    }
+    return `Змінено точку: ${dayLabel(to.localDate)}, було ${escapeHtml(note.shift.locationLabel)}`;
+}
 
 /**
  * Повідомлення про графік одного місяця — завжди з УСІМ місяцем людини.
@@ -187,7 +209,7 @@ export function formatMonthSection(input: {
     ];
 
     if (notes.length > 0) {
-        blocks.push(notes.map((note) => `${NOTE_PREFIX[note.kind]}${line(note.shift)}`).join("\n"));
+        blocks.push(notes.map((note) => formatNote(note, line)).join("\n"));
     }
 
     const total = rows.length;

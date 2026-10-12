@@ -208,8 +208,13 @@ function renderMonthSections(
         // список місяця і так показує, як є зараз.
         if (row !== undefined) row.mark = value;
     };
-    const note = (event: KeyedShift, kind: MonthNote["kind"]) => {
-        sectionOf(event.month).notes.push({ kind, shift: event.shift, locationKey: event.locationKey });
+    const note = (event: KeyedShift, kind: MonthNote["kind"], to?: KeyedShift) => {
+        sectionOf(event.month).notes.push({
+            kind,
+            shift: event.shift,
+            locationKey: event.locationKey,
+            ...(to === undefined ? {} : { to: to.shift })
+        });
     };
 
     for (const notification of group.notifications) {
@@ -235,10 +240,12 @@ function renderMonthSections(
                 if (after === null && before === null) return null;
                 if (after !== null) {
                     sectionOf(after.month);
-                    mark(after, "moved");
+                    // «Перенесена» — лише коли змінилася дата; інакше «змінена».
+                    mark(after, before !== null && before.shift.localDate !== after.shift.localDate ? "moved" : "changed");
                 }
                 if (before !== null && (after === null || before.key !== after.key || !sameShift(before, after))) {
-                    note(before, after === null ? "removed" : "movedFrom");
+                    if (after === null) note(before, "removed");
+                    else note(before, "movedFrom", after);
                 }
                 break;
             case "SHIFT_REMOVED":
