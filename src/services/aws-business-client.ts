@@ -531,47 +531,93 @@ const SHOOT_TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
 /**
  * Повідомлення фотографу про зйомку (план 4), контракт `BotShootTaskView` вебаппа. Схема
  * сувора: невідоме поле або вид — рядок іде в invalidPublicIds і стає failed, а не
- * вгадується. Телефон — лише E.164 і лише в ASSIGNED (вебапп його більше нікуди не кладе);
- * клієнт його не логує й не кладе в текст помилок.
+ * вгадується. Телефон — лише E.164 і лише в ASSIGNED / OFFER_TAKEN (вебапп його більше нікуди
+ * не кладе); клієнт його не логує й не кладе в текст помилок.
  */
-export const shootTaskSchema = z
+const SHOOT_REF = /^[a-z2-7]{12}$/u;
+
+const shootTaskShootSchema = z
     .object({
-        publicId: z.string().uuid(),
-        ref: z.string().regex(/^[a-z2-7]{12}$/u),
-        kind: z.enum([
-            "ASSIGNED",
-            "PHOTOS_DUE",
-            "DUE_TODAY",
-            "OVERDUE",
-            "RETURNED",
-            "DUE_CHANGED",
-            "UNASSIGNED",
-            "CANCELLED",
-            "REDACT",
-        ]),
-        telegramId: z.string().regex(/^\d{1,20}$/u),
-        shoot: z
-            .object({
-                clientName: z.string().nullable(),
-                childName: z.string().nullable(),
-                phone: z.string().regex(/^\+380\d{9}$/u).nullable(),
-                notes: z.string().nullable(),
-                location: z.object({ name: z.string().min(1), city: z.string(), branch: z.string().nullable() }).strict(),
-                shootOn: z.string().regex(SHOOT_DATE),
-                intervals: z.array(
-                    z.object({ start: z.string().regex(SHOOT_TIME), end: z.string().regex(SHOOT_TIME).nullable() }).strict(),
-                ),
-                durationMinutes: z.number().int().positive().nullable(),
-            })
-            .strict(),
-        dueOn: z.string().regex(SHOOT_DATE),
-        canMoveDue: z.boolean(),
-        overdueDays: z.number().int().positive().nullable(),
-        returnComment: z.string().nullable(),
-        pathB: z.boolean(),
-        targetMessageId: z.number().int().positive().nullable(),
+        clientName: z.string().nullable(),
+        childName: z.string().nullable(),
+        phone: z.string().regex(/^\+380\d{9}$/u).nullable(),
+        notes: z.string().nullable(),
+        location: z.object({ name: z.string().min(1), city: z.string(), branch: z.string().nullable() }).strict(),
+        shootOn: z.string().regex(SHOOT_DATE),
+        intervals: z.array(
+            z.object({ start: z.string().regex(SHOOT_TIME), end: z.string().regex(SHOOT_TIME).nullable() }).strict(),
+        ),
+        durationMinutes: z.number().int().positive().nullable(),
     })
     .strict();
+
+/** Пропозиція йде багатьом: телефону в ній бути не може — рядок з ним відкидається. */
+const shootOfferShootSchema = shootTaskShootSchema.extend({ phone: z.null() }).strict();
+
+const shootTaskCommon = {
+    publicId: z.string().uuid(),
+    ref: z.string().regex(SHOOT_REF),
+    telegramId: z.string().regex(/^\d{1,20}$/u),
+    shoot: shootTaskShootSchema,
+    dueOn: z.string().regex(SHOOT_DATE),
+    canMoveDue: z.boolean(),
+    overdueDays: z.number().int().positive().nullable(),
+    returnComment: z.string().nullable(),
+    pathB: z.boolean(),
+    targetMessageId: z.number().int().positive().nullable(),
+};
+
+/**
+ * Частина C: ключ `payload` є лише у видів OFFER* і в кожного свій (контракт
+ * `BotShootOfferPayload` вебаппа). У видів плану 4 його немає зовсім — і бути не може.
+ * OFFER / OFFER_REOPENED — `ref` пропозиції для кнопок і ставка (null — тарифу немає);
+ * OFFER_TAKEN — `ref` для «Скасувати»; OFFER_CLOSED — яке повідомлення правити і чим.
+ */
+export const shootTaskSchema = z.discriminatedUnion("kind", [
+    z
+        .object({
+            ...shootTaskCommon,
+            kind: z.enum([
+                "ASSIGNED",
+                "PHOTOS_DUE",
+                "DUE_TODAY",
+                "OVERDUE",
+                "RETURNED",
+                "DUE_CHANGED",
+                "UNASSIGNED",
+                "CANCELLED",
+                "REDACT",
+            ]),
+        })
+        .strict(),
+    z
+        .object({
+            ...shootTaskCommon,
+            kind: z.enum(["OFFER", "OFFER_REOPENED"]),
+            shoot: shootOfferShootSchema,
+            payload: z
+                .object({ offerRef: z.string().regex(SHOOT_REF), feeAmount: z.number().nonnegative().nullable() })
+                .strict(),
+        })
+        .strict(),
+    z
+        .object({
+            ...shootTaskCommon,
+            kind: z.literal("OFFER_TAKEN"),
+            payload: z.object({ offerRef: z.string().regex(SHOOT_REF) }).strict(),
+        })
+        .strict(),
+    z
+        .object({
+            ...shootTaskCommon,
+            kind: z.literal("OFFER_CLOSED"),
+            shoot: shootOfferShootSchema,
+            payload: z
+                .object({ variant: z.enum(["TAKEN", "CLOSED"]), targetMessageId: z.number().int().positive() })
+                .strict(),
+        })
+        .strict(),
+]);
 export type AwsShootTask = z.infer<typeof shootTaskSchema>;
 export type AwsShootTaskKind = AwsShootTask["kind"];
 
@@ -610,8 +656,8 @@ export interface AwsPendingShootTasks {
 
 /**
  * Причини `failed`, про які домовлено з вебаппом: TG_403 — фотограф заблокувала бота, рядок
- * одразу FAILED; TG_MESSAGE_GONE / TG_NOT_MODIFIED закривають REDACT (повідомлення немає або
- * телефону в ньому вже немає). PAYLOAD_INVALID — рядок не пройшов строгу схему.
+ * одразу FAILED; TG_MESSAGE_GONE / TG_NOT_MODIFIED закривають REDACT і OFFER_CLOSED
+ * (повідомлення немає або воно вже таке). PAYLOAD_INVALID — рядок не пройшов строгу схему.
  */
 export const SHOOT_TASK_FAILURE_REASONS = {
     BLOCKED: "TG_403",
@@ -668,6 +714,39 @@ function shootTaskActor(telegramId: number): string {
     }
     return String(telegramId);
 }
+
+/**
+ * Кнопки пропозиції зйомки (частина C): `POST shoot-offers/by-ref/:ref/{accept,decline,undo}`.
+ * Відомі відмови — типізований результат для спливашки; SHOOT_OFFER_CONCURRENT_CHANGE, 5xx,
+ * мережа й схема — виняток («Спробуй ще раз», кнопки лишаються).
+ */
+export const SHOOT_OFFER_REFUSAL_CODES = [
+    "SHOOT_OFFER_NOT_FOUND",
+    "SHOOT_OFFER_ALREADY_ANSWERED",
+    "SHOOT_STARTED",
+    "SHOOT_OFFER_INELIGIBLE",
+    "SHOOT_OFFER_UNDO_WINDOW_CLOSED",
+] as const;
+export type ShootOfferRefusalCode = (typeof SHOOT_OFFER_REFUSAL_CODES)[number];
+
+const SHOOT_OFFER_REFUSAL_STATUS: Record<ShootOfferRefusalCode, number> = {
+    SHOOT_OFFER_NOT_FOUND: 404,
+    SHOOT_OFFER_ALREADY_ANSWERED: 409,
+    SHOOT_STARTED: 409,
+    SHOOT_OFFER_INELIGIBLE: 409,
+    SHOOT_OFFER_UNDO_WINDOW_CLOSED: 409,
+};
+
+function shootOfferRefusal(error: unknown): ShootOfferRefusalCode | null {
+    if (!(error instanceof AwsBusinessApiError) || error.code === undefined) return null;
+    if (!Object.hasOwn(SHOOT_OFFER_REFUSAL_STATUS, error.code)) return null;
+    const code = error.code as ShootOfferRefusalCode;
+    return SHOOT_OFFER_REFUSAL_STATUS[code] === error.status ? code : null;
+}
+
+const shootOfferAnswerSchema = z.object({ result: z.enum(["TAKEN", "ALREADY_TAKEN", "DECLINED", "UNDONE"]) }).strict();
+export type ShootOfferAnswer = z.infer<typeof shootOfferAnswerSchema>["result"];
+export type ShootOfferButtonResult = { ok: true; result: ShootOfferAnswer } | { ok: false; code: ShootOfferRefusalCode };
 
 export type AwsBusinessSnapshot = z.infer<typeof snapshotSchema>;
 export type AwsEmployeeSchedule = z.infer<typeof employeeScheduleSchema>;
@@ -1510,6 +1589,40 @@ export class AwsBusinessClient {
             });
             return shootTaskLineSchema.parse(value);
         });
+    }
+
+    /** «✅ Беру»: перша виграє; повтор взявшої — знову TAKEN. */
+    async acceptShootOffer(ref: string, telegramId: number): Promise<ShootOfferButtonResult> {
+        return this.shootOfferButton(ref, "accept", telegramId);
+    }
+
+    /** «🚫 Не можу». Зйомку вже взяли — ALREADY_TAKEN, а не відмова. */
+    async declineShootOffer(ref: string, telegramId: number): Promise<ShootOfferButtonResult> {
+        return this.shootOfferButton(ref, "decline", telegramId);
+    }
+
+    /** «Скасувати» під «Зйомка твоя» — 15 хвилин від згоди і до початку зйомки. */
+    async undoShootOffer(ref: string, telegramId: number): Promise<ShootOfferButtonResult> {
+        return this.shootOfferButton(ref, "undo", telegramId);
+    }
+
+    private async shootOfferButton(
+        ref: string,
+        action: "accept" | "decline" | "undo",
+        telegramId: number,
+    ): Promise<ShootOfferButtonResult> {
+        const actor = shootTaskActor(telegramId);
+        try {
+            const value = await this.request(`/shoot-offers/by-ref/${encodeURIComponent(ref)}/${action}`, {
+                method: "POST",
+                body: JSON.stringify({ telegramId: actor }),
+            });
+            return { ok: true, result: shootOfferAnswerSchema.parse(value).result };
+        } catch (error) {
+            const code = shootOfferRefusal(error);
+            if (code === null) throw error;
+            return { ok: false, code };
+        }
     }
 
     /** Відомі відмови — результат для спливашки; решта (5xx, 400, мережа, схема) — виняток. */

@@ -422,3 +422,183 @@ describe("shoot task buttons: handlers", () => {
         await expect(createShootTaskHandlers(d as never).date(c as never)).resolves.toBeUndefined();
     });
 });
+
+describe("shoot offer buttons (part C)", () => {
+    const OFFER_REF = "qrstuvwx2345";
+    const offerButtons = () => ({
+        inline_keyboard: [
+            [
+                { text: "✅ Беру", callback_data: buildSignedCallback("sha", OFFER_REF) },
+                { text: "🚫 Не можу", callback_data: buildSignedCallback("shd", OFFER_REF) },
+            ],
+        ],
+    });
+    const takenButtons = () => ({
+        inline_keyboard: [
+            [{ text: "Скасувати", callback_data: buildSignedCallback("shu", OFFER_REF) }],
+            [{ text: "Написати в підтримку", callback_data: buildSignedCallback("sds", REF) }],
+        ],
+    });
+
+    function offerCtx(data: string, markup: Keyboard = offerButtons()) {
+        const c = ctx(data);
+        (c.callbackQuery as Record<string, unknown>).message = { message_id: 501, reply_markup: markup };
+        return c;
+    }
+
+    function offerDeps() {
+        const d = deps();
+        return {
+            ...d,
+            client: {
+                ...d.client,
+                acceptShootOffer: vi.fn().mockResolvedValue({ ok: true, result: "TAKEN" }),
+                declineShootOffer: vi.fn().mockResolvedValue({ ok: true, result: "DECLINED" }),
+                undoShootOffer: vi.fn().mockResolvedValue({ ok: true, result: "UNDONE" }),
+            },
+        };
+    }
+
+    const emptied = { reply_markup: { inline_keyboard: [] } };
+
+    it("«Беру» → TAKEN: the toast says details are below, the buttons go; telegramId from the callback", async () => {
+        const d = offerDeps();
+        const c = offerCtx(buildSignedCallback("sha", OFFER_REF));
+        await createShootTaskHandlers(d as never).take(c as never);
+        expect(d.client.acceptShootOffer).toHaveBeenCalledWith(OFFER_REF, 77);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Зйомка твоя — деталі нижче.");
+        expect(c.editMessageReplyMarkup).toHaveBeenCalledWith(emptied);
+    });
+
+    it.each(["take", "decline"] as const)("%s → ALREADY_TAKEN: «вже взяли», the buttons go", async (name) => {
+        const d = offerDeps();
+        d.client.acceptShootOffer.mockResolvedValue({ ok: true, result: "ALREADY_TAKEN" });
+        d.client.declineShootOffer.mockResolvedValue({ ok: true, result: "ALREADY_TAKEN" });
+        const c = offerCtx(buildSignedCallback(name === "take" ? "sha" : "shd", OFFER_REF));
+        await createShootTaskHandlers(d as never)[name](c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Зйомку вже взяли — хтось був раніше 💛");
+        expect(c.editMessageReplyMarkup).toHaveBeenCalledWith(emptied);
+    });
+
+    it("«Не можу» → DECLINED: thanks, the buttons go", async () => {
+        const d = offerDeps();
+        const c = offerCtx(buildSignedCallback("shd", OFFER_REF));
+        await createShootTaskHandlers(d as never).decline(c as never);
+        expect(d.client.declineShootOffer).toHaveBeenCalledWith(OFFER_REF, 77);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Зрозуміло, дякуємо за відповідь 💛");
+        expect(c.editMessageReplyMarkup).toHaveBeenCalledWith(emptied);
+    });
+
+    it.each([
+        ["SHOOT_STARTED", "Зйомка вже почалась.", true],
+        ["SHOOT_OFFER_ALREADY_ANSWERED", "Ти вже відповіла на цю пропозицію.", true],
+        ["SHOOT_OFFER_INELIGIBLE", "У тебе в цей час зміна або зйомка.", false],
+    ] as const)("«Беру» refused with %s → its own toast", async (code, toast, buttonsGo) => {
+        const d = offerDeps();
+        d.client.acceptShootOffer.mockResolvedValue({ ok: false, code });
+        const c = offerCtx(buildSignedCallback("sha", OFFER_REF));
+        await createShootTaskHandlers(d as never).take(c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith(toast);
+        if (buttonsGo) expect(c.editMessageReplyMarkup).toHaveBeenCalledWith(emptied);
+        else expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["a concurrent change", () => new AwsBusinessApiError(409, "SHOOT_OFFER_CONCURRENT_CHANGE", "x")],
+        ["a 5xx", () => new AwsBusinessApiError(503, undefined, "x")],
+        ["the network", () => new TypeError("fetch failed")],
+    ])("«Беру» failing on %s → «Спробуй ще раз», the buttons stay", async (_, error) => {
+        const d = offerDeps();
+        d.client.acceptShootOffer.mockRejectedValue(error());
+        const c = offerCtx(buildSignedCallback("sha", OFFER_REF));
+        await createShootTaskHandlers(d as never).take(c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Спробуй ще раз за хвилину.");
+        expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
+        expect(c.editMessageText).not.toHaveBeenCalled();
+    });
+
+    it("«Скасувати» → UNDONE: the toast, «Скасувати» goes, support stays", async () => {
+        const d = offerDeps();
+        const c = offerCtx(buildSignedCallback("shu", OFFER_REF), takenButtons());
+        await createShootTaskHandlers(d as never).undo(c as never);
+        expect(d.client.undoShootOffer).toHaveBeenCalledWith(OFFER_REF, 77);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Скасовано, зйомка знову вільна 💛");
+        expect(c.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [takenButtons().inline_keyboard[1]] } });
+    });
+
+    it("«Скасувати» after the window → an alert with «ОК», and the keyboard without «Скасувати»", async () => {
+        const d = offerDeps();
+        d.client.undoShootOffer.mockResolvedValue({ ok: false, code: "SHOOT_OFFER_UNDO_WINDOW_CLOSED" });
+        const c = offerCtx(buildSignedCallback("shu", OFFER_REF), takenButtons());
+        await createShootTaskHandlers(d as never).undo(c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith({ text: "Скасувати вже не можна — напиши в підтримку.", show_alert: true });
+        const markup = c.editMessageReplyMarkup.mock.calls[0]![0] as { reply_markup: Keyboard };
+        expect(markup.reply_markup.inline_keyboard.flat().map((b) => b.text)).toEqual(["Написати в підтримку"]);
+    });
+
+    it("«Скасувати» on a 5xx → retry, «Скасувати» stays", async () => {
+        const d = offerDeps();
+        d.client.undoShootOffer.mockRejectedValue(new AwsBusinessApiError(500, undefined, "x"));
+        const c = offerCtx(buildSignedCallback("shu", OFFER_REF), takenButtons());
+        await createShootTaskHandlers(d as never).undo(c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Спробуй ще раз за хвилину.");
+        expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
+    });
+
+    it.each(["take", "decline", "undo"] as const)("%s: not hers (404) → the neutral toast, message untouched", async (name) => {
+        const d = offerDeps();
+        const refused = { ok: false, code: "SHOOT_OFFER_NOT_FOUND" };
+        d.client.acceptShootOffer.mockResolvedValue(refused);
+        d.client.declineShootOffer.mockResolvedValue(refused);
+        d.client.undoShootOffer.mockResolvedValue(refused);
+        const code = { take: "sha", decline: "shd", undo: "shu" }[name];
+        const c = offerCtx(buildSignedCallback(code, OFFER_REF));
+        await createShootTaskHandlers(d as never)[name](c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Це сповіщення вже неактуальне.");
+        expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
+    });
+
+    it.each(["take", "decline", "undo"] as const)("%s: a forged signature or a foreign code never reaches the webapp", async (name) => {
+        const d = offerDeps();
+        const code = { take: "sha", decline: "shd", undo: "shu" }[name];
+        const good = buildSignedCallback(code, OFFER_REF);
+        for (const data of [good.replace(OFFER_REF, "qrstuvwx2346"), buildSignedCallback("sdp", OFFER_REF), `cb:${code}:${OFFER_REF}:0000000000`]) {
+            const c = offerCtx(data);
+            await createShootTaskHandlers(d as never)[name](c as never);
+            expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+            expect(c.answerCallbackQuery).toHaveBeenCalledWith("Це сповіщення вже неактуальне.");
+            expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
+        }
+        expect(d.client.acceptShootOffer).not.toHaveBeenCalled();
+        expect(d.client.declineShootOffer).not.toHaveBeenCalled();
+        expect(d.client.undoShootOffer).not.toHaveBeenCalled();
+    });
+
+    it("«Беру»: a slow webapp gets «Спробуй ще раз» in time, the late TAKEN still removes the buttons", async () => {
+        vi.useFakeTimers();
+        const d = offerDeps();
+        let resolve!: (value: unknown) => void;
+        d.client.acceptShootOffer.mockReturnValue(new Promise((r) => (resolve = r)));
+        const c = offerCtx(buildSignedCallback("sha", OFFER_REF));
+        const spy = c.answerCallbackQuery;
+        const run = createShootTaskHandlers(d as never).take(c as never);
+        await vi.advanceTimersByTimeAsync(ANSWER_DEADLINE_MS);
+        expect(spy).toHaveBeenCalledWith("Спробуй ще раз за хвилину.");
+        resolve({ ok: true, result: "TAKEN" });
+        await run;
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(c.editMessageReplyMarkup).toHaveBeenCalledWith(emptied);
+    });
+
+    it("every offer callback fits Telegram's 64 bytes", () => {
+        const worst = "z".repeat(12);
+        for (const code of ["sha", "shd", "shu"]) {
+            expect(Buffer.byteLength(buildSignedCallback(code, worst), "utf8")).toBeLessThanOrEqual(64);
+        }
+    });
+});

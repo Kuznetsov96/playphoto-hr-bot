@@ -34,6 +34,19 @@ export function formatDuration(minutes: number): string {
     return `${Math.floor(minutes / 60)} год ${minutes % 60} хв`;
 }
 
+/**
+ * Сума ставки: «600», «1 600», «412,50». Тисячі — пробілом, копійки — лише коли вони є. Без
+ * Intl: розділювачі в різних середовищах різні, а текст не має залежати від контейнера.
+ */
+export function formatUah(amount: number): string {
+    const cents = Math.round(amount * 100);
+    const whole = Math.floor(cents / 100).toString();
+    const groups: string[] = [];
+    for (let end = whole.length; end > 0; end -= 3) groups.unshift(whole.slice(Math.max(0, end - 3), end));
+    const rest = cents % 100;
+    return rest === 0 ? groups.join(" ") : `${groups.join(" ")},${String(rest).padStart(2, "0")}`;
+}
+
 /** `2030-03-16` → `300316`: шість цифр замість десяти — кнопка влазить у 64 байти. */
 export function toYymmdd(date: string): string {
     const m = DATE.exec(date);

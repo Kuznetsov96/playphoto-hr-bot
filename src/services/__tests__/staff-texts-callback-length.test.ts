@@ -31,6 +31,14 @@ const TOAST_TEXTS = [
     "shoot-task-ans-out-of-range",
     "shoot-task-ans-retry",
     "shoot-task-ans-moving",
+    "shoot-offer-ans-taken",
+    "shoot-offer-ans-already-taken",
+    "shoot-offer-ans-declined",
+    "shoot-offer-ans-started",
+    "shoot-offer-ans-ineligible",
+    "shoot-offer-ans-already-answered",
+    "shoot-offer-ans-undone",
+    "shoot-offer-ans-undo-closed",
 ] as const;
 
 /** Те же плашки у владельца — после кнопок в его уведомлениях о подмене. */

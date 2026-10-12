@@ -206,3 +206,123 @@ describe("AwsBusinessClient shoot tasks", () => {
         expect(fetch).not.toHaveBeenCalled();
     });
 });
+
+/** Часть C: предложение съёмки. Ключ `payload` есть только у видов OFFER* и строгий по виду. */
+describe("AwsBusinessClient shoot offers", () => {
+    const offerRef = "qrstuvwx2345";
+    const offer = {
+        ...task,
+        kind: "OFFER",
+        shoot: { ...task.shoot, clientName: null },
+        payload: { offerRef, feeAmount: 600 },
+    };
+
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn());
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it("accepts the four offer kinds with their own payload", () => {
+        expect(shootTaskSchema.safeParse(offer).success).toBe(true);
+        expect(shootTaskSchema.safeParse({ ...offer, payload: { offerRef, feeAmount: null } }).success).toBe(true);
+        expect(shootTaskSchema.safeParse({ ...offer, kind: "OFFER_REOPENED" }).success).toBe(true);
+        expect(
+            shootTaskSchema.safeParse({
+                ...task,
+                kind: "OFFER_TAKEN",
+                shoot: { ...task.shoot, phone: "+380671234567", childName: "Марійка" },
+                payload: { offerRef },
+            }).success,
+        ).toBe(true);
+        expect(
+            shootTaskSchema.safeParse({
+                ...task,
+                kind: "OFFER_CLOSED",
+                targetMessageId: 501,
+                payload: { variant: "TAKEN", targetMessageId: 501 },
+            }).success,
+        ).toBe(true);
+        expect(
+            shootTaskSchema.safeParse({
+                ...task,
+                kind: "OFFER_CLOSED",
+                targetMessageId: 501,
+                payload: { variant: "CLOSED", targetMessageId: 501 },
+            }).success,
+        ).toBe(true);
+    });
+
+    it("stays strict per kind: no payload on old kinds, no foreign payload, no extra fields", () => {
+        expect(shootTaskSchema.safeParse({ ...task, payload: { offerRef } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, payload: undefined }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, payload: { offerRef, feeAmount: 600, round: 2 } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, payload: { offerRef } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, payload: { offerRef: "ABC", feeAmount: 600 } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, payload: { offerRef, feeAmount: -1 } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, kind: "OFFER_TAKEN" }).success).toBe(false);
+        expect(
+            shootTaskSchema.safeParse({ ...offer, kind: "OFFER_CLOSED", payload: { variant: "GONE", targetMessageId: 1 } })
+                .success,
+        ).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, kind: "OFFER_CLOSED" }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, kind: "EVE" }).success).toBe(false);
+    });
+
+    it("never lets a phone into a message that goes to many", () => {
+        const phone = "+380671234567";
+        expect(shootTaskSchema.safeParse({ ...offer, shoot: { ...offer.shoot, phone } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...offer, kind: "OFFER_REOPENED", shoot: { ...offer.shoot, phone } }).success).toBe(
+            false,
+        );
+    });
+
+    it.each([
+        ["acceptShootOffer", "accept", "TAKEN"],
+        ["acceptShootOffer", "accept", "ALREADY_TAKEN"],
+        ["declineShootOffer", "decline", "DECLINED"],
+        ["declineShootOffer", "decline", "ALREADY_TAKEN"],
+        ["undoShootOffer", "undo", "UNDONE"],
+    ] as const)("%s posts to shoot-offers/by-ref/:ref/%s with the telegram id in the body (%s)", async (method, path, result) => {
+        vi.mocked(fetch).mockResolvedValue(ok({ result }));
+        const answer = await new AwsBusinessClient()[method](offerRef, 1164289764);
+        const [url, init] = vi.mocked(fetch).mock.calls[0]!;
+        expect(url).toBe(`https://api.example.test/api/v1/internal/bot/shoot-offers/by-ref/${offerRef}/${path}`);
+        expect(init!.method).toBe("POST");
+        expect(JSON.parse(String(init!.body))).toEqual({ telegramId: "1164289764" });
+        expect(answer).toEqual({ ok: true, result });
+    });
+
+    it.each([
+        [404, "SHOOT_OFFER_NOT_FOUND"],
+        [409, "SHOOT_OFFER_ALREADY_ANSWERED"],
+        [409, "SHOOT_STARTED"],
+        [409, "SHOOT_OFFER_INELIGIBLE"],
+        [409, "SHOOT_OFFER_UNDO_WINDOW_CLOSED"],
+    ])("maps %s %s to a typed refusal", async (status, code) => {
+        vi.mocked(fetch).mockImplementation(async () => problem(status, { code, message: "x" }));
+        const client = new AwsBusinessClient();
+        await expect(client.acceptShootOffer(offerRef, 1)).resolves.toEqual({ ok: false, code });
+        await expect(client.declineShootOffer(offerRef, 1)).resolves.toEqual({ ok: false, code });
+        await expect(client.undoShootOffer(offerRef, 1)).resolves.toEqual({ ok: false, code });
+    });
+
+    it("throws for a concurrent change, an unknown answer, a mismatched status and a server error", async () => {
+        const client = new AwsBusinessClient();
+        vi.mocked(fetch).mockResolvedValueOnce(problem(409, { code: "SHOOT_OFFER_CONCURRENT_CHANGE" }));
+        await expect(client.acceptShootOffer(offerRef, 1)).rejects.toMatchObject({ status: 409, code: "SHOOT_OFFER_CONCURRENT_CHANGE" });
+        vi.mocked(fetch).mockResolvedValueOnce(ok({ result: "MAYBE" }));
+        await expect(client.acceptShootOffer(offerRef, 1)).rejects.toThrow();
+        vi.mocked(fetch).mockResolvedValueOnce(problem(409, { code: "SHOOT_OFFER_NOT_FOUND" }));
+        await expect(client.declineShootOffer(offerRef, 1)).rejects.toBeInstanceOf(AwsBusinessApiError);
+        vi.mocked(fetch).mockResolvedValueOnce(problem(500, { code: "INTERNAL" }));
+        await expect(client.undoShootOffer(offerRef, 1)).rejects.toMatchObject({ status: 500 });
+    });
+
+    it("refuses a telegram id that is not a positive integer before calling the API", async () => {
+        await expect(new AwsBusinessClient().acceptShootOffer(offerRef, 0)).rejects.toThrow(RangeError);
+        expect(fetch).not.toHaveBeenCalled();
+    });
+});

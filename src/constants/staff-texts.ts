@@ -804,6 +804,37 @@ Please check bot permissions (Manage Topics).`,
     `❓ From a shoot reminder: ${p.line}`,
 
   /**
+   * Пропозиція зйомки фотографам точки (частина C, таблиця «Сообщения части C» спеку у вебаппі).
+   * Іде багатьом: лише точка, дата, інтервали, тривалість і ставка — ні клієнта, ні телефону.
+   * Сума — сухо, без 💛. `location` приходить уже екранованим, `date` — «сб 16.03».
+   */
+  "shoot-offer-head": `🆕 Зйомка — можеш взяти.`,
+  "shoot-offer-fee": (p: { amount: string }) => `Оплата — ${p.amount} грн.`,
+  "shoot-offer-first-wins": `Хто перший погодиться — за тим і зйомка.`,
+  // «Зйомка твоя» після «Беру»: далі тіло ASSIGNED без першого рядка.
+  "shoot-offer-taken-head": `✅ Зйомка твоя.`,
+  "shoot-offer-taken-undo-hint": `Якщо натиснула помилково — скасуй протягом 15 хвилин.`,
+  // Правка доставленої пропозиції: кнопки знімаються, лишається один рядок.
+  "shoot-offer-closed-taken": (p: { location: string; date: string }) => `Цю зйомку вже взяли: ${p.location}, ${p.date}.`,
+  "shoot-offer-closed": (p: { location: string; date: string }) => `Пропозицію закрито: ${p.location}, ${p.date}.`,
+  "shoot-offer-reopened": (p: { location: string; date: string }) =>
+    `Зйомка на ${p.location} ${p.date} знову вільна — та, що погодилась, скасувала це одразу.\nЯкщо можеш — бери.`,
+  "shoot-offer-btn-take": `✅ Беру`,
+  "shoot-offer-btn-decline": `🚫 Не можу`,
+  "shoot-offer-btn-undo": `Скасувати`,
+  // Спливашки на кнопки пропозиції: ≤ 45 символів (staff-texts-callback-length.test.ts).
+  // Збій — спільний «shoot-task-ans-retry».
+  "shoot-offer-ans-taken": `Зйомка твоя — деталі нижче.`,
+  "shoot-offer-ans-already-taken": `Зйомку вже взяли — хтось був раніше 💛`,
+  "shoot-offer-ans-declined": `Зрозуміло, дякуємо за відповідь 💛`,
+  "shoot-offer-ans-started": `Зйомка вже почалась.`,
+  "shoot-offer-ans-ineligible": `У тебе в цей час зміна або зйомка.`,
+  "shoot-offer-ans-already-answered": `Ти вже відповіла на цю пропозицію.`,
+  "shoot-offer-ans-undone": `Скасовано, зйомка знову вільна 💛`,
+  // Плашка з «ОК» (show_alert), а не тост: вікно закрито назавжди, кнопка зникає.
+  "shoot-offer-ans-undo-closed": `Скасувати вже не можна — напиши в підтримку.`,
+
+  /**
    * Загальний екран збою для співробітниці — пара до candidate-error-generic
    * (на «ти»). Вибір за роллю — utils/error-screen-texts.ts. Раніше всім ішло
    * «Ой, щось пішло не так!» з 🐾 і ✨ (погоджено власником 01.10.2026).

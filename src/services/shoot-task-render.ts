@@ -2,7 +2,7 @@ import { InlineKeyboard } from "grammy";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
-import { clip, dayLabel, formatDuration, formatIntervals } from "../utils/shoot-format.js";
+import { clip, dayLabel, formatDuration, formatIntervals, formatUah } from "../utils/shoot-format.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { ukDays } from "../utils/uk-plural.js";
 import type { AwsShootTask } from "./aws-business-client.js";
@@ -12,6 +12,10 @@ export const SHOOT_DUE_DATE_CODE = "sdd";
 export const SHOOT_DUE_CONFIRM_CODE = "sdc";
 export const SHOOT_DUE_BACK_CODE = "sdb";
 export const SHOOT_SUPPORT_CODE = "sds";
+/** Кнопки пропозиції (частина C): payload — `ref` пропозиції, не рядка outbox. */
+export const SHOOT_OFFER_TAKE_CODE = "sha";
+export const SHOOT_OFFER_DECLINE_CODE = "shd";
+export const SHOOT_OFFER_UNDO_CODE = "shu";
 
 /**
  * Імена коротші за загальні 500 символів — обмеження для читання, не для Telegram: ліміт 4096
@@ -34,13 +38,16 @@ export function shootBlock(item: AwsShootTask): string {
     return [title, locationLine(item), `📅 ${time === "" ? day : `${day}, ${time}`}`].join("\n");
 }
 
+/** Хто отримує телефон: призначена — після призначення менеджером чи після «Беру». */
+const WITH_PHONE: ReadonlySet<AwsShootTask["kind"]> = new Set(["ASSIGNED", "OFFER_TAKEN"]);
+
 /**
- * Телефон — лише в ASSIGNED; REDACT той самий текст, але «телефон приховано.». Моноширинний:
- * Telegram копіює `<code>` одним дотиком. Схема пускає лише E.164 — екранувати нічого.
+ * Телефон — лише в ASSIGNED і OFFER_TAKEN; REDACT той самий текст, але «телефон приховано.».
+ * Моноширинний: Telegram копіює `<code>` одним дотиком. Схема пускає лише E.164 — екранувати нічого.
  */
 function clientLine(item: AwsShootTask): string {
     const client = safe(item.shoot.clientName, NAME_LIMIT);
-    const phone = item.kind === "ASSIGNED" && item.shoot.phone !== null ? `<code>${item.shoot.phone}</code>` : null;
+    const phone = WITH_PHONE.has(item.kind) && item.shoot.phone !== null ? `<code>${item.shoot.phone}</code>` : null;
     if (phone !== null) {
         return STAFF_TEXTS["shoot-task-client"]({ client: client === null ? phone : `${client}, ${phone}` });
     }
@@ -48,13 +55,19 @@ function clientLine(item: AwsShootTask): string {
     return STAFF_TEXTS["shoot-task-client"]({ client: client === null ? tail : `${client} · ${tail}` });
 }
 
-function assignedText(item: AwsShootTask): string {
-    const lines = [STAFF_TEXTS["shoot-task-assigned-head"], "", locationLine(item), `📅 ${dayLabel(item.shoot.shootOn)}`];
+/** «🕐 15:00–16:00 (1 год)» — однаково в призначенні й у пропозиції; без інтервалів рядка немає. */
+function timeLine(item: AwsShootTask): string | null {
     const time = formatIntervals(item.shoot.intervals);
-    if (time !== "") {
-        const duration = item.shoot.durationMinutes === null ? "" : ` (${formatDuration(item.shoot.durationMinutes)})`;
-        lines.push(`🕐 ${time}${duration}`);
-    }
+    if (time === "") return null;
+    const duration = item.shoot.durationMinutes === null ? "" : ` (${formatDuration(item.shoot.durationMinutes)})`;
+    return `🕐 ${time}${duration}`;
+}
+
+/** Тіло ASSIGNED без першого рядка: OFFER_TAKEN ставить над ним «✅ Зйомка твоя.». */
+function assignedBody(item: AwsShootTask): string {
+    const lines = [locationLine(item), `📅 ${dayLabel(item.shoot.shootOn)}`];
+    const time = timeLine(item);
+    if (time !== null) lines.push(time);
     lines.push(clientLine(item));
     const child = safe(item.shoot.childName, NAME_LIMIT);
     if (child !== null) lines.push(STAFF_TEXTS["shoot-task-child"]({ name: child }));
@@ -62,6 +75,40 @@ function assignedText(item: AwsShootTask): string {
     if (notes !== null) lines.push(STAFF_TEXTS["shoot-task-notes"]({ notes }));
     lines.push("", STAFF_TEXTS["shoot-task-assigned-due"]({ due: dayLabel(item.dueOn) }));
     return lines.join("\n");
+}
+
+function assignedText(item: AwsShootTask): string {
+    return `${STAFF_TEXTS["shoot-task-assigned-head"]}\n\n${assignedBody(item)}`;
+}
+
+/** Пропозиція йде багатьом: точка, дата, інтервали, тривалість і ставка (якщо є тариф). */
+function offerText(item: AwsShootTask, feeAmount: number | null): string {
+    const lines = [STAFF_TEXTS["shoot-offer-head"], "", locationLine(item), `📅 ${dayLabel(item.shoot.shootOn)}`];
+    const time = timeLine(item);
+    if (time !== null) lines.push(time);
+    if (feeAmount !== null && feeAmount > 0) lines.push(STAFF_TEXTS["shoot-offer-fee"]({ amount: formatUah(feeAmount) }));
+    lines.push("", STAFF_TEXTS["shoot-offer-first-wins"]);
+    return lines.join("\n");
+}
+
+const offerPlace = (item: AwsShootTask) => ({
+    location: escapeHtml(formatLocation(item.shoot.location, "listing")),
+    date: dayLabel(item.shoot.shootOn),
+});
+
+/** «✅ Беру» і «🚫 Не можу» в один ряд — однакові за вагою відповіді на одне питання. */
+export function offerKeyboard(offerRef: string): InlineKeyboard {
+    return new InlineKeyboard()
+        .text(STAFF_TEXTS["shoot-offer-btn-take"], buildSignedCallback(SHOOT_OFFER_TAKE_CODE, offerRef))
+        .text(STAFF_TEXTS["shoot-offer-btn-decline"], buildSignedCallback(SHOOT_OFFER_DECLINE_CODE, offerRef));
+}
+
+/** «Скасувати» (ref пропозиції) і підтримка (ref рядка outbox, як у ASSIGNED). */
+function takenKeyboard(offerRef: string, taskRef: string): InlineKeyboard {
+    return new InlineKeyboard()
+        .text(STAFF_TEXTS["shoot-offer-btn-undo"], buildSignedCallback(SHOOT_OFFER_UNDO_CODE, offerRef))
+        .row()
+        .text(STAFF_TEXTS["staff-preferences-btn-support"], buildSignedCallback(SHOOT_SUPPORT_CODE, taskRef));
 }
 
 function withPathB(item: AwsShootTask, text: string): string {
@@ -163,5 +210,18 @@ export function renderShootTask(
             return { text: `${STAFF_TEXTS["shoot-task-unassigned"]}\n\n${block}`, keyboard: null };
         case "CANCELLED":
             return { text: `${STAFF_TEXTS["shoot-task-cancelled"]}\n\n${block}`, keyboard: null };
+        case "OFFER":
+            return { text: offerText(item, item.payload.feeAmount), keyboard: offerKeyboard(item.payload.offerRef) };
+        case "OFFER_REOPENED":
+            return { text: STAFF_TEXTS["shoot-offer-reopened"](offerPlace(item)), keyboard: offerKeyboard(item.payload.offerRef) };
+        case "OFFER_TAKEN":
+            return {
+                text: `${STAFF_TEXTS["shoot-offer-taken-head"]}\n\n${assignedBody(item)}\n\n${STAFF_TEXTS["shoot-offer-taken-undo-hint"]}`,
+                keyboard: takenKeyboard(item.payload.offerRef, item.ref),
+            };
+        case "OFFER_CLOSED": {
+            const key = item.payload.variant === "TAKEN" ? "shoot-offer-closed-taken" : "shoot-offer-closed";
+            return { text: STAFF_TEXTS[key](offerPlace(item)), keyboard: null };
+        }
     }
 }
