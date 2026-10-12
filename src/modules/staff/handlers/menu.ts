@@ -196,7 +196,7 @@ export async function showStaffHub(ctx: MyContext, forceNew: boolean = false) {
 /**
  * Show Schedule view
  */
-export async function showStaffSchedule(ctx: MyContext) {
+export async function showStaffSchedule(ctx: MyContext, options: { keepTapped?: boolean } = {}) {
     ctx.session.step = "idle";
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -215,7 +215,9 @@ export async function showStaffSchedule(ctx: MyContext) {
 
     if (shifts.length === 0) {
         const text = "У тебе поки немає призначених змін. 📅\nЯк тільки вони з'являться — я повідомлю!";
-        return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"));
+        return ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), {
+            keepTapped: options.keepTapped === true
+        });
     }
 
     let text = "📅 <b>Твій графік на найближчий час:</b>\n\n";
@@ -248,12 +250,13 @@ export async function showStaffSchedule(ctx: MyContext) {
     }
 
     await ScreenManager.renderScreen(ctx, text, new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"), {
-        pushToStack: true
+        pushToStack: true,
+        keepTapped: options.keepTapped === true
     });
     await ctx.answerCallbackQuery().catch(() => { });
 }
 
-export async function showReplacementShiftPicker(ctx: MyContext) {
+export async function showReplacementShiftPicker(ctx: MyContext, options: { keepTapped?: boolean } = {}) {
     ctx.session.step = "idle";
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
@@ -267,7 +270,7 @@ export async function showReplacementShiftPicker(ctx: MyContext) {
             ctx,
             "У тебе немає майбутніх змін, для яких можна запустити пошук підміни.",
             new InlineKeyboard().text("🏠 Меню", "staff_hub_nav"),
-            { pushToStack: true }
+            { pushToStack: true, keepTapped: options.keepTapped === true }
         );
         await ctx.answerCallbackQuery().catch(() => { });
         return;
@@ -289,7 +292,7 @@ export async function showReplacementShiftPicker(ctx: MyContext) {
         ctx,
         text,
         kb,
-        { pushToStack: true }
+        { pushToStack: true, keepTapped: options.keepTapped === true }
     );
     await ctx.answerCallbackQuery().catch(() => { });
 }

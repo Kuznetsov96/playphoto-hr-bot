@@ -33,6 +33,10 @@ import { ScreenManager } from "../utils/screen-manager.js";
 import { escapeHtml } from "./admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import prisma from "../db/core.js";
+import {
+    SCHEDULE_NOTIFICATION_REPLACEMENT_CALLBACK,
+    SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK
+} from "../constants/schedule-notification-callbacks.js";
 import { awsBusinessClient } from "../services/aws-business-client.js";
 import {
     OPEN_SHIFT_OFFER_ACCEPT_CALLBACK_CODE,
@@ -493,6 +497,21 @@ handlers.callbackQuery("staff_hub_nav", async (ctx) => {
     const { showStaffHub } = await import("../modules/staff/handlers/menu.js");
     await showStaffHub(ctx);
     await ctx.answerCallbackQuery();
+});
+
+// Кнопки під сповіщеннями про графік. Ведуть саме туди, куди названі, і не
+// переписують сповіщення: раніше «🗓 Мій графік» відкривала меню на місці
+// самого повідомлення про графік (аудит 12.10.2026).
+handlers.callbackQuery(SCHEDULE_NOTIFICATION_SCHEDULE_CALLBACK, async (ctx) => {
+    const { showStaffSchedule } = await import("../modules/staff/handlers/menu.js");
+    await showStaffSchedule(ctx, { keepTapped: true });
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+handlers.callbackQuery(SCHEDULE_NOTIFICATION_REPLACEMENT_CALLBACK, async (ctx) => {
+    const { showReplacementShiftPicker } = await import("../modules/staff/handlers/menu.js");
+    await showReplacementShiftPicker(ctx, { keepTapped: true });
+    await ctx.answerCallbackQuery().catch(() => { });
 });
 
 const adminApp = new Composer<MyContext>();
