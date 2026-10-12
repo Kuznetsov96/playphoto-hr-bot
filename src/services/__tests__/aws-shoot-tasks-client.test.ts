@@ -271,6 +271,17 @@ describe("AwsBusinessClient shoot offers", () => {
         expect(shootTaskSchema.safeParse({ ...offer, kind: "EVE" }).success).toBe(false);
     });
 
+    it("REDACT: with or without the undo reason, nothing else in its payload", () => {
+        const redact = { ...task, kind: "REDACT", targetMessageId: 501 };
+        expect(shootTaskSchema.safeParse(redact).success).toBe(true);
+        expect(shootTaskSchema.safeParse({ ...redact, payload: { reason: "UNDONE" } }).success).toBe(true);
+        expect(shootTaskSchema.safeParse({ ...redact, payload: { reason: "OTHER" } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...redact, payload: { reason: "UNDONE", extra: 1 } }).success).toBe(false);
+        expect(shootTaskSchema.safeParse({ ...redact, payload: {} }).success).toBe(false);
+        // Причина лише в REDACT: в інших видах плану 4 payload як і раніше заборонено.
+        expect(shootTaskSchema.safeParse({ ...task, kind: "ASSIGNED", payload: { reason: "UNDONE" } }).success).toBe(false);
+    });
+
     it("never lets a phone into a message that goes to many", () => {
         const phone = "+380671234567";
         expect(shootTaskSchema.safeParse({ ...offer, shoot: { ...offer.shoot, phone } }).success).toBe(false);

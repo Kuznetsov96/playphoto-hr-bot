@@ -4,7 +4,7 @@ vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "test-secre
 
 const { AwsBusinessApiError } = await import("../../services/aws-business-client.js");
 const { buildSignedCallback } = await import("../../utils/signed-callback.js");
-const { createShootTaskHandlers, dueKeyboard, confirmKeyboard, parseRef, parseRefDate, toastFor, movedToast, ANSWER_DEADLINE_MS } =
+const { createShootTaskHandlers, dueKeyboard, confirmKeyboard, parseRef, parseRefDate, toastFor, movedToast, withoutUndo, ANSWER_DEADLINE_MS } =
     await import("../shoot-tasks.js");
 const { supportKeyboard, renderShootTask } = await import("../../services/shoot-task-render.js");
 import type { AwsShootTask } from "../../services/aws-business-client.js";
@@ -538,6 +538,29 @@ describe("shoot offer buttons (part C)", () => {
         expect(c.answerCallbackQuery).toHaveBeenCalledWith({ text: "Скасувати вже не можна — напиши в підтримку.", show_alert: true });
         const markup = c.editMessageReplyMarkup.mock.calls[0]![0] as { reply_markup: Keyboard };
         expect(markup.reply_markup.inline_keyboard.flat().map((b) => b.text)).toEqual(["Написати в підтримку"]);
+    });
+
+    it("«Скасувати» again after an undo (ALREADY_ANSWERED) → its toast, «Скасувати» goes, support stays", async () => {
+        const d = offerDeps();
+        d.client.undoShootOffer.mockResolvedValue({ ok: false, code: "SHOOT_OFFER_ALREADY_ANSWERED" });
+        const c = offerCtx(buildSignedCallback("shu", OFFER_REF), takenButtons());
+        await createShootTaskHandlers(d as never).undo(c as never);
+        expect(c.answerCallbackQuery).toHaveBeenCalledTimes(1);
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Ти вже відповіла на цю пропозицію.");
+        expect(c.editMessageReplyMarkup).toHaveBeenCalledWith({ reply_markup: { inline_keyboard: [takenButtons().inline_keyboard[1]] } });
+    });
+
+    it("«Скасувати» on an inaccessible message → the toast, no edit, no throw", async () => {
+        const d = offerDeps();
+        const c = ctx(buildSignedCallback("shu", OFFER_REF));
+        // Telegram шле InaccessibleMessage (date: 0) без reply_markup — правити нічого.
+        (c.callbackQuery as Record<string, unknown>).message = { message_id: 501, date: 0, chat: { id: 77, type: "private" } };
+        await expect(createShootTaskHandlers(d as never).undo(c as never)).resolves.toBeUndefined();
+        expect(c.answerCallbackQuery).toHaveBeenCalledWith("Скасовано, зйомка знову вільна 💛");
+        expect(c.editMessageReplyMarkup).not.toHaveBeenCalled();
+        expect(withoutUndo(c as never)).toBeNull();
+        const none = ctx(buildSignedCallback("shu", OFFER_REF));
+        expect(withoutUndo(none as never)).toBeNull();
     });
 
     it("«Скасувати» on a 5xx → retry, «Скасувати» stays", async () => {

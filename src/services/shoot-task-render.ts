@@ -91,6 +91,14 @@ function offerText(item: AwsShootTask, feeAmount: number | null): string {
     return lines.join("\n");
 }
 
+/** Її «Зйомка твоя» після «Скасувати»: точка, дата, інтервали — особистих полів немає зовсім. */
+function undoneText(item: AwsShootTask): string {
+    const lines = [STAFF_TEXTS["shoot-offer-undone-head"], "", locationLine(item), `📅 ${dayLabel(item.shoot.shootOn)}`];
+    const time = timeLine(item);
+    if (time !== null) lines.push(time);
+    return lines.join("\n");
+}
+
 const offerPlace = (item: AwsShootTask) => ({
     location: escapeHtml(formatLocation(item.shoot.location, "listing")),
     date: dayLabel(item.shoot.shootOn),
@@ -170,7 +178,7 @@ export function renderShootTask(
         case "ASSIGNED":
             return { text: assignedText(item), keyboard: supportKeyboard(item.ref) };
         case "REDACT":
-            return { text: assignedText(item), keyboard: null };
+            return { text: item.payload?.reason === "UNDONE" ? undoneText(item) : assignedText(item), keyboard: null };
         case "PHOTOS_DUE":
             return {
                 text: withPathB(

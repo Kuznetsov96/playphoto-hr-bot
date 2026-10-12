@@ -586,8 +586,18 @@ export const shootTaskSchema = z.discriminatedUnion("kind", [
                 "DUE_CHANGED",
                 "UNASSIGNED",
                 "CANCELLED",
-                "REDACT",
             ]),
+        })
+        .strict(),
+    /**
+     * REDACT ховає телефон. Після її власного «Скасувати» вебапп додає `reason: UNDONE` —
+     * тоді повідомлення стає «Скасовано», а не «Тобі призначено». Без payload — як і раніше.
+     */
+    z
+        .object({
+            ...shootTaskCommon,
+            kind: z.literal("REDACT"),
+            payload: z.object({ reason: z.literal("UNDONE") }).strict().optional(),
         })
         .strict(),
     z

@@ -84,6 +84,7 @@ describe("shoot offer texts", () => {
         expect(t["shoot-offer-reopened"](offerSample)).toBe(
             "Зйомка на Dragon Park 1 (Lviv) сб 16.03 знову вільна — та, що погодилась, скасувала це одразу.\nЯкщо можеш — бери.",
         );
+        expect(t["shoot-offer-undone-head"]).toBe("Скасовано, зйомка знову вільна.");
         expect([t["shoot-offer-btn-take"], t["shoot-offer-btn-decline"], t["shoot-offer-btn-undo"]]).toEqual(["✅ Беру", "🚫 Не можу", "Скасувати"]);
         expect([
             t["shoot-offer-ans-taken"],

@@ -819,6 +819,8 @@ Please check bot permissions (Manage Topics).`,
   "shoot-offer-closed": (p: { location: string; date: string }) => `Пропозицію закрито: ${p.location}, ${p.date}.`,
   "shoot-offer-reopened": (p: { location: string; date: string }) =>
     `Зйомка на ${p.location} ${p.date} знову вільна — та, що погодилась, скасувала це одразу.\nЯкщо можеш — бери.`,
+  // Правка «✅ Зйомка твоя» після її «Скасувати»: лише точка й час — ні клієнта, ні телефону.
+  "shoot-offer-undone-head": `Скасовано, зйомка знову вільна.`,
   "shoot-offer-btn-take": `✅ Беру`,
   "shoot-offer-btn-decline": `🚫 Не можу`,
   "shoot-offer-btn-undo": `Скасувати`,

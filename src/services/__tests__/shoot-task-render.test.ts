@@ -215,6 +215,26 @@ describe("renderShootTask", () => {
             expect(readSignedCallback(callbacks(keyboard)[0]!, SHOOT_OFFER_TAKE_CODE)).toBe(offerRef);
         });
 
+        it("REDACT after her undo: «Скасовано», place and time only, no buttons", () => {
+            const undone: AwsShootTask = {
+                ...base,
+                kind: "REDACT",
+                targetMessageId: 501,
+                shoot: { ...shoot, clientName: "Олена", childName: "Марійка", notes: "Торт", phone: null },
+                payload: { reason: "UNDONE" },
+            };
+            const { text, keyboard } = renderShootTask(undone);
+            expect(text).toBe("Скасовано, зйомка знову вільна.\n\n📍 Dragon Park 1 (Lviv)\n📅 сб 16.03\n🕐 15:00–16:00, 18:00–19:30 (2,5 год)");
+            expect(text).not.toMatch(/Олена|Марійка|Торт|Клієнт|призначено/u);
+            expect(keyboard).toBeNull();
+        });
+
+        it("plain REDACT is unchanged by the undo variant", () => {
+            const plain = renderShootTask({ ...base, kind: "REDACT", targetMessageId: 501 }).text;
+            expect(plain.startsWith("Тобі призначено зйомку.")).toBe(true);
+            expect(plain).toContain("телефон приховано.");
+        });
+
         it("escapes the location in every offer text", () => {
             const location = { name: "A&B <Park>", city: "Lviv", branch: null };
             for (const kind of ["OFFER", "OFFER_REOPENED"] as const) {

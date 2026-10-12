@@ -199,6 +199,20 @@ describe("ShootTaskDispatcher", () => {
             expect(c.markShootTaskDelivered).not.toHaveBeenCalled();
         });
 
+        it("REDACT after an undo edits her «Зйомка твоя» into «Скасовано» and drops the keyboard", async () => {
+            const api = { sendMessage: vi.fn(), editMessageText: vi.fn().mockResolvedValue(true) };
+            const undone = { ...redact, shoot: { ...redact.shoot, clientName: null }, payload: { reason: "UNDONE" as const } };
+            const c = client([undone]);
+            await createShootTaskDispatcher(api as never, c as never, memoryStore()).runOnce();
+            expect(api.editMessageText).toHaveBeenCalledWith(
+                1164289764,
+                777,
+                expect.stringMatching(/^Скасовано, зйомка знову вільна\.\n\n📍/u),
+                expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+            );
+            expect(c.markShootTaskDelivered).toHaveBeenCalledWith(item.publicId, 777);
+        });
+
         it("OFFER_TAKEN: the phone goes to Telegram, never to the log", async () => {
             const taken = { ...item, kind: "OFFER_TAKEN" as const, shoot: { ...item.shoot, childName: "Марійка", notes: "Торт" }, payload: { offerRef } };
             const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 502 }), editMessageText: vi.fn() };
