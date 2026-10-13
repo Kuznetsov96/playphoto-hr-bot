@@ -233,6 +233,31 @@ describe('hrService', () => {
             expect(api.sendMessage).not.toHaveBeenCalled();
         });
 
+        it('MINIAPP retry of an already accepted and notified candidate: succeeds without a base url', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({
+                ...base, status: CandidateStatus.MENTOR_MANUAL, hrDecision: 'ACCEPTED', notificationSent: true
+            } as any);
+            trainingConfig.baseUrl = undefined;
+            try {
+                await expect(hrService.acceptAfterInterview(api, 'cand1', 'webapp-recruiter', 'MINIAPP')).resolves.toBe(true);
+            } finally {
+                trainingConfig.baseUrl = 'https://app.example.com';
+            }
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(candidateRepository.update).not.toHaveBeenCalled();
+        });
+
+        it('OWNER mode ignores the base url entirely: owner text, no web_app button', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+
+            await hrService.acceptAfterInterview(api, 'cand1', 'webapp-recruiter', 'OWNER');
+
+            const [, text, opts] = api.sendMessage.mock.calls[0] as any[];
+            expect(text).toBe(CANDIDATE_TEXTS['worker-offer-accepted']());
+            const buttons = opts.reply_markup.inline_keyboard.flat();
+            expect(buttons.some((b: any) => b.web_app)).toBe(false);
+        });
+
         it('decided during the meeting: completes the interview first, then MENTOR_MANUAL', async () => {
             vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_SCHEDULED } as any);
 

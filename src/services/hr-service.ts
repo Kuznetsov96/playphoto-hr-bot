@@ -335,15 +335,28 @@ export const hrService = {
         adminId?: string,
         trainingMode: "MINIAPP" | "OWNER" = "OWNER",
     ) {
-        // Адрес проверяем до смены статуса: при пустом адресе команда падает,
-        // не переведя кандидатку в MENTOR_MANUAL.
-        const trainingUrl = trainingMode === "MINIAPP" ? buildMiniAppUrl(TRAINING_MINIAPP_BASE_URL, "/learn") : null;
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return false;
 
         const telegramId = Number(cand.user.telegramId);
         const alreadyAccepted = cand.status === CandidateStatus.MENTOR_MANUAL && cand.hrDecision === "ACCEPTED";
         if (alreadyAccepted && cand.notificationSent) return true;
+
+        // Письмо точно уйдёт — собираем его по режиму до смены статуса: в MINIAPP
+        // без адреса команда падает, не переведя кандидатку в MENTOR_MANUAL.
+        const offer =
+            trainingMode === "MINIAPP"
+                ? {
+                      text: CANDIDATE_TEXTS["worker-offer-accepted-training"](),
+                      keyboard: new InlineKeyboard()
+                          .webApp("Почати навчання", buildMiniAppUrl(TRAINING_MINIAPP_BASE_URL, "/learn"))
+                          .row()
+                          .text("Написати нам", "contact_hr"),
+                  }
+                : {
+                      text: CANDIDATE_TEXTS["worker-offer-accepted"](),
+                      keyboard: new InlineKeyboard().text("Написати нам", "contact_hr"),
+                  };
 
         if (!alreadyAccepted) {
             if (cand.status === CandidateStatus.INTERVIEW_SCHEDULED) {
@@ -387,13 +400,7 @@ export const hrService = {
             const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
             // Старі повідомлення з кнопками запису прибираються, як і при відмові.
             await cleanupUserSessionMessages(api, telegramId);
-            const keyboard = trainingUrl
-                ? new InlineKeyboard().webApp("Почати навчання", trainingUrl).row().text("Написати нам", "contact_hr")
-                : new InlineKeyboard().text("Написати нам", "contact_hr");
-            const text = trainingUrl
-                ? CANDIDATE_TEXTS["worker-offer-accepted-training"]()
-                : CANDIDATE_TEXTS["worker-offer-accepted"]();
-            const msg = await api.sendMessage(telegramId, text, { parse_mode: "HTML", reply_markup: keyboard });
+            const msg = await api.sendMessage(telegramId, offer.text, { parse_mode: "HTML", reply_markup: offer.keyboard });
             if (msg) await trackUserMessage(telegramId, msg.message_id);
             await candidateRepository.update(candId, { notificationSent: true });
             logBusinessEvent({
