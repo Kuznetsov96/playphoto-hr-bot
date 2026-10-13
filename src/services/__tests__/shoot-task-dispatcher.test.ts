@@ -156,6 +156,75 @@ describe("ShootTaskDispatcher", () => {
         expect(c.markShootTaskFailed).toHaveBeenCalledWith(item.publicId, "TG_400");
     });
 
+    describe("offers (part C)", () => {
+        const offerRef = "qrstuvwx2345";
+        const offer = { ...item, kind: "OFFER" as const, shoot: { ...item.shoot, clientName: null, phone: null }, payload: { offerRef, feeAmount: 600 } };
+        const closed = (variant: "TAKEN" | "CLOSED") => ({
+            ...item,
+            kind: "OFFER_CLOSED" as const,
+            shoot: { ...item.shoot, clientName: null, phone: null },
+            targetMessageId: 501,
+            payload: { variant, targetMessageId: 501 },
+        });
+
+        it("OFFER is a new message with «Беру» and «Не можу»", async () => {
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 501 }), editMessageText: vi.fn() };
+            const c = client([offer]);
+            await createShootTaskDispatcher(api as never, c as never, memoryStore()).runOnce();
+            const [, text, options] = api.sendMessage.mock.calls[0]!;
+            expect(text).toContain("🆕 Зйомка — можеш взяти.");
+            expect(options.reply_markup.inline_keyboard.flat().map((b: { text: string }) => b.text)).toEqual(["✅ Беру", "🚫 Не можу"]);
+            expect(c.markShootTaskDelivered).toHaveBeenCalledWith(item.publicId, 501);
+        });
+
+        it.each(["TAKEN", "CLOSED"] as const)("OFFER_CLOSED (%s) edits the delivered OFFER and empties its keyboard", async (variant) => {
+            const api = { sendMessage: vi.fn(), editMessageText: vi.fn().mockResolvedValue(true) };
+            const c = client([closed(variant)]);
+            await createShootTaskDispatcher(api as never, c as never, memoryStore()).runOnce();
+            const text = variant === "TAKEN" ? "Цю зйомку вже взяли: Dragon Park 1 (Lviv), сб 16.03." : "Пропозицію закрито: Dragon Park 1 (Lviv), сб 16.03.";
+            expect(api.editMessageText).toHaveBeenCalledWith(1164289764, 501, text, expect.objectContaining({ reply_markup: { inline_keyboard: [] } }));
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(c.markShootTaskDelivered).toHaveBeenCalledWith(item.publicId, 501);
+        });
+
+        it.each([
+            ["Bad Request: message to edit not found", "TG_MESSAGE_GONE"],
+            ["Bad Request: MESSAGE_ID_INVALID", "TG_MESSAGE_GONE"],
+            ["Bad Request: message is not modified", "TG_NOT_MODIFIED"],
+        ])("OFFER_CLOSED refused with «%s» is failed as %s, not retried", async (description, reason) => {
+            const api = { sendMessage: vi.fn(), editMessageText: vi.fn().mockRejectedValue(tgError(400, description)) };
+            const c = client([closed("TAKEN")]);
+            await createShootTaskDispatcher(api as never, c as never, memoryStore()).runOnce();
+            expect(c.markShootTaskFailed).toHaveBeenCalledWith(item.publicId, reason);
+            expect(c.markShootTaskDelivered).not.toHaveBeenCalled();
+        });
+
+        it("REDACT after an undo edits her «Зйомка твоя» into «Скасовано» and drops the keyboard", async () => {
+            const api = { sendMessage: vi.fn(), editMessageText: vi.fn().mockResolvedValue(true) };
+            const undone = { ...redact, shoot: { ...redact.shoot, clientName: null }, payload: { reason: "UNDONE" as const } };
+            const c = client([undone]);
+            await createShootTaskDispatcher(api as never, c as never, memoryStore()).runOnce();
+            expect(api.editMessageText).toHaveBeenCalledWith(
+                1164289764,
+                777,
+                expect.stringMatching(/^Скасовано, зйомка знову вільна\.\n\n📍/u),
+                expect.objectContaining({ reply_markup: { inline_keyboard: [] } }),
+            );
+            expect(c.markShootTaskDelivered).toHaveBeenCalledWith(item.publicId, 777);
+        });
+
+        it("OFFER_TAKEN: the phone goes to Telegram, never to the log", async () => {
+            const taken = { ...item, kind: "OFFER_TAKEN" as const, shoot: { ...item.shoot, childName: "Марійка", notes: "Торт" }, payload: { offerRef } };
+            const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 502 }), editMessageText: vi.fn() };
+            const failing = { sendMessage: vi.fn().mockRejectedValue(tgError(400, "Bad Request: chat not found", "sendMessage")), editMessageText: vi.fn() };
+            await createShootTaskDispatcher(api as never, client([taken]) as never, memoryStore()).runOnce();
+            await createShootTaskDispatcher(failing as never, client([taken]) as never, memoryStore()).runOnce();
+            expect(api.sendMessage.mock.calls[0]![1]).toContain("<code>+380671231301</code>");
+            expect(logBusinessEvent).toHaveBeenCalled();
+            expect(JSON.stringify(logBusinessEvent.mock.calls)).not.toMatch(/380|Олена|Марійка|Торт|Dragon|qrstuvwx2345/u);
+        });
+    });
+
     it("REDACT without a target message is failed, not sent", async () => {
         const api = { sendMessage: vi.fn(), editMessageText: vi.fn() };
         const c = client([{ ...redact, targetMessageId: null }]);

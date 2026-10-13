@@ -102,12 +102,19 @@ function transient(error: unknown): boolean {
     return error instanceof GrammyError && (error.error_code === 429 || error.error_code >= 500);
 }
 
+/**
+ * Види, що правлять уже доставлене повідомлення, а не шлють нове: REDACT ховає телефон,
+ * OFFER_CLOSED перетворює пропозицію з кнопками на рядок «вже взяли» / «закрито».
+ */
+const EDIT_KINDS: ReadonlySet<AwsShootTask["kind"]> = new Set(["REDACT", "OFFER_CLOSED"]);
+
 function failureReason(error: unknown, kind: AwsShootTask["kind"]): string {
     if (error instanceof GrammyError) {
         if (error.error_code === 403) return SHOOT_TASK_FAILURE_REASONS.BLOCKED;
+        const edit = EDIT_KINDS.has(kind);
         const gone = describes(error, "message to edit not found") || describes(error, "message_id_invalid");
-        if (kind === "REDACT" && gone) return SHOOT_TASK_FAILURE_REASONS.MESSAGE_GONE;
-        if (kind === "REDACT" && describes(error, "message is not modified")) return SHOOT_TASK_FAILURE_REASONS.NOT_MODIFIED;
+        if (edit && gone) return SHOOT_TASK_FAILURE_REASONS.MESSAGE_GONE;
+        if (edit && describes(error, "message is not modified")) return SHOOT_TASK_FAILURE_REASONS.NOT_MODIFIED;
         return `TG_${error.error_code}`;
     }
     if (error instanceof HttpError) return "HTTP_ERROR";
@@ -174,14 +181,16 @@ export function createShootTaskDispatcher(
     async function deliver(item: AwsShootTask): Promise<number> {
         const chatId = Number(item.telegramId);
         const { text, keyboard } = renderShootTask(item);
-        if (item.kind === "REDACT") {
-            if (item.targetMessageId === null) throw new Error(NO_TARGET);
-            await api.editMessageText(chatId, item.targetMessageId, text, {
+        if (EDIT_KINDS.has(item.kind)) {
+            // У OFFER_CLOSED ціль ще й у payload (схема вимагає); верхнє поле — те саме, що в REDACT.
+            const target = item.kind === "OFFER_CLOSED" ? item.payload.targetMessageId : item.targetMessageId;
+            if (target === null) throw new Error(NO_TARGET);
+            await api.editMessageText(chatId, target, text, {
                 parse_mode: "HTML",
                 link_preview_options: { is_disabled: true },
                 reply_markup: { inline_keyboard: [] },
             });
-            return item.targetMessageId;
+            return target;
         }
         const sent = await api.sendMessage(chatId, text, {
             parse_mode: "HTML",

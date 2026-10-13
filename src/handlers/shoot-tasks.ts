@@ -1,16 +1,27 @@
 import { Composer, InlineKeyboard } from "grammy";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import logger from "../core/logger.js";
-import { AwsBusinessApiError, awsBusinessClient, type ShootTaskRefusalCode } from "../services/aws-business-client.js";
+import {
+    AwsBusinessApiError,
+    awsBusinessClient,
+    type ShootOfferAnswer,
+    type ShootOfferButtonResult,
+    type ShootOfferRefusalCode,
+    type ShootTaskRefusalCode,
+} from "../services/aws-business-client.js";
 import {
     SHOOT_DUE_BACK_CODE,
     SHOOT_DUE_CONFIRM_CODE,
     SHOOT_DUE_DATE_CODE,
     SHOOT_DUE_PICK_CODE,
+    SHOOT_OFFER_DECLINE_CODE,
+    SHOOT_OFFER_TAKE_CODE,
+    SHOOT_OFFER_UNDO_CODE,
     SHOOT_SUPPORT_CODE,
     renderShootTask,
     supportKeyboard,
 } from "../services/shoot-task-render.js";
+import type { InlineKeyboardMarkup } from "grammy/types";
 import type { MyContext } from "../types/context.js";
 import { dayLabel, fromYymmdd, toYymmdd } from "../utils/shoot-format.js";
 import { buildSignedCallback, readSignedCallback } from "../utils/signed-callback.js";
@@ -18,7 +29,8 @@ import { buildSignedCallback, readSignedCallback } from "../utils/signed-callbac
 /**
  * Кнопки нагадувань фотографу про зйомки (план 4): sdp → дати, sdd → підтвердження,
  * sdc → перенос, sdb → назад, sds → підтримка. Payload — `ref` рядка outbox або
- * `ref.YYMMDD` (спек «Кнопки: 64 байта»). Хто натиснула — лише `callbackQuery.from.id`:
+ * `ref.YYMMDD` (спек «Кнопки: 64 байта»). Пропозиція зйомки (частина C): sha → «Беру»,
+ * shd → «Не можу», shu → «Скасувати»; payload — `ref` пропозиції. Хто натиснула — лише `callbackQuery.from.id`:
  * сервер звіряє його з фотографом зйомки, з payload чи тексту він не береться.
  * У логи — лише назва помилки й код відмови: ні тексту повідомлення, ні телефону.
  */
@@ -103,7 +115,15 @@ export function movedToast(dueOn: string): string {
     return STAFF_TEXTS["shoot-task-ans-moved-to"]({ due: dayLabel(dueOn) });
 }
 
-type Client = Pick<typeof awsBusinessClient, "shootTaskDueOptions" | "moveShootTaskDue" | "shootTaskSupportLine">;
+type Client = Pick<
+    typeof awsBusinessClient,
+    | "shootTaskDueOptions"
+    | "moveShootTaskDue"
+    | "shootTaskSupportLine"
+    | "acceptShootOffer"
+    | "declineShootOffer"
+    | "undoShootOffer"
+>;
 export type ShootTaskHandlerDeps = {
     client: Client;
     openSupport(ctx: MyContext, shootLine: string): Promise<void>;
@@ -123,7 +143,8 @@ const errorName = (error: unknown): string => (error instanceof Error ? error.na
 const isNotModified = (error: unknown): boolean =>
     error instanceof Error && /message is not modified/iu.test(error.message);
 
-type Answer = (text?: string) => Promise<void>;
+/** `alert` — плашка з «ОК» (show_alert) замість тоста: для того, що треба дочитати. */
+type Answer = (text?: string, options?: { alert: true }) => Promise<void>;
 
 /**
  * Рівно одна відповідь на натискання. `answerCallbackQuery` контексту підмінено на час обробки:
@@ -149,8 +170,9 @@ async function handleOnce(
         }
     }) as MyContext["answerCallbackQuery"];
     ctx.answerCallbackQuery = guarded;
-    const answer: Answer = async (text) => {
-        await (text === undefined ? guarded() : guarded(text));
+    const answer: Answer = async (text, options) => {
+        if (text === undefined) await guarded();
+        else await (options?.alert ? guarded({ text, show_alert: true }) : guarded(text));
     };
     const deadline = setTimeout(() => void answer(deadlineToast), ANSWER_DEADLINE_MS);
     try {
@@ -180,6 +202,42 @@ async function edit(operation: string, run: () => Promise<unknown>): Promise<boo
     }
 }
 
+/**
+ * Відповіді на кнопки пропозиції (таблиця коротких відповідей спеку) і що стає з кнопками.
+ * `drop` — кнопки зникають: відповідь остаточна, мертва кнопка не має виглядати живою.
+ * INELIGIBLE кнопки лишає: зміну можуть зняти, і тоді «Беру» спрацює.
+ * NOT_FOUND (не її, немає, контур вимкнено) — нейтральна спливашка, повідомлення не чіпаємо.
+ */
+const OFFER_RESULT: Record<ShootOfferAnswer, { toast: keyof typeof STAFF_TEXTS; drop: boolean }> = {
+    TAKEN: { toast: "shoot-offer-ans-taken", drop: true },
+    ALREADY_TAKEN: { toast: "shoot-offer-ans-already-taken", drop: true },
+    DECLINED: { toast: "shoot-offer-ans-declined", drop: true },
+    UNDONE: { toast: "shoot-offer-ans-undone", drop: true },
+};
+const OFFER_REFUSAL: Record<ShootOfferRefusalCode, { toast: keyof typeof STAFF_TEXTS; drop: boolean }> = {
+    SHOOT_OFFER_NOT_FOUND: { toast: "schedule-notif-ans-expired", drop: false },
+    SHOOT_STARTED: { toast: "shoot-offer-ans-started", drop: true },
+    SHOOT_OFFER_ALREADY_ANSWERED: { toast: "shoot-offer-ans-already-answered", drop: true },
+    SHOOT_OFFER_INELIGIBLE: { toast: "shoot-offer-ans-ineligible", drop: false },
+    SHOOT_OFFER_UNDO_WINDOW_CLOSED: { toast: "shoot-offer-ans-undo-closed", drop: true },
+};
+
+/**
+ * Клавіатура повідомлення без кнопки «Скасувати» — «Написати в підтримку» лишається (ref
+ * рядка outbox бот не знає з payload `shu`, тож береться з самого повідомлення). Немає
+ * повідомлення (Telegram не прислав) — null, правки не буде.
+ */
+export function withoutUndo(ctx: MyContext): InlineKeyboardMarkup | null {
+    const message = ctx.callbackQuery?.message;
+    const rows = message !== undefined && "reply_markup" in message ? message.reply_markup?.inline_keyboard : undefined;
+    if (rows === undefined) return null;
+    const prefix = `cb:${SHOOT_OFFER_UNDO_CODE}:`;
+    const kept = rows
+        .map((row) => row.filter((button) => !("callback_data" in button && button.callback_data.startsWith(prefix))))
+        .filter((row) => row.length > 0);
+    return { inline_keyboard: kept };
+}
+
 export function createShootTaskHandlers(deps: ShootTaskHandlerDeps = defaultDeps) {
     const payloadOf = (ctx: MyContext, code: string): string | null => readSignedCallback(ctx.callbackQuery?.data ?? "", code);
     const telegramIdOf = (ctx: MyContext): number | null => ctx.callbackQuery?.from?.id ?? null;
@@ -189,7 +247,40 @@ export function createShootTaskHandlers(deps: ShootTaskHandlerDeps = defaultDeps
         await answer(toastFor({ ok: false, code }));
     };
 
+    /**
+     * «Беру», «Не можу», «Скасувати»: підпис і ref перевіряються до мережі, від кого — лише
+     * `callbackQuery.from.id`. Збій мережі, 5xx і SHOOT_OFFER_CONCURRENT_CHANGE — виняток,
+     * handleOnce відповідає «Спробуй ще раз», кнопки лишаються.
+     */
+    const offerButton = (
+        operation: string,
+        code: string,
+        call: (ref: string, telegramId: number) => Promise<ShootOfferButtonResult>,
+        closedKeyboard: (ctx: MyContext) => InlineKeyboardMarkup | null,
+    ) =>
+        (ctx: MyContext) =>
+            handleOnce(ctx, operation, async (answer) => {
+                const ref = parseRef(payloadOf(ctx, code));
+                const telegramId = telegramIdOf(ctx);
+                if (ref === null || telegramId === null) return expired(answer);
+                const outcome = await call(ref, telegramId);
+                const { toast, drop } = outcome.ok ? OFFER_RESULT[outcome.result] : OFFER_REFUSAL[outcome.code];
+                if (!outcome.ok) logger.info({ operation, code: outcome.code }, "Shoot offer button refused");
+                if (drop) {
+                    const keyboard = closedKeyboard(ctx);
+                    if (keyboard !== null) await edit(operation, () => ctx.editMessageReplyMarkup({ reply_markup: keyboard }));
+                }
+                const alert = !outcome.ok && outcome.code === "SHOOT_OFFER_UNDO_WINDOW_CLOSED";
+                await answer(STAFF_TEXTS[toast] as string, alert ? { alert: true } : undefined);
+            });
+
+    const noButtons = (): InlineKeyboardMarkup => ({ inline_keyboard: [] });
+
     return {
+        take: offerButton("shoot_offer.take", SHOOT_OFFER_TAKE_CODE, (ref, id) => deps.client.acceptShootOffer(ref, id), noButtons),
+        decline: offerButton("shoot_offer.decline", SHOOT_OFFER_DECLINE_CODE, (ref, id) => deps.client.declineShootOffer(ref, id), noButtons),
+        undo: offerButton("shoot_offer.undo", SHOOT_OFFER_UNDO_CODE, (ref, id) => deps.client.undoShootOffer(ref, id), withoutUndo),
+
         pick: (ctx: MyContext) =>
             handleOnce(ctx, "shoot_task.pick", async (answer) => {
                 const ref = parseRef(payloadOf(ctx, SHOOT_DUE_PICK_CODE));
@@ -294,3 +385,6 @@ shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_DUE_DATE_CODE}:`), (ctx)
 shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_DUE_CONFIRM_CODE}:`), (ctx) => handlers.confirm(ctx));
 shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_DUE_BACK_CODE}:`), (ctx) => handlers.back(ctx));
 shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_SUPPORT_CODE}:`), (ctx) => handlers.support(ctx));
+shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_OFFER_TAKE_CODE}:`), (ctx) => handlers.take(ctx));
+shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_OFFER_DECLINE_CODE}:`), (ctx) => handlers.decline(ctx));
+shootTaskHandlers.callbackQuery(new RegExp(`^cb:${SHOOT_OFFER_UNDO_CODE}:`), (ctx) => handlers.undo(ctx));

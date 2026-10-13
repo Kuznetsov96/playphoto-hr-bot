@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "test-secret" }));
 
-const { renderShootTask, SHOOT_DUE_PICK_CODE, SHOOT_SUPPORT_CODE } = await import("../shoot-task-render.js");
+const { renderShootTask, SHOOT_DUE_PICK_CODE, SHOOT_SUPPORT_CODE, SHOOT_OFFER_TAKE_CODE, SHOOT_OFFER_DECLINE_CODE, SHOOT_OFFER_UNDO_CODE } =
+    await import("../shoot-task-render.js");
 const { readSignedCallback } = await import("../../utils/signed-callback.js");
 const { formatLocation } = await import("../../utils/location-label.js");
 import type { AwsShootTask } from "../aws-business-client.js";
@@ -130,5 +131,117 @@ describe("renderShootTask", () => {
         const { text } = renderShootTask({ ...base, kind: "RETURNED", returnComment: "a < b", canMoveDue: false }, { moved: true });
         expect(text).toContain("<blockquote>a &lt; b</blockquote>\n\nНовий термін — вт 19.03 включно. Виправ і надішли знову з каси. Нагадаю зранку в цей день.");
         expect(text.split("Новий термін").length - 1).toBe(1);
+    });
+
+    describe("offers (part C)", () => {
+        const offerRef = "qrstuvwx2345";
+        type Offer = Extract<AwsShootTask, { kind: "OFFER" | "OFFER_REOPENED" }>;
+        const shoot: Offer["shoot"] = {
+            ...base.shoot,
+            clientName: null,
+            phone: null,
+            intervals: [{ start: "15:00", end: "16:00" }, { start: "18:00", end: "19:30" }],
+            durationMinutes: 150,
+        };
+        const offer: Offer = { ...base, kind: "OFFER", shoot, payload: { offerRef, feeAmount: 600 } };
+
+        it("OFFER: the spec text word for word, the fee line, two signed buttons", () => {
+            const { text, keyboard } = renderShootTask(offer);
+            expect(text).toBe(
+                "🆕 Зйомка — можеш взяти.\n\n📍 Dragon Park 1 (Lviv)\n📅 сб 16.03\n🕐 15:00–16:00, 18:00–19:30 (2,5 год)\nОплата — 600 грн.\n\nХто перший погодиться — за тим і зйомка.",
+            );
+            expect(labels(keyboard)).toEqual(["✅ Беру", "🚫 Не можу"]);
+            const [take, decline] = callbacks(keyboard);
+            expect(take!.startsWith("cb:sha:")).toBe(true);
+            expect(readSignedCallback(take!, SHOOT_OFFER_TAKE_CODE)).toBe(offerRef);
+            expect(readSignedCallback(decline!, SHOOT_OFFER_DECLINE_CODE)).toBe(offerRef);
+            for (const data of callbacks(keyboard)) expect(Buffer.byteLength(data, "utf8")).toBeLessThanOrEqual(64);
+        });
+
+        it("OFFER: no fee line without a tariff; thousands are grouped, kopecks kept", () => {
+            expect(renderShootTask({ ...offer, payload: { offerRef, feeAmount: null } }).text).not.toContain("Оплата");
+            expect(renderShootTask({ ...offer, payload: { offerRef, feeAmount: 1600 } }).text).toContain("\nОплата — 1 600 грн.\n");
+            expect(renderShootTask({ ...offer, payload: { offerRef, feeAmount: 412.5 } }).text).toContain("\nОплата — 412,50 грн.\n");
+        });
+
+        it("OFFER: no time line when the shoot has no intervals, no duration when unknown", () => {
+            const noTime = renderShootTask({ ...offer, shoot: { ...shoot, intervals: [], durationMinutes: null } }).text;
+            expect(noTime).not.toContain("🕐");
+            const noDuration = renderShootTask({ ...offer, shoot: { ...shoot, durationMinutes: null } }).text;
+            expect(noDuration).toContain("🕐 15:00–16:00, 18:00–19:30\n");
+        });
+
+        it("OFFER and OFFER_REOPENED never carry the client, the child, the wishes or a phone", () => {
+            const leaky = { ...shoot, clientName: "Олена", childName: "Марійка", notes: "Торт", phone: "+380671231301" };
+            for (const kind of ["OFFER", "OFFER_REOPENED"] as const) {
+                const { text } = renderShootTask({ ...offer, kind, shoot: leaky } as unknown as AwsShootTask);
+                expect(text).not.toMatch(/Олена|Марійка|Торт|380/u);
+            }
+        });
+
+        it("OFFER_TAKEN: «Зйомка твоя», the ASSIGNED body without its first line, the undo hint; phone in <code>", () => {
+            const personal = { ...shoot, clientName: "Олена", childName: "Марійка", phone: "+380671231301", notes: "Торт" };
+            const taken: AwsShootTask = { ...base, kind: "OFFER_TAKEN", shoot: personal, payload: { offerRef } };
+            const assigned = renderShootTask({ ...base, kind: "ASSIGNED", shoot: personal }).text;
+            const { text, keyboard } = renderShootTask(taken);
+            const body = assigned.split("\n").slice(2).join("\n");
+            expect(text).toBe(`✅ Зйомка твоя.\n\n${body}\n\nЯкщо натиснула помилково — скасуй протягом 15 хвилин.`);
+            expect(text).toContain("Клієнт: Олена, <code>+380671231301</code>");
+            expect(text).not.toContain("Тобі призначено зйомку.");
+            expect(labels(keyboard)).toEqual(["Скасувати", "Написати в підтримку"]);
+            const [undo, support] = callbacks(keyboard);
+            expect(readSignedCallback(undo!, SHOOT_OFFER_UNDO_CODE)).toBe(offerRef);
+            expect(readSignedCallback(support!, SHOOT_SUPPORT_CODE)).toBe(base.ref);
+        });
+
+        it("OFFER_CLOSED: one line per variant, no buttons", () => {
+            const closed = (variant: "TAKEN" | "CLOSED"): AwsShootTask => ({
+                ...base,
+                kind: "OFFER_CLOSED",
+                shoot,
+                targetMessageId: 501,
+                payload: { variant, targetMessageId: 501 },
+            });
+            expect(renderShootTask(closed("TAKEN"))).toEqual({ text: "Цю зйомку вже взяли: Dragon Park 1 (Lviv), сб 16.03.", keyboard: null });
+            expect(renderShootTask(closed("CLOSED"))).toEqual({ text: "Пропозицію закрито: Dragon Park 1 (Lviv), сб 16.03.", keyboard: null });
+        });
+
+        it("OFFER_REOPENED: the spec text, «Беру» and «Не можу» on the same offer ref", () => {
+            const { text, keyboard } = renderShootTask({ ...offer, kind: "OFFER_REOPENED" });
+            expect(text).toBe(
+                "Зйомка на Dragon Park 1 (Lviv) сб 16.03 знову вільна — та, що погодилась, скасувала це одразу.\nЯкщо можеш — бери.",
+            );
+            expect(labels(keyboard)).toEqual(["✅ Беру", "🚫 Не можу"]);
+            expect(readSignedCallback(callbacks(keyboard)[0]!, SHOOT_OFFER_TAKE_CODE)).toBe(offerRef);
+        });
+
+        it("REDACT after her undo: «Скасовано», place and time only, no buttons", () => {
+            const undone: AwsShootTask = {
+                ...base,
+                kind: "REDACT",
+                targetMessageId: 501,
+                shoot: { ...shoot, clientName: "Олена", childName: "Марійка", notes: "Торт", phone: null },
+                payload: { reason: "UNDONE" },
+            };
+            const { text, keyboard } = renderShootTask(undone);
+            expect(text).toBe("Скасовано, зйомка знову вільна.\n\n📍 Dragon Park 1 (Lviv)\n📅 сб 16.03\n🕐 15:00–16:00, 18:00–19:30 (2,5 год)");
+            expect(text).not.toMatch(/Олена|Марійка|Торт|Клієнт|призначено/u);
+            expect(keyboard).toBeNull();
+        });
+
+        it("plain REDACT is unchanged by the undo variant", () => {
+            const plain = renderShootTask({ ...base, kind: "REDACT", targetMessageId: 501 }).text;
+            expect(plain.startsWith("Тобі призначено зйомку.")).toBe(true);
+            expect(plain).toContain("телефон приховано.");
+        });
+
+        it("escapes the location in every offer text", () => {
+            const location = { name: "A&B <Park>", city: "Lviv", branch: null };
+            for (const kind of ["OFFER", "OFFER_REOPENED"] as const) {
+                expect(renderShootTask({ ...offer, kind, shoot: { ...shoot, location } }).text).toContain("A&amp;B &lt;Park&gt;");
+            }
+            const closed: AwsShootTask = { ...base, kind: "OFFER_CLOSED", shoot: { ...shoot, location }, targetMessageId: 1, payload: { variant: "CLOSED", targetMessageId: 1 } };
+            expect(renderShootTask(closed).text).toContain("A&amp;B &lt;Park&gt;");
+        });
     });
 });
