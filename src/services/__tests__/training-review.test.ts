@@ -44,4 +44,9 @@ describe("training payload readers", () => {
         expect(buildMiniAppUrl("https://app.playphoto.com.ua/", "/learn")).toBe("https://app.playphoto.com.ua/learn");
         expect(() => buildMiniAppUrl(undefined, "/learn")).toThrow("OFFER_NOT_SENT:miniapp_url_missing");
     });
+
+    it("joins a path without a leading slash with exactly one slash", () => {
+        expect(buildMiniAppUrl("https://app.playphoto.com.ua", "learn")).toBe("https://app.playphoto.com.ua/learn");
+        expect(buildMiniAppUrl("https://app.playphoto.com.ua/", "learn")).toBe("https://app.playphoto.com.ua/learn");
+    });
 });

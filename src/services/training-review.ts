@@ -31,7 +31,8 @@ export function readCandidateMessage(payload: Record<string, unknown> | null): "
     return payload?.candidateMessage === "TRAINING_REJECTED" ? "TRAINING_REJECTED" : null;
 }
 
+/** База без хвостовых «/» + путь ровно с одним ведущим «/», как бы их ни прислали. */
 export function buildMiniAppUrl(base: string | undefined, path: string): string {
     if (!base) throw new Error("OFFER_NOT_SENT:miniapp_url_missing");
-    return `${base.replace(/\/+$/u, "")}${path}`;
+    return `${base.replace(/\/+$/u, "")}/${path.replace(/^\/+/u, "")}`;
 }
