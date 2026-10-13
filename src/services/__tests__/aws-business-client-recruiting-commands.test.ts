@@ -28,7 +28,6 @@ describe("AwsBusinessClient recruiter commands", () => {
         reasonCode: null,
         reasonText: null,
         locationCode: null,
-        payload: null,
         attempts: 0,
         candidate: {
             telegramId: "1164289764",
@@ -82,7 +81,15 @@ describe("AwsBusinessClient recruiter commands", () => {
                 reviewerTelegramId: "1001",
             });
             expect(result.candidateTelegramId).toBe("42");
-            expect(vi.mocked(fetch).mock.calls[0]?.[0]).toContain(`/recruiting/training/reviews/${reviewId}/decision`);
+            const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+            expect(url).toContain(`/recruiting/training/reviews/${reviewId}/decision`);
+            expect(init?.method).toBe("POST");
+            expect(JSON.parse(String(init?.body))).toEqual({
+                decision: "PASSED",
+                failedItems: [],
+                reasonCode: null,
+                reviewerTelegramId: "1001",
+            });
         });
 
         it("posts training review feedback without expecting a body", async () => {
@@ -108,7 +115,7 @@ describe("AwsBusinessClient recruiter commands", () => {
 
             const result = await new AwsBusinessClient().listPendingRecruitingCommands(20);
 
-            expect(result).toEqual({ items: [command] });
+            expect(result).toEqual({ items: [{ ...command, payload: null }] });
             expect(fetch).toHaveBeenCalledWith(
                 "https://api.example.test/api/v1/internal/bot/recruiting/commands/pending?limit=20",
                 expect.objectContaining({
@@ -129,7 +136,7 @@ describe("AwsBusinessClient recruiter commands", () => {
             const { AwsBusinessClient } = await import("../aws-business-client.js");
 
             await expect(new AwsBusinessClient().listPendingRecruitingCommands(20))
-                .resolves.toEqual({ items: [{ ...legacy, locationCode: null }] });
+                .resolves.toEqual({ items: [{ ...legacy, locationCode: null, payload: null }] });
         });
 
         it("carries locationCode of a CHANGE_LOCATION command through", async () => {
@@ -141,7 +148,7 @@ describe("AwsBusinessClient recruiter commands", () => {
             const { AwsBusinessClient } = await import("../aws-business-client.js");
 
             await expect(new AwsBusinessClient().listPendingRecruitingCommands(20))
-                .resolves.toEqual({ items: [changeLocation] });
+                .resolves.toEqual({ items: [{ ...changeLocation, payload: null }] });
         });
 
         it("tolerates an unknown kind — the schema must carry it through as a plain string", async () => {
