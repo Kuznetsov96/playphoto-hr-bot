@@ -177,9 +177,11 @@ export async function handleTrainingFeedback(ctx: MyContext, next: NextFunction)
     const body = message.text ?? (attachment ? ATTACHMENT_LABELS[attachment.kind] : null);
     if (!body) return next(); // стикер, фото и прочее — не совет
 
+    let copied: { message_id: number };
     try {
-        await ctx.api.copyMessage(Number(candidateTelegramId), ctx.chat.id, message.message_id);
+        copied = await ctx.api.copyMessage(Number(candidateTelegramId), ctx.chat.id, message.message_id);
     } catch (error) {
+        // isBotBlocked: заблокировала бота, удалила аккаунт или чата нет — один ответ на все три.
         if (isBotBlocked(error)) {
             await ctx.reply(ADMIN_TEXTS["training-feedback-blocked"]);
             return;
@@ -189,7 +191,8 @@ export async function handleTrainingFeedback(ctx: MyContext, next: NextFunction)
     try {
         await awsBusinessClient.postTrainingReviewFeedback(reviewPublicId, {
             reviewerTelegramId: String(ctx.from.id),
-            telegramMessageId: String(message.message_id),
+            // Id копии в чате кандидатки — то сообщение, которое она видит.
+            telegramMessageId: String(copied.message_id),
             body,
             attachment,
         });

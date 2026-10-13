@@ -55,7 +55,18 @@ function ctxFor(fromId: number, data: string): Any {
     };
 }
 
-function messageCtx(o: { from: number; replyTo?: number; text?: string; voice?: object; messageId: number }): Any {
+const COPIED_MESSAGE_ID = 501;
+
+function messageCtx(o: {
+    from: number;
+    replyTo?: number;
+    text?: string;
+    voice?: object;
+    video_note?: object;
+    sticker?: object;
+    photo?: object[];
+    messageId: number;
+}): Any {
     return {
         from: { id: o.from },
         chat: { id: o.from, type: "private" },
@@ -63,9 +74,12 @@ function messageCtx(o: { from: number; replyTo?: number; text?: string; voice?: 
             message_id: o.messageId,
             text: o.text,
             voice: o.voice,
+            video_note: o.video_note,
+            sticker: o.sticker,
+            photo: o.photo,
             reply_to_message: o.replyTo ? { message_id: o.replyTo } : undefined,
         },
-        api: { copyMessage: vi.fn(async () => ({})) },
+        api: { copyMessage: vi.fn(async () => ({ message_id: COPIED_MESSAGE_ID })) },
         reply: vi.fn(async () => ({})),
     };
 }
@@ -251,7 +265,7 @@ describe("owner feedback reply", () => {
         expect(ctx.api.copyMessage).toHaveBeenCalledWith(42, OWNER_ID, 90);
         expect(postFeedback).toHaveBeenCalledWith(REVIEW_ID, {
             reviewerTelegramId: String(OWNER_ID),
-            telegramMessageId: "90",
+            telegramMessageId: String(COPIED_MESSAGE_ID),
             body: "🎙 Голосове повідомлення",
             attachment: { fileId: "OWNERVOICE", kind: "VOICE" },
         });
@@ -276,8 +290,50 @@ describe("owner feedback reply", () => {
             throw Object.assign(new Error("Forbidden: bot was blocked by the user"), { error_code: 403 });
         });
         await handleTrainingFeedback(ctx, vi.fn());
-        expect(ctx.reply).toHaveBeenCalledWith("Could not deliver: she blocked the bot.");
+        expect(ctx.reply).toHaveBeenCalledWith("Could not deliver: the candidate can't receive messages from the bot.");
         expect(postFeedback).not.toHaveBeenCalled();
+    });
+
+    it("copies a video note reply and records it with its own label", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(stored);
+        const ctx = messageCtx({ from: OWNER_ID, replyTo: 77, video_note: { file_id: "OWNERNOTE" }, messageId: 95 });
+        const next = vi.fn();
+        await handleTrainingFeedback(ctx, next);
+        expect(ctx.api.copyMessage).toHaveBeenCalledWith(42, OWNER_ID, 95);
+        expect(postFeedback).toHaveBeenCalledWith(REVIEW_ID, {
+            reviewerTelegramId: String(OWNER_ID),
+            telegramMessageId: String(COPIED_MESSAGE_ID),
+            body: "⭕ Відеозаписка",
+            attachment: { fileId: "OWNERNOTE", kind: "VIDEO_NOTE" },
+        });
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["sticker", { sticker: { file_id: "STK" } }],
+        ["photo", { photo: [{ file_id: "PH" }] }],
+    ])("a %s reply to the prompt is not feedback and goes to next()", async (_kind, extra) => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(stored);
+        const ctx = messageCtx({ from: OWNER_ID, replyTo: 77, messageId: 96, ...extra });
+        const next = vi.fn();
+        await handleTrainingFeedback(ctx, next);
+        expect(next).toHaveBeenCalled();
+        expect(ctx.api.copyMessage).not.toHaveBeenCalled();
+        expect(postFeedback).not.toHaveBeenCalled();
+    });
+
+    it("a non-403 copy failure is rethrown and nothing is recorded", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(stored);
+        const ctx = messageCtx({ from: OWNER_ID, replyTo: 77, text: "well done", messageId: 97 });
+        ctx.api.copyMessage = vi.fn(async () => {
+            throw Object.assign(new Error("Too Many Requests"), { error_code: 429 });
+        });
+        await expect(handleTrainingFeedback(ctx, vi.fn())).rejects.toThrow("Too Many Requests");
+        expect(postFeedback).not.toHaveBeenCalled();
+        expect(ctx.reply).not.toHaveBeenCalled();
     });
 
     it("passes through when the reply is not to a feedback prompt", async () => {
