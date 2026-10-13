@@ -611,6 +611,20 @@ describe("REQUEST_PITCH_REVIEW", () => {
         }
     });
 
+    it.each([
+        ["null", null],
+        ["malformed", { reviewPublicId: "not-a-uuid", fileId: "" }],
+    ])("%s payload: failed-ack, nothing sent to the owner", async (_label, payload) => {
+        listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload })] });
+        const api = { ...makeApi(), sendVoice: vi.fn(), sendVideoNote: vi.fn() };
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(api.sendVoice).not.toHaveBeenCalled();
+        expect(api.sendVideoNote).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(ackFailed).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e", expect.any(String));
+        expect(ackApplied).not.toHaveBeenCalled();
+    });
+
     it("does not need the candidate in the bot DB", async () => {
         findByTelegramId.mockResolvedValue(null);
         listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
