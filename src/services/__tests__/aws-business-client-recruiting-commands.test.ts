@@ -101,7 +101,15 @@ describe("AwsBusinessClient recruiter commands", () => {
                 body: "ok",
                 attachment: null,
             });
-            expect(vi.mocked(fetch).mock.calls[0]?.[0]).toContain(`/recruiting/training/reviews/${reviewId}/feedback`);
+            const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+            expect(url).toContain(`/recruiting/training/reviews/${reviewId}/feedback`);
+            expect(init?.method).toBe("POST");
+            expect(JSON.parse(String(init?.body))).toEqual({
+                reviewerTelegramId: "1001",
+                telegramMessageId: "7",
+                body: "ok",
+                attachment: null,
+            });
         });
     });
 
