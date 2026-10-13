@@ -1,7 +1,9 @@
-import type { Api } from "grammy";
+import { InlineKeyboard, type Api } from "grammy";
+import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { awsBusinessClient } from "./aws-business-client.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
+import { buildMiniAppUrl } from "./training-review.js";
 
 /** Контрактный максимум одного тика — очередь короткая, тик минутный. */
 const PENDING_LIMIT = 50;
@@ -22,7 +24,7 @@ function describeDeliveryFailure(error: unknown): string {
 
 /**
  * Доставка исходящих сообщений рекрутёра (фаза 3b). Веб пишет PENDING в
- * outbox, этот проход шлёт каждое обычным текстом БЕЗ клавиатуры через общий
+ * outbox, этот проход шлёт каждое обычным текстом (с кнопкой Mini App, если веб её попросил) через общий
  * Api живущего бота и отвечает sent/failed. Живёт внутри тика диспетчера
  * команд — та же Redis-лиза, тот же флаг AWS_RECRUITING_COMMANDS_ENABLED.
  *
@@ -52,7 +54,17 @@ export async function deliverPendingRecruitingMessages(api: Api): Promise<{ sent
     let failed = 0;
     for (const message of pending.items) {
         try {
-            const delivered = await api.sendMessage(Number(message.telegramId), message.body);
+            const options = message.webAppButton
+                ? {
+                      reply_markup: new InlineKeyboard().webApp(
+                          message.webAppButton.text,
+                          buildMiniAppUrl(TRAINING_MINIAPP_BASE_URL, message.webAppButton.path),
+                      ),
+                  }
+                : undefined;
+            const delivered = options
+                ? await api.sendMessage(Number(message.telegramId), message.body, options)
+                : await api.sendMessage(Number(message.telegramId), message.body);
             sent++;
             await ack(message.publicId, () => awsBusinessClient.ackRecruitingMessageSent(
                 message.publicId,

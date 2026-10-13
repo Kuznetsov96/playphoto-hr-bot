@@ -18,6 +18,14 @@ vi.mock("../aws-business-client.js", () => ({
     },
 }));
 
+const miniApp = vi.hoisted(() => ({ url: "https://app.example.test" as string | undefined }));
+vi.mock("../../config.js", async (orig) => ({
+    ...(await orig<Record<string, unknown>>()),
+    get TRAINING_MINIAPP_BASE_URL() {
+        return miniApp.url;
+    },
+}));
+
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
 vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -36,6 +44,7 @@ const message = (overrides: Partial<Record<string, unknown>> = {}) => ({
 
 beforeEach(() => {
     vi.clearAllMocks();
+    miniApp.url = "https://app.example.test";
     listPendingMessages.mockResolvedValue({ items: [] });
     ackSent.mockResolvedValue({ publicId: "x", status: "SENT" });
     ackMessageFailed.mockResolvedValue({ publicId: "x", status: "FAILED" });
@@ -120,5 +129,40 @@ describe("deliverPendingRecruitingMessages", () => {
         await deliverPendingRecruitingMessages(api as never);
 
         expect(ackSent).toHaveBeenCalledTimes(2);
+    });
+
+    it("без кнопки шлёт обычный текст", async () => {
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({ items: [message({ webAppButton: null })] });
+        await deliverPendingRecruitingMessages(api as never);
+        expect(api.sendMessage).toHaveBeenCalledWith(1164289764, "Привіт! Це повідомлення від рекрутера.");
+    });
+
+    it("прикрепляет web_app кнопку по запросу", async () => {
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({
+            items: [message({ body: "Навчання чекає", webAppButton: { text: "Продовжити навчання", path: "/learn" } })],
+        });
+        await deliverPendingRecruitingMessages(api as never);
+        const [, , options] = api.sendMessage.mock.calls[0] as unknown as [number, string, { reply_markup: { inline_keyboard: unknown[][] } }];
+        expect(options.reply_markup.inline_keyboard[0]?.[0]).toEqual({
+            text: "Продовжити навчання",
+            web_app: { url: "https://app.example.test/learn" },
+        });
+    });
+
+    it("без базового url кнопка — громкий failed, сообщение не уходит", async () => {
+        miniApp.url = undefined;
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({
+            items: [message({ webAppButton: { text: "Продовжити навчання", path: "/learn" } })],
+        });
+        const result = await deliverPendingRecruitingMessages(api as never);
+        expect(ackMessageFailed).toHaveBeenCalledWith(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            expect.stringContaining("miniapp_url_missing"),
+        );
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(result).toEqual({ sent: 0, failed: 1 });
     });
 });
