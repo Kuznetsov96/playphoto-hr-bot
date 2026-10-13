@@ -52,10 +52,12 @@ vi.mock("../../repositories/candidate-repository.js", () => ({
 
 const redisSet = vi.fn();
 const redisEval = vi.fn();
+const redisGet = vi.fn();
 
 vi.mock("../../core/redis.js", () => ({
     redis: {
         set: (...args: unknown[]) => redisSet(...args),
+        get: (...args: unknown[]) => redisGet(...args),
         eval: (...args: unknown[]) => redisEval(...args),
     },
 }));
@@ -109,6 +111,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     redisSet.mockResolvedValue("OK");
     redisEval.mockResolvedValue(1);
+    redisGet.mockResolvedValue(null);
     listPending.mockResolvedValue({ items: [] });
     ackApplied.mockResolvedValue({ publicId: "x", status: "APPLIED" });
     ackFailed.mockResolvedValue({ publicId: "x", status: "PENDING" });
@@ -255,6 +258,31 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(api.sendMessage).toHaveBeenCalledWith(1164289764, CANDIDATE_TEXTS["training-rejected"]());
         expect(update).toHaveBeenCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
         expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой: текст ушёл, запись статуса упала — ретрай не шлёт текст второй раз", async () => {
+        const api = makeApi();
+        const marks = new Map<string, string>();
+        redisSet.mockImplementation(async (key: string, value: string) => {
+            marks.set(key, value);
+            return "OK";
+        });
+        redisGet.mockImplementation(async (key: string) => marks.get(key) ?? null);
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        update.mockRejectedValueOnce(new Error("write conflict"));
+        const reject = command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } });
+        listPending.mockResolvedValue({ items: [reject] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(ackFailed).toHaveBeenCalledTimes(1);
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+        listPending.mockResolvedValue({ items: [{ ...reject, attempts: 1 }] });
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(update).toHaveBeenLastCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(ackApplied).toHaveBeenCalledTimes(1);
     });
 
     it("REJECT с меткой: бот заблокирован (403) — всё равно REJECTED", async () => {

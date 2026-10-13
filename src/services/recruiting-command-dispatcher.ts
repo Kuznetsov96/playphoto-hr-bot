@@ -27,6 +27,10 @@ const LEASE_HEARTBEAT_MS = 60 * 1000;
  */
 const PENDING_LIMIT = 20;
 
+/** Метка отправленного отказа обучения живёт дольше любого ретрая команды. */
+const TRAINING_REJECT_SENT_TTL_SECONDS = 7 * 24 * 3600;
+const trainingRejectSentKey = (commandPublicId: string) => `recruiting:training-reject-sent:${commandPublicId}`;
+
 /**
  * Статусы ручного owner-контура: со стадий TRAINING/STAGING/DOCS зеркала
  * владелец общается с кандидаткой ЛИЧНО со своего аккаунта, поэтому REJECT
@@ -394,13 +398,20 @@ export class RecruitingCommandDispatcher {
                 if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
                     // Отказ после голосового или низкого балла курса: вежливый текст
                     // только по явной метке в payload (спека 2026-10-13).
-                    if (readCandidateMessage(command.payload) === "TRAINING_REJECTED") {
+                    // Метка «текст ушёл» по publicId команды: если запись статуса ниже
+                    // упадёт, ретрай той же команды не пришлёт отказ второй раз.
+                    const sentKey = trainingRejectSentKey(command.publicId);
+                    if (
+                        readCandidateMessage(command.payload) === "TRAINING_REJECTED" &&
+                        !(await redis.get(sentKey))
+                    ) {
                         try {
                             await api.sendMessage(Number(candidate.user.telegramId), CANDIDATE_TEXTS["training-rejected"]());
                         } catch (error) {
                             // Заблокировала бота — отказ всё равно фиксируем; прочее — ретрай команды.
                             if (!isBotBlocked(error)) throw new Error("REJECT_NOT_SENT:send_failed");
                         }
+                        await redis.set(sentKey, "1", "EX", TRAINING_REJECT_SENT_TTL_SECONDS);
                     }
                     await candidateRepository.update(candidate.id, {
                         status: CandidateStatus.REJECTED,
