@@ -156,9 +156,31 @@ describe("RecruitingCommandDispatcher", () => {
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
-        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String));
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String), "OWNER");
         expect(makeDecision).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
+    });
+
+    it("passes MINIAPP training mode to accept", async () => {
+        const api = makeApi();
+        acceptAfterInterview.mockResolvedValue(true);
+        listPending.mockResolvedValue({
+            items: [command({ kind: "ACCEPT_AFTER_INTERVIEW", payload: { trainingMode: "MINIAPP" } })],
+        });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", "webapp-recruiter", "MINIAPP");
+    });
+
+    it("keeps the owner contour when payload is absent", async () => {
+        const api = makeApi();
+        acceptAfterInterview.mockResolvedValue(true);
+        listPending.mockResolvedValue({ items: [command({ kind: "ACCEPT_AFTER_INTERVIEW", payload: null })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", "webapp-recruiter", "OWNER");
     });
 
     it("REJECT_AFTER_INTERVIEW maps to rejectAfterInterview — rejection is sent at once", async () => {

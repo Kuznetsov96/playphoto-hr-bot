@@ -17,6 +17,8 @@ import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
+import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
+import { buildMiniAppUrl } from "./training-review.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -327,7 +329,15 @@ export const hrService = {
      *
      * Повторний виклик для вже прийнятої без листа лише дошле лист.
      */
-    async acceptAfterInterview(api: any, candId: string, adminId?: string) {
+    async acceptAfterInterview(
+        api: any,
+        candId: string,
+        adminId?: string,
+        trainingMode: "MINIAPP" | "OWNER" = "OWNER",
+    ) {
+        // Адрес проверяем до смены статуса: при пустом адресе команда падает,
+        // не переведя кандидатку в MENTOR_MANUAL.
+        const trainingUrl = trainingMode === "MINIAPP" ? buildMiniAppUrl(TRAINING_MINIAPP_BASE_URL, "/learn") : null;
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return false;
 
@@ -377,10 +387,13 @@ export const hrService = {
             const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
             // Старі повідомлення з кнопками запису прибираються, як і при відмові.
             await cleanupUserSessionMessages(api, telegramId);
-            const msg = await api.sendMessage(telegramId, CANDIDATE_TEXTS["worker-offer-accepted"](), {
-                parse_mode: "HTML",
-                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr"),
-            });
+            const keyboard = trainingUrl
+                ? new InlineKeyboard().webApp("Почати навчання", trainingUrl).row().text("Написати нам", "contact_hr")
+                : new InlineKeyboard().text("Написати нам", "contact_hr");
+            const text = trainingUrl
+                ? CANDIDATE_TEXTS["worker-offer-accepted-training"]()
+                : CANDIDATE_TEXTS["worker-offer-accepted"]();
+            const msg = await api.sendMessage(telegramId, text, { parse_mode: "HTML", reply_markup: keyboard });
             if (msg) await trackUserMessage(telegramId, msg.message_id);
             await candidateRepository.update(candId, { notificationSent: true });
             logBusinessEvent({

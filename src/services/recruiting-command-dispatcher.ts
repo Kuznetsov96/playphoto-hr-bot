@@ -11,6 +11,7 @@ import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client
 import { hrService } from "./hr-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
+import { readTrainingMode } from "./training-review.js";
 
 export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
@@ -341,7 +342,12 @@ export class RecruitingCommandDispatcher {
             case "ACCEPT_AFTER_INTERVIEW": {
                 // Принятие — сразу: статус и письмо кандидатке (решение
                 // владельца 01.10.2026), см. hrService.acceptAfterInterview.
-                const ok = await hrService.acceptAfterInterview(api, candidate.id, "webapp-recruiter");
+                const ok = await hrService.acceptAfterInterview(
+                    api,
+                    candidate.id,
+                    "webapp-recruiter",
+                    readTrainingMode(command.payload),
+                );
                 if (!ok) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
             }
