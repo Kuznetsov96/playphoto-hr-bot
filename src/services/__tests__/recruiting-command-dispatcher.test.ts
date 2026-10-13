@@ -74,9 +74,12 @@ vi.mock("../../core/redis.js", () => ({
 }));
 
 const OWNER_ID = 4242;
+const adminIds = vi.hoisted(() => ({ value: [4242] as number[] }));
 vi.mock("../../config.js", async () => ({
     ...(await vi.importActual<Record<string, unknown>>("../../config.js")),
-    ADMIN_IDS: [OWNER_ID],
+    get ADMIN_IDS() {
+        return adminIds.value;
+    },
 }));
 vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "x".repeat(32) }));
 
@@ -588,6 +591,24 @@ describe("REQUEST_PITCH_REVIEW", () => {
         expect(redisSet).toHaveBeenCalledWith(
             `training:review:card:${pitch.reviewPublicId}`, expect.any(String), "EX", 14 * 24 * 3600);
         expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("no owner configured (ADMIN_IDS empty): failed-ack PITCH_REVIEW_NOT_SENT:no_owner, nothing sent", async () => {
+        adminIds.value = [];
+        try {
+            listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
+            const api = { ...makeApi(), sendVoice: vi.fn() };
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+            expect(api.sendVoice).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith(
+                "0f8fad5b-d9cb-469f-a165-70867728950e",
+                expect.stringContaining("PITCH_REVIEW_NOT_SENT:no_owner"),
+            );
+            expect(ackApplied).not.toHaveBeenCalled();
+        } finally {
+            adminIds.value = [OWNER_ID];
+        }
     });
 
     it("does not need the candidate in the bot DB", async () => {

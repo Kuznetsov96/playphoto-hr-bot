@@ -109,6 +109,15 @@ describe("review card", () => {
     });
 
     it("refuses more than 6 checklist items", () => {
-        expect(() => retryKeyboard(payload.reviewPublicId, 0, [...payload.checklist, "x"])).toThrow();
+        expect(() => retryKeyboard(payload.reviewPublicId, 0, [...payload.checklist, "x"])).toThrow(
+            "TRAINING_CHECKLIST_TOO_LONG",
+        );
+    });
+
+    it("renders a missing location and score as a dash", () => {
+        const text = renderReviewCard({ ...payload, locationName: null, scorePct: null });
+        expect(text).toContain("Location: —");
+        expect(text).toContain("Test score: —");
+        expect(text).not.toContain("null");
     });
 });
