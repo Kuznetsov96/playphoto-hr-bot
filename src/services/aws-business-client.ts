@@ -910,6 +910,11 @@ const recruitingCommandSchema = z.object({
      * шле — default(null) тримає розбір черги сумісним.
      */
     locationCode: z.string().nullable().optional().default(null),
+    /**
+     * Данные вида команды (обучение кандидаток: trainingMode, candidateMessage, данные
+     * проверки питча). Старый вебапп поля не шлёт — default(null).
+     */
+    payload: z.record(z.string(), z.unknown()).nullable().optional().default(null),
     attempts: z.number().int(),
     candidate: z.object({
         telegramId: z.string(),
@@ -943,6 +948,12 @@ const recruitingOutgoingMessageSchema = z.object({
     publicId: z.string().uuid(),
     body: z.string(),
     telegramId: z.string(),
+    /** Кнопка Mini App под сообщением (path относительно TRAINING_MINIAPP_BASE_URL). */
+    webAppButton: z
+        .object({ text: z.string().min(1).max(64), path: z.string().startsWith("/") })
+        .nullable()
+        .optional()
+        .default(null),
 });
 
 const recruitingOutgoingMessagesSchema = z.object({
@@ -955,6 +966,25 @@ const recruitingMessageAckSchema = z.object({
 });
 
 export type RecruitingOutgoingMessage = z.infer<typeof recruitingOutgoingMessageSchema>;
+
+const trainingReviewDecisionResultSchema = z.object({
+    decision: z.enum(["PASSED", "RETRY", "REJECTED"]),
+    candidateTelegramId: z.string(),
+    candidateName: z.string(),
+});
+export type TrainingReviewDecisionResult = z.infer<typeof trainingReviewDecisionResultSchema>;
+export type TrainingReviewDecisionBody = {
+    decision: "PASSED" | "RETRY" | "REJECTED";
+    failedItems: number[];
+    reasonCode: string | null;
+    reviewerTelegramId: string;
+};
+export type TrainingReviewFeedbackBody = {
+    reviewerTelegramId: string;
+    telegramMessageId: string;
+    body: string;
+    attachment: { fileId: string; kind: "VOICE" | "VIDEO_NOTE" } | null;
+};
 
 /**
  * Сводка за день для вечернего отчёта.
@@ -1097,6 +1127,28 @@ export class AwsBusinessClient {
             { method: "POST", body: JSON.stringify({ error: error.slice(0, 500) }) },
         );
         return recruitingCommandAckSchema.parse(body);
+    }
+
+    /** Решение владельца по питчу кандидатки. */
+    async postTrainingReviewDecision(
+        reviewPublicId: string,
+        body: TrainingReviewDecisionBody,
+    ): Promise<TrainingReviewDecisionResult> {
+        const response = await this.request(
+            `/recruiting/training/reviews/${encodeURIComponent(reviewPublicId)}/decision`,
+            { method: "POST", body: JSON.stringify(body) },
+        );
+        return trainingReviewDecisionResultSchema.parse(response);
+    }
+
+    /** Голосовой/видео-отзыв владельца по питчу. */
+    async postTrainingReviewFeedback(reviewPublicId: string, body: TrainingReviewFeedbackBody): Promise<void> {
+        await this.request(
+            `/recruiting/training/reviews/${encodeURIComponent(reviewPublicId)}/feedback`,
+            { method: "POST", body: JSON.stringify(body) },
+            20_000,
+            { expectsBody: false },
+        );
     }
 
     /** Очередь исходящих сообщений рекрутёра: старые вперёд, обычный текст без клавиатуры. */

@@ -111,6 +111,10 @@ const envSchema = z.object({
     TEAM_CHANNEL_ID: z.string().min(1, "TEAM_CHANNEL_ID is missing"),
     LOGISTICS_TOPIC_ID: z.string().optional(),
 
+    // Адрес вебаппа, на котором живёт Mini App обучения (`/learn`). Не флаг формы выката —
+    // кладётся в секрет DOCKER_ENV. Пусто → команды с trainingMode MINIAPP падают громко.
+    TRAINING_MINIAPP_BASE_URL: z.string().url().optional(),
+
     // IBANs (Comma-separated)
     IBAN_KUZNETSOV: z.string().optional(),
     IBAN_KARPUK: z.string().optional(),
@@ -153,6 +157,7 @@ export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CON
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
 export const AWS_RECRUITING_MIRROR_ENABLED = env.AWS_RECRUITING_MIRROR_ENABLED === "true";
 export const AWS_RECRUITING_SLOTS_ENABLED = env.AWS_RECRUITING_SLOTS_ENABLED === "true";
+export const TRAINING_MINIAPP_BASE_URL = env.TRAINING_MINIAPP_BASE_URL;
 export const AWS_RECRUITING_COMMANDS_ENABLED = env.AWS_RECRUITING_COMMANDS_ENABLED === "true";
 
 // Helper to parse number arrays
