@@ -395,6 +395,10 @@ export class RecruitingCommandDispatcher {
                 // сообщения от бота. На тату-проверке — тату-отказ с его
                 // сообщением (APPEARANCE), до интервью — прежний кнопочный
                 // путь rejectCandidate с сообщением GENERAL.
+                // Уже REJECTED — повтор команды, чей ack потерялся: статус записан,
+                // всё нужное кандидатке уже ушло. Без этой проверки повтор попал бы
+                // в rejectCandidate(GENERAL) и прислал второй, общий отказ.
+                if (candidate.status === CandidateStatus.REJECTED) return;
                 if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
                     // Отказ после голосового или низкого балла курса: вежливый текст
                     // только по явной метке в payload (спека 2026-10-13).

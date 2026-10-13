@@ -285,6 +285,23 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(ackApplied).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+        ["с меткой TRAINING_REJECTED", { candidateMessage: "TRAINING_REJECTED" }],
+        ["без метки", null],
+    ])("REJECT %s по уже REJECTED (ack потерялся) — идемпотентный успех без сообщений", async (_label, payload) => {
+        const api = makeApi();
+        findByTelegramId.mockResolvedValue(localCandidate("REJECTED"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload, attempts: 1 })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(rejectCandidate).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
+        expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
+        expect(ackFailed).not.toHaveBeenCalled();
+    });
+
     it("REJECT с меткой: бот заблокирован (403) — всё равно REJECTED", async () => {
         const api = makeApi();
         api.sendMessage.mockRejectedValue(Object.assign(new Error("Forbidden"), { error_code: 403 }));
