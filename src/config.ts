@@ -163,7 +163,6 @@ export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CON
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
 export const AWS_RECRUITING_MIRROR_ENABLED = env.AWS_RECRUITING_MIRROR_ENABLED === "true";
 export const AWS_RECRUITING_SLOTS_ENABLED = env.AWS_RECRUITING_SLOTS_ENABLED === "true";
-export const TRAINING_MINIAPP_BASE_URL = env.TRAINING_MINIAPP_BASE_URL;
 export const AWS_RECRUITING_COMMANDS_ENABLED = env.AWS_RECRUITING_COMMANDS_ENABLED === "true";
 
 // Helper to parse number arrays
@@ -188,6 +187,9 @@ export const KNOWLEDGE_BASE_LINK = env.KNOWLEDGE_BASE_LINK || "https://t.me/+hC9
 export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge base channel
 export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
 if (!PHOTOGRAPHER_GUIDE_LINK) console.warn("⚠️  PHOTOGRAPHER_GUIDE_LINK is not set — mentor messages will be sent without a clickable guide link");
+// База Mini App обучения кандидаток (адрес вебаппа, путь добавляет buildMiniAppUrl).
+// Не флаг: undefined → команда с trainingMode MINIAPP падает OFFER_NOT_SENT:miniapp_url_missing.
+export const TRAINING_MINIAPP_BASE_URL = env.TRAINING_MINIAPP_BASE_URL;
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 export const OPENAI_API_KEY = env.OPENAI_API_KEY || "";
