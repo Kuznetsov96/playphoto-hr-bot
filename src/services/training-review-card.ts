@@ -1,0 +1,78 @@
+import { InlineKeyboard, type Api } from "grammy";
+import { buildSignedCallback } from "../utils/signed-callback.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { redis } from "../core/redis.js";
+import type { PitchReviewPayload } from "./training-review.js";
+
+export const TRAINING_CB = {
+    pass: "tpp",
+    retry: "tpr",
+    toggle: "tpt",
+    sendRetry: "tps",
+    reject: "tpj",
+    rejectReason: "tpx",
+} as const;
+
+export const TRAINING_REJECT_REASONS = ["NOT_A_FIT", "CANDIDATE_DECLINED", "OTHER"] as const;
+
+const CARD_TTL_SECONDS = 14 * 24 * 3600;
+export const cardKey = (reviewPublicId: string) => `training:review:card:${reviewPublicId}`;
+
+export function renderReviewCard(p: PitchReviewPayload): string {
+    const lines = [
+        ADMIN_TEXTS["training-review-title"](p.candidateName),
+        `Location: ${p.locationName ?? "—"}`,
+        `Test score: ${p.scorePct === null ? "—" : `${p.scorePct}%`}`,
+        `Attempt ${p.attemptNo}${p.reminder ? " · waiting over 24 h" : ""}`,
+        "",
+        "Checklist:",
+        ...p.checklist.map((item, index) => `${index + 1}. ${item}`),
+    ];
+    return lines.join("\n");
+}
+
+export function reviewKeyboard(reviewPublicId: string): InlineKeyboard {
+    return new InlineKeyboard()
+        .text("Passed", buildSignedCallback(TRAINING_CB.pass, reviewPublicId))
+        .text("Try again", buildSignedCallback(TRAINING_CB.retry, reviewPublicId))
+        .text("Reject", buildSignedCallback(TRAINING_CB.reject, reviewPublicId));
+}
+
+export function retryKeyboard(reviewPublicId: string, mask: number, checklist: string[]): InlineKeyboard {
+    const kb = new InlineKeyboard();
+    checklist.forEach((item, index) => {
+        const bit = 1 << index;
+        const label = `${mask & bit ? "✗ " : ""}${index + 1}. ${item}`;
+        kb.text(label, buildSignedCallback(TRAINING_CB.toggle, `${reviewPublicId}.${mask ^ bit}`)).row();
+    });
+    return kb.text("Send to candidate", buildSignedCallback(TRAINING_CB.sendRetry, `${reviewPublicId}.${mask}`));
+}
+
+export function rejectKeyboard(reviewPublicId: string): InlineKeyboard {
+    const kb = new InlineKeyboard();
+    TRAINING_REJECT_REASONS.forEach((code, index) => {
+        kb.text(
+            ADMIN_TEXTS["training-reject-reason"](code),
+            buildSignedCallback(TRAINING_CB.rejectReason, `${reviewPublicId}.${index}`),
+        ).row();
+    });
+    return kb;
+}
+
+export async function sendReviewCard(api: Api, chatId: number, p: PitchReviewPayload): Promise<void> {
+    if (p.attachmentKind === "VOICE") await api.sendVoice(chatId, p.fileId);
+    else await api.sendVideoNote(chatId, p.fileId);
+    await api.sendMessage(chatId, renderReviewCard(p), { reply_markup: reviewKeyboard(p.reviewPublicId) });
+    await redis.set(
+        cardKey(p.reviewPublicId),
+        JSON.stringify({ checklist: p.checklist, candidateName: p.candidateName }),
+        "EX",
+        CARD_TTL_SECONDS,
+    );
+}
+
+/** Разбор `<uuid>.<int>` из payload кнопки. */
+export function splitIdAndNumber(payload: string): { reviewPublicId: string; n: number } | null {
+    const match = /^([0-9a-f-]{36})\.(\d{1,2})$/u.exec(payload);
+    return match?.[1] ? { reviewPublicId: match[1], n: Number(match[2]) } : null;
+}

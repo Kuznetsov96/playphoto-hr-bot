@@ -72,6 +72,13 @@ vi.mock("../../core/redis.js", () => ({
     },
 }));
 
+const OWNER_ID = 4242;
+vi.mock("../../config.js", async () => ({
+    ...(await vi.importActual<Record<string, unknown>>("../../config.js")),
+    ADMIN_IDS: [OWNER_ID],
+}));
+vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "x".repeat(32) }));
+
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
 vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -555,5 +562,39 @@ describe("RecruitingCommandDispatcher", () => {
 
         expect(ackApplied).toHaveBeenCalledTimes(2);
         expect(ackApplied).toHaveBeenLastCalledWith("22222222-2222-4222-8222-222222222222");
+    });
+});
+
+describe("REQUEST_PITCH_REVIEW", () => {
+    const pitch = {
+        reviewPublicId: "5b0c3f5e-9a51-4c2b-9b7a-0c1f3e8d2a11",
+        fileId: "AwAC",
+        attachmentKind: "VOICE",
+        candidateName: "Марія Коваль",
+        locationName: "Drive City",
+        scorePct: 86,
+        attemptNo: 2,
+        checklist: ["Greeting", "Photo"],
+        reminder: false,
+    };
+
+    it("sends the pitch for review to the owner and applies the command", async () => {
+        listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
+        const api = { ...makeApi(), sendVoice: vi.fn().mockResolvedValue({ message_id: 8 }) };
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(api.sendVoice).toHaveBeenCalledWith(OWNER_ID, "AwAC");
+        expect(api.sendMessage).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining("Марія Коваль"), expect.anything());
+        expect(redisSet).toHaveBeenCalledWith(
+            `training:review:card:${pitch.reviewPublicId}`, expect.any(String), "EX", 14 * 24 * 3600);
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("does not need the candidate in the bot DB", async () => {
+        findByTelegramId.mockResolvedValue(null);
+        listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
+        const api = { ...makeApi(), sendVoice: vi.fn().mockResolvedValue({ message_id: 8 }) };
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(ackApplied).toHaveBeenCalled();
+        expect(ackFailed).not.toHaveBeenCalled();
     });
 });

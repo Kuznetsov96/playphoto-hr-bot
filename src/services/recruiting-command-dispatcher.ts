@@ -11,7 +11,9 @@ import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client
 import { hrService } from "./hr-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
-import { readCandidateMessage, readTrainingMode } from "./training-review.js";
+import { ADMIN_IDS } from "../config.js";
+import { sendReviewCard } from "./training-review-card.js";
+import { parsePitchReviewPayload, readCandidateMessage, readTrainingMode } from "./training-review.js";
 
 export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
@@ -285,6 +287,14 @@ export class RecruitingCommandDispatcher {
      * из вебаппа делает ровно то же, что и палец рекрутёра на кнопке в боте.
      */
     private async execute(api: Api, command: RecruitingCommand): Promise<void> {
+        if (command.kind === "REQUEST_PITCH_REVIEW") {
+            // Кандидатке ничего не шлётся, бот-запись кандидатки не нужна:
+            // всё, что нужно, лежит в payload (проверка идёт до поиска в боте).
+            const owner = ADMIN_IDS[0];
+            if (!owner) throw new Error("PITCH_REVIEW_NOT_SENT:no_owner");
+            await sendReviewCard(api, owner, parsePitchReviewPayload(command.payload));
+            return;
+        }
         const candidate = await candidateRepository.findByTelegramId(Number(command.candidate.telegramId));
         if (!candidate) {
             // Кандидат в зеркале есть, в боте нет — контрактный код, по нему
