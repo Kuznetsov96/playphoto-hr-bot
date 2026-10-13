@@ -11,6 +11,7 @@ export const TRAINING_CB = {
     sendRetry: "tps",
     reject: "tpj",
     rejectReason: "tpx",
+    back: "tpk",
 } as const;
 
 export const TRAINING_REJECT_REASONS = ["NOT_A_FIT", "CANDIDATE_DECLINED", "OTHER"] as const;
@@ -47,7 +48,10 @@ export function retryKeyboard(reviewPublicId: string, mask: number, checklist: s
         const label = `${mask & bit ? "✗ " : ""}${index + 1}. ${item}`;
         kb.text(label, buildSignedCallback(TRAINING_CB.toggle, `${reviewPublicId}.${mask ^ bit}`)).row();
     });
-    return kb.text("Send to candidate", buildSignedCallback(TRAINING_CB.sendRetry, `${reviewPublicId}.${mask}`));
+    return kb
+        .text("Send to candidate", buildSignedCallback(TRAINING_CB.sendRetry, `${reviewPublicId}.${mask}`))
+        .row()
+        .text(ADMIN_TEXTS["training-back"], buildSignedCallback(TRAINING_CB.back, reviewPublicId));
 }
 
 export function rejectKeyboard(reviewPublicId: string): InlineKeyboard {
@@ -58,7 +62,7 @@ export function rejectKeyboard(reviewPublicId: string): InlineKeyboard {
             buildSignedCallback(TRAINING_CB.rejectReason, `${reviewPublicId}.${index}`),
         ).row();
     });
-    return kb;
+    return kb.text(ADMIN_TEXTS["training-back"], buildSignedCallback(TRAINING_CB.back, reviewPublicId));
 }
 
 export async function sendReviewCard(api: Api, chatId: number, p: PitchReviewPayload): Promise<void> {

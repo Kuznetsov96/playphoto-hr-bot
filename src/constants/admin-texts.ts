@@ -400,6 +400,8 @@ If the replacement is already in the main schedule, update and sync Google Sheet
   "training-decision-rejected": (reason: string) => `Decision: rejected (${reason}).`,
   "training-feedback-prompt": (name: string) =>
     `Reply to this message with a voice or text and I'll pass it to ${name}. Or just ignore it.`,
+  "training-back": `‹ Back`,
+  "training-feedback-blocked": `Could not deliver: she blocked the bot.`,
   "training-feedback-sent": `Sent to the candidate.`,
   "training-decision-failed": `Could not save the decision. Try again.`,
   "training-retry-pick": `Mark what she missed, then send.`,

@@ -10,10 +10,12 @@ import {
     TRAINING_REJECT_REASONS,
     cardKey,
     rejectKeyboard,
+    reviewKeyboard,
     retryKeyboard,
     splitIdAndNumber,
 } from "../services/training-review-card.js";
 import { redis } from "../core/redis.js";
+import { isBotBlocked } from "../utils/bot-blocked.js";
 import logger from "../core/logger.js";
 
 const FEEDBACK_TTL_SECONDS = 7 * 24 * 3600;
@@ -50,8 +52,8 @@ async function decide(
         });
     } catch (error) {
         if (error instanceof AwsBusinessApiError && error.code === "REVIEW_ALREADY_DECIDED") {
-            await ctx.editMessageReplyMarkup(EMPTY_MARKUP);
             await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["training-already-decided"], show_alert: true });
+            await ctx.editMessageReplyMarkup(EMPTY_MARKUP).catch(() => {});
             return;
         }
         // Кнопка не должна крутиться: отвечаем, оставляем кнопки живыми для повтора и логируем.
@@ -63,8 +65,8 @@ async function decide(
         return;
     }
 
-    await ctx.editMessageReplyMarkup(EMPTY_MARKUP);
     await ctx.answerCallbackQuery();
+    await ctx.editMessageReplyMarkup(EMPTY_MARKUP).catch(() => {});
     const summary =
         decision === "PASSED"
             ? ADMIN_TEXTS["training-decision-passed"](result.candidateName)
@@ -95,8 +97,8 @@ async function redrawRetry(ctx: MyContext, reviewPublicId: string, mask: number)
         return;
     }
     const { checklist } = JSON.parse(raw) as { checklist: string[] };
-    await ctx.editMessageReplyMarkup({ reply_markup: retryKeyboard(reviewPublicId, mask, checklist) });
     await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["training-retry-pick"] });
+    await ctx.editMessageReplyMarkup({ reply_markup: retryKeyboard(reviewPublicId, mask, checklist) }).catch(() => {});
 }
 
 export async function handleTrainingCallback(ctx: MyContext): Promise<void> {
@@ -123,8 +125,15 @@ export async function handleTrainingCallback(ctx: MyContext): Promise<void> {
 
     const rejectId = read(TRAINING_CB.reject);
     if (rejectId) {
-        await ctx.editMessageReplyMarkup({ reply_markup: rejectKeyboard(rejectId) });
         await ctx.answerCallbackQuery();
+        await ctx.editMessageReplyMarkup({ reply_markup: rejectKeyboard(rejectId) }).catch(() => {});
+        return;
+    }
+
+    const backId = read(TRAINING_CB.back);
+    if (backId) {
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageReplyMarkup({ reply_markup: reviewKeyboard(backId) }).catch(() => {});
         return;
     }
 
@@ -156,7 +165,15 @@ export async function handleTrainingFeedback(ctx: MyContext, next: NextFunction)
     const body = message.text ?? (attachment ? ATTACHMENT_LABELS[attachment.kind] : null);
     if (!body) return next(); // стикер, фото и прочее — не совет
 
-    await ctx.api.copyMessage(Number(candidateTelegramId), ctx.chat.id, message.message_id);
+    try {
+        await ctx.api.copyMessage(Number(candidateTelegramId), ctx.chat.id, message.message_id);
+    } catch (error) {
+        if (isBotBlocked(error)) {
+            await ctx.reply(ADMIN_TEXTS["training-feedback-blocked"]);
+            return;
+        }
+        throw error;
+    }
     try {
         await awsBusinessClient.postTrainingReviewFeedback(reviewPublicId, {
             reviewerTelegramId: String(ctx.from.id),

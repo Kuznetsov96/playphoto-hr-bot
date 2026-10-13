@@ -9,6 +9,10 @@ const redisGet = vi.fn();
 vi.mock("../../core/logger.js", () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "test-secret" }));
 vi.mock("../../core/redis.js", () => ({ redis: { set: redisSet, get: redisGet } }));
+vi.mock("../../utils/bot-blocked.js", () => ({
+    // Настоящий модуль тянет репозиторий и Prisma; предикат здесь сведён к тому же 403.
+    isBotBlocked: (err: { error_code?: number }) => err?.error_code === 403,
+}));
 vi.mock("../../config/roles.js", () => ({ getAdminRoleByTelegramId: roleOf }));
 vi.mock("../../services/aws-business-client.js", async () => {
     const actual = await vi.importActual<typeof import("../../services/aws-business-client.js")>(
@@ -162,6 +166,48 @@ describe("training review callbacks", () => {
     });
 });
 
+describe("back button and answer ordering", () => {
+    it("back redraws the original decision keyboard", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        const ctx = ctxFor(OWNER_ID, signed("tpk", REVIEW_ID));
+        await handleTrainingCallback(ctx);
+        const markup = ctx.editMessageReplyMarkup.mock.calls[0][0].reply_markup.inline_keyboard;
+        expect(markup[0].map((b: Any) => b.text)).toEqual(["Passed", "Try again", "Reject"]);
+        expect(postDecision).not.toHaveBeenCalled();
+    });
+
+    it("retry and reject screens carry a Back button within 64 bytes", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(JSON.stringify({ checklist: ["A", "B"], candidateName: "Марія" }));
+        for (const data of [signed("tpr", REVIEW_ID), signed("tpj", REVIEW_ID)]) {
+            const ctx = ctxFor(OWNER_ID, data);
+            await handleTrainingCallback(ctx);
+            const rows: Any[][] = ctx.editMessageReplyMarkup.mock.calls[0][0].reply_markup.inline_keyboard;
+            const back = rows.flat().find((b) => b.text === "‹ Back");
+            expect(back).toBeTruthy();
+            expect(Buffer.byteLength(back.callback_data)).toBeLessThanOrEqual(64);
+        }
+    });
+
+    it("rejects a forged back callback from a stranger", async () => {
+        roleOf.mockReturnValue(undefined);
+        const ctx = ctxFor(STRANGER_ID, signed("tpk", REVIEW_ID));
+        await handleTrainingCallback(ctx);
+        expect(ctx.editMessageReplyMarkup).not.toHaveBeenCalled();
+    });
+
+    it("already decided: answers before editing and survives a failing edit", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        postDecision.mockRejectedValue(new AwsBusinessApiError(409, "REVIEW_ALREADY_DECIDED", "decided"));
+        const ctx = ctxFor(OWNER_ID, signed("tpp", REVIEW_ID));
+        const order: string[] = [];
+        ctx.answerCallbackQuery = vi.fn(async () => { order.push("answer"); return true; });
+        ctx.editMessageReplyMarkup = vi.fn(async () => { order.push("edit"); throw new Error("message is not modified"); });
+        await expect(handleTrainingCallback(ctx)).resolves.toBeUndefined();
+        expect(order).toEqual(["answer", "edit"]);
+    });
+});
+
 describe("owner feedback reply", () => {
     const stored = JSON.stringify({ reviewPublicId: REVIEW_ID, candidateTelegramId: "42", candidateName: "Марія" });
 
@@ -190,6 +236,18 @@ describe("owner feedback reply", () => {
         await handleTrainingFeedback(ctx, vi.fn());
         expect(ctx.api.copyMessage).toHaveBeenCalled();
         expect(ctx.reply).toHaveBeenCalledWith("Sent to the candidate.");
+    });
+
+    it("tells the owner when the candidate blocked the bot and records nothing", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(stored);
+        const ctx = messageCtx({ from: OWNER_ID, replyTo: 77, text: "well done", messageId: 93 });
+        ctx.api.copyMessage = vi.fn(async () => {
+            throw Object.assign(new Error("Forbidden: bot was blocked by the user"), { error_code: 403 });
+        });
+        await handleTrainingFeedback(ctx, vi.fn());
+        expect(ctx.reply).toHaveBeenCalledWith("Could not deliver: she blocked the bot.");
+        expect(postFeedback).not.toHaveBeenCalled();
     });
 
     it("passes through when the reply is not to a feedback prompt", async () => {

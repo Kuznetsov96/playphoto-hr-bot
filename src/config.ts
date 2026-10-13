@@ -4,6 +4,9 @@ import { z } from "zod";
 dotenv.config();
 
 // 1. Define Zod Schema for Environment Variables
+/** Пустая строка из DOCKER_ENV (`KEY=`) означает «не задано». */
+export const emptyToUndefined = (value: unknown): unknown => (value === "" ? undefined : value);
+
 const envSchema = z.object({
     // Core
     BOT_TOKEN: z.string().min(1, "BOT_TOKEN is missing"),
@@ -113,7 +116,10 @@ const envSchema = z.object({
 
     // Адрес вебаппа, на котором живёт Mini App обучения (`/learn`). Не флаг формы выката —
     // кладётся в секрет DOCKER_ENV. Пусто → команды с trainingMode MINIAPP падают громко.
-    TRAINING_MINIAPP_BASE_URL: z.string().url().optional(),
+    TRAINING_MINIAPP_BASE_URL: z.preprocess(
+        emptyToUndefined,
+        z.string().url().refine((v) => v.startsWith("https://"), "TRAINING_MINIAPP_BASE_URL must be https").optional(),
+    ),
 
     // IBANs (Comma-separated)
     IBAN_KUZNETSOV: z.string().optional(),

@@ -99,3 +99,38 @@ describe('FINANCE_DDS_TARGET derived from the deploy flag', () => {
 // `scripts/aws/check-production-deploy-contract.mjs`, which owns the whole
 // production deploy contract and now runs in CI. Duplicating it here would
 // mean two places to update for one rule.
+
+describe('TRAINING_MINIAPP_BASE_URL', () => {
+  const load = async (value: string | undefined) => {
+    const previous = { ...process.env };
+    if (value === undefined) delete process.env.TRAINING_MINIAPP_BASE_URL;
+    else process.env.TRAINING_MINIAPP_BASE_URL = value;
+    vi.resetModules();
+    try {
+      const config = await import('../config.js');
+      return config.TRAINING_MINIAPP_BASE_URL;
+    } finally {
+      process.env = previous;
+      vi.resetModules();
+    }
+  };
+
+  it('treats an empty string as not set', async () => {
+    expect(await load('')).toBeUndefined();
+  });
+
+  it('accepts an https URL', async () => {
+    expect(await load('https://app.example.com')).toBe('https://app.example.com');
+  });
+
+  it('rejects an http URL', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => { throw new Error('exit'); }) as never);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(load('http://app.example.com')).rejects.toThrow();
+    } finally {
+      exit.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
