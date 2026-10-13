@@ -394,6 +394,7 @@ If the replacement is already in the main schedule, update and sync Google Sheet
   "training-reject-reason": (code: string) =>
     ({ NOT_A_FIT: "Not a fit", CANDIDATE_DECLINED: "She declined", OTHER: "Other" } as Record<string, string>)[code] ?? code,
   "training-already-decided": `Already decided.`,
+  "training-card-expired": `This card expired. Decide in the webapp card.`,
   "training-not-allowed": `Only the owner can decide.`,
   "training-decision-passed": (name: string) => `Decision: passed. Arrange the internship for ${name}.`,
   "training-decision-retry": `Decision: try again. Hints sent.`,

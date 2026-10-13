@@ -208,6 +208,36 @@ describe("back button and answer ordering", () => {
     });
 });
 
+describe("expired or unreadable card", () => {
+    const EXPIRED = { text: "This card expired. Decide in the webapp card.", show_alert: true };
+
+    it("retry on a card whose Redis entry is gone says the card expired", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(null);
+        const ctx = ctxFor(OWNER_ID, signed("tpr", REVIEW_ID));
+        await handleTrainingCallback(ctx);
+        expect(answer).toHaveBeenCalledWith(EXPIRED);
+        expect(ctx.editMessageReplyMarkup).not.toHaveBeenCalled();
+    });
+
+    it("an unreadable Redis card value is treated as expired, not thrown", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue("{not json");
+        const ctx = ctxFor(OWNER_ID, signed("tpt", `${REVIEW_ID}.1`));
+        await expect(handleTrainingCallback(ctx)).resolves.toBeUndefined();
+        expect(answer).toHaveBeenCalledWith(EXPIRED);
+        expect(ctx.editMessageReplyMarkup).not.toHaveBeenCalled();
+    });
+
+    it("a callback with a bad signature says the card expired", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        const forged = signed("tpp", REVIEW_ID).replace(/.$/u, (c) => (c === "A" ? "B" : "A"));
+        await handleTrainingCallback(ctxFor(OWNER_ID, forged));
+        expect(postDecision).not.toHaveBeenCalled();
+        expect(answer).toHaveBeenCalledWith(EXPIRED);
+    });
+});
+
 describe("owner feedback reply", () => {
     const stored = JSON.stringify({ reviewPublicId: REVIEW_ID, candidateTelegramId: "42", candidateName: "Марія" });
 

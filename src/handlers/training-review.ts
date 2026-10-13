@@ -90,13 +90,24 @@ async function decide(
     );
 }
 
-async function redrawRetry(ctx: MyContext, reviewPublicId: string, mask: number): Promise<void> {
-    const raw = await redis.get(cardKey(reviewPublicId));
-    if (!raw) {
-        await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["training-already-decided"], show_alert: true });
-        return;
+/** Чек-лист карточки из Redis; null — запись истекла или не читается. */
+function readCardChecklist(raw: string | null): string[] | null {
+    if (!raw) return null;
+    try {
+        const { checklist } = JSON.parse(raw) as { checklist?: unknown };
+        return Array.isArray(checklist) && checklist.every((item) => typeof item === "string") ? checklist : null;
+    } catch {
+        return null;
     }
-    const { checklist } = JSON.parse(raw) as { checklist: string[] };
+}
+
+async function answerCardExpired(ctx: MyContext): Promise<void> {
+    await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["training-card-expired"], show_alert: true });
+}
+
+async function redrawRetry(ctx: MyContext, reviewPublicId: string, mask: number): Promise<void> {
+    const checklist = readCardChecklist(await redis.get(cardKey(reviewPublicId)));
+    if (!checklist) return answerCardExpired(ctx);
     await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["training-retry-pick"] });
     await ctx.editMessageReplyMarkup({ reply_markup: retryKeyboard(reviewPublicId, mask, checklist) }).catch(() => {});
 }
@@ -142,8 +153,9 @@ export async function handleTrainingCallback(ctx: MyContext): Promise<void> {
     const code = parsedReason ? TRAINING_REJECT_REASONS[parsedReason.n] : undefined;
     if (parsedReason && code) return decide(ctx, parsedReason.reviewPublicId, "REJECTED", [], code);
 
-    // Подпись не сошлась или payload битый.
-    await ctx.answerCallbackQuery({ text: ADMIN_TEXTS["training-already-decided"], show_alert: true });
+    // Подпись не сошлась (секрет сменился, карточка старая) или payload битый —
+    // решение по такой карточке принимается в вебаппе.
+    await answerCardExpired(ctx);
 }
 
 export async function handleTrainingFeedback(ctx: MyContext, next: NextFunction): Promise<void> {
