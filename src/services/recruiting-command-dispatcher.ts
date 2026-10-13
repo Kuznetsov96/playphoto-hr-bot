@@ -296,7 +296,7 @@ export class RecruitingCommandDispatcher {
             // всё, что нужно, лежит в payload (проверка идёт до поиска в боте).
             const owner = ADMIN_IDS[0];
             if (!owner) throw new Error("PITCH_REVIEW_NOT_SENT:no_owner");
-            await sendReviewCard(api, owner, parsePitchReviewPayload(command.payload));
+            await sendReviewCard(api, owner, parsePitchReviewPayload(command.payload), command.publicId);
             return;
         }
         const candidate = await candidateRepository.findByTelegramId(Number(command.candidate.telegramId));

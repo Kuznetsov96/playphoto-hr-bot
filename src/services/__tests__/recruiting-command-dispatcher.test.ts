@@ -68,6 +68,7 @@ const redisEval = vi.fn();
 vi.mock("../../core/redis.js", () => ({
     redis: {
         set: (...args: unknown[]) => redisSet(...args),
+        get: async () => null,
         eval: (...args: unknown[]) => redisEval(...args),
     },
 }));

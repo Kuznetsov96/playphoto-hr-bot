@@ -65,7 +65,19 @@ export function rejectKeyboard(reviewPublicId: string): InlineKeyboard {
     return kb.text(ADMIN_TEXTS["training-back"], buildSignedCallback(TRAINING_CB.back, reviewPublicId));
 }
 
-export async function sendReviewCard(api: Api, chatId: number, p: PitchReviewPayload): Promise<void> {
+const voiceSentKey = (deliveryKey: string) => `training:review:voice-sent:${deliveryKey}`;
+
+/**
+ * deliveryKey — publicId команды REQUEST_PITCH_REVIEW. Ретрай той же команды
+ * (голосовое ушло, текст карточки — нет) не шлёт голосовое повторно; напоминание
+ * через 24 ч — новая команда, и голосовое уходит владельцу снова.
+ */
+export async function sendReviewCard(
+    api: Api,
+    chatId: number,
+    p: PitchReviewPayload,
+    deliveryKey: string,
+): Promise<void> {
     // Redis первым (идемпотентная перезапись): иначе при сбое после отправки
     // владелец держит живую карточку, а кнопки не найдут сохранённый чек-лист.
     await redis.set(
@@ -74,8 +86,12 @@ export async function sendReviewCard(api: Api, chatId: number, p: PitchReviewPay
         "EX",
         CARD_TTL_SECONDS,
     );
-    if (p.attachmentKind === "VOICE") await api.sendVoice(chatId, p.fileId);
-    else await api.sendVideoNote(chatId, p.fileId);
+    const sentKey = voiceSentKey(deliveryKey);
+    if (!(await redis.get(sentKey))) {
+        if (p.attachmentKind === "VOICE") await api.sendVoice(chatId, p.fileId);
+        else await api.sendVideoNote(chatId, p.fileId);
+        await redis.set(sentKey, "1", "EX", CARD_TTL_SECONDS);
+    }
     await api.sendMessage(chatId, renderReviewCard(p), { reply_markup: reviewKeyboard(p.reviewPublicId) });
 }
 
