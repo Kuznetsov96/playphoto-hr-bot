@@ -158,16 +158,26 @@ export async function handleTrainingCallback(ctx: MyContext): Promise<void> {
     await answerCardExpired(ctx);
 }
 
+/** Подсказка совета из Redis; null — записи нет или она не читается. */
+function readFeedbackPrompt(raw: string | null): { reviewPublicId: string; candidateTelegramId: string } | null {
+    if (!raw) return null;
+    try {
+        const { reviewPublicId, candidateTelegramId } = JSON.parse(raw) as Record<string, unknown>;
+        return typeof reviewPublicId === "string" && typeof candidateTelegramId === "string"
+            ? { reviewPublicId, candidateTelegramId }
+            : null;
+    } catch {
+        return null;
+    }
+}
+
 export async function handleTrainingFeedback(ctx: MyContext, next: NextFunction): Promise<void> {
     const message = ctx.message;
     const replyTo = message?.reply_to_message;
     if (!message || !replyTo || !ctx.from || ctx.chat?.type !== "private" || !isOwner(ctx.from.id)) return next();
-    const raw = await redis.get(feedbackKey(ctx.chat.id, replyTo.message_id));
-    if (!raw) return next();
-    const { reviewPublicId, candidateTelegramId } = JSON.parse(raw) as {
-        reviewPublicId: string;
-        candidateTelegramId: string;
-    };
+    const prompt = readFeedbackPrompt(await redis.get(feedbackKey(ctx.chat.id, replyTo.message_id)));
+    if (!prompt) return next(); // нет подсказки или запись не читается — обычное сообщение
+    const { reviewPublicId, candidateTelegramId } = prompt;
 
     const attachment = message.voice
         ? { fileId: message.voice.file_id, kind: "VOICE" as const }

@@ -336,6 +336,17 @@ describe("owner feedback reply", () => {
         expect(ctx.reply).not.toHaveBeenCalled();
     });
 
+    it("an unreadable feedback prompt value is treated as no prompt and goes to next()", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue("{not json");
+        const ctx = messageCtx({ from: OWNER_ID, replyTo: 77, text: "well done", messageId: 99 });
+        const next = vi.fn();
+        await expect(handleTrainingFeedback(ctx, next)).resolves.toBeUndefined();
+        expect(next).toHaveBeenCalled();
+        expect(ctx.api.copyMessage).not.toHaveBeenCalled();
+        expect(postFeedback).not.toHaveBeenCalled();
+    });
+
     it("passes through when the reply is not to a feedback prompt", async () => {
         roleOf.mockReturnValue("SUPER_ADMIN");
         redisGet.mockResolvedValue(null);
