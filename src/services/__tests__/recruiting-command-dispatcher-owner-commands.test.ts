@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 
 /**
  * Owner-команды полного цикла найма (фаза 3b). КРИТИЧЕСКАЯ семантика: владелец
@@ -242,6 +243,46 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(rejectCandidate).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой TRAINING_REJECTED — вежливый текст и REJECTED", async () => {
+        const api = makeApi();
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(api.sendMessage).toHaveBeenCalledWith(1164289764, CANDIDATE_TEXTS["training-rejected"]());
+        expect(update).toHaveBeenCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой: бот заблокирован (403) — всё равно REJECTED", async () => {
+        const api = makeApi();
+        api.sendMessage.mockRejectedValue(Object.assign(new Error("Forbidden"), { error_code: 403 }));
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(update).toHaveBeenCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой: иная ошибка отправки — статус не меняется, команда на ретрай", async () => {
+        const api = makeApi();
+        api.sendMessage.mockRejectedValue(new Error("ETIMEDOUT"));
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(update).not.toHaveBeenCalled();
+        expect(ackApplied).not.toHaveBeenCalled();
+        expect(ackFailed).toHaveBeenCalledWith(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            expect.stringContaining("REJECT_NOT_SENT:send_failed"),
+        );
     });
 
     it.each([["STAGING_ACTIVE"], ["READY_FOR_HIRE"], ["AWAITING_FIRST_SHIFT"], ["NDA"], ["TRAINING_SCHEDULED"], ["DISCOVERY_COMPLETED"]])(

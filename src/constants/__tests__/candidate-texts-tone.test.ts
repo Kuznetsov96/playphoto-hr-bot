@@ -63,6 +63,7 @@ describe("candidate tone of voice", () => {
         "candidate-hired-no-cabinet",
         "candidate-location-changed-in-team",
         "worker-offer-accepted-training",
+        "training-rejected",
     ];
 
     it("никогда не обращается к кандидатке на «ти» — кроме момента приёма в команду", () => {

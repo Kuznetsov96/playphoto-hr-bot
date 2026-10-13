@@ -11,7 +11,7 @@ import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client
 import { hrService } from "./hr-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
-import { readTrainingMode } from "./training-review.js";
+import { readCandidateMessage, readTrainingMode } from "./training-review.js";
 
 export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
@@ -382,6 +382,16 @@ export class RecruitingCommandDispatcher {
                 // сообщением (APPEARANCE), до интервью — прежний кнопочный
                 // путь rejectCandidate с сообщением GENERAL.
                 if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
+                    // Отказ после голосового или низкого балла курса: вежливый текст
+                    // только по явной метке в payload (спека 2026-10-13).
+                    if (readCandidateMessage(command.payload) === "TRAINING_REJECTED") {
+                        try {
+                            await api.sendMessage(Number(candidate.user.telegramId), CANDIDATE_TEXTS["training-rejected"]());
+                        } catch (error) {
+                            // Заблокировала бота — отказ всё равно фиксируем; прочее — ретрай команды.
+                            if (!isBotBlocked(error)) throw new Error("REJECT_NOT_SENT:send_failed");
+                        }
+                    }
                     await candidateRepository.update(candidate.id, {
                         status: CandidateStatus.REJECTED,
                         hrDecision: "REJECTED",
