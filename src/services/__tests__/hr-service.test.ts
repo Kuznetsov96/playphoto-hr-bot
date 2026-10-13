@@ -75,10 +75,12 @@ vi.mock('../../repositories/timeline-repository.js', () => ({
     }
 }));
 
+const trainingConfig = vi.hoisted(() => ({ baseUrl: 'https://app.example.com' as string | undefined }));
+
 vi.mock('../../config.js', () => ({
     HR_IDS: [111111],
     MENTOR_IDS: [444444],
-    TRAINING_MINIAPP_BASE_URL: 'https://app.example.com'
+    get TRAINING_MINIAPP_BASE_URL() { return trainingConfig.baseUrl; }
 }));
 
 vi.mock('../access-service.js', () => ({
@@ -215,6 +217,20 @@ describe('hrService', () => {
             expect(buttons[0].text).toBe('Почати навчання');
             expect(buttons[0].web_app.url).toMatch(/^https:\/\/app\.example\.com\/learn/);
             expect(buttons[1].callback_data).toBe('contact_hr');
+        });
+
+        it('MINIAPP mode without TRAINING_MINIAPP_BASE_URL: fails loudly, status untouched, nothing sent', async () => {
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+            vi.mocked(candidateRepository.update).mockClear();
+            trainingConfig.baseUrl = undefined;
+            try {
+                await expect(hrService.acceptAfterInterview(api, 'cand1', 'webapp-recruiter', 'MINIAPP'))
+                    .rejects.toThrow('OFFER_NOT_SENT:miniapp_url_missing');
+            } finally {
+                trainingConfig.baseUrl = 'https://app.example.com';
+            }
+            expect(candidateRepository.update).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
         });
 
         it('decided during the meeting: completes the interview first, then MENTOR_MANUAL', async () => {
