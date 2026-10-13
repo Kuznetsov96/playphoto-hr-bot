@@ -68,6 +68,41 @@ describe("AwsBusinessClient recruiter commands", () => {
             expect(result.items[1]?.webAppButton).toEqual({ text: "Open", path: "/learn" });
         });
 
+        it("a malformed payload becomes null for that command only, the batch still parses", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({
+                    items: [
+                        { ...command, payload: "not-an-object" },
+                        { ...command, publicId: reviewId, payload: { trainingMode: "MINIAPP" } },
+                    ],
+                }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingCommands(20);
+            expect(result.items).toHaveLength(2);
+            expect(result.items[0]?.payload).toBeNull();
+            expect(result.items[1]?.payload).toEqual({ trainingMode: "MINIAPP" });
+        });
+
+        it("an invalid webAppButton is marked on that message only, the batch still parses", async () => {
+            const message = { publicId: reviewId, body: "hi", telegramId: "42" };
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({
+                    items: [
+                        { ...message, webAppButton: { text: "", path: "learn" } },
+                        { ...message, webAppButton: { text: "Open", path: "/learn" } },
+                    ],
+                }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient, INVALID_WEB_APP_BUTTON } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingMessages(20);
+            expect(result.items).toHaveLength(2);
+            expect(result.items[0]?.webAppButton).toBe(INVALID_WEB_APP_BUTTON);
+            expect(result.items[1]?.webAppButton).toEqual({ text: "Open", path: "/learn" });
+        });
+
         it("posts a training review decision", async () => {
             vi.mocked(fetch).mockResolvedValue(new Response(
                 JSON.stringify({ decision: "PASSED", candidateTelegramId: "42", candidateName: "Марія" }),

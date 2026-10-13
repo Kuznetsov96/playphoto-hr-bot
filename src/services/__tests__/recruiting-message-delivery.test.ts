@@ -10,7 +10,8 @@ const listPendingMessages = vi.fn();
 const ackSent = vi.fn();
 const ackMessageFailed = vi.fn();
 
-vi.mock("../aws-business-client.js", () => ({
+vi.mock("../aws-business-client.js", async (orig) => ({
+    ...(await orig<Record<string, unknown>>()),
     awsBusinessClient: {
         listPendingRecruitingMessages: listPendingMessages,
         ackRecruitingMessageSent: ackSent,
@@ -32,6 +33,7 @@ vi.mock("../../core/logger.js", () => ({
 }));
 
 const { deliverPendingRecruitingMessages } = await import("../recruiting-message-delivery.js");
+const { INVALID_WEB_APP_BUTTON } = await import("../aws-business-client.js");
 
 const makeApi = () => ({ sendMessage: vi.fn().mockResolvedValue({ message_id: 42 }) });
 
@@ -149,6 +151,24 @@ describe("deliverPendingRecruitingMessages", () => {
             text: "Продовжити навчання",
             web_app: { url: "https://app.example.test/learn" },
         });
+    });
+
+    it("битая кнопка — failed только этого сообщения, соседнее уходит", async () => {
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({
+            items: [
+                message({ publicId: "11111111-1111-4111-8111-111111111111", webAppButton: INVALID_WEB_APP_BUTTON }),
+                message({ publicId: "22222222-2222-4222-8222-222222222222", webAppButton: null }),
+            ],
+        });
+        const result = await deliverPendingRecruitingMessages(api as never);
+        expect(ackMessageFailed).toHaveBeenCalledWith(
+            "11111111-1111-4111-8111-111111111111",
+            expect.stringContaining("invalid_web_app_button"),
+        );
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(ackSent).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222", "42");
+        expect(result).toEqual({ sent: 1, failed: 1 });
     });
 
     it("без базового url кнопка — громкий failed, сообщение не уходит", async () => {

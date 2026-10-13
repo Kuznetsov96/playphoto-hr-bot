@@ -1,7 +1,7 @@
 import { InlineKeyboard, type Api } from "grammy";
 import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { awsBusinessClient } from "./aws-business-client.js";
+import { INVALID_WEB_APP_BUTTON, awsBusinessClient } from "./aws-business-client.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { buildMiniAppUrl } from "./training-review.js";
 
@@ -56,6 +56,9 @@ export async function deliverPendingRecruitingMessages(api: Api): Promise<{ sent
     let failed = 0;
     for (const message of pending.items) {
         try {
+            if (message.webAppButton === INVALID_WEB_APP_BUTTON) {
+                throw new Error("MESSAGE_NOT_SENT:invalid_web_app_button");
+            }
             const options = message.webAppButton
                 ? {
                       reply_markup: new InlineKeyboard().webApp(

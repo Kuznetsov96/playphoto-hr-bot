@@ -912,9 +912,11 @@ const recruitingCommandSchema = z.object({
     locationCode: z.string().nullable().optional().default(null),
     /**
      * Данные вида команды (обучение кандидаток: trainingMode, candidateMessage, данные
-     * проверки питча). Старый вебапп поля не шлёт — default(null).
+     * проверки питча). Старый вебапп поля не шлёт — default(null). Битый payload одной
+     * команды — catch(null), а не ошибка разбора всей очереди: читатели payload трактуют
+     * null как старое поведение, REQUEST_PITCH_REVIEW без данных падает поштучно.
      */
-    payload: z.record(z.string(), z.unknown()).nullable().optional().default(null),
+    payload: z.record(z.string(), z.unknown()).nullable().optional().default(null).catch(null),
     attempts: z.number().int(),
     candidate: z.object({
         telegramId: z.string(),
@@ -944,16 +946,27 @@ export type RecruitingCommandAck = z.infer<typeof recruitingCommandAckSchema>;
  * найма). НЕ `.strict()` — по той же причине, что и команды: новое поле в
  * ответе API не должно ронять доставку всей очереди.
  */
+/** Метка битой webAppButton в разобранном сообщении outbox. */
+export const INVALID_WEB_APP_BUTTON = "INVALID_WEB_APP_BUTTON" as const;
+
 const recruitingOutgoingMessageSchema = z.object({
     publicId: z.string().uuid(),
     body: z.string(),
     telegramId: z.string(),
-    /** Кнопка Mini App под сообщением (path относительно TRAINING_MINIAPP_BASE_URL). */
+    /**
+     * Кнопка Mini App под сообщением (path относительно TRAINING_MINIAPP_BASE_URL).
+     * Битая кнопка не роняет разбор очереди: catch ставит метку, и доставка отвечает
+     * failed только этому сообщению (без кнопки слать нельзя — текст зовёт её нажать).
+     */
     webAppButton: z
-        .object({ text: z.string().min(1).max(64), path: z.string().startsWith("/") })
-        .nullable()
+        .union([
+            z.object({ text: z.string().min(1).max(64), path: z.string().startsWith("/") }),
+            z.null(),
+            z.literal(INVALID_WEB_APP_BUTTON),
+        ])
         .optional()
-        .default(null),
+        .default(null)
+        .catch(INVALID_WEB_APP_BUTTON),
 });
 
 const recruitingOutgoingMessagesSchema = z.object({
