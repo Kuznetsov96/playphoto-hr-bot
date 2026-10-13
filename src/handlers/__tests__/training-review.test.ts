@@ -360,3 +360,71 @@ describe("owner feedback reply", () => {
         expect(next).toHaveBeenCalled();
     });
 });
+
+describe("registration order", () => {
+    const stored = JSON.stringify({ reviewPublicId: REVIEW_ID, candidateTelegramId: "42", candidateName: "Марія" });
+
+    function ownerReplyUpdate(text: string): Any {
+        return {
+            update_id: 1,
+            message: {
+                message_id: 98,
+                date: 0,
+                text,
+                chat: { id: OWNER_ID, type: "private", first_name: "Owner" },
+                from: { id: OWNER_ID, is_bot: false, first_name: "Owner" },
+                reply_to_message: {
+                    message_id: 77,
+                    date: 0,
+                    chat: { id: OWNER_ID, type: "private", first_name: "Owner" },
+                },
+            },
+        };
+    }
+
+    async function runThroughComposer(update: Any) {
+        const { Composer, Context } = await import("grammy");
+        const { registerTrainingReviewHandlers } = await import("../training-review.js");
+        const composer = new Composer<Any>();
+        registerTrainingReviewHandlers(composer);
+        const generic = vi.fn();
+        composer.on("message", generic);
+        const api: Any = {
+            copyMessage: vi.fn(async () => ({ message_id: COPIED_MESSAGE_ID })),
+            sendMessage: vi.fn(async () => ({ message_id: 1 })),
+        };
+        const ctx = new Context(update, api, { id: 7, is_bot: true, first_name: "Bot" } as Any);
+        await composer.middleware()(ctx as Any, async () => {});
+        return { generic, api };
+    }
+
+    it("a reply to the feedback prompt is consumed by the training handler before generic message handlers", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(stored);
+        const { generic, api } = await runThroughComposer(ownerReplyUpdate("well done"));
+        expect(api.copyMessage).toHaveBeenCalledWith(42, OWNER_ID, 98);
+        expect(generic).not.toHaveBeenCalled();
+    });
+
+    it("any other owner message still reaches the generic handlers", async () => {
+        roleOf.mockReturnValue("SUPER_ADMIN");
+        redisGet.mockResolvedValue(null);
+        const { generic, api } = await runThroughComposer(ownerReplyUpdate("hi"));
+        expect(api.copyMessage).not.toHaveBeenCalled();
+        expect(generic).toHaveBeenCalledTimes(1);
+    });
+
+    it("handlers/index.ts registers training before every private-chat handler but the shields", async () => {
+        const { readFileSync } = await import("node:fs");
+        const { fileURLToPath } = await import("node:url");
+        const source = readFileSync(fileURLToPath(new URL("../index.ts", import.meta.url)), "utf8");
+        const training = source.indexOf("registerTrainingReviewHandlers(handlers);");
+        expect(training).toBeGreaterThan(-1);
+        const registrations = [...source.matchAll(/^handlers\.(use|on|callbackQuery|command|hears)\(/gmu)].map((m) => m.index ?? -1);
+        const before = registrations.filter((index) => index < training);
+        // До обучения — только blockShield и сквозной debug-проход (оба зовут next()).
+        expect(before).toHaveLength(2);
+        expect(source.slice(before[0], before[0]! + 40)).toContain("handlers.use(blockShield)");
+        expect(source.indexOf("handlers.use(preferencesHandlers)")).toBeGreaterThan(training);
+    });
+});
