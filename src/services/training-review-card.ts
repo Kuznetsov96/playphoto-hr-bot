@@ -39,6 +39,8 @@ export function reviewKeyboard(reviewPublicId: string): InlineKeyboard {
 }
 
 export function retryKeyboard(reviewPublicId: string, mask: number, checklist: string[]): InlineKeyboard {
+    // Маска из битов: payload кнопки держит до двух цифр (<= 99), то есть не более 6 пунктов.
+    if (checklist.length > 6) throw new Error("TRAINING_CHECKLIST_TOO_LONG");
     const kb = new InlineKeyboard();
     checklist.forEach((item, index) => {
         const bit = 1 << index;
@@ -60,15 +62,17 @@ export function rejectKeyboard(reviewPublicId: string): InlineKeyboard {
 }
 
 export async function sendReviewCard(api: Api, chatId: number, p: PitchReviewPayload): Promise<void> {
-    if (p.attachmentKind === "VOICE") await api.sendVoice(chatId, p.fileId);
-    else await api.sendVideoNote(chatId, p.fileId);
-    await api.sendMessage(chatId, renderReviewCard(p), { reply_markup: reviewKeyboard(p.reviewPublicId) });
+    // Redis первым (идемпотентная перезапись): иначе при сбое после отправки
+    // владелец держит живую карточку, а кнопки не найдут сохранённый чек-лист.
     await redis.set(
         cardKey(p.reviewPublicId),
         JSON.stringify({ checklist: p.checklist, candidateName: p.candidateName }),
         "EX",
         CARD_TTL_SECONDS,
     );
+    if (p.attachmentKind === "VOICE") await api.sendVoice(chatId, p.fileId);
+    else await api.sendVideoNote(chatId, p.fileId);
+    await api.sendMessage(chatId, renderReviewCard(p), { reply_markup: reviewKeyboard(p.reviewPublicId) });
 }
 
 /** Разбор `<uuid>.<int>` из payload кнопки. */

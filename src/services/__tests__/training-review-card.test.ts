@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "x".repeat(32) }));
-vi.mock("../../core/redis.js", () => ({ redis: { set: vi.fn() } }));
-const { renderReviewCard, retryKeyboard, reviewKeyboard, rejectKeyboard } = await import("../training-review-card.js");
+const redisSet = vi.fn();
+vi.mock("../../core/redis.js", () => ({ redis: { set: (...a: unknown[]) => redisSet(...a) } }));
+const { sendReviewCard, renderReviewCard, retryKeyboard, reviewKeyboard, rejectKeyboard } = await import("../training-review-card.js");
 
 const payload = {
     reviewPublicId: "5b0c3f5e-9a51-4c2b-9b7a-0c1f3e8d2a11",
@@ -44,5 +45,25 @@ describe("review card", () => {
         expect(labels).toContain("✗ 1. Greeting");
         expect(labels).toContain("2. Photo");
         expect(labels).toContain("✗ 3. Magnets");
+    });
+
+    it("writes Redis before sending; a Redis failure sends nothing", async () => {
+        redisSet.mockRejectedValueOnce(new Error("redis down"));
+        const api = { sendVoice: vi.fn(), sendVideoNote: vi.fn(), sendMessage: vi.fn() };
+        await expect(sendReviewCard(api as never, 1, payload)).rejects.toThrow("redis down");
+        expect(api.sendVoice).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("uses sendVideoNote for a video note", async () => {
+        redisSet.mockResolvedValue("OK");
+        const api = { sendVoice: vi.fn(), sendVideoNote: vi.fn(), sendMessage: vi.fn() };
+        await sendReviewCard(api as never, 1, { ...payload, attachmentKind: "VIDEO_NOTE" });
+        expect(api.sendVideoNote).toHaveBeenCalledWith(1, "AwAC");
+        expect(api.sendVoice).not.toHaveBeenCalled();
+    });
+
+    it("refuses more than 6 checklist items", () => {
+        expect(() => retryKeyboard(payload.reviewPublicId, 0, [...payload.checklist, "x"])).toThrow();
     });
 });
