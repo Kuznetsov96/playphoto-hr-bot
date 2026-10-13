@@ -18,6 +18,7 @@ import { supportHandlers, handleSupportMessage } from "./support.js";
 import { staffLogisticsHandlers } from "../modules/staff/handlers/logistics.js";
 import { preferencesHandlers } from "./preferences-flow.js";
 import { shootTaskHandlers } from "./shoot-tasks.js";
+import { registerTrainingReviewHandlers } from "./training-review.js";
 import { bot } from "../core/bot.js";
 import { shouldRouteMessageToPrivateRoleFlows } from "../utils/message-routing.js";
 import { accessHandlers } from "./access.js";
@@ -65,6 +66,11 @@ handlers.use(async (ctx, next) => {
     // logger.info(`🔍 [DEBUG] Handlers Entry: ${ctx.update.update_id}`);
     await next();
 });
+
+// Решение владельца по голосовому кандидатки и его ответ-совет. До всех общих
+// обработчиков лички: ответ на подсказку не должен попасть в preferences/support/роли,
+// всё остальное handleTrainingFeedback отдаёт дальше через next().
+registerTrainingReviewHandlers(handlers);
 
 // Preferences flow must be global (accessible to staff via PM and admins via stats)
 handlers.use(preferencesHandlers);

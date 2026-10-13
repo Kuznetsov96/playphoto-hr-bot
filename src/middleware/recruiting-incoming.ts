@@ -5,6 +5,7 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { AwsBusinessApiError, awsBusinessClient } from "../services/aws-business-client.js";
 import { getRichMessagePlainText } from "../utils/rich-message.js";
+import { ATTACHMENT_LABELS } from "../constants/attachment-labels.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 
 /** API-контракт: `body` ограничен @MaxLength(4000), Telegram отдаёт до 4096. */
@@ -92,16 +93,16 @@ function extractAttachment(message: Record<string, any> | undefined): {
     const photo = message?.photo;
     // Последний элемент — максимальный размер.
     if (Array.isArray(photo) && photo.length > 0) {
-        return { attachment: { fileId: photo[photo.length - 1].file_id, kind: "PHOTO" }, label: "📷 Фото" };
+        return { attachment: { fileId: photo[photo.length - 1].file_id, kind: "PHOTO" }, label: ATTACHMENT_LABELS.PHOTO };
     }
     if (message?.video_note) {
-        return { attachment: { fileId: message.video_note.file_id, kind: "VIDEO_NOTE" }, label: "⭕ Відеозаписка" };
+        return { attachment: { fileId: message.video_note.file_id, kind: "VIDEO_NOTE" }, label: ATTACHMENT_LABELS.VIDEO_NOTE };
     }
     if (message?.voice) {
-        return { attachment: { fileId: message.voice.file_id, kind: "VOICE" }, label: "🎙 Голосове повідомлення" };
+        return { attachment: { fileId: message.voice.file_id, kind: "VOICE" }, label: ATTACHMENT_LABELS.VOICE };
     }
     if (message?.video) {
-        return { attachment: { fileId: message.video.file_id, kind: "VIDEO" }, label: "🎥 Відео" };
+        return { attachment: { fileId: message.video.file_id, kind: "VIDEO" }, label: ATTACHMENT_LABELS.VIDEO };
     }
     return { attachment: null, label: "" };
 }
