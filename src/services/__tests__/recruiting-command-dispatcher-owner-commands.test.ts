@@ -43,6 +43,9 @@ vi.mock("../team-registration-service.js", () => ({
     teamRegistrationService: { registerNewHire },
 }));
 
+const syncUserAccess = vi.fn();
+vi.mock("../access-service.js", () => ({ accessService: { syncUserAccess } }));
+
 const findByTelegramId = vi.fn();
 const update = vi.fn();
 
@@ -62,7 +65,8 @@ vi.mock("../../core/redis.js", () => ({
     },
 }));
 
-vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
+const logBusinessEvent = vi.fn();
+vi.mock("../../core/log-events.js", () => ({ logBusinessEvent }));
 vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -298,6 +302,13 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(api.sendMessage).not.toHaveBeenCalled();
         expect(rejectCandidate).not.toHaveBeenCalled();
         expect(update).not.toHaveBeenCalled();
+        // Прошлая попытка могла записать REJECTED и упасть до синка доступа — повтор его досинкает.
+        expect(syncUserAccess).toHaveBeenCalledTimes(1);
+        expect(syncUserAccess).toHaveBeenCalledWith(1164289764n, expect.stringContaining("HR Rejected"));
+        expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({
+            event: "bot.recruiting_commands.already_rejected",
+            safeContext: expect.objectContaining({ commandPublicId: "0f8fad5b-d9cb-469f-a165-70867728950e" }),
+        }));
         expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
         expect(ackFailed).not.toHaveBeenCalled();
     });

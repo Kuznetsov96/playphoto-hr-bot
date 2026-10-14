@@ -397,8 +397,26 @@ export class RecruitingCommandDispatcher {
                 // путь rejectCandidate с сообщением GENERAL.
                 // Уже REJECTED — повтор команды, чей ack потерялся: статус записан,
                 // всё нужное кандидатке уже ушло. Без этой проверки повтор попал бы
-                // в rejectCandidate(GENERAL) и прислал второй, общий отказ.
-                if (candidate.status === CandidateStatus.REJECTED) return;
+                // в rejectCandidate(GENERAL) и прислал второй, общий отказ. Синк
+                // доступа идемпотентен и повторяется: прошлая попытка могла упасть
+                // после записи статуса, но до него, — доступ иначе не отозвался бы.
+                if (candidate.status === CandidateStatus.REJECTED) {
+                    // Лениво, как reschedule-сервис: стек доступа нужен только этой ветке.
+                    const { accessService } = await import("./access-service.js");
+                    await accessService.syncUserAccess(candidate.user.telegramId, "HR Rejected: replay");
+                    logBusinessEvent({
+                        event: "bot.recruiting_commands.already_rejected",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "skipped",
+                        reasonCode: "ALREADY_REJECTED",
+                        module: "recruiting-command-dispatcher",
+                        operation: "execute",
+                        candidateId: candidate.id,
+                        safeContext: { commandPublicId: command.publicId },
+                    });
+                    return;
+                }
                 if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
                     // Отказ после голосового или низкого балла курса: вежливый текст
                     // только по явной метке в payload (спека 2026-10-13).
