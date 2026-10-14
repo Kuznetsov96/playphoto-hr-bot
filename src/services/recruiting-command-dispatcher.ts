@@ -439,6 +439,11 @@ export class RecruitingCommandDispatcher {
                         status: CandidateStatus.REJECTED,
                         hrDecision: "REJECTED",
                     });
+                    // Принятие открыло ей доступ — отказ его отзывает, как rejectCandidate.
+                    // Если синк бросит, команда уйдёт на ретрай, и ветка «уже REJECTED»
+                    // выше досинкает без второго текста.
+                    const { accessService } = await import("./access-service.js");
+                    await accessService.syncUserAccess(candidate.user.telegramId, "HR Rejected");
                     return;
                 }
                 const reason = candidate.status === CandidateStatus.MANUAL_REVIEW ? "APPEARANCE" : "GENERAL";
