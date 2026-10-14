@@ -11,6 +11,9 @@ import { awsBusinessClient, type RecruitingCommand } from "./aws-business-client
 import { hrService } from "./hr-service.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
 import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.js";
+import { ADMIN_IDS } from "../config.js";
+import { sendReviewCard } from "./training-review-card.js";
+import { parsePitchReviewPayload, readCandidateMessage, readTrainingMode } from "./training-review.js";
 
 export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
@@ -23,6 +26,10 @@ const LEASE_HEARTBEAT_MS = 60 * 1000;
  * шлёт сообщения в Telegram), и короткий тик раз в минуту важнее большого куска.
  */
 const PENDING_LIMIT = 20;
+
+/** Метка отправленного отказа обучения живёт дольше любого ретрая команды. */
+const TRAINING_REJECT_SENT_TTL_SECONDS = 7 * 24 * 3600;
+const trainingRejectSentKey = (commandPublicId: string) => `recruiting:training-reject-sent:${commandPublicId}`;
 
 /**
  * Статусы ручного owner-контура: со стадий TRAINING/STAGING/DOCS зеркала
@@ -284,6 +291,14 @@ export class RecruitingCommandDispatcher {
      * из вебаппа делает ровно то же, что и палец рекрутёра на кнопке в боте.
      */
     private async execute(api: Api, command: RecruitingCommand): Promise<void> {
+        if (command.kind === "REQUEST_PITCH_REVIEW") {
+            // Кандидатке ничего не шлётся, бот-запись кандидатки не нужна:
+            // всё, что нужно, лежит в payload (проверка идёт до поиска в боте).
+            const owner = ADMIN_IDS[0];
+            if (!owner) throw new Error("PITCH_REVIEW_NOT_SENT:no_owner");
+            await sendReviewCard(api, owner, parsePitchReviewPayload(command.payload), command.publicId);
+            return;
+        }
         const candidate = await candidateRepository.findByTelegramId(Number(command.candidate.telegramId));
         if (!candidate) {
             // Кандидат в зеркале есть, в боте нет — контрактный код, по нему
@@ -341,7 +356,12 @@ export class RecruitingCommandDispatcher {
             case "ACCEPT_AFTER_INTERVIEW": {
                 // Принятие — сразу: статус и письмо кандидатке (решение
                 // владельца 01.10.2026), см. hrService.acceptAfterInterview.
-                const ok = await hrService.acceptAfterInterview(api, candidate.id, "webapp-recruiter");
+                const ok = await hrService.acceptAfterInterview(
+                    api,
+                    candidate.id,
+                    "webapp-recruiter",
+                    readTrainingMode(command.payload),
+                );
                 if (!ok) throw new Error("CANDIDATE_NOT_FOUND_IN_BOT");
                 return;
             }
@@ -375,11 +395,56 @@ export class RecruitingCommandDispatcher {
                 // сообщения от бота. На тату-проверке — тату-отказ с его
                 // сообщением (APPEARANCE), до интервью — прежний кнопочный
                 // путь rejectCandidate с сообщением GENERAL.
+                // Уже REJECTED — повтор команды, чей ack потерялся: статус записан,
+                // всё нужное кандидатке уже ушло. Без этой проверки повтор попал бы
+                // в rejectCandidate(GENERAL) и прислал второй, общий отказ. Синк
+                // доступа идемпотентен и повторяется: процесс мог упасть после записи
+                // статуса, но до синка, — доступ иначе не отозвался бы.
+                if (candidate.status === CandidateStatus.REJECTED) {
+                    // Лениво, как reschedule-сервис: стек доступа нужен только этой ветке.
+                    const { accessService } = await import("./access-service.js");
+                    await accessService.syncUserAccess(candidate.user.telegramId, "HR Rejected: replay");
+                    logBusinessEvent({
+                        event: "bot.recruiting_commands.already_rejected",
+                        actorType: "system",
+                        actorRole: "system",
+                        result: "synced",
+                        reasonCode: "ALREADY_REJECTED",
+                        module: "recruiting-command-dispatcher",
+                        operation: "execute",
+                        candidateId: candidate.id,
+                        safeContext: { commandPublicId: command.publicId },
+                    });
+                    return;
+                }
                 if (MANUAL_CONTOUR_STATUSES.has(candidate.status)) {
+                    // Отказ после голосового или низкого балла курса: вежливый текст
+                    // только по явной метке в payload (спека 2026-10-13).
+                    // Метка «текст ушёл» по publicId команды: если запись статуса ниже
+                    // упадёт, ретрай той же команды не пришлёт отказ второй раз.
+                    const sentKey = trainingRejectSentKey(command.publicId);
+                    if (
+                        readCandidateMessage(command.payload) === "TRAINING_REJECTED" &&
+                        !(await redis.get(sentKey))
+                    ) {
+                        try {
+                            await api.sendMessage(Number(candidate.user.telegramId), CANDIDATE_TEXTS["training-rejected"]());
+                        } catch (error) {
+                            // Заблокировала бота — отказ всё равно фиксируем; прочее — ретрай команды.
+                            if (!isBotBlocked(error)) throw new Error("REJECT_NOT_SENT:send_failed");
+                        }
+                        await redis.set(sentKey, "1", "EX", TRAINING_REJECT_SENT_TTL_SECONDS);
+                    }
                     await candidateRepository.update(candidate.id, {
                         status: CandidateStatus.REJECTED,
                         hrDecision: "REJECTED",
                     });
+                    // Принятие открыло ей доступ — отказ его отзывает, как rejectCandidate.
+                    // syncUserAccess сам ловит и логирует свои ошибки и не бросает. Ветка
+                    // «уже REJECTED» выше страхует от падения процесса между записью статуса
+                    // и синком: ack не уйдёт, повтор досинкает без второго текста.
+                    const { accessService } = await import("./access-service.js");
+                    await accessService.syncUserAccess(candidate.user.telegramId, "HR Rejected");
                     return;
                 }
                 const reason = candidate.status === CandidateStatus.MANUAL_REVIEW ? "APPEARANCE" : "GENERAL";

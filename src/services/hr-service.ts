@@ -17,6 +17,8 @@ import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { hiringNeedsService } from "./hiring-needs-service.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
+import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
+import { buildMiniAppUrl } from "./training-review.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -327,13 +329,34 @@ export const hrService = {
      *
      * Повторний виклик для вже прийнятої без листа лише дошле лист.
      */
-    async acceptAfterInterview(api: any, candId: string, adminId?: string) {
+    async acceptAfterInterview(
+        api: any,
+        candId: string,
+        adminId?: string,
+        trainingMode: "MINIAPP" | "OWNER" = "OWNER",
+    ) {
         const cand = await this.getCandidateDetails(candId);
         if (!cand) return false;
 
         const telegramId = Number(cand.user.telegramId);
         const alreadyAccepted = cand.status === CandidateStatus.MENTOR_MANUAL && cand.hrDecision === "ACCEPTED";
         if (alreadyAccepted && cand.notificationSent) return true;
+
+        // Письмо точно уйдёт — собираем его по режиму до смены статуса: в MINIAPP
+        // без адреса команда падает, не переведя кандидатку в MENTOR_MANUAL.
+        const offer =
+            trainingMode === "MINIAPP"
+                ? {
+                      text: CANDIDATE_TEXTS["worker-offer-accepted-training"](),
+                      keyboard: new InlineKeyboard()
+                          .webApp("Почати навчання", buildMiniAppUrl(TRAINING_MINIAPP_BASE_URL, "/learn"))
+                          .row()
+                          .text("Написати нам", "contact_hr"),
+                  }
+                : {
+                      text: CANDIDATE_TEXTS["worker-offer-accepted"](),
+                      keyboard: new InlineKeyboard().text("Написати нам", "contact_hr"),
+                  };
 
         if (!alreadyAccepted) {
             if (cand.status === CandidateStatus.INTERVIEW_SCHEDULED) {
@@ -377,10 +400,7 @@ export const hrService = {
             const { cleanupUserSessionMessages, trackUserMessage } = await import("../utils/cleanup.js");
             // Старі повідомлення з кнопками запису прибираються, як і при відмові.
             await cleanupUserSessionMessages(api, telegramId);
-            const msg = await api.sendMessage(telegramId, CANDIDATE_TEXTS["worker-offer-accepted"](), {
-                parse_mode: "HTML",
-                reply_markup: new InlineKeyboard().text("Написати нам", "contact_hr"),
-            });
+            const msg = await api.sendMessage(telegramId, offer.text, { parse_mode: "HTML", reply_markup: offer.keyboard });
             if (msg) await trackUserMessage(telegramId, msg.message_id);
             await candidateRepository.update(candId, { notificationSent: true });
             logBusinessEvent({

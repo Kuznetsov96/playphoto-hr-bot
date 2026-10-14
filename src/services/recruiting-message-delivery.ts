@@ -1,7 +1,9 @@
-import type { Api } from "grammy";
+import { InlineKeyboard, type Api } from "grammy";
+import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { awsBusinessClient } from "./aws-business-client.js";
+import { INVALID_WEB_APP_BUTTON, awsBusinessClient } from "./aws-business-client.js";
 import { describeCommandFailure } from "./recruiting-failure-reason.js";
+import { buildMiniAppUrl } from "./training-review.js";
 
 /** Контрактный максимум одного тика — очередь короткая, тик минутный. */
 const PENDING_LIMIT = 50;
@@ -22,9 +24,11 @@ function describeDeliveryFailure(error: unknown): string {
 
 /**
  * Доставка исходящих сообщений рекрутёра (фаза 3b). Веб пишет PENDING в
- * outbox, этот проход шлёт каждое обычным текстом БЕЗ клавиатуры через общий
- * Api живущего бота и отвечает sent/failed. Живёт внутри тика диспетчера
- * команд — та же Redis-лиза, тот же флаг AWS_RECRUITING_COMMANDS_ENABLED.
+ * outbox, этот проход шлёт каждое через общий Api живущего бота и отвечает
+ * sent/failed. Обычное сообщение — простой текст без клавиатуры; если веб
+ * приложил webAppButton — тот же текст с одной кнопкой Mini App обучения.
+ * Живёт внутри тика диспетчера команд — та же Redis-лиза, тот же флаг
+ * AWS_RECRUITING_COMMANDS_ENABLED.
  *
  * Никогда не бросает: сбой одного сообщения — его собственный failed-ack,
  * сбой списка — нулевой проход с логом; очередь догонит следующий тик.
@@ -52,7 +56,20 @@ export async function deliverPendingRecruitingMessages(api: Api): Promise<{ sent
     let failed = 0;
     for (const message of pending.items) {
         try {
-            const delivered = await api.sendMessage(Number(message.telegramId), message.body);
+            if (message.webAppButton === INVALID_WEB_APP_BUTTON) {
+                throw new Error("MESSAGE_NOT_SENT:invalid_web_app_button");
+            }
+            const options = message.webAppButton
+                ? {
+                      reply_markup: new InlineKeyboard().webApp(
+                          message.webAppButton.text,
+                          buildMiniAppUrl(TRAINING_MINIAPP_BASE_URL, message.webAppButton.path),
+                      ),
+                  }
+                : undefined;
+            const delivered = options
+                ? await api.sendMessage(Number(message.telegramId), message.body, options)
+                : await api.sendMessage(Number(message.telegramId), message.body);
             sent++;
             await ack(message.publicId, () => awsBusinessClient.ackRecruitingMessageSent(
                 message.publicId,

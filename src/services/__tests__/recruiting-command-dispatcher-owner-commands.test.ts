@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 
 /**
  * Owner-команды полного цикла найма (фаза 3b). КРИТИЧЕСКАЯ семантика: владелец
@@ -42,6 +43,9 @@ vi.mock("../team-registration-service.js", () => ({
     teamRegistrationService: { registerNewHire },
 }));
 
+const syncUserAccess = vi.fn();
+vi.mock("../access-service.js", () => ({ accessService: { syncUserAccess } }));
+
 const findByTelegramId = vi.fn();
 const update = vi.fn();
 
@@ -51,15 +55,18 @@ vi.mock("../../repositories/candidate-repository.js", () => ({
 
 const redisSet = vi.fn();
 const redisEval = vi.fn();
+const redisGet = vi.fn();
 
 vi.mock("../../core/redis.js", () => ({
     redis: {
         set: (...args: unknown[]) => redisSet(...args),
+        get: (...args: unknown[]) => redisGet(...args),
         eval: (...args: unknown[]) => redisEval(...args),
     },
 }));
 
-vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
+const logBusinessEvent = vi.fn();
+vi.mock("../../core/log-events.js", () => ({ logBusinessEvent }));
 vi.mock("../../core/logger.js", () => ({
     default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -106,8 +113,10 @@ const updatedStatuses = () => update.mock.calls.map(([, data]) => (data as { sta
 
 beforeEach(() => {
     vi.clearAllMocks();
+    syncUserAccess.mockReset().mockResolvedValue(undefined);
     redisSet.mockResolvedValue("OK");
     redisEval.mockResolvedValue(1);
+    redisGet.mockResolvedValue(null);
     listPending.mockResolvedValue({ items: [] });
     ackApplied.mockResolvedValue({ publicId: "x", status: "APPLIED" });
     ackFailed.mockResolvedValue({ publicId: "x", status: "PENDING" });
@@ -242,6 +251,143 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(rejectCandidate).not.toHaveBeenCalled();
         expect(api.sendMessage).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой TRAINING_REJECTED — вежливый текст и REJECTED", async () => {
+        const api = makeApi();
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(api.sendMessage).toHaveBeenCalledWith(1164289764, CANDIDATE_TEXTS["training-rejected"]());
+        expect(update).toHaveBeenCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой: текст ушёл, запись статуса упала — ретрай не шлёт текст второй раз", async () => {
+        const api = makeApi();
+        const marks = new Map<string, string>();
+        redisSet.mockImplementation(async (key: string, value: string) => {
+            marks.set(key, value);
+            return "OK";
+        });
+        redisGet.mockImplementation(async (key: string) => marks.get(key) ?? null);
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        update.mockRejectedValueOnce(new Error("write conflict"));
+        const reject = command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } });
+        listPending.mockResolvedValue({ items: [reject] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(ackFailed).toHaveBeenCalledTimes(1);
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+        listPending.mockResolvedValue({ items: [{ ...reject, attempts: 1 }] });
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(update).toHaveBeenLastCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(ackApplied).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ["с меткой TRAINING_REJECTED", { candidateMessage: "TRAINING_REJECTED" }],
+        ["без метки", null],
+    ])("REJECT %s по уже REJECTED (ack потерялся) — идемпотентный успех без сообщений", async (_label, payload) => {
+        const api = makeApi();
+        findByTelegramId.mockResolvedValue(localCandidate("REJECTED"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload, attempts: 1 })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(rejectCandidate).not.toHaveBeenCalled();
+        expect(update).not.toHaveBeenCalled();
+        // Прошлая попытка могла записать REJECTED и упасть до синка доступа — повтор его досинкает.
+        expect(syncUserAccess).toHaveBeenCalledTimes(1);
+        expect(syncUserAccess).toHaveBeenCalledWith(1164289764n, expect.stringContaining("HR Rejected"));
+        expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({
+            event: "bot.recruiting_commands.already_rejected",
+            result: "synced",
+            safeContext: expect.objectContaining({ commandPublicId: "0f8fad5b-d9cb-469f-a165-70867728950e" }),
+        }));
+        expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
+        expect(ackFailed).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["с меткой TRAINING_REJECTED", { candidateMessage: "TRAINING_REJECTED" }],
+        ["без метки", null],
+    ])("REJECT %s на ручной стадии синкает доступ один раз — после записи REJECTED", async (_label, payload) => {
+        const api = makeApi();
+        const order: string[] = [];
+        update.mockImplementation(async () => { order.push("update"); return {}; });
+        syncUserAccess.mockImplementation(async () => { order.push("sync"); });
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(syncUserAccess).toHaveBeenCalledTimes(1);
+        expect(syncUserAccess).toHaveBeenCalledWith(1164289764n, "HR Rejected");
+        expect(order).toEqual(["update", "sync"]);
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    // syncUserAccess в проде не бросает; брошенная ошибка здесь имитирует прерванный синк
+    // (падение процесса между записью REJECTED и синком): ack не ушёл, команда повторяется.
+    it("REJECT на ручной стадии: прерванный синк — команда без ack, повтор по уже REJECTED досинкивает без второго отказа", async () => {
+        const api = makeApi();
+        const marks = new Map<string, string>();
+        redisSet.mockImplementation(async (key: string, value: string) => { marks.set(key, value); return "OK"; });
+        redisGet.mockImplementation(async (key: string) => marks.get(key) ?? null);
+        syncUserAccess.mockRejectedValueOnce(new Error("sync crashed"));
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        const reject = command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } });
+        listPending.mockResolvedValue({ items: [reject] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(ackFailed).toHaveBeenCalledTimes(1);
+        expect(ackApplied).not.toHaveBeenCalled();
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+        findByTelegramId.mockResolvedValue(localCandidate("REJECTED"));
+        listPending.mockResolvedValue({ items: [{ ...reject, attempts: 1 }] });
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(syncUserAccess).toHaveBeenCalledTimes(2);
+        expect(syncUserAccess).toHaveBeenLastCalledWith(1164289764n, expect.stringContaining("HR Rejected"));
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(rejectCandidate).not.toHaveBeenCalled();
+        expect(ackApplied).toHaveBeenCalledTimes(1);
+    });
+
+    it("REJECT с меткой: бот заблокирован (403) — всё равно REJECTED", async () => {
+        const api = makeApi();
+        api.sendMessage.mockRejectedValue(Object.assign(new Error("Forbidden"), { error_code: 403 }));
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(update).toHaveBeenCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("REJECT с меткой: иная ошибка отправки — статус не меняется, команда на ретрай", async () => {
+        const api = makeApi();
+        api.sendMessage.mockRejectedValue(new Error("ETIMEDOUT"));
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(update).not.toHaveBeenCalled();
+        expect(ackApplied).not.toHaveBeenCalled();
+        expect(ackFailed).toHaveBeenCalledWith(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            expect.stringContaining("REJECT_NOT_SENT:send_failed"),
+        );
     });
 
     it.each([["STAGING_ACTIVE"], ["READY_FOR_HIRE"], ["AWAITING_FIRST_SHIFT"], ["NDA"], ["TRAINING_SCHEDULED"], ["DISCOVERY_COMPLETED"]])(

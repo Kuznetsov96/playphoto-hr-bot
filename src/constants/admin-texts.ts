@@ -390,5 +390,21 @@ If the replacement is already in the main schedule, update and sync Google Sheet
   "admin-replacement-cancel-confirmed-still-scheduled": `This photographer is still assigned in the main schedule. Update and sync Google Sheets first, then cancel the confirmed replacement.`,
   "admin-staff-none-loc": `📭 Staff not assigned.`,
   "support-btn-force-close": `🔒 Force Close`,
+  "training-review-title": (name: string) => `Pitch review · ${name}`,
+  "training-reject-reason": (code: string) =>
+    ({ NOT_A_FIT: "Not a fit", CANDIDATE_DECLINED: "She declined", OTHER: "Other" } as Record<string, string>)[code] ?? code,
+  "training-already-decided": `Already decided.`,
+  "training-card-expired": `This card expired. Decide in the webapp card.`,
+  "training-not-allowed": `Only the owner can decide.`,
+  "training-decision-passed": (name: string) => `Decision: passed. Arrange the internship for ${name}.`,
+  "training-decision-retry": `Decision: try again. Hints sent.`,
+  "training-decision-rejected": (reason: string) => `Decision: rejected (${reason}).`,
+  "training-feedback-prompt": (name: string) =>
+    `Reply to this message with a voice or text and I'll pass it to ${name}. Or just ignore it.`,
+  "training-back": `‹ Back`,
+  "training-feedback-blocked": `Could not deliver: the candidate can't receive messages from the bot.`,
+  "training-feedback-sent": `Sent to the candidate.`,
+  "training-decision-failed": `Could not save the decision. Try again.`,
+  "training-retry-pick": `Mark what she missed, then send.`,
   "hr-error-overlap": `✨ This time slot is already occupied. Please choose another window. 📅`
 };

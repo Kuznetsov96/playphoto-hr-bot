@@ -36,6 +36,118 @@ describe("AwsBusinessClient recruiter commands", () => {
         },
     };
 
+    describe("training payload and review decisions", () => {
+        const reviewId = "5b0c3f5e-9a51-4c2b-9b7a-0c1f3e8d2a11";
+
+        it("keeps payload null when the webapp does not send it", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ items: [command] }), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingCommands(20);
+            expect(result.items[0]?.payload).toBeNull();
+        });
+
+        it("passes payload through", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({ items: [{ ...command, payload: { trainingMode: "MINIAPP" } }] }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingCommands(20);
+            expect(result.items[0]?.payload).toEqual({ trainingMode: "MINIAPP" });
+        });
+
+        it("defaults webAppButton to null and passes it through", async () => {
+            const message = { publicId: reviewId, body: "hi", telegramId: "42" };
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({ items: [message, { ...message, webAppButton: { text: "Open", path: "/learn" } }] }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingMessages(20);
+            expect(result.items[0]?.webAppButton).toBeNull();
+            expect(result.items[1]?.webAppButton).toEqual({ text: "Open", path: "/learn" });
+        });
+
+        it("a malformed payload becomes null for that command only, the batch still parses", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({
+                    items: [
+                        { ...command, payload: "not-an-object" },
+                        { ...command, publicId: reviewId, payload: { trainingMode: "MINIAPP" } },
+                    ],
+                }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingCommands(20);
+            expect(result.items).toHaveLength(2);
+            expect(result.items[0]?.payload).toBeNull();
+            expect(result.items[1]?.payload).toEqual({ trainingMode: "MINIAPP" });
+        });
+
+        it("an invalid webAppButton is marked on that message only, the batch still parses", async () => {
+            const message = { publicId: reviewId, body: "hi", telegramId: "42" };
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({
+                    items: [
+                        { ...message, webAppButton: { text: "", path: "learn" } },
+                        { ...message, webAppButton: { text: "Open", path: "/learn" } },
+                    ],
+                }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient, INVALID_WEB_APP_BUTTON } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().listPendingRecruitingMessages(20);
+            expect(result.items).toHaveLength(2);
+            expect(result.items[0]?.webAppButton).toBe(INVALID_WEB_APP_BUTTON);
+            expect(result.items[1]?.webAppButton).toEqual({ text: "Open", path: "/learn" });
+        });
+
+        it("posts a training review decision", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(
+                JSON.stringify({ decision: "PASSED", candidateTelegramId: "42", candidateName: "Марія" }),
+                { status: 200 },
+            ));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            const result = await new AwsBusinessClient().postTrainingReviewDecision(reviewId, {
+                decision: "PASSED",
+                failedItems: [],
+                reasonCode: null,
+                reviewerTelegramId: "1001",
+            });
+            expect(result.candidateTelegramId).toBe("42");
+            const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+            expect(url).toContain(`/recruiting/training/reviews/${reviewId}/decision`);
+            expect(init?.method).toBe("POST");
+            expect(JSON.parse(String(init?.body))).toEqual({
+                decision: "PASSED",
+                failedItems: [],
+                reasonCode: null,
+                reviewerTelegramId: "1001",
+            });
+        });
+
+        it("posts training review feedback without expecting a body", async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            await new AwsBusinessClient().postTrainingReviewFeedback(reviewId, {
+                reviewerTelegramId: "1001",
+                telegramMessageId: "7",
+                body: "ok",
+                attachment: null,
+            });
+            const [url, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+            expect(url).toContain(`/recruiting/training/reviews/${reviewId}/feedback`);
+            expect(init?.method).toBe("POST");
+            expect(JSON.parse(String(init?.body))).toEqual({
+                reviewerTelegramId: "1001",
+                telegramMessageId: "7",
+                body: "ok",
+                attachment: null,
+            });
+        });
+    });
+
     describe("listPendingRecruitingCommands", () => {
         it("GETs /recruiting/commands/pending with the limit and parses the items", async () => {
             vi.mocked(fetch).mockResolvedValue(new Response(
@@ -46,7 +158,7 @@ describe("AwsBusinessClient recruiter commands", () => {
 
             const result = await new AwsBusinessClient().listPendingRecruitingCommands(20);
 
-            expect(result).toEqual({ items: [command] });
+            expect(result).toEqual({ items: [{ ...command, payload: null }] });
             expect(fetch).toHaveBeenCalledWith(
                 "https://api.example.test/api/v1/internal/bot/recruiting/commands/pending?limit=20",
                 expect.objectContaining({
@@ -67,7 +179,7 @@ describe("AwsBusinessClient recruiter commands", () => {
             const { AwsBusinessClient } = await import("../aws-business-client.js");
 
             await expect(new AwsBusinessClient().listPendingRecruitingCommands(20))
-                .resolves.toEqual({ items: [{ ...legacy, locationCode: null }] });
+                .resolves.toEqual({ items: [{ ...legacy, locationCode: null, payload: null }] });
         });
 
         it("carries locationCode of a CHANGE_LOCATION command through", async () => {
@@ -79,7 +191,7 @@ describe("AwsBusinessClient recruiter commands", () => {
             const { AwsBusinessClient } = await import("../aws-business-client.js");
 
             await expect(new AwsBusinessClient().listPendingRecruitingCommands(20))
-                .resolves.toEqual({ items: [changeLocation] });
+                .resolves.toEqual({ items: [{ ...changeLocation, payload: null }] });
         });
 
         it("tolerates an unknown kind — the schema must carry it through as a plain string", async () => {

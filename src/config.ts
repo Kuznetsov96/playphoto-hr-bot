@@ -4,6 +4,9 @@ import { z } from "zod";
 dotenv.config();
 
 // 1. Define Zod Schema for Environment Variables
+/** Пустая строка из DOCKER_ENV (`KEY=`) означает «не задано». */
+export const emptyToUndefined = (value: unknown): unknown => (value === "" ? undefined : value);
+
 const envSchema = z.object({
     // Core
     BOT_TOKEN: z.string().min(1, "BOT_TOKEN is missing"),
@@ -111,6 +114,13 @@ const envSchema = z.object({
     TEAM_CHANNEL_ID: z.string().min(1, "TEAM_CHANNEL_ID is missing"),
     LOGISTICS_TOPIC_ID: z.string().optional(),
 
+    // Адрес вебаппа, на котором живёт Mini App обучения (`/learn`). Не флаг формы выката —
+    // кладётся в секрет DOCKER_ENV. Пусто → команды с trainingMode MINIAPP падают громко.
+    TRAINING_MINIAPP_BASE_URL: z.preprocess(
+        emptyToUndefined,
+        z.string().url().refine((v) => v.startsWith("https://"), "TRAINING_MINIAPP_BASE_URL must be https").optional(),
+    ),
+
     // IBANs (Comma-separated)
     IBAN_KUZNETSOV: z.string().optional(),
     IBAN_KARPUK: z.string().optional(),
@@ -177,6 +187,9 @@ export const KNOWLEDGE_BASE_LINK = env.KNOWLEDGE_BASE_LINK || "https://t.me/+hC9
 export const TEAM_CHANNEL_LINK = KNOWLEDGE_BASE_LINK; // Alias for knowledge base channel
 export const PHOTOGRAPHER_GUIDE_LINK = env.PHOTOGRAPHER_GUIDE_LINK || "";
 if (!PHOTOGRAPHER_GUIDE_LINK) console.warn("⚠️  PHOTOGRAPHER_GUIDE_LINK is not set — mentor messages will be sent without a clickable guide link");
+// База Mini App обучения кандидаток (адрес вебаппа, путь добавляет buildMiniAppUrl).
+// Не флаг: undefined → команда с trainingMode MINIAPP падает OFFER_NOT_SENT:miniapp_url_missing.
+export const TRAINING_MINIAPP_BASE_URL = env.TRAINING_MINIAPP_BASE_URL;
 export const BACKUP_PASSPHRASE = env.BACKUP_PASSPHRASE;
 export const ALLOW_DEV_COMMANDS = env.ALLOW_DEV_COMMANDS === "true";
 export const OPENAI_API_KEY = env.OPENAI_API_KEY || "";

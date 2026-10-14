@@ -68,9 +68,20 @@ const redisEval = vi.fn();
 vi.mock("../../core/redis.js", () => ({
     redis: {
         set: (...args: unknown[]) => redisSet(...args),
+        get: async () => null,
         eval: (...args: unknown[]) => redisEval(...args),
     },
 }));
+
+const OWNER_ID = 4242;
+const adminIds = vi.hoisted(() => ({ value: [4242] as number[] }));
+vi.mock("../../config.js", async () => ({
+    ...(await vi.importActual<Record<string, unknown>>("../../config.js")),
+    get ADMIN_IDS() {
+        return adminIds.value;
+    },
+}));
+vi.mock("../../config/callback-secret.js", () => ({ CALLBACK_SECRET: "x".repeat(32) }));
 
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
 vi.mock("../../core/logger.js", () => ({
@@ -156,9 +167,31 @@ describe("RecruitingCommandDispatcher", () => {
 
         await new RecruitingCommandDispatcher().runOnce(api as never);
 
-        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String));
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", expect.any(String), "OWNER");
         expect(makeDecision).not.toHaveBeenCalled();
         expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
+    });
+
+    it("passes MINIAPP training mode to accept", async () => {
+        const api = makeApi();
+        acceptAfterInterview.mockResolvedValue(true);
+        listPending.mockResolvedValue({
+            items: [command({ kind: "ACCEPT_AFTER_INTERVIEW", payload: { trainingMode: "MINIAPP" } })],
+        });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", "webapp-recruiter", "MINIAPP");
+    });
+
+    it("keeps the owner contour when payload is absent", async () => {
+        const api = makeApi();
+        acceptAfterInterview.mockResolvedValue(true);
+        listPending.mockResolvedValue({ items: [command({ kind: "ACCEPT_AFTER_INTERVIEW", payload: null })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(acceptAfterInterview).toHaveBeenCalledWith(api, "cand-1", "webapp-recruiter", "OWNER");
     });
 
     it("REJECT_AFTER_INTERVIEW maps to rejectAfterInterview — rejection is sent at once", async () => {
@@ -533,5 +566,71 @@ describe("RecruitingCommandDispatcher", () => {
 
         expect(ackApplied).toHaveBeenCalledTimes(2);
         expect(ackApplied).toHaveBeenLastCalledWith("22222222-2222-4222-8222-222222222222");
+    });
+});
+
+describe("REQUEST_PITCH_REVIEW", () => {
+    const pitch = {
+        reviewPublicId: "5b0c3f5e-9a51-4c2b-9b7a-0c1f3e8d2a11",
+        fileId: "AwAC",
+        attachmentKind: "VOICE",
+        candidateName: "Марія Коваль",
+        locationName: "Drive City",
+        scorePct: 86,
+        attemptNo: 2,
+        checklist: ["Greeting", "Photo"],
+        reminder: false,
+    };
+
+    it("sends the pitch for review to the owner and applies the command", async () => {
+        listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
+        const api = { ...makeApi(), sendVoice: vi.fn().mockResolvedValue({ message_id: 8 }) };
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(api.sendVoice).toHaveBeenCalledWith(OWNER_ID, "AwAC");
+        expect(api.sendMessage).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining("Марія Коваль"), expect.anything());
+        expect(redisSet).toHaveBeenCalledWith(
+            `training:review:card:${pitch.reviewPublicId}`, expect.any(String), "EX", 14 * 24 * 3600);
+        expect(ackApplied).toHaveBeenCalled();
+    });
+
+    it("no owner configured (ADMIN_IDS empty): failed-ack PITCH_REVIEW_NOT_SENT:no_owner, nothing sent", async () => {
+        adminIds.value = [];
+        try {
+            listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
+            const api = { ...makeApi(), sendVoice: vi.fn() };
+            await new RecruitingCommandDispatcher().runOnce(api as never);
+            expect(api.sendVoice).not.toHaveBeenCalled();
+            expect(api.sendMessage).not.toHaveBeenCalled();
+            expect(ackFailed).toHaveBeenCalledWith(
+                "0f8fad5b-d9cb-469f-a165-70867728950e",
+                expect.stringContaining("PITCH_REVIEW_NOT_SENT:no_owner"),
+            );
+            expect(ackApplied).not.toHaveBeenCalled();
+        } finally {
+            adminIds.value = [OWNER_ID];
+        }
+    });
+
+    it.each([
+        ["null", null],
+        ["malformed", { reviewPublicId: "not-a-uuid", fileId: "" }],
+    ])("%s payload: failed-ack, nothing sent to the owner", async (_label, payload) => {
+        listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload })] });
+        const api = { ...makeApi(), sendVoice: vi.fn(), sendVideoNote: vi.fn() };
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(api.sendVoice).not.toHaveBeenCalled();
+        expect(api.sendVideoNote).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(ackFailed).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e", expect.any(String));
+        expect(ackApplied).not.toHaveBeenCalled();
+    });
+
+    it("does not need the candidate in the bot DB", async () => {
+        findByTelegramId.mockResolvedValue(null);
+        listPending.mockResolvedValue({ items: [command({ kind: "REQUEST_PITCH_REVIEW", payload: pitch })] });
+        const api = { ...makeApi(), sendVoice: vi.fn().mockResolvedValue({ message_id: 8 }) };
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+        expect(ackApplied).toHaveBeenCalled();
+        expect(ackFailed).not.toHaveBeenCalled();
     });
 });

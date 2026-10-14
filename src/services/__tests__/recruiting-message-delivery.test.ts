@@ -10,11 +10,20 @@ const listPendingMessages = vi.fn();
 const ackSent = vi.fn();
 const ackMessageFailed = vi.fn();
 
-vi.mock("../aws-business-client.js", () => ({
+vi.mock("../aws-business-client.js", async (orig) => ({
+    ...(await orig<Record<string, unknown>>()),
     awsBusinessClient: {
         listPendingRecruitingMessages: listPendingMessages,
         ackRecruitingMessageSent: ackSent,
         ackRecruitingMessageFailed: ackMessageFailed,
+    },
+}));
+
+const miniApp = vi.hoisted(() => ({ url: "https://app.example.test" as string | undefined }));
+vi.mock("../../config.js", async (orig) => ({
+    ...(await orig<Record<string, unknown>>()),
+    get TRAINING_MINIAPP_BASE_URL() {
+        return miniApp.url;
     },
 }));
 
@@ -24,6 +33,7 @@ vi.mock("../../core/logger.js", () => ({
 }));
 
 const { deliverPendingRecruitingMessages } = await import("../recruiting-message-delivery.js");
+const { INVALID_WEB_APP_BUTTON } = await import("../aws-business-client.js");
 
 const makeApi = () => ({ sendMessage: vi.fn().mockResolvedValue({ message_id: 42 }) });
 
@@ -36,6 +46,7 @@ const message = (overrides: Partial<Record<string, unknown>> = {}) => ({
 
 beforeEach(() => {
     vi.clearAllMocks();
+    miniApp.url = "https://app.example.test";
     listPendingMessages.mockResolvedValue({ items: [] });
     ackSent.mockResolvedValue({ publicId: "x", status: "SENT" });
     ackMessageFailed.mockResolvedValue({ publicId: "x", status: "FAILED" });
@@ -120,5 +131,58 @@ describe("deliverPendingRecruitingMessages", () => {
         await deliverPendingRecruitingMessages(api as never);
 
         expect(ackSent).toHaveBeenCalledTimes(2);
+    });
+
+    it("без кнопки шлёт обычный текст", async () => {
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({ items: [message({ webAppButton: null })] });
+        await deliverPendingRecruitingMessages(api as never);
+        expect(api.sendMessage).toHaveBeenCalledWith(1164289764, "Привіт! Це повідомлення від рекрутера.");
+    });
+
+    it("прикрепляет web_app кнопку по запросу", async () => {
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({
+            items: [message({ body: "Навчання чекає", webAppButton: { text: "Продовжити навчання", path: "/learn" } })],
+        });
+        await deliverPendingRecruitingMessages(api as never);
+        const [, , options] = api.sendMessage.mock.calls[0] as unknown as [number, string, { reply_markup: { inline_keyboard: unknown[][] } }];
+        expect(options.reply_markup.inline_keyboard[0]?.[0]).toEqual({
+            text: "Продовжити навчання",
+            web_app: { url: "https://app.example.test/learn" },
+        });
+    });
+
+    it("битая кнопка — failed только этого сообщения, соседнее уходит", async () => {
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({
+            items: [
+                message({ publicId: "11111111-1111-4111-8111-111111111111", webAppButton: INVALID_WEB_APP_BUTTON }),
+                message({ publicId: "22222222-2222-4222-8222-222222222222", webAppButton: null }),
+            ],
+        });
+        const result = await deliverPendingRecruitingMessages(api as never);
+        expect(ackMessageFailed).toHaveBeenCalledWith(
+            "11111111-1111-4111-8111-111111111111",
+            expect.stringContaining("invalid_web_app_button"),
+        );
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(ackSent).toHaveBeenCalledWith("22222222-2222-4222-8222-222222222222", "42");
+        expect(result).toEqual({ sent: 1, failed: 1 });
+    });
+
+    it("без базового url кнопка — громкий failed, сообщение не уходит", async () => {
+        miniApp.url = undefined;
+        const api = makeApi();
+        listPendingMessages.mockResolvedValue({
+            items: [message({ webAppButton: { text: "Продовжити навчання", path: "/learn" } })],
+        });
+        const result = await deliverPendingRecruitingMessages(api as never);
+        expect(ackMessageFailed).toHaveBeenCalledWith(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            expect.stringContaining("miniapp_url_missing"),
+        );
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(result).toEqual({ sent: 0, failed: 1 });
     });
 });
