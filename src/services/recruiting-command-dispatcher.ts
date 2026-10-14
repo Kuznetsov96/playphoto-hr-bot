@@ -398,8 +398,8 @@ export class RecruitingCommandDispatcher {
                 // Уже REJECTED — повтор команды, чей ack потерялся: статус записан,
                 // всё нужное кандидатке уже ушло. Без этой проверки повтор попал бы
                 // в rejectCandidate(GENERAL) и прислал второй, общий отказ. Синк
-                // доступа идемпотентен и повторяется: прошлая попытка могла упасть
-                // после записи статуса, но до него, — доступ иначе не отозвался бы.
+                // доступа идемпотентен и повторяется: процесс мог упасть после записи
+                // статуса, но до синка, — доступ иначе не отозвался бы.
                 if (candidate.status === CandidateStatus.REJECTED) {
                     // Лениво, как reschedule-сервис: стек доступа нужен только этой ветке.
                     const { accessService } = await import("./access-service.js");
@@ -408,7 +408,7 @@ export class RecruitingCommandDispatcher {
                         event: "bot.recruiting_commands.already_rejected",
                         actorType: "system",
                         actorRole: "system",
-                        result: "skipped",
+                        result: "synced",
                         reasonCode: "ALREADY_REJECTED",
                         module: "recruiting-command-dispatcher",
                         operation: "execute",
@@ -440,8 +440,9 @@ export class RecruitingCommandDispatcher {
                         hrDecision: "REJECTED",
                     });
                     // Принятие открыло ей доступ — отказ его отзывает, как rejectCandidate.
-                    // Если синк бросит, команда уйдёт на ретрай, и ветка «уже REJECTED»
-                    // выше досинкает без второго текста.
+                    // syncUserAccess сам ловит и логирует свои ошибки и не бросает. Ветка
+                    // «уже REJECTED» выше страхует от падения процесса между записью статуса
+                    // и синком: ack не уйдёт, повтор досинкает без второго текста.
                     const { accessService } = await import("./access-service.js");
                     await accessService.syncUserAccess(candidate.user.telegramId, "HR Rejected");
                     return;

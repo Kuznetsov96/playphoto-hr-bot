@@ -308,6 +308,7 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(syncUserAccess).toHaveBeenCalledWith(1164289764n, expect.stringContaining("HR Rejected"));
         expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({
             event: "bot.recruiting_commands.already_rejected",
+            result: "synced",
             safeContext: expect.objectContaining({ commandPublicId: "0f8fad5b-d9cb-469f-a165-70867728950e" }),
         }));
         expect(ackApplied).toHaveBeenCalledWith("0f8fad5b-d9cb-469f-a165-70867728950e");
@@ -333,7 +334,9 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(ackApplied).toHaveBeenCalled();
     });
 
-    it("REJECT на ручной стадии: синк упал — команда failed, повтор по уже REJECTED досинкивает без второго отказа", async () => {
+    // syncUserAccess в проде не бросает; брошенная ошибка здесь имитирует прерванный синк
+    // (падение процесса между записью REJECTED и синком): ack не ушёл, команда повторяется.
+    it("REJECT на ручной стадии: прерванный синк — команда без ack, повтор по уже REJECTED досинкивает без второго отказа", async () => {
         const api = makeApi();
         const marks = new Map<string, string>();
         redisSet.mockImplementation(async (key: string, value: string) => { marks.set(key, value); return "OK"; });
