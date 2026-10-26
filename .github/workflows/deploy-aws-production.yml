@@ -169,7 +169,10 @@ concurrency:
 jobs:
   quality:
     name: Verify bot release candidate
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, не ubuntu-latest: с переездом latest на 26.04 (26.10.2026)
+    # симуляция выката (check-production-deploy) молча падала на раннере, хотя
+    # проходит локально и на чистом образе 26.04. Выкат 14.10 прошёл на 24.04.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:15-alpine
@@ -294,7 +297,7 @@ jobs:
   deploy:
     name: Transfer secrets and deploy live bot
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment: production
     permissions:
