@@ -28,6 +28,11 @@ function getPendingCount(broadcast: any): number {
         acc + (tracked.pendingReplies?.filter((reply: any) => reply.status === "pending").length || 0), 0) || 0;
 }
 
+/** Снимать можно только ещё не снятую рассылку. */
+export function canWithdraw(stats: Pick<BroadcastStats, "withdrawnAt">): boolean {
+    return !stats.withdrawnAt;
+}
+
 function isBroadcastActive(broadcast: any): boolean {
     if (broadcast.withdrawnAt) return false;
     const hasActivePing = broadcast.trackedMessages?.some((tracked: any) => Boolean(tracked.nextPingAt)) || false;
@@ -760,16 +765,19 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
                 "⏹️ <b>Auto-pings are stopped for this broadcast.</b>",
             );
             await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
-        }).row()
-        .text("↩️ Withdraw", async (ctx) => {
+        }).row();
+    // Уже снятую рассылку снимать нечем: кнопка только вводила бы в заблуждение.
+    if (canWithdraw(await broadcastService.getStats(bId))) {
+        range.text("↩️ Withdraw", async (ctx) => {
             const confirmKb = new InlineKeyboard()
                 .text(ADMIN_TEXTS["broadcast-withdraw-confirm-btn"], "br_withdraw_exec").danger().row()
                 .text(ADMIN_TEXTS["broadcast-withdraw-cancel-btn"], "br_withdraw_cancel").danger();
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["broadcast-withdraw-confirm"], confirmKb, { pushToStack: true });
-        }).row()
-        .text("⬅️ Back", async (ctx) => {
-            await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
-        });
+        }).row();
+    }
+    range.text("⬅️ Back", async (ctx) => {
+        await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
+    });
 });
 
 adminBroadcastHandlers.callbackQuery("b_test", async (ctx: MyContext) => {

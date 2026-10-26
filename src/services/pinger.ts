@@ -179,7 +179,8 @@ async function pruneNonMembersFromPending(msg: any, bot: Bot<MyContext>) {
     }
 
     if (stalePendingIds.length > 0) {
-        await pendingReplyRepository.deleteMany({ id: { in: stalePendingIds } });
+        // История не теряется: строка остаётся со статусом 'dropped' и больше нигде не считается.
+        await pendingReplyRepository.updateMany({ id: { in: stalePendingIds } }, { status: "dropped" });
     }
 
     return stillPending;

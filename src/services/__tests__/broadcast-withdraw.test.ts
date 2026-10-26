@@ -26,7 +26,7 @@ vi.mock("../../repositories/broadcast-repository.js", () => ({
     },
 }));
 vi.mock("../../repositories/broadcast-delivery-repository.js", () => ({
-    broadcastDeliveryRepository: { findSentMessages: deliveryFindSent, getStats: vi.fn() },
+    broadcastDeliveryRepository: { findSentMessages: deliveryFindSent, getStats: vi.fn().mockResolvedValue({}) },
 }));
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -38,7 +38,9 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany },
 }));
-vi.mock("../../repositories/user-repository.js", () => ({ userRepository: {} }));
+vi.mock("../../repositories/user-repository.js", () => ({
+    userRepository: { findWithStaffProfileByTelegramId: vi.fn().mockResolvedValue({ firstName: "A" }) },
+}));
 vi.mock("../../core/queue.js", () => ({ broadcastQueue: { add: queueAdd } }));
 vi.mock("../../core/redis.js", () => ({ redis: { get: vi.fn() } }));
 vi.mock("../../core/logger.js", () => ({
@@ -159,5 +161,35 @@ describe("reminder stops and creation metadata", () => {
             buttonType: "default",
             attachmentKinds: [],
         }));
+    });
+});
+
+describe("'dropped' replies behave like deleted rows", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        broadcastFindById.mockResolvedValue({ id: 5, withdrawnAt: null });
+        trackedFindMany.mockResolvedValue([
+            {
+                id: 1, chatId: 1n, messageId: 1,
+                pendingReplies: [
+                    { userId: 1n, status: "pending" },
+                    { userId: 2n, status: "confirmed" },
+                    { userId: 3n, status: "declined" },
+                    { userId: 4n, status: "dropped" },
+                ],
+            },
+        ]);
+    });
+
+    it("getStats counts only pending/confirmed/declined", async () => {
+        const stats = await broadcastService.getStats(5);
+        expect([stats.pending, stats.confirmed, stats.declined]).toEqual([1, 1, 1]);
+    });
+
+    it("getFullStatusReport lists no dropped user anywhere", async () => {
+        const report = await broadcastService.getFullStatusReport(5);
+        expect(report.pending).toHaveLength(1);
+        expect(report.confirmed).toHaveLength(1);
+        expect(report.declined).toHaveLength(1);
     });
 });

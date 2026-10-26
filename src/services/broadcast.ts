@@ -617,9 +617,11 @@ export const broadcastService = {
                     }
                 }
 
+                // 'dropped' = снято системой: для рассылки это как будто строки нет.
                 const exists = await pendingReplyRepository.findFirst({
                     trackedMessageId,
-                    userId: s.user.telegramId
+                    userId: s.user.telegramId,
+                    status: { not: "dropped" }
                 });
                 if (!exists) {
                     await pendingReplyRepository.create({
@@ -648,7 +650,8 @@ export const broadcastService = {
 
         const pending = await pendingReplyRepository.findFirst({
             trackedMessageId: tracked.id,
-            userId: BigInt(userId)
+            userId: BigInt(userId),
+            status: { not: "dropped" }
         });
 
         if (!pending) {
@@ -688,7 +691,8 @@ export const broadcastService = {
 
         const pending = await pendingReplyRepository.findFirst({
             trackedMessageId: tracked.id,
-            userId: BigInt(userId)
+            userId: BigInt(userId),
+            status: { not: "dropped" }
         });
 
         if (!pending) {

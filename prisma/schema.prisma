@@ -118,6 +118,7 @@ model PendingReply {
   id               Int            @id @default(autoincrement())
   trackedMessageId Int
   userId           BigInt
+  /// pending | confirmed | declined | dropped (снято системой: ушёл из чата/неактивна; ни в чём не считается)
   status           String         @default("pending")
   respondedAt      DateTime?
   /// Текст причины после «Не згодна».

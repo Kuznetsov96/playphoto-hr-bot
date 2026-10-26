@@ -34,10 +34,6 @@ export class PendingReplyRepository {
         });
     }
 
-    async deleteMany(where: Prisma.PendingReplyWhereInput) {
-        return prisma.pendingReply.deleteMany({ where });
-    }
-
     async findMany(where: Prisma.PendingReplyWhereInput, include?: Prisma.PendingReplyInclude): Promise<PendingReplyWithRelations[]> {
         return prisma.pendingReply.findMany({
             where,

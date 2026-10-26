@@ -14,10 +14,6 @@ export class TrackedMessageRepository {
         return prisma.trackedMessage.updateMany({ where, data });
     }
 
-    async deleteMany(where: Prisma.TrackedMessageWhereInput) {
-        return prisma.trackedMessage.deleteMany({ where });
-    }
-
     async findManyWithReplies(broadcastId: number) {
         return prisma.trackedMessage.findMany({
             where: { broadcastId },

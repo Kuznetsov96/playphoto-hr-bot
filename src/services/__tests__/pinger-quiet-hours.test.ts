@@ -136,6 +136,32 @@ describe("pinger quiet hours", () => {
         expect(pingLogCreate).toHaveBeenCalledWith(7, 12345n);
     });
 
+    it("marks stale group replies 'dropped' (no delete) and stops tracking when none remain", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        const msg = { ...trackedMessage(60 * 60 * 1000), chatId: -1001 };
+        findToPing.mockResolvedValue([msg]);
+        const bot = fakeBot();
+        bot.api.getChatMember.mockResolvedValue({ status: "left" });
+
+        await runPingerForTest(bot);
+
+        expect(pendingDeleteMany).not.toHaveBeenCalled();
+        expect(pendingUpdateMany).toHaveBeenCalledWith({ id: { in: [11] } }, { status: "dropped" });
+        expect(stopTracking).toHaveBeenCalledWith(1);
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("stops tracking when only answered/dropped replies remain (none pending)", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        findToPing.mockResolvedValue([{ ...trackedMessage(60 * 60 * 1000), pendingReplies: [] }]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(stopTracking).toHaveBeenCalledWith(1);
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+    });
+
     it("sends normally during the working day", async () => {
         vi.setSystemTime(new Date("2026-08-26T11:00:00Z")); // 14:00 Kyiv
         findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
