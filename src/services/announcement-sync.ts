@@ -52,7 +52,13 @@ function displayNameOf(user: NamedUser): string {
 
 function topicUrl(thread: { chatId: bigint; topicId: number } | null | undefined): string | undefined {
     if (!thread) return undefined;
-    return `https://t.me/c/${String(thread.chatId).replace(/^-100/u, "")}/${thread.topicId}`;
+    const raw = String(thread.chatId);
+    // Ссылка t.me/c/<id>/<topic> есть только у супергрупп (-100…); иначе вебапп отвергнет весь снимок.
+    if (!raw.startsWith("-100")) return undefined;
+    const channelId = raw.slice(4);
+    if (!/^\d+$/u.test(channelId)) return undefined;
+    if (!Number.isInteger(thread.topicId) || thread.topicId <= 0) return undefined;
+    return `https://t.me/c/${channelId}/${thread.topicId}`;
 }
 
 /** Необязательное поле-дата: ключа нет, если даты нет (exactOptionalPropertyTypes). */

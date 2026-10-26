@@ -615,10 +615,21 @@ preferencesHandlers.callbackQuery("pref_save_final", async (ctx) => {
         // Ожидание ответа закрыто → пингер перестаёт напоминать. Только по
         // рассылкам пожеланий: раньше подача «подтверждала» и любую другую
         // висящую рассылку — объявление, которое человек не читал.
-        await pendingReplyRepository.updateMany(
-            { userId: BigInt(telegramId!), status: "pending", trackedMessage: { buttonType: "preferences" } },
-            { status: "confirmed", respondedAt: new Date() }
-        );
+        const prefWhere = { userId: BigInt(telegramId!), status: "pending", trackedMessage: { buttonType: "preferences" } };
+        // Рассылки, чьё ожидание закрывается, — для синка истории; сбой чтения не должен мешать подаче.
+        const closingBroadcastIds = await (async () => {
+            try {
+                const rows = await pendingReplyRepository.findMany(prefWhere, { trackedMessage: { select: { broadcastId: true } } });
+                return [...new Set(rows.map((r: any) => r.trackedMessage?.broadcastId).filter(Boolean))] as number[];
+            } catch {
+                return [] as number[];
+            }
+        })();
+        await pendingReplyRepository.updateMany(prefWhere, { status: "confirmed", respondedAt: new Date() });
+        if (closingBroadcastIds.length > 0) {
+            const { enqueueAnnouncementSyncSafe } = await import("../services/announcement-sync.js");
+            for (const id of closingBroadcastIds) await enqueueAnnouncementSyncSafe(id);
+        }
 
         // Запасная отметка «подал» для рассылки: `resolveAlreadyFilledCheck`
         // читает её, когда `/missing` вебаппа недоступен.

@@ -151,6 +151,23 @@ describe("buildAnnouncementSnapshot", () => {
         expect(snap.recipients[0]!.supportTopicUrl).toBe("https://t.me/c/3794600501/52151");
     });
 
+    it("support topic link is omitted for non-supergroup chats and bad topic ids", async () => {
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({
+            deliveries: [
+                { chatId: 1n, targetType: "USER", status: "SENT", sentAt: T(1), lastError: null },
+                { chatId: 2n, targetType: "USER", status: "SENT", sentAt: T(1), lastError: null },
+                { chatId: 3n, targetType: "USER", status: "SENT", sentAt: T(1), lastError: null },
+            ],
+        }));
+        userFindMany.mockResolvedValue([
+            user(1n, { supportThread: { chatId: -5000n, topicId: 9 } }),
+            user(2n, { supportThread: { chatId: 777n, topicId: 9 } }),
+            user(3n, { supportThread: { chatId: -1003794600501n, topicId: 0 } }),
+        ]);
+        const snap = await buildAnnouncementSnapshot(7);
+        for (const r of snap.recipients) expect(r).not.toHaveProperty("supportTopicUrl");
+    });
+
     it("author without a User row falls back to 'Telegram user'; reply mode maps buttonType", async () => {
         broadcastFindUnique.mockResolvedValue(baseBroadcast({ buttonType: "none" }));
         let snap = await buildAnnouncementSnapshot(7);
