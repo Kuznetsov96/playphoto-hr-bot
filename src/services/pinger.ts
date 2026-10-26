@@ -17,6 +17,7 @@ import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { formatLocalDate } from "../utils/format-deadline.js";
 import { awsBusinessClient, type SchedulePreferenceSchedule } from "./aws-business-client.js";
+import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
 import { monthNameFromCanonical } from "./preference-month.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
@@ -259,6 +260,12 @@ async function missingFor(
     return missing;
 }
 
+/** Остановка напоминаний по сообщению + синк рассылки в вебапп. */
+async function stopTrackingAndSync(msg: { id: number; broadcastId: number }) {
+    await trackedMessageRepository.stopTracking(msg.id);
+    await enqueueAnnouncementSyncSafe(msg.broadcastId);
+}
+
 async function runPinger(bot: Bot<MyContext>) {
     try {
         const now = new Date();
@@ -284,7 +291,7 @@ async function runPinger(bot: Bot<MyContext>) {
 
             // 1. If no pending replies, stop pinging
             if (activePendingReplies.length === 0) {
-                await trackedMessageRepository.stopTracking(msg.id);
+                await stopTrackingAndSync(msg);
                 logBusinessEvent({
                     event: "broadcast.ping_tracking.completed",
                     actorType: "system",
@@ -325,7 +332,7 @@ async function runPinger(bot: Bot<MyContext>) {
                 // Конец месяца графика — раньше запроса к вебаппу: иначе при
                 // лежащем вебаппе строка возвращалась бы каждую минуту вечно.
                 if (now.getTime() >= monthAfter(msg.targetMonth)) {
-                    await trackedMessageRepository.stopTracking(msg.id);
+                    await stopTrackingAndSync(msg);
                     continue;
                 }
                 const schedule = await preferencesScheduleFor(msg.targetMonth, schedules);
@@ -333,7 +340,7 @@ async function runPinger(bot: Bot<MyContext>) {
                 // Закрытие необратимо (личное окно открывает «Reopen», а не
                 // рассылка) — напоминания кончаются насовсем.
                 if (!schedule.open) {
-                    await trackedMessageRepository.stopTracking(msg.id);
+                    await stopTrackingAndSync(msg);
                     continue;
                 }
                 // Срок прошёл, но владелец ещё может его продлить — проверяем
@@ -354,7 +361,7 @@ async function runPinger(bot: Bot<MyContext>) {
                         { trackedMessageId: msg.id, status: "pending" },
                         { status: "confirmed", respondedAt: now },
                     );
-                    await trackedMessageRepository.stopTracking(msg.id);
+                    await stopTrackingAndSync(msg);
                     continue;
                 }
                 text = STAFF_TEXTS["staff-preferences-reminder"]({
@@ -417,6 +424,7 @@ async function runPinger(bot: Bot<MyContext>) {
                 await broadcastPingLogRepository.create(msg.broadcastId, BigInt(msg.chatId)).catch(err => {
                     logger.warn({ err, broadcastId: msg.broadcastId }, "Failed to record broadcast ping");
                 });
+                await enqueueAnnouncementSyncSafe(msg.broadcastId);
 
                 logBusinessEvent({
                     event: "broadcast.ping_sent",
@@ -434,7 +442,7 @@ async function runPinger(bot: Bot<MyContext>) {
                 });
             } catch (e: any) {
                 if (e.error_code === 403 || (e.error_code === 400 && e.description?.includes("chat not found"))) {
-                    await trackedMessageRepository.stopTracking(msg.id);
+                    await stopTrackingAndSync(msg);
                     // Only treat as intentional block if we already pinged at least once before
                     // (msg.lastPingMsgId exists = at least one prior ping was delivered)
                     const chatId = Number(msg.chatId);
@@ -461,7 +469,7 @@ async function runPinger(bot: Bot<MyContext>) {
                     });
                 } else if (e.error_code === 400 && e.description?.includes("message to be replied not found")) {
                     logger.warn({ chatId: msg.chatId, trackedMessageId: msg.id, messageId: msg.messageId }, "Ping tracking stopped because original message was not found");
-                    await trackedMessageRepository.stopTracking(msg.id);
+                    await stopTrackingAndSync(msg);
                     logBusinessEvent({
                         event: "broadcast.ping_tracking.stopped",
                         level: "warn",

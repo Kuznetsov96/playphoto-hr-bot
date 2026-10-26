@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AnnouncementSnapshot } from "./announcement-snapshot-types.js";
 import { z } from "zod";
 import {
     AWS_BUSINESS_API_TOKEN,
@@ -1833,6 +1834,16 @@ export class AwsBusinessClient {
         await this.request(
             `/access-revocations/${encodeURIComponent(publicId)}/failed`,
             { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    /** Полный снимок рассылки для истории в вебаппе (идемпотентный PUT). */
+    async putAnnouncementSnapshot(publicId: string, snapshot: AnnouncementSnapshot): Promise<void> {
+        await this.request(
+            `/internal/bot/announcements/${encodeURIComponent(publicId)}`,
+            { method: "PUT", body: JSON.stringify(snapshot) },
             undefined,
             { expectsBody: false },
         );

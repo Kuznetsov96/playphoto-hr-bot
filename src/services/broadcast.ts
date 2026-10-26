@@ -18,6 +18,7 @@ import { awsBusinessClient } from "./aws-business-client.js";
 import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "./preference-month.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
+import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
 
 export interface BroadcastStats {
     totalChats: number;
@@ -409,6 +410,7 @@ export const broadcastService = {
             attachmentKinds: (Array.isArray(media) ? media : media ? [media] : []).map((item: any) => item.type),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
+        await enqueueAnnouncementSyncSafe(broadcast.id);
 
         // 2. Resolve targets to get a count (optional, but good for UI)
         const { chats, users } = await this.resolveTargets(target);
@@ -497,12 +499,14 @@ export const broadcastService = {
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
                 await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
+                await enqueueAnnouncementSyncSafe(broadcastId);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, chatId }, "Failed to broadcast to chat");
                 await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
+                await enqueueAnnouncementSyncSafe(broadcastId);
             }
         }
 
@@ -529,6 +533,7 @@ export const broadcastService = {
                 if (alreadyFilledCheck && await alreadyFilledCheck(userId)) {
                     logger.debug({ userId, month: prefMonthName }, "Preferences broadcast skipped because it was already completed");
                     await broadcastDeliveryRepository.markSkipped(delivery.id, "PREFERENCES_ALREADY_FILLED");
+                    await enqueueAnnouncementSyncSafe(broadcastId);
                     continue;
                 }
 
@@ -550,12 +555,14 @@ export const broadcastService = {
                     });
                 }
                 await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
+                await enqueueAnnouncementSyncSafe(broadcastId);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, userId }, "Failed to broadcast to user");
                 await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
+                await enqueueAnnouncementSyncSafe(broadcastId);
             }
         }
 
@@ -570,6 +577,7 @@ export const broadcastService = {
         }
 
         await broadcastRepository.update(broadcastId, { completedAt: new Date() });
+        await enqueueAnnouncementSyncSafe(broadcastId);
         logToDebug(`✅ [WORKER] Broadcast ${broadcastId} completed. Sent: ${sentCount}`);
         return sentCount;
     },
@@ -670,6 +678,7 @@ export const broadcastService = {
         }
 
         await pendingReplyRepository.update(pending.id, { status: "confirmed", respondedAt: new Date() });
+        await enqueueAnnouncementSyncSafe(broadcastId);
         await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-confirmed"]);
         return "confirmed";
     },
@@ -711,6 +720,7 @@ export const broadcastService = {
         }
 
         await pendingReplyRepository.update(pending.id, { status: "declined", respondedAt: new Date() });
+        await enqueueAnnouncementSyncSafe(broadcastId);
         await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-open-decline-form"]);
         return "declined";
     },
@@ -726,6 +736,7 @@ export const broadcastService = {
             },
             { status: "declined", respondedAt: new Date() }
         );
+        await enqueueAnnouncementSyncSafe(broadcastId);
     },
 
     async getStats(broadcastId: number): Promise<BroadcastStats> {
@@ -773,9 +784,11 @@ export const broadcastService = {
     async stopPinging(broadcastId: number) {
         await broadcastRepository.update(broadcastId, { remindersStoppedAt: new Date() });
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
+        await enqueueAnnouncementSyncSafe(broadcastId);
     },
 
     async stopAllPings(): Promise<number> {
+        const affectedIds = await trackedMessageRepository.findBroadcastIdsWithActivePings();
         await broadcastRepository.updateMany(
             { trackedMessages: { some: { nextPingAt: { not: null } } } },
             { remindersStoppedAt: new Date() }
@@ -784,6 +797,7 @@ export const broadcastService = {
             { nextPingAt: { not: null } },
             { nextPingAt: null }
         );
+        for (const id of affectedIds) await enqueueAnnouncementSyncSafe(id);
         return result.count;
     },
 
@@ -827,6 +841,7 @@ export const broadcastService = {
             withdrawnAt: new Date(),
             withdrawnByTelegramId: BigInt(actorTelegramId),
         });
+        await enqueueAnnouncementSyncSafe(broadcastId);
 
         return { deleted, failed };
     },

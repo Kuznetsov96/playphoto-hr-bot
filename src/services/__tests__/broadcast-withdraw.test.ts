@@ -11,6 +11,8 @@ const trackedDeleteMany = vi.fn();
 const pendingDeleteMany = vi.fn();
 const deliveryFindSent = vi.fn();
 const queueAdd = vi.fn();
+const activePingBroadcastIds = vi.fn();
+const syncSafe = vi.fn();
 
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: { findActive: vi.fn().mockResolvedValue([]) } }));
 vi.mock("../../repositories/location-repository.js", () => ({
@@ -33,8 +35,10 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
         findManyWithReplies: trackedFindMany,
         updateMany: trackedUpdateMany,
         deleteMany: trackedDeleteMany,
+        findBroadcastIdsWithActivePings: activePingBroadcastIds,
     },
 }));
+vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: syncSafe }));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany },
 }));
@@ -123,6 +127,7 @@ describe("reminder stops and creation metadata", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         trackedUpdateMany.mockResolvedValue({ count: 4 });
+        activePingBroadcastIds.mockResolvedValue([3, 8]);
         broadcastCreate.mockResolvedValue({ id: 42 });
         broadcastUpdate.mockResolvedValue({});
         queueAdd.mockResolvedValue({});
@@ -141,6 +146,9 @@ describe("reminder stops and creation metadata", () => {
             { trackedMessages: { some: { nextPingAt: { not: null } } } },
             { remindersStoppedAt: expect.any(Date) },
         );
+        // Рассылки запрашиваются ДО обнуления nextPingAt и синкаются все.
+        expect(syncSafe).toHaveBeenCalledWith(3);
+        expect(syncSafe).toHaveBeenCalledWith(8);
     });
 
     it("createBroadcast stores button type and attachment kinds", async () => {

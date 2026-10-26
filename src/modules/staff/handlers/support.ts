@@ -1088,6 +1088,8 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
             await pendingReplyRepository.recordDeclineReason(BigInt(ctx.from!.id), Number(broadcastId), reason).catch(err => {
                 logger.warn({ err, broadcastId }, "Failed to record broadcast decline reason");
             });
+            const { enqueueAnnouncementSyncSafe } = await import("../../../services/announcement-sync.js");
+            await enqueueAnnouncementSyncSafe(Number(broadcastId));
         }
 
         try {

@@ -33,6 +33,11 @@ export const startWorkers = () => {
             const { processCandidateMirrorPush } = await import('../services/recruiting-mirror/push-service.js');
             await processCandidateMirrorPush(job.data.candidateId);
         }
+        if (job.name === 'announcement-sync') {
+            // Ошибка пробрасывается — ретраи (attempts/backoff) ведёт BullMQ.
+            const { processAnnouncementSync } = await import('../services/announcement-sync.js');
+            await processAnnouncementSync(job.data.broadcastId);
+        }
     }, { connection });
 
     const broadcastWorker = new Worker(QUEUES.BROADCAST, async job => {
