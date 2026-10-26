@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
+import { broadcastPingLogRepository } from "../repositories/broadcast-ping-log-repository.js";
 import { pendingReplyRepository } from "../repositories/pending-reply-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
@@ -408,6 +409,12 @@ async function runPinger(bot: Bot<MyContext>) {
                 await trackedMessageRepository.update(msg.id, {
                     lastPingMsgId: sentPing.message_id,
                     nextPingAt: nextAllowedPingTime(new Date(Date.now() + nextPingInterval))
+                });
+
+                // История рассылки: пинг записан, даже если запись не удалась — не
+                // ломаем отправку остальным.
+                await broadcastPingLogRepository.create(msg.broadcastId, BigInt(msg.chatId)).catch(err => {
+                    logger.warn({ err, broadcastId: msg.broadcastId }, "Failed to record broadcast ping");
                 });
 
                 logBusinessEvent({

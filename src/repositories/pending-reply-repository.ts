@@ -26,6 +26,14 @@ export class PendingReplyRepository {
         return prisma.pendingReply.updateMany({ where, data });
     }
 
+    /** Текст причины после «Не згодна»; записывается в отклонённый ответ этого человека. */
+    async recordDeclineReason(userId: bigint, broadcastId: number, reason: string) {
+        return prisma.pendingReply.updateMany({
+            where: { userId, status: "declined", trackedMessage: { broadcastId } },
+            data: { declineReason: reason.slice(0, 2000) },
+        });
+    }
+
     async deleteMany(where: Prisma.PendingReplyWhereInput) {
         return prisma.pendingReply.deleteMany({ where });
     }

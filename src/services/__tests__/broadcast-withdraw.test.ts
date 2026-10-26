@@ -1,0 +1,163 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const broadcastCreate = vi.fn();
+const broadcastUpdate = vi.fn();
+const broadcastUpdateMany = vi.fn();
+const broadcastFindById = vi.fn();
+const broadcastDelete = vi.fn();
+const trackedFindMany = vi.fn();
+const trackedUpdateMany = vi.fn();
+const trackedDeleteMany = vi.fn();
+const pendingDeleteMany = vi.fn();
+const deliveryFindSent = vi.fn();
+const queueAdd = vi.fn();
+
+vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: { findActive: vi.fn().mockResolvedValue([]) } }));
+vi.mock("../../repositories/location-repository.js", () => ({
+    locationRepository: { findAll: vi.fn().mockResolvedValue([]), findById: vi.fn() },
+}));
+vi.mock("../../repositories/broadcast-repository.js", () => ({
+    broadcastRepository: {
+        create: broadcastCreate,
+        update: broadcastUpdate,
+        updateMany: broadcastUpdateMany,
+        findById: broadcastFindById,
+        delete: broadcastDelete,
+    },
+}));
+vi.mock("../../repositories/broadcast-delivery-repository.js", () => ({
+    broadcastDeliveryRepository: { findSentMessages: deliveryFindSent, getStats: vi.fn() },
+}));
+vi.mock("../../repositories/tracked-message-repository.js", () => ({
+    trackedMessageRepository: {
+        findManyWithReplies: trackedFindMany,
+        updateMany: trackedUpdateMany,
+        deleteMany: trackedDeleteMany,
+    },
+}));
+vi.mock("../../repositories/pending-reply-repository.js", () => ({
+    pendingReplyRepository: { deleteMany: pendingDeleteMany },
+}));
+vi.mock("../../repositories/user-repository.js", () => ({ userRepository: {} }));
+vi.mock("../../core/queue.js", () => ({ broadcastQueue: { add: queueAdd } }));
+vi.mock("../../core/redis.js", () => ({ redis: { get: vi.fn() } }));
+vi.mock("../../core/logger.js", () => ({
+    default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
+vi.mock("../aws-business-client.js", () => ({ awsBusinessClient: { missingSchedulePreferences: vi.fn() } }));
+vi.mock("../../config.js", () => ({ TEAM_CHATS: { HUB: -1001 }, AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: false }));
+vi.mock("../../handlers/admin/utils.js", () => ({ normalizeCity: (value: string) => value }));
+
+const { broadcastService } = await import("../broadcast.js");
+
+describe("withdrawBroadcast", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        broadcastFindById.mockResolvedValue({ id: 5, withdrawnAt: null });
+        trackedFindMany.mockResolvedValue([
+            { id: 1, chatId: -100n, messageId: 11, pendingReplies: [] },
+            { id: 2, chatId: -200n, messageId: 22, pendingReplies: [] },
+        ]);
+        deliveryFindSent.mockResolvedValue([
+            { chatId: -100n, messageId: 11 }, // дубль трекинга
+            { chatId: 777n, messageId: 33 }, // личка без трекинга
+        ]);
+        trackedUpdateMany.mockResolvedValue({ count: 2 });
+        broadcastUpdate.mockResolvedValue({});
+    });
+
+    it("deletes every tracked message and delivery message, keeps all rows, marks withdrawn", async () => {
+        const api = { deleteMessage: vi.fn().mockResolvedValue(true) };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, 99);
+
+        expect(result).toEqual({ deleted: 3, failed: 0 });
+        expect(api.deleteMessage).toHaveBeenCalledWith(-100, 11);
+        expect(api.deleteMessage).toHaveBeenCalledWith(-200, 22);
+        expect(api.deleteMessage).toHaveBeenCalledWith(777, 33);
+        expect(api.deleteMessage).toHaveBeenCalledTimes(3);
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({
+            withdrawnAt: expect.any(Date),
+            withdrawnByTelegramId: 99n,
+        }));
+        expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
+        expect(broadcastDelete).not.toHaveBeenCalled();
+        expect(trackedDeleteMany).not.toHaveBeenCalled();
+        expect(pendingDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("counts deleteMessage errors as failed and still marks withdrawn", async () => {
+        const api = {
+            deleteMessage: vi.fn()
+                .mockResolvedValueOnce(true)
+                .mockRejectedValueOnce(new Error("message can't be deleted"))
+                .mockResolvedValueOnce(true),
+        };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, 99);
+
+        expect(result).toEqual({ deleted: 2, failed: 1 });
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({ withdrawnAt: expect.any(Date) }));
+    });
+
+    it("is idempotent: a second call deletes nothing", async () => {
+        broadcastFindById.mockResolvedValue({ id: 5, withdrawnAt: new Date() });
+        const api = { deleteMessage: vi.fn() };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, 99);
+
+        expect(result).toEqual({ deleted: 0, failed: 0 });
+        expect(api.deleteMessage).not.toHaveBeenCalled();
+        expect(broadcastUpdate).not.toHaveBeenCalled();
+    });
+
+    it("does not export pruneCompletedArchive", () => {
+        expect("pruneCompletedArchive" in broadcastService).toBe(false);
+    });
+});
+
+describe("reminder stops and creation metadata", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        trackedUpdateMany.mockResolvedValue({ count: 4 });
+        broadcastCreate.mockResolvedValue({ id: 42 });
+        broadcastUpdate.mockResolvedValue({});
+        queueAdd.mockResolvedValue({});
+    });
+
+    it("stopPinging records remindersStoppedAt", async () => {
+        await broadcastService.stopPinging(5);
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, { remindersStoppedAt: expect.any(Date) });
+        expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
+    });
+
+    it("stopAllPings records remindersStoppedAt on broadcasts with active pings", async () => {
+        const count = await broadcastService.stopAllPings();
+        expect(count).toBe(4);
+        expect(broadcastUpdateMany).toHaveBeenCalledWith(
+            { trackedMessages: { some: { nextPingAt: { not: null } } } },
+            { remindersStoppedAt: expect.any(Date) },
+        );
+    });
+
+    it("createBroadcast stores button type and attachment kinds", async () => {
+        await broadcastService.createBroadcast(
+            {}, 1, "text", { type: "hub" },
+            [{ type: "photo", fileId: "a" }, { type: "photo", fileId: "b" }, { type: "document", fileId: "c" }] as any,
+            "bot", { buttonType: "none" },
+        );
+        expect(broadcastCreate).toHaveBeenCalledWith(expect.objectContaining({
+            buttonType: "none",
+            attachmentKinds: ["photo", "photo", "document"],
+        }));
+    });
+
+    it("createBroadcast defaults button type to 'default' and no attachments", async () => {
+        await broadcastService.createBroadcast({}, 1, "text", { type: "hub" });
+        expect(broadcastCreate).toHaveBeenCalledWith(expect.objectContaining({
+            buttonType: "default",
+            attachmentKinds: [],
+        }));
+    });
+});

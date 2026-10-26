@@ -7,6 +7,7 @@ const pendingDeleteMany = vi.fn();
 const schedulePreferenceSchedule = vi.fn();
 const missingSchedulePreferences = vi.fn();
 const pendingUpdateMany = vi.fn();
+const pingLogCreate = vi.fn().mockResolvedValue({});
 
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -17,6 +18,9 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
 }));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany, updateMany: pendingUpdateMany },
+}));
+vi.mock("../../repositories/broadcast-ping-log-repository.js", () => ({
+    broadcastPingLogRepository: { create: pingLogCreate },
 }));
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: {} }));
 vi.mock("../aws-business-client.js", () => ({
@@ -121,6 +125,15 @@ describe("pinger quiet hours", () => {
         expect(trackedUpdate).toHaveBeenCalledTimes(1);
         const moved = trackedUpdate.mock.calls[0]?.[1]?.nextPingAt as Date;
         expect(kyivHourOf(moved)).toBe(10);
+    });
+
+    it("records every sent ping in the broadcast ping log", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z")); // 14:00 Kyiv
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+
+        await runPingerForTest(fakeBot());
+
+        expect(pingLogCreate).toHaveBeenCalledWith(7, 12345n);
     });
 
     it("sends normally during the working day", async () => {

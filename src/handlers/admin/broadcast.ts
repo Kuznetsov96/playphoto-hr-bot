@@ -14,7 +14,7 @@ import { getRichMessageMedia } from "../../utils/rich-message.js";
 import { TELEGRAM_MESSAGE_LIMIT } from "../../constants/telegram-limits.js";
 
 export const adminBroadcastHandlers = new Composer<MyContext>();
-const ARCHIVE_KEEP_COMPLETED = 50;
+const ARCHIVE_LIST_LIMIT = 500;
 const ARCHIVE_PAGE_SIZE = 8;
 
 // --- MENUS (Declared first to avoid cycles) ---
@@ -29,12 +29,17 @@ function getPendingCount(broadcast: any): number {
 }
 
 function isBroadcastActive(broadcast: any): boolean {
+    if (broadcast.withdrawnAt) return false;
     const hasActivePing = broadcast.trackedMessages?.some((tracked: any) => Boolean(tracked.nextPingAt)) || false;
     return hasActivePing || getPendingCount(broadcast) > 0;
 }
 
 function formatBroadcastStats(broadcastId: number, stats: BroadcastStats, footer?: string): string {
+    const withdrawn = stats.withdrawnAt
+        ? `↩️ Withdrawn: <b>${stats.withdrawnAt.toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit', year: 'numeric' })}</b>\n\n`
+        : "";
     return `📊 <b>Broadcast Statistics (ID: ${broadcastId})</b>\n\n` +
+        withdrawn +
         `📨 Delivery targets: <b>${stats.deliveryTotal}</b>\n` +
         `✅ Delivered: <b>${stats.deliverySent}</b>\n` +
         `⚠️ Failed: <b>${stats.deliveryFailed}</b>\n` +
@@ -650,9 +655,7 @@ adminBroadcastHubMenu.dynamic(async (ctx, range) => {
 });
 
 adminBroadcastArchiveMenu.dynamic(async (ctx, range) => {
-    await broadcastService.pruneCompletedArchive(ARCHIVE_KEEP_COMPLETED);
-
-    const broadcasts = await broadcastService.getRecentBroadcasts(ARCHIVE_KEEP_COMPLETED + 20);
+    const broadcasts = await broadcastService.getRecentBroadcasts(ARCHIVE_LIST_LIMIT);
     const completedBroadcasts = broadcasts.filter((broadcast: any) => !isBroadcastActive(broadcast));
     const totalPages = Math.max(1, Math.ceil(completedBroadcasts.length / ARCHIVE_PAGE_SIZE));
     const requestedPage = Number((ctx.session as any).broadcastArchivePage || 0);
@@ -712,6 +715,26 @@ adminBroadcastHandlers.callbackQuery("br_stop_all_pings_cancel", async (ctx) => 
     await ScreenManager.goBack(ctx, "📜 <b>Active Broadcasts</b>", "admin-broadcast-list");
 });
 
+adminBroadcastHandlers.callbackQuery("br_withdraw_exec", async (ctx) => {
+    const bId = Number(ctx.session.candidateData?.city);
+    if (!bId) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
+
+    const result = await broadcastService.withdrawBroadcast(ctx.api, bId, ctx.from.id);
+    await ctx.answerCallbackQuery("↩️ Withdrawn.").catch(() => { });
+
+    const stats = await broadcastService.getStats(bId);
+    const footer = ADMIN_TEXTS["broadcast-withdraw-result"]({ deleted: result.deleted, failed: result.failed });
+    await ScreenManager.renderScreen(ctx, formatBroadcastStats(bId, stats, footer), "admin-broadcast-manage");
+});
+
+adminBroadcastHandlers.callbackQuery("br_withdraw_cancel", async (ctx) => {
+    await ctx.answerCallbackQuery("Cancelled").catch(() => { });
+    const bId = Number(ctx.session.candidateData?.city);
+    if (!bId) return ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
+    const stats = await broadcastService.getStats(bId);
+    await ScreenManager.renderScreen(ctx, formatBroadcastStats(bId, stats), "admin-broadcast-manage");
+});
+
 adminBroadcastManageMenu.dynamic(async (ctx, range) => {
     const bId = Number(ctx.session.candidateData?.city);
     if (!bId) return;
@@ -738,10 +761,11 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
             );
             await ScreenManager.renderScreen(ctx, freshText, "admin-broadcast-manage");
         }).row()
-        .text("🗑️ Delete", async (ctx) => {
-            await broadcastService.deleteBroadcast(ctx, bId);
-            await ctx.answerCallbackQuery("✅ Deleted.").catch(() => { });
-            await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
+        .text("↩️ Withdraw", async (ctx) => {
+            const confirmKb = new InlineKeyboard()
+                .text(ADMIN_TEXTS["broadcast-withdraw-confirm-btn"], "br_withdraw_exec").danger().row()
+                .text(ADMIN_TEXTS["broadcast-withdraw-cancel-btn"], "br_withdraw_cancel").danger();
+            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["broadcast-withdraw-confirm"], confirmKb, { pushToStack: true });
         }).row()
         .text("⬅️ Back", async (ctx) => {
             await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");

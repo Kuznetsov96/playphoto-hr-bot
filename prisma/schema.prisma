@@ -43,8 +43,31 @@ model Broadcast {
   completedAt     DateTime?
   cancelledAt     DateTime?
   targetSummary   String?
+  /// Стабильный id для вебаппа: числовой id бота наружу не уходит.
+  publicId              String              @unique @default(uuid()) @db.Uuid
+  /// Снята из чатов («Withdraw»): строки истории остаются.
+  withdrawnAt           DateTime?
+  withdrawnByTelegramId BigInt?
+  /// Какую кнопку несла рассылка: default | preferences | none.
+  buttonType            String?
+  /// Виды вложений по порядку: photo, document, ...
+  attachmentKinds       String[]            @default([])
+  /// Когда админ остановил напоминания.
+  remindersStoppedAt    DateTime?
   trackedMessages TrackedMessage[]
   deliveries      BroadcastDelivery[]
+  pingLogs        BroadcastPingLog[]
+}
+
+/// Каждое отправленное напоминание — для истории рассылки в вебаппе.
+model BroadcastPingLog {
+  id          Int       @id @default(autoincrement())
+  broadcastId Int
+  chatId      BigInt
+  sentAt      DateTime  @default(now())
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId])
 }
 
 model BroadcastDelivery {
@@ -97,6 +120,9 @@ model PendingReply {
   userId           BigInt
   status           String         @default("pending")
   respondedAt      DateTime?
+  /// Текст причины после «Не згодна».
+  declineReason    String?
+  createdAt        DateTime       @default(now())
   trackedMessage   TrackedMessage @relation(fields: [trackedMessageId], references: [id])
   user             User           @relation(fields: [userId], references: [telegramId])
 

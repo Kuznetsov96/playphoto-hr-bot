@@ -5,12 +5,14 @@ const relayStaffMessage = vi.fn<(...args: any[]) => Promise<string>>(async () =>
 const getTaskById = vi.fn();
 const getSubmissionById = vi.fn();
 const findWithStaffProfileByTelegramId = vi.fn();
+const recordDeclineReason = vi.fn(async () => ({ count: 1 }));
 
 vi.mock("../../../../core/logger.js", () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock("../../../../services/support-thread-runtime.js", () => ({ supportRelayService: { relayStaffMessage } }));
 vi.mock("../../../../services/task-service.js", () => ({ taskService: { getTaskById } }));
 vi.mock("../../../../services/task-proof-service.js", () => ({ taskProofService: { getSubmissionById } }));
 vi.mock("../../../../repositories/user-repository.js", () => ({ userRepository: { findWithStaffProfileByTelegramId } }));
+vi.mock("../../../../repositories/pending-reply-repository.js", () => ({ pendingReplyRepository: { recordDeclineReason } }));
 vi.mock("../../../../constants/staff-texts.js", () => ({
     STAFF_TEXTS: { "broadcast-ans-decline": "DECLINE-NOTED", "staff-btn-home": "Меню", "support-thread-unsupported": "UNSUPPORTED" },
 }));
@@ -127,6 +129,7 @@ describe("повідомлення співробітниці йде в її т�
         expect(c.reply).not.toHaveBeenCalled();
         expect(c.session.broadcastId).toBeUndefined();
         expect(c.session.step).toBe("idle");
+        expect(recordDeclineReason).toHaveBeenCalledWith(555n, 42, "Питання");
     });
 
     it("відповідь на фінансове питання — контекст із питання", async () => {

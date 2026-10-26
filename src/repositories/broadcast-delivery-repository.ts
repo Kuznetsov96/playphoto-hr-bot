@@ -52,6 +52,14 @@ export class BroadcastDeliveryRepository {
         });
     }
 
+    /** Сообщения, реально ушедшие в чаты: по ним withdraw удаляет сообщения. */
+    async findSentMessages(broadcastId: number) {
+        return prisma.broadcastDelivery.findMany({
+            where: { broadcastId, messageId: { not: null } },
+            select: { chatId: true, messageId: true },
+        });
+    }
+
     async getStats(broadcastId: number) {
         const groups = await prisma.broadcastDelivery.groupBy({
             by: ["status"],

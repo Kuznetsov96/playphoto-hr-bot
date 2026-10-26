@@ -1083,6 +1083,13 @@ async function _handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): Promise
         const broadcastId = ctx.session.broadcastId;
         const reason = ctx.message?.text || ctx.message?.caption || "[Медіа]";
 
+        if (broadcastId) {
+            const { pendingReplyRepository } = await import("../../../repositories/pending-reply-repository.js");
+            await pendingReplyRepository.recordDeclineReason(BigInt(ctx.from!.id), Number(broadcastId), reason).catch(err => {
+                logger.warn({ err, broadcastId }, "Failed to record broadcast decline reason");
+            });
+        }
+
         try {
             const { supportService } = await import("../../../services/support-service.js");
             const ticketText = `❌ <b>Не згодна з розсилкою #${broadcastId}</b>\n\n<b>Причина:</b> ${reason}`;

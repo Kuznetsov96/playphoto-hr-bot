@@ -29,6 +29,8 @@ export interface BroadcastStats {
     deliveryFailed: number;
     deliveryUncertain: number;
     deliverySkipped: number;
+    /** Когда рассылку сняли из чатов; null — не снималась. */
+    withdrawnAt?: Date | null;
 }
 
 export interface BroadcastTarget {
@@ -402,7 +404,9 @@ export const broadcastService = {
         const broadcast = await broadcastRepository.create({
             initiatorId: BigInt(initiatorId),
             messageText: messageText,
-            targetSummary: targetSummary
+            targetSummary: targetSummary,
+            buttonType: pingOptions?.buttonType ?? 'default',
+            attachmentKinds: (Array.isArray(media) ? media : media ? [media] : []).map((item: any) => item.type),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
 
@@ -721,9 +725,10 @@ export const broadcastService = {
     },
 
     async getStats(broadcastId: number): Promise<BroadcastStats> {
-        const [tracked, deliveryStats] = await Promise.all([
+        const [tracked, deliveryStats, broadcast] = await Promise.all([
             trackedMessageRepository.findManyWithReplies(broadcastId),
             broadcastDeliveryRepository.getStats(broadcastId),
+            broadcastRepository.findById(broadcastId),
         ]);
 
         let pending = 0;
@@ -753,6 +758,7 @@ export const broadcastService = {
             deliveryFailed,
             deliveryUncertain,
             deliverySkipped,
+            withdrawnAt: broadcast?.withdrawnAt ?? null,
         };
     },
 
@@ -760,38 +766,16 @@ export const broadcastService = {
         return await broadcastRepository.findRecent(limit);
     },
 
-    async pruneCompletedArchive(keepCompleted: number = 100): Promise<number> {
-        if (keepCompleted < 0) keepCompleted = 0;
-
-        const all = await broadcastRepository.findRecent(2000);
-        const completed = all.filter((broadcast: any) => {
-            const trackedMessages = broadcast.trackedMessages || [];
-            const hasActivePings = trackedMessages.some((tracked: any) => Boolean(tracked.nextPingAt));
-            if (hasActivePings) return false;
-            return !hasPendingReplies(trackedMessages);
-        });
-
-        const toDelete = completed.slice(keepCompleted);
-        let deletedCount = 0;
-
-        for (const broadcast of toDelete) {
-            const trackedIds = (broadcast.trackedMessages || []).map((tracked: any) => tracked.id);
-            if (trackedIds.length > 0) {
-                await pendingReplyRepository.deleteMany({ trackedMessageId: { in: trackedIds } });
-                await trackedMessageRepository.deleteMany({ broadcastId: broadcast.id });
-            }
-            await broadcastRepository.delete(broadcast.id);
-            deletedCount++;
-        }
-
-        return deletedCount;
-    },
-
     async stopPinging(broadcastId: number) {
+        await broadcastRepository.update(broadcastId, { remindersStoppedAt: new Date() });
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
     },
 
     async stopAllPings(): Promise<number> {
+        await broadcastRepository.updateMany(
+            { trackedMessages: { some: { nextPingAt: { not: null } } } },
+            { remindersStoppedAt: new Date() }
+        );
         const result = await trackedMessageRepository.updateMany(
             { nextPingAt: { not: null } },
             { nextPingAt: null }
@@ -799,20 +783,48 @@ export const broadcastService = {
         return result.count;
     },
 
-    async deleteBroadcast(ctx: MyContext, broadcastId: number) {
-        const tracked = await trackedMessageRepository.findManyWithReplies(broadcastId);
+    /**
+     * «Withdraw»: убрать сообщения из чатов, но оставить историю. Строки не
+     * удаляются; рассылка помечается снятой, напоминания останавливаются.
+     * Повторный вызов ничего не делает.
+     */
+    async withdrawBroadcast(api: any, broadcastId: number, actorTelegramId: number | bigint): Promise<{ deleted: number; failed: number }> {
+        const existing = await broadcastRepository.findById(broadcastId);
+        if (existing?.withdrawnAt) return { deleted: 0, failed: 0 };
+
+        const [tracked, deliveries] = await Promise.all([
+            trackedMessageRepository.findManyWithReplies(broadcastId),
+            broadcastDeliveryRepository.findSentMessages(broadcastId),
+        ]);
+
+        const targets = new Map<string, { chatId: number; messageId: number }>();
         for (const t of tracked) {
-            try {
-                await ctx.api.deleteMessage(Number(t.chatId), t.messageId);
-            } catch (e) { /* ignore */ }
+            targets.set(`${t.chatId}:${t.messageId}`, { chatId: Number(t.chatId), messageId: t.messageId });
+        }
+        for (const d of deliveries) {
+            if (d.messageId == null) continue;
+            targets.set(`${d.chatId}:${d.messageId}`, { chatId: Number(d.chatId), messageId: d.messageId });
         }
 
-        const trackedIds = tracked.map(t => t.id);
-        if (trackedIds.length > 0) {
-            await pendingReplyRepository.deleteMany({ trackedMessageId: { in: trackedIds } });
-            await trackedMessageRepository.deleteMany({ broadcastId });
+        let deleted = 0;
+        let failed = 0;
+        for (const { chatId, messageId } of targets.values()) {
+            try {
+                await api.deleteMessage(chatId, messageId);
+                deleted++;
+            } catch (e) {
+                // Старше 48 часов или уже удалено — Telegram не даст убрать.
+                failed++;
+            }
         }
-        await broadcastRepository.delete(broadcastId);
+
+        await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
+        await broadcastRepository.update(broadcastId, {
+            withdrawnAt: new Date(),
+            withdrawnByTelegramId: BigInt(actorTelegramId),
+        });
+
+        return { deleted, failed };
     },
 
     async getPendingUsers(broadcastId: number): Promise<string[]> {
