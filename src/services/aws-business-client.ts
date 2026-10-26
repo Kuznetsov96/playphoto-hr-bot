@@ -1842,9 +1842,9 @@ export class AwsBusinessClient {
     /** Полный снимок рассылки для истории в вебаппе (идемпотентный PUT). */
     async putAnnouncementSnapshot(publicId: string, snapshot: AnnouncementSnapshot): Promise<void> {
         await this.request(
-            `/internal/bot/announcements/${encodeURIComponent(publicId)}`,
+            `/announcements/${encodeURIComponent(publicId)}`,
             { method: "PUT", body: JSON.stringify(snapshot) },
-            undefined,
+            5_000,
             { expectsBody: false },
         );
     }
