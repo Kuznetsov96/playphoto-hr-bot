@@ -1155,6 +1155,75 @@ describe("ReplacementService", () => {
         expect(api.sendMessage).not.toHaveBeenCalled();
     });
 
+    it("does not block the photographer who took the shift as a replacement on the previous requester's found search", async () => {
+        // Підміна в вебаппі переписує ту саму зміну (той самий канонічний id)
+        // на нову виконавицю. Заявка попередньої авторки в стані FOUND лишається
+        // на цьому id — і без умови на автора вона відмовляла новій виконавиці
+        // «Підміну для цієї зміни вже знайдено» (19.10.2026, Dragon Park 2).
+        const shift: any = {
+            id: "shift-taken",
+            staffId: "taker-1",
+            locationId: "location-9",
+            awsScheduledShiftPublicId: "ss_taken",
+            date: new Date("2030-05-16T00:00:00.000Z"),
+            startTime: new Date("2030-05-16T11:00:00.000Z"),
+            endTime: new Date("2030-05-16T18:00:00.000Z"),
+            location: { id: "location-9", name: "Dragon Park 2", city: "Київ", schedule: null },
+            staff: { id: "taker-1", fullName: "Нова Виконавиця", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.workShift.findUnique.mockResolvedValue(shift);
+        prismaMock.replacementRequest.findFirst.mockResolvedValue(null);
+        prismaMock.replacementRequest.create.mockRejectedValue(new Error("stop after the guard"));
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await expect(new ReplacementService().startRequest({ sendMessage: vi.fn() } as any, "taker-1", "shift-taken"))
+            .rejects.toThrow("stop after the guard");
+
+        expect(prismaMock.replacementRequest.findFirst).toHaveBeenCalledWith({
+            where: {
+                status: { in: ["ACTIVE", "FOUND", "FAILED"] },
+                OR: [
+                    { requesterStaffId: "taker-1", scheduledShiftPublicId: "ss_taken" },
+                    {
+                        requesterStaffId: "taker-1",
+                        locationId: "location-9",
+                        shiftDate: { gte: expect.any(Date), lt: expect.any(Date) },
+                    },
+                    { scheduledShiftPublicId: "ss_taken", status: "ACTIVE" },
+                ],
+            },
+        });
+    });
+
+    it("asks the new assignee to wait while the previous requester's local search is not yet closed", async () => {
+        const shift: any = {
+            id: "shift-taken",
+            staffId: "taker-1",
+            locationId: "location-9",
+            awsScheduledShiftPublicId: "ss_taken",
+            date: new Date("2030-05-16T00:00:00.000Z"),
+            startTime: new Date("2030-05-16T11:00:00.000Z"),
+            endTime: new Date("2030-05-16T18:00:00.000Z"),
+            location: { id: "location-9", name: "Dragon Park 2", city: "Київ", schedule: null },
+            staff: { id: "taker-1", fullName: "Нова Виконавиця", user: { telegramId: 769506907n } },
+        };
+
+        prismaMock.workShift.findUnique.mockResolvedValue(shift);
+        prismaMock.replacementRequest.findFirst.mockResolvedValue({
+            id: "previous-request",
+            requesterStaffId: "previous-requester",
+            scheduledShiftPublicId: "ss_taken",
+            status: "ACTIVE",
+        });
+
+        const { ReplacementService } = await import("../replacement-service.js");
+        await expect(new ReplacementService().startRequest({ sendMessage: vi.fn() } as any, "taker-1", "shift-taken"))
+            .rejects.toThrow("SHIFT_HANDOVER_SETTLING");
+
+        expect(prismaMock.replacementRequest.create).not.toHaveBeenCalled();
+    });
+
     it("blocks restarting a search when the same shift already failed to find a replacement", async () => {
         const shift: any = {
             id: "shift-failed",

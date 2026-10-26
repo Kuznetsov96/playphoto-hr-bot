@@ -375,6 +375,12 @@ export class ReplacementService {
         // звʼязало рядок з каноном, ця гілка просто не додається — другу
         // заявку на той самий день все одно ловить гілка за
         // «той самий автор + локація + день».
+        //
+        // Обидві гілки — лише про заявки цієї ж авторки. Підміна переписує
+        // ту саму зміну (той самий канонічний id) на нову виконавицю, і
+        // заявка попередньої в стані FOUND лишається на цьому id. Без умови
+        // на автора нова виконавиця не могла шукати підміну на зміну, яку
+        // взяла, і читала «Підміну вже знайдено» (19.10.2026).
         const sameShiftFilters: Prisma.ReplacementRequestWhereInput[] = [
             {
                 requesterStaffId,
@@ -386,7 +392,16 @@ export class ReplacementService {
             }
         ];
         if (shift.awsScheduledShiftPublicId) {
-            sameShiftFilters.unshift({ scheduledShiftPublicId: shift.awsScheduledShiftPublicId });
+            sameShiftFilters.unshift({ requesterStaffId, scheduledShiftPublicId: shift.awsScheduledShiftPublicId });
+            // Чужий ACTIVE на цьому id — це заявка попередньої виконавиці, яку
+            // вебапп уже закрив, а локальна копія ще ні (звірка раз на 5 хв).
+            // Пропустити її не можна: канонічна заявка створилась би, а
+            // локальна впала б на ReplacementRequest_active_scheduled_shift_key
+            // — пошук ішов би без копії в боті.
+            sameShiftFilters.push({
+                scheduledShiftPublicId: shift.awsScheduledShiftPublicId,
+                status: ReplacementRequestStatus.ACTIVE
+            });
         }
 
         const existing = await prisma.replacementRequest.findFirst({
@@ -395,6 +410,7 @@ export class ReplacementService {
                 OR: sameShiftFilters
             }
         });
+        if (existing && existing.requesterStaffId !== requesterStaffId) throw new Error("SHIFT_HANDOVER_SETTLING");
         if (existing?.status === ReplacementRequestStatus.ACTIVE) throw new Error("REQUEST_ALREADY_ACTIVE");
         if (existing?.status === ReplacementRequestStatus.FOUND) throw new Error("REQUEST_ALREADY_FOUND");
         if (existing?.status === ReplacementRequestStatus.FAILED) throw new Error("REQUEST_PREVIOUSLY_FAILED");
