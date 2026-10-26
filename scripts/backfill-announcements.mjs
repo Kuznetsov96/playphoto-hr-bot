@@ -12,15 +12,18 @@
 // выходит с кодом 1.
 
 const code = await main();
+// exitCode гарантирует правильный код, даже если цикл событий опустеет раньше таймера.
+process.exitCode = code;
 // Prisma, Redis очереди и логгер держат соединения — без явного выхода процесс висит.
 setTimeout(() => process.exit(code), 200).unref();
 
 async function main() {
+    // До любых импортов из dist: ни Prisma, ни Redis не открываются.
+    if (process.env.ANNOUNCEMENTS_SYNC_ENABLED !== "true") {
+        console.error("ANNOUNCEMENTS_SYNC_ENABLED is not true in this container: nothing was enqueued. Deploy with the flag on first.");
+        return 1;
+    }
     try {
-        if (process.env.ANNOUNCEMENTS_SYNC_ENABLED !== "true") {
-            console.error("ANNOUNCEMENTS_SYNC_ENABLED is not true in this container: nothing was enqueued. Deploy with the flag on first.");
-            return 1;
-        }
         const { enqueueAllAnnouncementSyncs } = await import("/app/dist/services/announcement-sync.js");
         const count = await enqueueAllAnnouncementSyncs();
         console.log(`Enqueued ${count} announcement snapshots`);
