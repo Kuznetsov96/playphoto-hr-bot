@@ -720,24 +720,40 @@ adminBroadcastHandlers.callbackQuery("br_stop_all_pings_cancel", async (ctx) => 
     await ScreenManager.goBack(ctx, "📜 <b>Active Broadcasts</b>", "admin-broadcast-list");
 });
 
-adminBroadcastHandlers.callbackQuery("br_withdraw_exec", async (ctx) => {
-    const bId = Number(ctx.session.candidateData?.city);
-    if (!bId) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
+export async function handleWithdrawExec(ctx: MyContext, bId: number): Promise<void> {
+    if (!Number.isInteger(bId) || bId <= 0) {
+        await ctx.answerCallbackQuery("Session expired.").catch(() => { });
+        return;
+    }
 
-    const result = await broadcastService.withdrawBroadcast(ctx.api, bId, ctx.from.id);
+    const result = await broadcastService.withdrawBroadcast(ctx.api, bId, ctx.from!.id);
     await ctx.answerCallbackQuery("↩️ Withdrawn.").catch(() => { });
 
     const stats = await broadcastService.getStats(bId);
-    const footer = ADMIN_TEXTS["broadcast-withdraw-result"]({ deleted: result.deleted, failed: result.failed });
+    const footer = ADMIN_TEXTS["broadcast-withdraw-result"]({
+        deleted: result.deleted,
+        failed: result.failed,
+        album: (stats.attachmentCount ?? 0) > 1,
+    });
     await ScreenManager.renderScreen(ctx, formatBroadcastStats(bId, stats, footer), "admin-broadcast-manage");
-});
+}
 
-adminBroadcastHandlers.callbackQuery("br_withdraw_cancel", async (ctx) => {
+export async function handleWithdrawCancel(ctx: MyContext, bId: number): Promise<void> {
     await ctx.answerCallbackQuery("Cancelled").catch(() => { });
-    const bId = Number(ctx.session.candidateData?.city);
-    if (!bId) return ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
+    if (!Number.isInteger(bId) || bId <= 0) {
+        await ScreenManager.goBack(ctx, "📜 <b>Broadcast History</b>", "admin-broadcast-list");
+        return;
+    }
     const stats = await broadcastService.getStats(bId);
     await ScreenManager.renderScreen(ctx, formatBroadcastStats(bId, stats), "admin-broadcast-manage");
+}
+
+adminBroadcastHandlers.callbackQuery(/^br_withdraw_exec_(\d+)$/, async (ctx) => {
+    await handleWithdrawExec(ctx, Number(ctx.match[1]));
+});
+
+adminBroadcastHandlers.callbackQuery(/^br_withdraw_cancel_(\d+)$/, async (ctx) => {
+    await handleWithdrawCancel(ctx, Number(ctx.match[1]));
 });
 
 adminBroadcastManageMenu.dynamic(async (ctx, range) => {
@@ -770,8 +786,8 @@ adminBroadcastManageMenu.dynamic(async (ctx, range) => {
     if (canWithdraw(await broadcastService.getStats(bId))) {
         range.text("↩️ Withdraw", async (ctx) => {
             const confirmKb = new InlineKeyboard()
-                .text(ADMIN_TEXTS["broadcast-withdraw-confirm-btn"], "br_withdraw_exec").danger().row()
-                .text(ADMIN_TEXTS["broadcast-withdraw-cancel-btn"], "br_withdraw_cancel").danger();
+                .text(ADMIN_TEXTS["broadcast-withdraw-confirm-btn"], `br_withdraw_exec_${bId}`).danger().row()
+                .text(ADMIN_TEXTS["broadcast-withdraw-cancel-btn"], `br_withdraw_cancel_${bId}`).danger();
             await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["broadcast-withdraw-confirm"], confirmKb, { pushToStack: true });
         }).row();
     }

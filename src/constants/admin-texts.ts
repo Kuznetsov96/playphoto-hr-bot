@@ -352,7 +352,9 @@ Revert anyway?`,
   "broadcast-withdraw-confirm": `↩️ <b>Withdraw from chats?</b>\n\nMessages older than 48 hours stay.`,
   "broadcast-withdraw-confirm-btn": `✅ Withdraw`,
   "broadcast-withdraw-cancel-btn": `✖️ Cancel`,
-  "broadcast-withdraw-result": (p: { deleted: number; failed: number }) => `↩️ <b>Withdrawn.</b> Removed: ${p.deleted}, left in chats: ${p.failed}.`,
+  "broadcast-withdraw-result": (p: { deleted: number; failed: number; album?: boolean }) =>
+    `↩️ <b>Withdrawn.</b> Removed: ${p.deleted}, left in chats: ${p.failed}.` +
+    (p.album ? `\nAlbum photos sent before this update may stay in chats.` : ``),
   "broadcast-sent-count": (p: { count: string | number }) => `✅ Broadcast sent to ${p.count} recipients!`,
   "admin-pref-stats-err-not-found": `❌ No active preference broadcast found.`,
   "admin-pref-stats-title": `📊 <b>Schedule Preferences Status</b>`,
