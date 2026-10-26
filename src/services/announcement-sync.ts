@@ -236,6 +236,7 @@ async function addDebounced(
     queue: { getJob: (id: string) => Promise<any>; add: (...args: any[]) => Promise<unknown> },
     jobId: string,
     broadcastId: number,
+    delay: number = SYNC_DELAY_MS,
 ): Promise<"added" | "debounced" | "active"> {
     const existing = await queue.getJob(jobId);
     if (existing) {
@@ -249,7 +250,7 @@ async function addDebounced(
     await queue.add(
         ANNOUNCEMENT_SYNC_JOB_NAME,
         { broadcastId },
-        { jobId, delay: SYNC_DELAY_MS, attempts: 8, backoff: { type: "exponential", delay: 10_000 } },
+        { jobId, delay, attempts: 8, backoff: { type: "exponential", delay: 10_000 } },
     );
     return "added";
 }
@@ -268,6 +269,44 @@ export async function enqueueAnnouncementSync(broadcastId: number): Promise<void
         // Задача уже строит снимок и могла не увидеть эту правку — ставим следующую.
         await addDebounced(defaultQueue, `${jobId}-next`, broadcastId);
     }
+}
+
+const BACKFILL_PAGE_SIZE = 200;
+const BACKFILL_STAGGER_MS = 500;
+
+/**
+ * Разовый перенос: ставит снимок каждой существующей рассылки. Задачам задана
+ * нарастающая задержка, чтобы вебапп (2 CPU, пул БД 5) не получил сотни PUT
+ * разом. Возвращает число рассылок, для которых синк поставлен или уже ждёт.
+ */
+export async function enqueueAllAnnouncementSyncs(): Promise<number> {
+    if (!ANNOUNCEMENTS_SYNC_ENABLED) {
+        logger.warn("Announcement backfill skipped: ANNOUNCEMENTS_SYNC_ENABLED is off");
+        return 0;
+    }
+    const { defaultQueue } = await import("../core/queue.js");
+    let count = 0;
+    let cursor: number | undefined;
+    for (;;) {
+        const page: { id: number }[] = await prisma.broadcast.findMany({
+            select: { id: true },
+            orderBy: { id: "asc" },
+            take: BACKFILL_PAGE_SIZE,
+            ...(cursor !== undefined ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (page.length === 0) break;
+        for (const { id } of page) {
+            const delay = SYNC_DELAY_MS + count * BACKFILL_STAGGER_MS;
+            const jobId = `announcement-sync-${id}`;
+            const result = await addDebounced(defaultQueue, jobId, id, delay);
+            if (result === "active") await addDebounced(defaultQueue, `${jobId}-next`, id, delay);
+            count++;
+        }
+        cursor = page[page.length - 1]!.id;
+        if (page.length < BACKFILL_PAGE_SIZE) break;
+    }
+    logger.info({ count }, "Announcement backfill enqueued");
+    return count;
 }
 
 /** Для мест вызова: отказ очереди/Redis не должен ломать действие пользователя. */
