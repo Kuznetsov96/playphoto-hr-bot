@@ -853,6 +853,8 @@ staffHandlers.callbackQuery(/^staff_repl_start_(.+)$/, async (ctx) => {
             message = replacementBlockedReason("FAILED");
         } else if (error?.message === "SHIFT_ALREADY_STARTED") {
             message = "Ця зміна вже почалась.";
+        } else if (error?.message === "SHIFT_HANDOVER_SETTLING") {
+            message = "Зміна щойно перейшла до тебе, графік ще оновлюється. Спробуй за кілька хвилин.";
         } else if (error?.message === "CANONICAL_REPLACEMENT_FAILED:REPLACEMENT_REQUEST_ALREADY_OPEN") {
             message = STAFF_TEXTS["staff-replacement-already-open"];
         } else if (typeof error?.message === "string" && error.message.startsWith("CANONICAL_REPLACEMENT_FAILED:")) {
