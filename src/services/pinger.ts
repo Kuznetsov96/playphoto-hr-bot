@@ -286,6 +286,8 @@ async function runPinger(bot: Bot<MyContext>) {
                 await trackedMessageRepository.update(msg.id, {
                     nextPingAt: nextAllowedPingTime(now)
                 });
+                // «Следующее напоминание» в вебаппе берётся из nextPingAt.
+                await enqueueAnnouncementSyncSafe(msg.broadcastId);
                 continue;
             }
 

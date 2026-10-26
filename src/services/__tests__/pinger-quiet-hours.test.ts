@@ -8,6 +8,9 @@ const schedulePreferenceSchedule = vi.fn();
 const missingSchedulePreferences = vi.fn();
 const pendingUpdateMany = vi.fn();
 const pingLogCreate = vi.fn().mockResolvedValue({});
+const enqueueSync = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: enqueueSync }));
 
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -125,6 +128,15 @@ describe("pinger quiet hours", () => {
         expect(trackedUpdate).toHaveBeenCalledTimes(1);
         const moved = trackedUpdate.mock.calls[0]?.[1]?.nextPingAt as Date;
         expect(kyivHourOf(moved)).toBe(10);
+    });
+
+    it("enqueues an announcement sync after the quiet-hours deferral so 'Next reminder' is not stale", async () => {
+        vi.setSystemTime(new Date("2026-08-26T23:00:00Z")); // 02:00 Kyiv
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+
+        await runPingerForTest(fakeBot());
+
+        expect(enqueueSync).toHaveBeenCalledWith(7);
     });
 
     it("records every sent ping in the broadcast ping log", async () => {
