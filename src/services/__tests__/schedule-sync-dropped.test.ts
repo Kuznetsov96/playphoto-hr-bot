@@ -29,6 +29,7 @@ describe("schedule sync keeps PendingReply history", () => {
         );
     });
 
+    // Путь внутри syncTeam (~500 строк, Sheets, десяток репозиториев) с моками не вызвать: проверяем исходник.
     it("the inactive-staff path in team sync no longer deletes either", () => {
         const source = readFileSync(new URL("../schedule-sync.ts", import.meta.url), "utf8");
         expect(source).not.toMatch(/pendingReplyRepository\.deleteMany/);
