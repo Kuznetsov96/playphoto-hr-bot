@@ -32,6 +32,8 @@ export interface BroadcastStats {
     deliverySkipped: number;
     /** Когда рассылку сняли из чатов; null — не снималась. */
     withdrawnAt?: Date | null;
+    /** Число вложений рассылки (альбом — больше одного). */
+    attachmentCount?: number;
 }
 
 export interface BroadcastTarget {
@@ -774,6 +776,7 @@ export const broadcastService = {
             deliveryUncertain,
             deliverySkipped,
             withdrawnAt: broadcast?.withdrawnAt ?? null,
+            attachmentCount: broadcast?.attachmentKinds?.length ?? 0,
         };
     },
 
@@ -807,8 +810,12 @@ export const broadcastService = {
      * Повторный вызов ничего не делает.
      */
     async withdrawBroadcast(api: any, broadcastId: number, actorTelegramId: number | bigint): Promise<{ deleted: number; failed: number }> {
-        const existing = await broadcastRepository.findById(broadcastId);
-        if (existing?.withdrawnAt) return { deleted: 0, failed: 0 };
+        // Атомарный захват: параллельные вызовы не удалят сообщения дважды.
+        const claim = await broadcastRepository.updateMany(
+            { id: broadcastId, withdrawnAt: null },
+            { withdrawnAt: new Date(), withdrawnByTelegramId: BigInt(actorTelegramId) },
+        );
+        if (claim.count === 0) return { deleted: 0, failed: 0 };
 
         const [tracked, deliveries] = await Promise.all([
             trackedMessageRepository.findManyWithReplies(broadcastId),
@@ -837,10 +844,6 @@ export const broadcastService = {
         }
 
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
-        await broadcastRepository.update(broadcastId, {
-            withdrawnAt: new Date(),
-            withdrawnByTelegramId: BigInt(actorTelegramId),
-        });
         await enqueueAnnouncementSyncSafe(broadcastId);
 
         return { deleted, failed };

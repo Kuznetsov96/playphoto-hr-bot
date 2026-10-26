@@ -7,7 +7,6 @@ const broadcastFindById = vi.fn();
 const broadcastDelete = vi.fn();
 const trackedFindMany = vi.fn();
 const trackedUpdateMany = vi.fn();
-const trackedDeleteMany = vi.fn();
 const pendingDeleteMany = vi.fn();
 const deliveryFindSent = vi.fn();
 const queueAdd = vi.fn();
@@ -34,7 +33,6 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
         findManyWithReplies: trackedFindMany,
         updateMany: trackedUpdateMany,
-        deleteMany: trackedDeleteMany,
         findBroadcastIdsWithActivePings: activePingBroadcastIds,
     },
 }));
@@ -60,7 +58,7 @@ const { broadcastService } = await import("../broadcast.js");
 describe("withdrawBroadcast", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        broadcastFindById.mockResolvedValue({ id: 5, withdrawnAt: null });
+        broadcastUpdateMany.mockResolvedValue({ count: 1 });
         trackedFindMany.mockResolvedValue([
             { id: 1, chatId: -100n, messageId: 11, pendingReplies: [] },
             { id: 2, chatId: -200n, messageId: 22, pendingReplies: [] },
@@ -83,13 +81,12 @@ describe("withdrawBroadcast", () => {
         expect(api.deleteMessage).toHaveBeenCalledWith(-200, 22);
         expect(api.deleteMessage).toHaveBeenCalledWith(777, 33);
         expect(api.deleteMessage).toHaveBeenCalledTimes(3);
-        expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({
-            withdrawnAt: expect.any(Date),
-            withdrawnByTelegramId: 99n,
-        }));
+        expect(broadcastUpdateMany).toHaveBeenCalledWith(
+            { id: 5, withdrawnAt: null },
+            { withdrawnAt: expect.any(Date), withdrawnByTelegramId: 99n },
+        );
         expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
         expect(broadcastDelete).not.toHaveBeenCalled();
-        expect(trackedDeleteMany).not.toHaveBeenCalled();
         expect(pendingDeleteMany).not.toHaveBeenCalled();
     });
 
@@ -104,18 +101,33 @@ describe("withdrawBroadcast", () => {
         const result = await broadcastService.withdrawBroadcast(api, 5, 99);
 
         expect(result).toEqual({ deleted: 2, failed: 1 });
-        expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({ withdrawnAt: expect.any(Date) }));
+        expect(broadcastUpdateMany).toHaveBeenCalledWith({ id: 5, withdrawnAt: null }, expect.objectContaining({ withdrawnAt: expect.any(Date) }));
     });
 
     it("is idempotent: a second call deletes nothing", async () => {
-        broadcastFindById.mockResolvedValue({ id: 5, withdrawnAt: new Date() });
+        broadcastUpdateMany.mockResolvedValue({ count: 0 });
         const api = { deleteMessage: vi.fn() };
 
         const result = await broadcastService.withdrawBroadcast(api, 5, 99);
 
         expect(result).toEqual({ deleted: 0, failed: 0 });
         expect(api.deleteMessage).not.toHaveBeenCalled();
-        expect(broadcastUpdate).not.toHaveBeenCalled();
+        expect(trackedFindMany).not.toHaveBeenCalled();
+        expect(syncSafe).not.toHaveBeenCalled();
+    });
+
+    it("concurrent calls: only the one that wins the claim deletes messages", async () => {
+        broadcastUpdateMany.mockReset();
+        broadcastUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+        const api = { deleteMessage: vi.fn().mockResolvedValue(true) };
+
+        const results = await Promise.all([
+            broadcastService.withdrawBroadcast(api, 5, 99),
+            broadcastService.withdrawBroadcast(api, 5, 98),
+        ]);
+
+        expect(results).toEqual([{ deleted: 3, failed: 0 }, { deleted: 0, failed: 0 }]);
+        expect(api.deleteMessage).toHaveBeenCalledTimes(3);
     });
 
     it("does not export pruneCompletedArchive", () => {
