@@ -90,7 +90,7 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         include: {
             deliveries: true,
             pingLogs: true,
-            trackedMessages: { include: { pendingReplies: true } },
+            trackedMessages: { orderBy: { id: "asc" }, include: { pendingReplies: true } },
         },
     });
     if (!broadcast) return null;
@@ -301,6 +301,7 @@ export async function enqueueAllAnnouncementSyncs(): Promise<number> {
     }
     const { defaultQueue } = await import("../core/queue.js");
     let count = 0;
+    let enqueued = 0;
     let cursor: number | undefined;
     for (;;) {
         const page: { id: number }[] = await prisma.broadcast.findMany({
@@ -311,10 +312,15 @@ export async function enqueueAllAnnouncementSyncs(): Promise<number> {
         });
         if (page.length === 0) break;
         for (const { id } of page) {
-            const delay = SYNC_DELAY_MS + count * BACKFILL_STAGGER_MS;
+            const delay = SYNC_DELAY_MS + enqueued * BACKFILL_STAGGER_MS;
             const jobId = `announcement-sync-${id}`;
             const result = await addDebounced(defaultQueue, jobId, id, delay);
-            if (result === "active") await addDebounced(defaultQueue, `${jobId}-next`, id, delay);
+            // Задержка растёт только за реально поставленные задачи: уже ждущие не занимают слот.
+            if (result === "added") enqueued++;
+            if (result === "active") {
+                const next = await addDebounced(defaultQueue, `${jobId}-next`, id, delay);
+                if (next === "added") enqueued++;
+            }
             count++;
         }
         cursor = page[page.length - 1]!.id;

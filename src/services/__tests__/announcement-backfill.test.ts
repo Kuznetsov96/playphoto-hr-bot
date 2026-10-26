@@ -52,6 +52,15 @@ describe("enqueueAllAnnouncementSyncs", () => {
         expect(queueAdd).not.toHaveBeenCalled();
     });
 
+    it("staggers only jobs that were actually enqueued", async () => {
+        broadcastFindMany.mockResolvedValueOnce([{ id: 1 }, { id: 2 }, { id: 3 }]);
+        getJob.mockImplementation(async (jobId: string) =>
+            jobId === "announcement-sync-1" ? { getState: async () => "delayed" } : null);
+        await expect(enqueueAllAnnouncementSyncs()).resolves.toBe(3);
+        const delays = queueAdd.mock.calls.map(c => c[2].delay);
+        expect(delays).toEqual([3000, 3500]);
+    });
+
     it("returns 0 and logs the reason when the flag is off", async () => {
         flag.enabled = false;
         await expect(enqueueAllAnnouncementSyncs()).resolves.toBe(0);

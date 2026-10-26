@@ -199,6 +199,12 @@ describe("buildAnnouncementSnapshot", () => {
         expect((await buildAnnouncementSnapshot(7)).replyMode).toBe("NONE");
     });
 
+    it("loads tracked messages in id order so the buttonType fallback is deterministic", async () => {
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ buttonType: null, trackedMessages: [] }));
+        await buildAnnouncementSnapshot(7);
+        expect(broadcastFindUnique.mock.calls.at(-1)![0].include.trackedMessages).toMatchObject({ orderBy: { id: "asc" } });
+    });
+
     it("activity over the cap keeps the newest reminders and never drops STOPPED/WITHDRAWN", async () => {
         const pingLogs = Array.from({ length: 1200 }, (_, i) => ({
             chatId: 1n,
