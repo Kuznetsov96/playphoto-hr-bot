@@ -16,6 +16,17 @@ UPDATE "Broadcast" SET "publicId" = gen_random_uuid() WHERE "publicId" IS NULL;
 
 ALTER TABLE "Broadcast" ALTER COLUMN "publicId" SET NOT NULL;
 
+-- Вид кнопки у старых рассылок: берём у первого отслеживаемого сообщения.
+-- Без отслеживаемых сообщений остаётся NULL (в снимке это «без ответа»).
+UPDATE "Broadcast" b
+SET "buttonType" = (
+    SELECT t."buttonType" FROM "TrackedMessage" t
+    WHERE t."broadcastId" = b."id"
+    ORDER BY t."id" ASC
+    LIMIT 1
+)
+WHERE b."buttonType" IS NULL;
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Broadcast_publicId_key" ON "Broadcast"("publicId");
 

@@ -127,7 +127,7 @@ describe("buildAnnouncementSnapshot", () => {
 
         expect(snap.recipients).toHaveLength(2);
         expect(snap.recipients.every(r => r.deliveryStatus === undefined)).toBe(true);
-        expect(snap.recipients.map(r => r.replyStatus)).toEqual(["PENDING", "PENDING"]);
+        expect(snap.recipients.map(r => r.replyStatus)).toEqual(["PENDING", "DROPPED"]);
         expect(snap.recipients[0]!.displayName).toBe("Telegram user");
         expect(snap.chats).toEqual([{ chatId: "-100555", title: "Smile Park", deliveryStatus: "SENT", deliveredAt: T(1).toISOString() }]);
         expect(snap.nextReminderAt).toBe(T(30).toISOString());
@@ -177,6 +177,50 @@ describe("buildAnnouncementSnapshot", () => {
         broadcastFindUnique.mockResolvedValue(baseBroadcast({ buttonType: "preferences" }));
         snap = await buildAnnouncementSnapshot(7);
         expect(snap.replyMode).toBe("PREFERENCES");
+    });
+
+    it("old broadcast with null buttonType takes the kind from its first tracked message", async () => {
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({
+            buttonType: null,
+            trackedMessages: [
+                { chatId: 1n, buttonType: "preferences", nextPingAt: null, pingUntil: null, pendingReplies: [] },
+                { chatId: 2n, buttonType: "default", nextPingAt: null, pingUntil: null, pendingReplies: [] },
+            ],
+        }));
+        expect((await buildAnnouncementSnapshot(7)).replyMode).toBe("PREFERENCES");
+
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({
+            buttonType: null,
+            trackedMessages: [{ chatId: 1n, buttonType: "default", nextPingAt: null, pingUntil: null, pendingReplies: [] }],
+        }));
+        expect((await buildAnnouncementSnapshot(7)).replyMode).toBe("CONFIRM");
+
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ buttonType: null, trackedMessages: [] }));
+        expect((await buildAnnouncementSnapshot(7)).replyMode).toBe("NONE");
+    });
+
+    it("activity over the cap keeps the newest reminders and never drops STOPPED/WITHDRAWN", async () => {
+        const pingLogs = Array.from({ length: 1200 }, (_, i) => ({
+            chatId: 1n,
+            sentAt: new Date(T(0).getTime() + (i + 1) * 120_000),
+        }));
+        const lastPing = pingLogs[1199]!.sentAt;
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({
+            pingLogs,
+            remindersStoppedAt: new Date(lastPing.getTime() + 60_000),
+            withdrawnAt: new Date(lastPing.getTime() + 120_000),
+        }));
+
+        const snap = await buildAnnouncementSnapshot(7);
+
+        expect(snap.activity).toHaveLength(1000);
+        expect(snap.activity[0]!.kind).toBe("SENT");
+        expect(snap.activity.at(-1)!.kind).toBe("WITHDRAWN");
+        expect(snap.activity.at(-2)!.kind).toBe("STOPPED");
+        expect(snap.activity.at(-3)!.at).toBe(lastPing.toISOString());
+        expect(snap.activity.filter(a => a.kind === "REMINDED")).toHaveLength(997);
+        const ats = snap.activity.map(a => a.at);
+        expect([...ats].sort()).toEqual(ats);
     });
 
     it("activity: pings grouped by minute, stop and withdraw recorded; message truncated", async () => {

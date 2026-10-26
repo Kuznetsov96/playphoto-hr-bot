@@ -21,10 +21,11 @@ function deliveryStatus(raw: string): SnapshotDeliveryStatus {
     return DELIVERY_STATUSES.has(raw) ? (raw as SnapshotDeliveryStatus) : "PENDING";
 }
 
-/** dropped (снята системой) остаётся в списке как PENDING: вебапп сам уводит неактивных в «Left the team». */
+/** dropped = бот перестал спрашивать этого человека (вышла из чата, заблокировала, неактуальное пожелание). */
 function replyStatus(raw: string): SnapshotReplyStatus {
     if (raw === "confirmed") return "CONFIRMED";
     if (raw === "declined") return "DECLINED";
+    if (raw === "dropped") return "DROPPED";
     return "PENDING";
 }
 
@@ -64,6 +65,17 @@ function topicUrl(thread: { chatId: bigint; topicId: number } | null | undefined
 /** Необязательное поле-дата: ключа нет, если даты нет (exactOptionalPropertyTypes). */
 function opt<K extends string>(key: K, date: Date | null | undefined): { [P in K]?: string } {
     return date ? ({ [key]: date.toISOString() } as { [P in K]?: string }) : {};
+}
+
+const ACTIVITY_LIMIT = 1000;
+
+/** Лимит вебаппа: оставляем САМЫЕ НОВЫЕ записи; SENT/DELIVERED/STOPPED/WITHDRAWN не отбрасываем никогда. */
+function capActivity(sorted: AnnouncementActivity[]): AnnouncementActivity[] {
+    if (sorted.length <= ACTIVITY_LIMIT) return sorted;
+    const pinned = sorted.filter(a => a.kind !== "REMINDED");
+    const reminders = sorted.filter(a => a.kind === "REMINDED");
+    const keep = new Set(reminders.slice(-Math.max(0, ACTIVITY_LIMIT - pinned.length)));
+    return sorted.filter(a => a.kind !== "REMINDED" || keep.has(a)).slice(-ACTIVITY_LIMIT);
 }
 
 export async function buildAnnouncementSnapshot(broadcastId: number): Promise<AnnouncementSnapshot> {
@@ -194,15 +206,18 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         });
     }
     activity.sort((a, b) => a.at.localeCompare(b.at));
+    const cappedActivity = capActivity(activity);
 
     const nextPings = broadcast.trackedMessages.map(t => t.nextPingAt).filter((d): d is Date => !!d);
     const pingUntils = broadcast.trackedMessages.map(t => t.pingUntil).filter((d): d is Date => !!d);
     const minDate = (dates: Date[]) => dates.length ? new Date(Math.min(...dates.map(d => d.getTime()))) : undefined;
     const maxDate = (dates: Date[]) => dates.length ? new Date(Math.max(...dates.map(d => d.getTime()))) : undefined;
 
+    // У старых рассылок Broadcast.buttonType может быть null — берём вид кнопки у отслеживаемого сообщения.
+    const buttonType = broadcast.buttonType ?? broadcast.trackedMessages[0]?.buttonType ?? null;
     const replyMode: AnnouncementSnapshot["replyMode"] =
-        broadcast.buttonType === "preferences" ? "PREFERENCES"
-            : broadcast.buttonType === "none" || (broadcast.buttonType == null && broadcast.trackedMessages.length === 0) ? "NONE"
+        buttonType === "preferences" ? "PREFERENCES"
+            : buttonType === "none" || buttonType == null ? "NONE"
                 : "CONFIRM";
 
     const snapshot: AnnouncementSnapshot = {
@@ -225,7 +240,7 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         ...opt("reminderUntil", maxDate(pingUntils)),
         recipients: [...recipients.values()].slice(0, 5000),
         chats: chats.slice(0, 1000),
-        activity: activity.slice(0, 1000),
+        activity: cappedActivity,
     };
     return { publicId: broadcast.publicId, snapshot };
 }

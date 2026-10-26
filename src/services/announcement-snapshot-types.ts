@@ -1,6 +1,6 @@
 /** Снимок рассылки для вебаппа — зеркало AnnouncementSnapshotDto (apps/api/src/announcements/dto). */
 export type SnapshotDeliveryStatus = "PENDING" | "SENDING" | "SENT" | "FAILED" | "SKIPPED";
-export type SnapshotReplyStatus = "PENDING" | "CONFIRMED" | "DECLINED";
+export type SnapshotReplyStatus = "PENDING" | "CONFIRMED" | "DECLINED" | "DROPPED";
 
 export interface AnnouncementRecipient {
     telegramId: string;
