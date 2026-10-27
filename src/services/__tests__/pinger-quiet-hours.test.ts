@@ -19,6 +19,12 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
         update: trackedUpdate,
     },
 }));
+vi.mock("../../repositories/broadcast-repository.js", () => ({
+    broadcastRepository: { findDueManualReminders: vi.fn().mockResolvedValue([]), update: vi.fn() },
+}));
+vi.mock("../../repositories/broadcast-action-repository.js", () => ({
+    broadcastActionRepository: {},
+}));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany, updateMany: pendingUpdateMany },
 }));

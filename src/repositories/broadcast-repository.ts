@@ -38,6 +38,14 @@ export class BroadcastRepository {
         });
     }
 
+    /** Отложенные ручные напоминания, чей час настал. */
+    async findDueManualReminders(now: Date) {
+        return prisma.broadcast.findMany({
+            where: { manualRemindAt: { lte: now } },
+            select: { id: true, manualRemindActionId: true, withdrawnAt: true, remindersStoppedAt: true },
+        });
+    }
+
     async updateMany(where: Prisma.BroadcastWhereInput, data: Prisma.BroadcastUpdateManyMutationInput) {
         return prisma.broadcast.updateMany({ where, data });
     }

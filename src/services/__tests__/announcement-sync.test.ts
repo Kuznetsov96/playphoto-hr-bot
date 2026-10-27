@@ -51,6 +51,10 @@ function baseBroadcast(overrides: Record<string, unknown> = {}) {
         buttonType: "default",
         attachmentKinds: ["photo"],
         remindersStoppedAt: null,
+        remindersStoppedByName: null,
+        withdrawnByName: null,
+        textAsCaption: false,
+        actionLogs: [],
         deliveries: [],
         pingLogs: [],
         trackedMessages: [],
@@ -85,6 +89,28 @@ describe("buildAnnouncementSnapshot", () => {
         expect(snap.authorName).toBe("Віталій");
         expect(snap.authorTelegramId).toBeUndefined();
         expect(snap.activity[0]).toMatchObject({ kind: "SENT", actorName: "Віталій" });
+    });
+
+    it("carries textAsCaption, the stopper, the withdrawer name and the done actions", async () => {
+        const A1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const A2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({
+            textAsCaption: true,
+            remindersStoppedAt: T(5),
+            remindersStoppedByName: "Olha",
+            withdrawnAt: T(9),
+            withdrawnByName: "Ivan",
+            actionLogs: [{ publicId: A1 }, { publicId: A2 }],
+        }));
+
+        const snap = await buildAnnouncementSnapshot(7);
+
+        expect(snap.textAsCaption).toBe(true);
+        expect(snap.remindersStoppedByName).toBe("Olha");
+        expect(snap.withdrawnByName).toBe("Ivan");
+        expect(snap.actionsDone).toEqual([A1, A2]);
+        expect(snap.activity).toContainEqual(expect.objectContaining({ kind: "STOPPED", actorName: "Olha" }));
+        expect(snap.activity).toContainEqual(expect.objectContaining({ kind: "WITHDRAWN", actorName: "Ivan" }));
     });
 
     it("personal broadcast with default buttons: statuses, decline reason, delivery error", async () => {

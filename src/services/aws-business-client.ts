@@ -971,6 +971,38 @@ const announcementCommandSchema = z.discriminatedUnion("kind", [
         attachments: z.array(announcementAttachmentSchema).default([]),
         textAsCaption: z.boolean().default(false),
     }),
+    // Действия над отправленной рассылкой (фаза 3). `publicId` — действия, не рассылки.
+    z.object({
+        kind: z.literal("REMIND"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        notBefore: z.string().nullable().default(null),
+    }),
+    z.object({
+        kind: z.literal("STOP"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        actorName: z.string(),
+    }),
+    z.object({
+        kind: z.literal("WITHDRAW"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        actorName: z.string(),
+    }),
+    z.object({
+        kind: z.literal("EDIT"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        messageHtml: z.string(),
+        reconfirm: z.boolean().default(false),
+        textAsCaption: z.boolean().default(false),
+        replacements: z.array(z.object({
+            position: z.number().int().min(0),
+            attachment: announcementAttachmentSchema,
+        })).default([]),
+        actorName: z.string(),
+    }),
 ]);
 
 const announcementUnknownCommandSchema = z.object({
@@ -1238,10 +1270,14 @@ export class AwsBusinessClient {
         };
     }
 
-    async ackAnnouncementCommandAccepted(publicId: string): Promise<void> {
+    /** `result` — только у WITHDRAW: сколько чатов очищено и у кого сообщение осталось. */
+    async ackAnnouncementCommandAccepted(
+        publicId: string,
+        result?: { deletedChats: number; stayed: string[] },
+    ): Promise<void> {
         await this.request(
             `/announcements/commands/${encodeURIComponent(publicId)}/accepted`,
-            { method: "POST" },
+            { method: "POST", ...(result ? { body: JSON.stringify({ result }) } : {}) },
             undefined,
             { expectsBody: false },
         );

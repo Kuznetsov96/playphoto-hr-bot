@@ -63,9 +63,44 @@ model Broadcast {
   mediaFileIds          Json?
   /// Текст рассылки ушёл подписью к единственному вложению (решает вебапп).
   textAsCaption         Boolean             @default(false)
+  /// Ручное «Remind» из вебаппа, отложенное на утро: пингер шлёт на первом тике после этого момента.
+  manualRemindAt        DateTime?
+  /// publicId действия, ради которого стоит manualRemindAt (отметки «кому ушло» привязаны к нему).
+  manualRemindActionId  String?             @db.Uuid
+  /// Кто из вебаппа остановил напоминания.
+  remindersStoppedByName String?
+  /// Кто из вебаппа отозвал рассылку (у такой withdrawnByTelegramId пуст).
+  withdrawnByName       String?
   trackedMessages TrackedMessage[]
   deliveries      BroadcastDelivery[]
   pingLogs        BroadcastPingLog[]
+  actionLogs      BroadcastActionLog[]
+  reminderMarks   BroadcastReminderMark[]
+}
+
+/// Выполненные действия вебаппа (REMIND/STOP/WITHDRAW/EDIT): повторная выдача по publicId только подтверждается.
+model BroadcastActionLog {
+  publicId    String    @id @db.Uuid
+  broadcastId Int
+  kind        String
+  doneAt      DateTime  @default(now())
+  /// Итог действия, чтобы повторный ack нёс тот же ответ (WITHDRAW: deletedChats/stayed).
+  result      Json?
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId, doneAt])
+}
+
+/// Кому ручное напоминание этого действия уже ушло: повтор команды второго не шлёт.
+model BroadcastReminderMark {
+  broadcastId    Int
+  chatId         BigInt
+  actionPublicId String    @db.Uuid
+  createdAt      DateTime  @default(now())
+  broadcast      Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@id([actionPublicId, chatId])
+  @@index([broadcastId])
 }
 
 /// Каждое отправленное напоминание — для истории рассылки в вебаппе.

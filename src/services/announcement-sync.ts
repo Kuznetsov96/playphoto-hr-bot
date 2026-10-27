@@ -1,4 +1,5 @@
 import prisma from "../db/core.js";
+import { ACTIONS_DONE_LIMIT } from "../repositories/broadcast-action-repository.js";
 import logger from "../core/logger.js";
 import { ANNOUNCEMENTS_SYNC_ENABLED, TEAM_CHATS } from "../config.js";
 import { awsBusinessClient } from "./aws-business-client.js";
@@ -90,6 +91,7 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         include: {
             deliveries: true,
             pingLogs: true,
+            actionLogs: { orderBy: [{ doneAt: "desc" }, { publicId: "desc" }], take: ACTIONS_DONE_LIMIT, select: { publicId: true } },
             trackedMessages: { orderBy: { id: "asc" }, include: { pendingReplies: true } },
         },
     });
@@ -194,11 +196,18 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         activity.push({ at: group.at.toISOString(), kind: "REMINDED", count: group.chats.size });
     }
     if (broadcast.remindersStoppedAt) {
-        activity.push({ at: broadcast.remindersStoppedAt.toISOString(), kind: "STOPPED" });
+        activity.push({
+            at: broadcast.remindersStoppedAt.toISOString(),
+            kind: "STOPPED",
+            ...(broadcast.remindersStoppedByName ? { actorName: broadcast.remindersStoppedByName.slice(0, 300) } : {}),
+        });
     }
-    const withdrawnByName = broadcast.withdrawnByTelegramId != null
-        ? displayNameOf(userById.get(String(broadcast.withdrawnByTelegramId)))
-        : undefined;
+    // Из вебаппа имя пришло с командой; у админки бота его собирают по Telegram id.
+    const withdrawnByName = broadcast.withdrawnByName
+        ? broadcast.withdrawnByName.slice(0, 300)
+        : broadcast.withdrawnByTelegramId != null
+            ? displayNameOf(userById.get(String(broadcast.withdrawnByTelegramId)))
+            : undefined;
     if (broadcast.withdrawnAt) {
         activity.push({
             at: broadcast.withdrawnAt.toISOString(),
@@ -237,6 +246,9 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         ...opt("withdrawnAt", broadcast.withdrawnAt),
         ...(withdrawnByName ? { withdrawnByName } : {}),
         ...opt("remindersStoppedAt", broadcast.remindersStoppedAt),
+        ...(broadcast.remindersStoppedByName ? { remindersStoppedByName: broadcast.remindersStoppedByName.slice(0, 300) } : {}),
+        textAsCaption: broadcast.textAsCaption,
+        actionsDone: broadcast.actionLogs.map(a => a.publicId),
         ...opt("nextReminderAt", minDate(nextPings)),
         ...opt("reminderUntil", maxDate(pingUntils)),
         recipients: [...recipients.values()].slice(0, 5000),

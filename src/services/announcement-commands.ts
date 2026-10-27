@@ -4,6 +4,10 @@ import { ANNOUNCEMENTS_COMMANDS_ENABLED } from "../config.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
 import { broadcastRepository } from "../repositories/broadcast-repository.js";
+import { broadcastActionRepository } from "../repositories/broadcast-action-repository.js";
+import { nextAllowedPingTime } from "../utils/quiet-hours.js";
+import { remindBroadcast } from "./pinger.js";
+import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
 import { isBotBlocked } from "../utils/bot-blocked.js";
 import { awsBusinessClient, type AnnouncementAttachment, type AnnouncementCommand } from "./aws-business-client.js";
 import { broadcastService } from "./broadcast.js";
@@ -105,9 +109,14 @@ export class AnnouncementCommandDispatcher {
     /** Применяет одну команду и шлёт ack. Никогда не бросает. */
     private async applyOne(api: Api, command: AnnouncementCommand): Promise<boolean> {
         let failure: string | null = null;
+        let result: ActionAckResult | undefined;
         try {
             if (command.kind === "SEND") await this.send(command);
             else if (command.kind === "TEST") await this.test(api, command);
+            else if (command.kind === "REMIND") await this.remind(api, command);
+            else if (command.kind === "STOP") await this.stop(command);
+            else if (command.kind === "WITHDRAW") result = await this.withdraw(api, command);
+            else if (command.kind === "EDIT") throw new CommandFailure("EDIT_NOT_IMPLEMENTED");
             else failure = `UNKNOWN_KIND: ${command.receivedKind}`.slice(0, 200);
         } catch (error) {
             failure = error instanceof CommandFailure ? error.code : "SEND_FAILED";
@@ -122,7 +131,10 @@ export class AnnouncementCommandDispatcher {
         }
 
         try {
-            if (failure === null) await awsBusinessClient.ackAnnouncementCommandAccepted(command.publicId);
+            if (failure === null) {
+                if (result) await awsBusinessClient.ackAnnouncementCommandAccepted(command.publicId, result);
+                else await awsBusinessClient.ackAnnouncementCommandAccepted(command.publicId);
+            }
             else await awsBusinessClient.ackAnnouncementCommandFailed(command.publicId, failure);
         } catch (error) {
             // Потерянный ack не страшен: вебапп предложит команду снова, а дубль гасит publicId.
@@ -224,6 +236,64 @@ export class AnnouncementCommandDispatcher {
         }
     }
 
+    /**
+     * «Remind» из вебаппа. Идемпотентно по publicId действия: журнал действий
+     * закрывает повтор целиком, отметки по чатам — повтор после частичной отправки.
+     * Ночью (или при `notBefore` в будущем) только ставит `manualRemindAt`: пингер
+     * пошлёт на первом тике после него. Расписание автонапоминаний не трогаем.
+     */
+    private async remind(api: Api, command: Extract<AnnouncementCommand, { kind: "REMIND" }>): Promise<void> {
+        if (await broadcastActionRepository.findLog(command.publicId)) return;
+        const broadcast = await requireBroadcast(command.announcementPublicId);
+        // Снята или остановлена между выдачей и исполнением: напоминать уже нечего.
+        if (broadcast.withdrawnAt || broadcast.remindersStoppedAt) {
+            await broadcastActionRepository.markDone(command.publicId, broadcast.id, "REMIND");
+            return;
+        }
+
+        const now = new Date();
+        const notBefore = command.notBefore ? new Date(command.notBefore) : null;
+        const earliest = notBefore && !Number.isNaN(notBefore.getTime()) && notBefore > now ? notBefore : now;
+        const at = new Date(Math.max(earliest.getTime(), nextAllowedPingTime(now).getTime()));
+
+        if (at.getTime() > now.getTime()) {
+            // Лиз вернулся уже после постановки: время не двигаем.
+            if (broadcast.manualRemindActionId === command.publicId && broadcast.manualRemindAt) return;
+            // Более раннее отложенное действие вытеснено новым: закрываем его, а не оставляем висеть.
+            if (broadcast.manualRemindActionId && broadcast.manualRemindActionId !== command.publicId) {
+                await broadcastActionRepository.markDone(broadcast.manualRemindActionId, broadcast.id, "REMIND");
+            }
+            await broadcastRepository.update(broadcast.id, { manualRemindAt: at, manualRemindActionId: command.publicId });
+            await enqueueAnnouncementSyncSafe(broadcast.id);
+            return;
+        }
+
+        const { failed } = await remindBroadcast({ api }, broadcast.id, command.publicId, now);
+        // Не всем ушло: вебапп повторит (1/2/5/15 мин), отметки не дадут продублировать ушедшее.
+        if (failed > 0) throw new CommandFailure("REMIND_FAILED");
+        await broadcastActionRepository.markDone(command.publicId, broadcast.id, "REMIND");
+    }
+
+    private async stop(command: Extract<AnnouncementCommand, { kind: "STOP" }>): Promise<void> {
+        if (await broadcastActionRepository.findLog(command.publicId)) return;
+        const broadcast = await requireBroadcast(command.announcementPublicId);
+        // Уже остановлены (в вебаппе или админкой бота): имя первого остановившего не затираем.
+        if (!broadcast.remindersStoppedAt) await broadcastService.stopPinging(broadcast.id, command.actorName);
+        await broadcastActionRepository.markDone(command.publicId, broadcast.id, "STOP");
+    }
+
+    /** Итог отзыва сохраняется в журнале: повторный ack несёт тот же результат, а не «0 чатов». */
+    private async withdraw(api: Api, command: Extract<AnnouncementCommand, { kind: "WITHDRAW" }>): Promise<ActionAckResult> {
+        const logged = await broadcastActionRepository.findLog(command.publicId);
+        if (logged) return parseStoredResult(logged.result);
+        const broadcast = await requireBroadcast(command.announcementPublicId);
+        const outcome = await broadcastService.withdrawBroadcast(api, broadcast.id, { name: command.actorName });
+        const result: ActionAckResult = { deletedChats: outcome.deletedChats, stayed: outcome.stayed };
+        await broadcastActionRepository.markDone(command.publicId, broadcast.id, "WITHDRAW", result);
+        await enqueueAnnouncementSyncSafe(broadcast.id);
+        return result;
+    }
+
     private async test(api: Api, command: Extract<AnnouncementCommand, { kind: "TEST" }>): Promise<void> {
         try {
             await broadcastService.sendTestBroadcast(
@@ -252,6 +322,22 @@ function toMediaItems(attachments: AnnouncementAttachment[]): BroadcastMediaItem
         height: a.height,
         durationSec: a.durationSec,
     }));
+}
+
+type ActionAckResult = { deletedChats: number; stayed: string[] };
+
+function parseStoredResult(value: unknown): ActionAckResult {
+    const raw = (value ?? {}) as { deletedChats?: unknown; stayed?: unknown };
+    return {
+        deletedChats: typeof raw.deletedChats === "number" ? raw.deletedChats : 0,
+        stayed: Array.isArray(raw.stayed) ? raw.stayed.map(String) : [],
+    };
+}
+
+async function requireBroadcast(announcementPublicId: string) {
+    const broadcast = await broadcastRepository.findByPublicId(announcementPublicId);
+    if (!broadcast) throw new CommandFailure("BROADCAST_NOT_FOUND");
+    return broadcast;
 }
 
 class CommandFailure extends Error {

@@ -52,6 +52,21 @@ export class TrackedMessageRepository {
         });
     }
 
+    /** Адресаты ручного напоминания: все сообщения рассылки с теми, кто ещё не ответил. */
+    async findForManualRemind(broadcastId: number) {
+        return prisma.trackedMessage.findMany({
+            where: { broadcastId },
+            orderBy: { id: "asc" },
+            include: {
+                broadcast: true,
+                pendingReplies: {
+                    where: { status: "pending" },
+                    include: { user: true }
+                }
+            }
+        });
+    }
+
     async update(id: number, data: Prisma.TrackedMessageUpdateInput) {
         return prisma.trackedMessage.update({
             where: { id },

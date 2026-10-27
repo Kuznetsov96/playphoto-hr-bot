@@ -64,8 +64,9 @@ export class BroadcastDeliveryRepository {
     /** Сообщения, реально ушедшие в чаты: по ним withdraw удаляет сообщения. */
     async findSentMessages(broadcastId: number) {
         return prisma.broadcastDelivery.findMany({
-            where: { broadcastId, messageId: { not: null } },
-            select: { chatId: true, messageId: true },
+            // Часть сообщений могла уйти и у доставки, упавшей посреди (messageId пуст).
+            where: { broadcastId, OR: [{ messageId: { not: null } }, { partMessageIds: { isEmpty: false } }] },
+            select: { chatId: true, messageId: true, partMessageIds: true },
         });
     }
 

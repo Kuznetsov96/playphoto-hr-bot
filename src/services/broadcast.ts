@@ -319,6 +319,14 @@ async function resolveAlreadyFilledCheck(prefMonthName: string, prefMonthYear: n
     }
 }
 
+/** Итог отзыва: сообщения (`deleted`/`failed`) и чаты (`deletedChats`/`stayed` — Telegram id чатов, где что-то осталось). */
+export interface WithdrawResult {
+    deleted: number;
+    failed: number;
+    deletedChats: number;
+    stayed: string[];
+}
+
 export const broadcastService = {
     async getBroadcastTargetStats(target: BroadcastTarget): Promise<{ chats: number, users: number }> {
         const { chats, users } = await this.resolveTargets(target);
@@ -917,8 +925,17 @@ export const broadcastService = {
         return await broadcastRepository.findRecent(limit);
     },
 
-    async stopPinging(broadcastId: number) {
-        await broadcastRepository.update(broadcastId, { remindersStoppedAt: new Date() });
+    /**
+     * Остановка напоминаний. `actorName` — кто нажал в вебаппе (у бота-админа
+     * имени нет). Отложенное ручное напоминание отменяется вместе с автоматическими.
+     */
+    async stopPinging(broadcastId: number, actorName?: string) {
+        await broadcastRepository.update(broadcastId, {
+            remindersStoppedAt: new Date(),
+            ...(actorName ? { remindersStoppedByName: actorName } : {}),
+            manualRemindAt: null,
+            manualRemindActionId: null,
+        });
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
         await enqueueAnnouncementSyncSafe(broadcastId);
     },
@@ -941,45 +958,81 @@ export const broadcastService = {
      * «Withdraw»: убрать сообщения из чатов, но оставить историю. Строки не
      * удаляются; рассылка помечается снятой, напоминания останавливаются.
      * Повторный вызов ничего не делает.
+     *
+     * Удаляются ВСЕ сообщения чата: рассылка, части альбома/вложений
+     * (`partMessageIds`, в них же переподтверждения), последнее напоминание.
+     * Чат «остался», если не удалось убрать хотя бы одно из его сообщений
+     * (Telegram не удаляет сообщения старше 48 часов).
+     * `actor`: Telegram id админа бота или имя из вебаппа.
      */
-    async withdrawBroadcast(api: any, broadcastId: number, actorTelegramId: number | bigint): Promise<{ deleted: number; failed: number }> {
+    async withdrawBroadcast(
+        api: any,
+        broadcastId: number,
+        actor: number | bigint | { name: string },
+    ): Promise<WithdrawResult> {
+        const byName = typeof actor === "object" && actor !== null && "name" in actor;
         // Атомарный захват: параллельные вызовы не удалят сообщения дважды.
         const claim = await broadcastRepository.updateMany(
             { id: broadcastId, withdrawnAt: null },
-            { withdrawnAt: new Date(), withdrawnByTelegramId: BigInt(actorTelegramId) },
+            {
+                withdrawnAt: new Date(),
+                ...(byName ? { withdrawnByName: actor.name } : { withdrawnByTelegramId: BigInt(actor as number | bigint) }),
+                manualRemindAt: null,
+                manualRemindActionId: null,
+            },
         );
-        if (claim.count === 0) return { deleted: 0, failed: 0 };
+        if (claim.count === 0) return { deleted: 0, failed: 0, deletedChats: 0, stayed: [] };
 
         const [tracked, deliveries] = await Promise.all([
             trackedMessageRepository.findManyWithReplies(broadcastId),
             broadcastDeliveryRepository.findSentMessages(broadcastId),
         ]);
 
-        const targets = new Map<string, { chatId: number; messageId: number }>();
+        const byChat = new Map<string, { chatId: number; messageIds: Set<number> }>();
+        const add = (chatId: bigint, messageId: number | null | undefined) => {
+            if (messageId == null) return;
+            const key = String(chatId);
+            const entry = byChat.get(key) ?? { chatId: Number(chatId), messageIds: new Set<number>() };
+            entry.messageIds.add(messageId);
+            byChat.set(key, entry);
+        };
         for (const t of tracked) {
-            targets.set(`${t.chatId}:${t.messageId}`, { chatId: Number(t.chatId), messageId: t.messageId });
+            add(t.chatId, t.messageId);
+            add(t.chatId, t.lastPingMsgId);
         }
         for (const d of deliveries) {
-            if (d.messageId == null) continue;
-            targets.set(`${d.chatId}:${d.messageId}`, { chatId: Number(d.chatId), messageId: d.messageId });
+            add(d.chatId, d.messageId);
+            for (const id of d.partMessageIds ?? []) add(d.chatId, id);
         }
 
         let deleted = 0;
         let failed = 0;
-        for (const { chatId, messageId } of targets.values()) {
-            try {
-                await api.deleteMessage(chatId, messageId);
-                deleted++;
-            } catch (e) {
-                // Старше 48 часов или уже удалено — Telegram не даст убрать.
-                failed++;
+        let deletedChats = 0;
+        const stayed: string[] = [];
+        for (const [key, { chatId, messageIds }] of byChat) {
+            let chatFailed = false;
+            for (const messageId of messageIds) {
+                try {
+                    await api.deleteMessage(chatId, messageId);
+                    deleted++;
+                } catch (e: any) {
+                    // Уже удалено руками — сообщения в чате и так нет.
+                    if (/message to delete not found/iu.test(String(e?.description ?? ""))) {
+                        deleted++;
+                        continue;
+                    }
+                    // Старше 48 часов или нет прав — Telegram не даст убрать.
+                    failed++;
+                    chatFailed = true;
+                }
             }
+            if (chatFailed) stayed.push(key); else deletedChats++;
         }
 
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
         await enqueueAnnouncementSyncSafe(broadcastId);
 
-        return { deleted, failed };
+        return { deleted, failed, deletedChats, stayed };
     },
 
     async getPendingUsers(broadcastId: number): Promise<string[]> {

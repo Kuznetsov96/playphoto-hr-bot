@@ -99,4 +99,33 @@ describe("AwsBusinessClient announcement commands", () => {
             `https://api.example.test/api/v1/internal/bot/announcements/commands/${ID}/failed`,
             expect.objectContaining({ method: "POST", body: JSON.stringify({ error: "BOT_BLOCKED" }) }));
     });
+
+    it("parses REMIND, STOP, WITHDRAW and EDIT; a future kind stays UNKNOWN", async () => {
+        const A = "22222222-2222-4222-8222-222222222222";
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+            items: [
+                { kind: "REMIND", publicId: ID, announcementPublicId: A, notBefore: "2026-10-28T07:00:00.000Z" },
+                { kind: "STOP", publicId: ID, announcementPublicId: A, actorName: "Olha" },
+                { kind: "WITHDRAW", publicId: ID, announcementPublicId: A, actorName: "Olha" },
+                { kind: "EDIT", publicId: ID, announcementPublicId: A, messageHtml: "x", reconfirm: true, textAsCaption: false, replacements: [], actorName: "Olha" },
+                { kind: "FUTURE_ACTION", publicId: ID },
+            ],
+        }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        const result = await new AwsBusinessClient().listPendingAnnouncementCommands(20);
+
+        expect(result.items.map(i => i.kind)).toEqual(["REMIND", "STOP", "WITHDRAW", "EDIT", "UNKNOWN"]);
+    });
+
+    it("sends the WITHDRAW result in the accepted body", async () => {
+        vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 204 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        await new AwsBusinessClient().ackAnnouncementCommandAccepted(ID, { deletedChats: 3, stayed: ["10"] });
+
+        expect(fetch).toHaveBeenCalledWith(
+            `https://api.example.test/api/v1/internal/bot/announcements/commands/${ID}/accepted`,
+            expect.objectContaining({ body: JSON.stringify({ result: { deletedChats: 3, stayed: ["10"] } }) }));
+    });
 });

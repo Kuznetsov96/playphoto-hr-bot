@@ -44,6 +44,11 @@ export interface AnnouncementSnapshot {
     withdrawnAt?: string;
     withdrawnByName?: string;
     remindersStoppedAt?: string;
+    remindersStoppedByName?: string;
+    /** Текст ушёл подписью к вложению. */
+    textAsCaption?: boolean;
+    /** publicId выполненных действий вебаппа (последние 50). */
+    actionsDone?: string[];
     nextReminderAt?: string;
     reminderUntil?: string;
     recipients: AnnouncementRecipient[];

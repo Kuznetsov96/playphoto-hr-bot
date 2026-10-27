@@ -76,14 +76,14 @@ describe("withdrawBroadcast", () => {
 
         const result = await broadcastService.withdrawBroadcast(api, 5, 99);
 
-        expect(result).toEqual({ deleted: 3, failed: 0 });
+        expect(result).toEqual({ deleted: 3, failed: 0, deletedChats: 3, stayed: [] });
         expect(api.deleteMessage).toHaveBeenCalledWith(-100, 11);
         expect(api.deleteMessage).toHaveBeenCalledWith(-200, 22);
         expect(api.deleteMessage).toHaveBeenCalledWith(777, 33);
         expect(api.deleteMessage).toHaveBeenCalledTimes(3);
         expect(broadcastUpdateMany).toHaveBeenCalledWith(
             { id: 5, withdrawnAt: null },
-            { withdrawnAt: expect.any(Date), withdrawnByTelegramId: 99n },
+            { withdrawnAt: expect.any(Date), withdrawnByTelegramId: 99n, manualRemindAt: null, manualRemindActionId: null },
         );
         expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
         expect(broadcastDelete).not.toHaveBeenCalled();
@@ -100,7 +100,8 @@ describe("withdrawBroadcast", () => {
 
         const result = await broadcastService.withdrawBroadcast(api, 5, 99);
 
-        expect(result).toEqual({ deleted: 2, failed: 1 });
+        expect(result).toMatchObject({ deleted: 2, failed: 1, deletedChats: 2 });
+        expect(result.stayed).toHaveLength(1);
         expect(broadcastUpdateMany).toHaveBeenCalledWith({ id: 5, withdrawnAt: null }, expect.objectContaining({ withdrawnAt: expect.any(Date) }));
     });
 
@@ -110,7 +111,7 @@ describe("withdrawBroadcast", () => {
 
         const result = await broadcastService.withdrawBroadcast(api, 5, 99);
 
-        expect(result).toEqual({ deleted: 0, failed: 0 });
+        expect(result).toEqual({ deleted: 0, failed: 0, deletedChats: 0, stayed: [] });
         expect(api.deleteMessage).not.toHaveBeenCalled();
         expect(trackedFindMany).not.toHaveBeenCalled();
         expect(syncSafe).not.toHaveBeenCalled();
@@ -126,8 +127,56 @@ describe("withdrawBroadcast", () => {
             broadcastService.withdrawBroadcast(api, 5, 98),
         ]);
 
-        expect(results).toEqual([{ deleted: 3, failed: 0 }, { deleted: 0, failed: 0 }]);
+        expect(results).toEqual([
+            { deleted: 3, failed: 0, deletedChats: 3, stayed: [] },
+            { deleted: 0, failed: 0, deletedChats: 0, stayed: [] },
+        ]);
         expect(api.deleteMessage).toHaveBeenCalledTimes(3);
+    });
+
+    it("deletes parts, the delivery message and the last reminder of a chat; reports stayed chats by id", async () => {
+        trackedFindMany.mockResolvedValue([
+            { id: 1, chatId: 10n, messageId: 100, lastPingMsgId: 150, pendingReplies: [] },
+            { id: 2, chatId: 20n, messageId: 200, lastPingMsgId: null, pendingReplies: [] },
+        ]);
+        deliveryFindSent.mockResolvedValue([
+            { chatId: 10n, messageId: 100, partMessageIds: [100, 101, 102] },
+            { chatId: 20n, messageId: 200, partMessageIds: [200, 201] },
+            { chatId: 30n, messageId: null, partMessageIds: [300] }, // упала посреди альбома
+        ]);
+        const api = {
+            deleteMessage: vi.fn(async (chatId: number, messageId: number) => {
+                if (chatId === 20 && messageId === 201) throw new Error("message can't be deleted");
+                return true;
+            }),
+        };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, { name: "Olha" });
+
+        expect(api.deleteMessage.mock.calls.map(c => c.join(":")).sort()).toEqual(
+            ["10:100", "10:101", "10:102", "10:150", "20:200", "20:201", "30:300"].sort(),
+        );
+        // Чат «остался», если не ушло хотя бы одно из его сообщений.
+        expect(result).toEqual({ deleted: 6, failed: 1, deletedChats: 2, stayed: ["20"] });
+        expect(broadcastUpdateMany).toHaveBeenCalledWith(
+            { id: 5, withdrawnAt: null },
+            expect.objectContaining({ withdrawnByName: "Olha" }),
+        );
+    });
+
+    it("counts an already-deleted message as gone, not as stayed", async () => {
+        trackedFindMany.mockResolvedValue([{ id: 1, chatId: 10n, messageId: 100, pendingReplies: [] }]);
+        deliveryFindSent.mockResolvedValue([]);
+        const api = { deleteMessage: vi.fn().mockRejectedValue({ description: "Bad Request: message to delete not found" }) };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, 99);
+
+        expect(result).toMatchObject({ deletedChats: 1, stayed: [] });
+    });
+
+    it("stopPinging by a webapp actor records the name", async () => {
+        await broadcastService.stopPinging(5, "Olha");
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({ remindersStoppedByName: "Olha" }));
     });
 
     it("does not export pruneCompletedArchive", () => {
@@ -147,7 +196,7 @@ describe("reminder stops and creation metadata", () => {
 
     it("stopPinging records remindersStoppedAt", async () => {
         await broadcastService.stopPinging(5);
-        expect(broadcastUpdate).toHaveBeenCalledWith(5, { remindersStoppedAt: expect.any(Date) });
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null });
         expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
     });
 
