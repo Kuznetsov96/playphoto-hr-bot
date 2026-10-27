@@ -1039,26 +1039,6 @@ export const broadcastService = {
         await enqueueAnnouncementSyncSafe(broadcastId);
     },
 
-    async stopAllPings(): Promise<number> {
-        const affectedIds = await trackedMessageRepository.findBroadcastIdsWithActivePings();
-        // Отложенные ручные напоминания (в том числе у рассылок без автонапоминаний) тоже отменяются.
-        const manualIds = await broadcastRepository.findIdsWithManualRemind();
-        await broadcastRepository.updateMany(
-            { trackedMessages: { some: { nextPingAt: { not: null } } } },
-            { remindersStoppedAt: new Date(), manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null }
-        );
-        await broadcastRepository.updateMany(
-            { manualRemindAt: { not: null } },
-            { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null }
-        );
-        const result = await trackedMessageRepository.updateMany(
-            { nextPingAt: { not: null } },
-            { nextPingAt: null }
-        );
-        for (const id of new Set([...affectedIds, ...manualIds])) await enqueueAnnouncementSyncSafe(id);
-        return result.count;
-    },
-
     /**
      * «Withdraw»: убрать сообщения из чатов, но оставить историю. Строки не
      * удаляются; рассылка помечается снятой, напоминания останавливаются.

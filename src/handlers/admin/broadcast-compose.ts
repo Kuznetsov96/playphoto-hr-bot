@@ -6,6 +6,8 @@ import { visibleLength } from "../../services/announcement-layout.js";
 import { userRepository } from "../../repositories/user-repository.js";
 import { getMessageHtml } from "./utils.js";
 import { formatLocation } from "../../utils/location-label.js";
+import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
+import { TRAINING_MINIAPP_BASE_URL } from "../../config.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { audit } from "../../core/audit-logger.js";
 import logger from "../../core/logger.js";
@@ -85,6 +87,12 @@ async function loadCatalogue(): Promise<AnnouncementRecipientCatalogue | null> {
         logger.warn({ err: error }, "Announcement recipient catalogue failed");
         return null;
     }
+}
+
+/** Ссылка на рассылку в вебаппе; адрес вебаппа не задан (или не https) — кнопки нет. */
+export function announcementWebUrl(publicId: string | undefined | null): string | null {
+    if (!publicId || !TRAINING_MINIAPP_BASE_URL) return null;
+    return `${TRAINING_MINIAPP_BASE_URL.replace(/\/+$/u, "")}/owner/announcements/${encodeURIComponent(publicId)}`;
 }
 
 async function show(ctx: MyContext, text: string, kb: InlineKeyboard, forceNew = false) {
@@ -520,7 +528,10 @@ broadcastComposeHandlers.callbackQuery("b_send", async (ctx) => {
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
         if (ctx.session.adminFlow === "BROADCAST") delete ctx.session.adminFlow;
-        const kb = new InlineKeyboard().text("New announcement", "br_new").row().text("Back to announcements", "br_to_hub");
+        const kb = new InlineKeyboard();
+        const webUrl = announcementWebUrl(publicId);
+        if (webUrl) kb.url("Open in web", webUrl).row();
+        kb.text("New announcement", "br_new").row().text("Back to announcements", "br_to_hub");
         await show(ctx, `Sent to ${peopleLabel(count)}.`, kb, true);
     } catch (e: any) {
         data.step = "PREVIEW";
@@ -537,7 +548,7 @@ broadcastComposeHandlers.callbackQuery("br_cancel", async (ctx) => {
     delete ctx.session.broadcastDraft;
     if (ctx.session.adminFlow === "BROADCAST") delete ctx.session.adminFlow;
     await ctx.answerCallbackQuery("Cancelled.").catch(() => { });
-    await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
+    await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-sys-broadcast"], "admin-broadcast-hub");
 });
 
 // Стикер приходит не через общий фильтр сообщений админки (он протекал бы в ответы поддержки,

@@ -291,28 +291,6 @@ describe("reminder stops and creation metadata", () => {
         expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
     });
 
-    it("stopAllPings records remindersStoppedAt on broadcasts with active pings", async () => {
-        const count = await broadcastService.stopAllPings();
-        expect(count).toBe(4);
-        expect(broadcastUpdateMany).toHaveBeenCalledWith(
-            { trackedMessages: { some: { nextPingAt: { not: null } } } },
-            { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null },
-        );
-        // Рассылки запрашиваются ДО обнуления nextPingAt и синкаются все.
-        expect(syncSafe).toHaveBeenCalledWith(3);
-        expect(syncSafe).toHaveBeenCalledWith(8);
-    });
-
-    it("stopAllPings also cancels deferred manual reminders, even without auto pings", async () => {
-        broadcastManualIds.mockResolvedValue([11]);
-        await broadcastService.stopAllPings();
-        expect(broadcastUpdateMany).toHaveBeenCalledWith(
-            { manualRemindAt: { not: null } },
-            { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null },
-        );
-        expect(syncSafe).toHaveBeenCalledWith(11);
-    });
-
     it("createBroadcast stores button type and attachment kinds", async () => {
         await broadcastService.createBroadcast(
             {}, 1, "text", { type: "hub" },

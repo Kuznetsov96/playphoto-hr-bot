@@ -16,6 +16,11 @@ vi.mock("../../../repositories/user-repository.js", () => ({
     userRepository: { findWithStaffProfileByTelegramId: vi.fn().mockResolvedValue({ firstName: "Ira", lastName: "K", username: null, staffProfile: { fullName: "Ira Kovalenko" } }) },
 }));
 vi.mock("../../../middleware/role-check.js", () => ({ getUserAdminRole: getRole }));
+const webBase: { value: string | undefined } = { value: undefined };
+vi.mock("../../../config.js", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    get TRAINING_MINIAPP_BASE_URL() { return webBase.value; },
+}));
 vi.mock("../../../core/logger.js", () => ({ default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../../../core/audit-logger.js", () => ({ audit: vi.fn() }));
 vi.mock("../../../utils/screen-manager.js", () => ({ ScreenManager: { renderScreen, goBack } }));
@@ -78,6 +83,7 @@ async function toMessageStep(ctx: any, reply: "none" | "confirm" = "none") {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    webBase.value = undefined;
     getRole.mockResolvedValue("SUPER_ADMIN");
     getCatalogue.mockResolvedValue(catalogue);
     resolveRecipients.mockResolvedValue({ count: 34, telegramIds: [] });
@@ -144,7 +150,7 @@ describe("To step", () => {
         expect(ctx.session.broadcastData).toBeUndefined();
         expect(ctx.session.adminFlow).toBeUndefined();
         expect(ctx.answerCallbackQuery).toHaveBeenLastCalledWith("Cancelled.");
-        expect(goBack).toHaveBeenCalledWith(ctx, expect.any(String), "admin-broadcast-hub");
+        expect(goBack).toHaveBeenCalledWith(ctx, "Announcements", "admin-broadcast-hub");
     });
 });
 
@@ -449,6 +455,27 @@ describe("Preview and send", () => {
         expect(text).toBe("Sent to 35 people.");
         expect(labels(kb)).toEqual(["New announcement", "Back to announcements"]);
         expect(ctx.session.broadcastData).toBeUndefined();
+    });
+
+    async function sendOne(ctx: any) {
+        await toMessageStep(ctx);
+        await send(ctx, { text: "Hi" });
+        await tap(ctx, "br_msg_next");
+        await tap(ctx, "b_send");
+    }
+
+    it("success screen links to the announcement in the web app when the address is set", async () => {
+        webBase.value = "https://web.example.com/";
+        createBotAnnouncement.mockResolvedValue({ broadcastId: 5, publicId: "pub-123", count: 35 });
+        await sendOne(makeCtx());
+        const { kb } = lastScreen();
+        expect(labels(kb)).toEqual(["Open in web", "New announcement", "Back to announcements"]);
+        expect(kb.inline_keyboard[0]![0]!.url).toBe("https://web.example.com/owner/announcements/pub-123");
+    });
+
+    it("success screen has no web button when the address is not set", async () => {
+        await sendOne(makeCtx());
+        expect(labels(lastScreen().kb)).toEqual(["New announcement", "Back to announcements"]);
     });
 
     it("reminders are off when no reply is asked", async () => {

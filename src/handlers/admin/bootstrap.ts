@@ -23,7 +23,7 @@ export async function registerAdminMenusHierarchy(bot: any) {
     } = await import("./system.js");
 
     const { 
-        adminBroadcastHubMenu, adminBroadcastListMenu, adminBroadcastArchiveMenu, adminBroadcastManageMenu 
+        adminBroadcastHubMenu 
     } = await import("./broadcast.js");
 
     const { 
@@ -58,9 +58,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     
 
     bot.use(adminBroadcastHubMenu);
-    bot.use(adminBroadcastListMenu);
-    bot.use(adminBroadcastArchiveMenu);
-    bot.use(adminBroadcastManageMenu);
     
     bot.use(adminStatsMenu);
     bot.use(adminStatsCityMenu);
@@ -90,9 +87,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     
     
     menuRegistry.register(adminBroadcastHubMenu);
-    menuRegistry.register(adminBroadcastListMenu);
-    menuRegistry.register(adminBroadcastArchiveMenu);
-    menuRegistry.register(adminBroadcastManageMenu);
     
     menuRegistry.register(adminStatsMenu);
     menuRegistry.register(adminStatsCityMenu);
@@ -120,9 +114,6 @@ export async function registerAdminMenusHierarchy(bot: any) {
     
     adminMenu.register(adminSystemMenu);
     adminMenu.register(adminBroadcastHubMenu);
-    adminBroadcastHubMenu.register(adminBroadcastListMenu);
-    adminBroadcastHubMenu.register(adminBroadcastArchiveMenu);
-    adminBroadcastHubMenu.register(adminBroadcastManageMenu);
     
     adminMenu.register(adminStatsMenu);
     adminStatsMenu.register(adminStatsCityMenu);
