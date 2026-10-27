@@ -78,6 +78,10 @@ const TASK_CALLBACKS = [
     "tas_city_Lviv",
     "task_del_exec_abc_2026-09-20",
     "b_send",
+    "br_new",
+    "br_tc_0",
+    "br_cancel",
+    "br_tl_11111111-1111-4111-8111-111111111111",
 ];
 
 describe("task callback role guard", () => {

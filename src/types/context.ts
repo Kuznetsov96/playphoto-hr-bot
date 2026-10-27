@@ -156,6 +156,11 @@ export interface SessionData {
         media: BroadcastMediaItem[];
         /** Одноразовая строка над счётчиками («лишнее не добавлено»). */
         notice?: string;
+        /** Города последнего показанного списка: кнопка несёт индекс в нём, а не в свежем каталоге. */
+        cityList?: string[];
+        /** Последний media_group_id и сообщение с экраном «Message»: части альбома правят его на месте. */
+        lastGroupId?: string;
+        screenMessageId?: number;
     };
 
     supportData?: {

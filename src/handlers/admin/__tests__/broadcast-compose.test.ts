@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const renderScreen = vi.fn();
+const goBack = vi.fn();
 const createBotAnnouncement = vi.fn();
 const sendTestBroadcast = vi.fn();
 const resolveRecipients = vi.fn();
@@ -17,7 +18,7 @@ vi.mock("../../../repositories/user-repository.js", () => ({
 vi.mock("../../../middleware/role-check.js", () => ({ getUserAdminRole: getRole }));
 vi.mock("../../../core/logger.js", () => ({ default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../../../core/audit-logger.js", () => ({ audit: vi.fn() }));
-vi.mock("../../../utils/screen-manager.js", () => ({ ScreenManager: { renderScreen, goBack: vi.fn() } }));
+vi.mock("../../../utils/screen-manager.js", () => ({ ScreenManager: { renderScreen, goBack } }));
 
 const { startStatelessBroadcast, handleBroadcastContent, broadcastComposeHandlers } = await import("../broadcast-compose.js");
 const { nightLine, describeArrival } = await import("../broadcast-helpers.js");
@@ -104,6 +105,17 @@ describe("To step", () => {
         expect(labels(lastScreen().kb)).toEqual(["Kyiv", "✓ Lviv", "Continue (1)", "Back"]);
     });
 
+    it("a city tap uses the list shown, not a freshly loaded catalogue", async () => {
+        const ctx = makeCtx();
+        await startStatelessBroadcast(ctx);
+        await tap(ctx, "br_to_city");
+        getCatalogue.mockClear();
+        getCatalogue.mockResolvedValue({ ...catalogue, cities: [catalogue.cities[1], catalogue.cities[0]] });
+        await tap(ctx, "br_tc_0");
+        expect(ctx.session.broadcastData.cityNames).toEqual(["Kyiv"]);
+        expect(getCatalogue).toHaveBeenCalledTimes(1);
+    });
+
     it("By location selects by public id", async () => {
         const ctx = makeCtx();
         await startStatelessBroadcast(ctx);
@@ -131,6 +143,8 @@ describe("To step", () => {
         await tap(ctx, "br_cancel");
         expect(ctx.session.broadcastData).toBeUndefined();
         expect(ctx.session.adminFlow).toBeUndefined();
+        expect(ctx.answerCallbackQuery).toHaveBeenLastCalledWith("Cancelled.");
+        expect(goBack).toHaveBeenCalledWith(ctx, expect.any(String), "admin-broadcast-hub");
     });
 });
 
@@ -145,6 +159,16 @@ describe("Reply step", () => {
         expect(labels(lastScreen().kb)[0]).toBe("Reminders: Off");
         await tap(ctx, "br_reply_next");
         expect(lastScreen().text).toContain("Send the text and attachments. Photos and videos — up to 10, files — up to 10.");
+    });
+
+    it("Back on the reminders screen returns to the reply choice", async () => {
+        const ctx = makeCtx();
+        await startStatelessBroadcast(ctx);
+        await tap(ctx, "br_to_all");
+        await tap(ctx, "br_reply_confirm");
+        const back = lastScreen().kb.inline_keyboard.flat().find((b: any) => b.text === "Back");
+        await tap(ctx, back.callback_data);
+        expect(labels(lastScreen().kb)).toEqual(["Ask to confirm", "No reply needed", "Back"]);
     });
 
     it("No reply needed goes straight to the message", async () => {
@@ -183,12 +207,31 @@ describe("Message step", () => {
         expect(lastScreen().text).toContain("Files: up to 10");
     });
 
-    it.each(["voice", "video_note", "audio", "animation", "sticker"])("refuses %s", async (kind) => {
+    it.each(["voice", "video_note", "audio", "animation"])("refuses %s", async (kind) => {
         const ctx = makeCtx();
         await toMessageStep(ctx);
         await send(ctx, { [kind]: { file_id: "x" } });
         expect(ctx.reply).toHaveBeenCalledWith("This type isn't supported. Send it as a file.");
         expect(ctx.session.broadcastData.media).toHaveLength(0);
+    });
+
+    it("refuses a sticker on the message step only (own handler, not the shared filter)", async () => {
+        const ctx = makeCtx();
+        await toMessageStep(ctx);
+        ctx.callbackQuery = undefined;
+        ctx.message = { message_id: 7, sticker: { file_id: "s" } };
+        ctx.update = { update_id: 2, message: ctx.message };
+        const next = vi.fn();
+        await broadcastComposeHandlers.middleware()(ctx, next);
+        expect(ctx.reply).toHaveBeenCalledWith("This type isn't supported. Send it as a file.");
+        expect(next).not.toHaveBeenCalled();
+        const other = makeCtx({});
+        other.message = { message_id: 8, sticker: { file_id: "s" } };
+        other.update = { update_id: 3, message: other.message };
+        const next2 = vi.fn();
+        await broadcastComposeHandlers.middleware()(other, next2);
+        expect(next2).toHaveBeenCalled();
+        expect(other.reply).not.toHaveBeenCalled();
     });
 
     it("refuses text over 4096 with the numbers", async () => {
@@ -215,6 +258,22 @@ describe("Message step", () => {
         expect(ctx.session.broadcastData.media.map((m: any) => m.fileId)).toEqual(["a", "b", "c"]);
         expect(ctx.session.broadcastData.textHtml).toBe("<b>Hello</b> team");
         expect(lastScreen().text).toContain("Photos and videos: 3 of 10");
+    });
+
+    it("a 10-part album sends one new screen and edits it for the rest", async () => {
+        renderScreen.mockImplementation(async (c: any) => { (c.session.messagesToDelete ??= []).push(500); });
+        const ctx = makeCtx();
+        ctx.api.editMessageText = vi.fn().mockResolvedValue(true);
+        await toMessageStep(ctx);
+        renderScreen.mockClear();
+        for (let i = 0; i < 10; i++) await send(ctx, { media_group_id: "g", photo: [{ file_id: `p${i}`, width: 1, height: 1 }] });
+        expect(renderScreen).toHaveBeenCalledTimes(1);
+        expect(ctx.api.editMessageText).toHaveBeenCalledTimes(9);
+        expect(ctx.api.editMessageText.mock.calls.at(-1)![0]).toBe(99);
+        expect(ctx.api.editMessageText.mock.calls.at(-1)![1]).toBe(500);
+        expect(ctx.api.editMessageText.mock.calls.at(-1)![2]).toContain("Photos and videos: 10 of 10");
+        expect(ctx.session.broadcastData.media).toHaveLength(10);
+        renderScreen.mockReset();
     });
 
     it("Clear drops text and attachments; Continue needs content", async () => {
@@ -339,6 +398,24 @@ describe("Preview and send", () => {
         expect(args[5]).toBe(true);
         expect(args[6]).toBe(true);
         expect(createBotAnnouncement).not.toHaveBeenCalled();
+        // Предпросмотр перерисован ниже тестовых сообщений.
+        const call = renderScreen.mock.calls.at(-1)!;
+        expect(call[1]).toContain("<b>Preview</b>");
+        expect(call[3]).toEqual({ forceNew: true });
+        expect(labels(call[2])).toContain("Send to 34 people");
+    });
+
+    it("a failed test shows the reason on the redrawn Preview", async () => {
+        sendTestBroadcast.mockRejectedValue(new Error("boom"));
+        const ctx = makeCtx();
+        await toMessageStep(ctx);
+        await send(ctx, { text: "Hi" });
+        await tap(ctx, "br_msg_next");
+        await tap(ctx, "b_test");
+        const call = renderScreen.mock.calls.at(-1)!;
+        expect(call[1]).toContain("<b>Preview</b>");
+        expect(call[1]).toContain("Couldn't send the test: boom");
+        expect(call[3]).toEqual({ forceNew: true });
     });
 
     it("Send creates the announcement with the exact fields and shows the result", async () => {

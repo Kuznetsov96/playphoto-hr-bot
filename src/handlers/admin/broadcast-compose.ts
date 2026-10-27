@@ -134,6 +134,7 @@ async function renderSelection(ctx: MyContext, kind: "city" | "loc") {
     }
     const kb = new InlineKeyboard();
     if (kind === "city") {
+        data.cityList = catalogue.cities.map(city => city.name);
         catalogue.cities.forEach((city, index) => {
             const mark = data.cityNames.includes(city.name) ? "✓ " : "";
             kb.text(`${mark}${city.name}`, `br_tc_${index}`).row();
@@ -162,7 +163,7 @@ async function renderReply(ctx: MyContext, confirmOptions = false) {
     if (confirmOptions) {
         kb.text(`Reminders: ${data.reminders ? "On" : "Off"}`, "br_rem_toggle").row()
             .text("Continue", "br_reply_next").row()
-            .text("Back", "br_reply_back");
+            .text("Back", "br_reply_choice");
         await show(ctx, "<b>Reply</b>\nPeople get Confirm and Decline buttons.\n\nReminders ask again if they haven't answered.", kb);
         return;
     }
@@ -179,20 +180,29 @@ function messageScreenText(data: Draft): string {
     return lines.join("\n");
 }
 
-async function renderMessage(ctx: MyContext, forceNew = false) {
-    const data = ctx.session.broadcastData;
-    if (!data) return;
-    data.step = "MESSAGE";
+function messageScreen(data: Draft) {
     const kb = new InlineKeyboard()
         .text("Continue", "br_msg_next").row()
         .text("Clear", "br_msg_clear").row()
         .text("Back", "br_msg_back");
     const text = messageScreenText(data);
     delete data.notice;
-    await show(ctx, text, kb, forceNew);
+    return { text, kb };
 }
 
-async function renderPreview(ctx: MyContext, forceNew = false) {
+async function renderMessage(ctx: MyContext, forceNew = false) {
+    const data = ctx.session.broadcastData;
+    if (!data) return;
+    data.step = "MESSAGE";
+    if (!forceNew) delete data.lastGroupId;
+    const { text, kb } = messageScreen(data);
+    await show(ctx, text, kb, forceNew);
+    // Запоминаем сообщение-экран: части альбома правят его на месте, а не шлют новое.
+    const id = ctx.session.messagesToDelete?.at(-1);
+    if (id !== undefined) data.screenMessageId = id;
+}
+
+async function renderPreview(ctx: MyContext, forceNew = false, notice?: string) {
     const data = ctx.session.broadcastData;
     if (!data) return;
     data.step = "PREVIEW";
@@ -211,6 +221,7 @@ async function renderPreview(ctx: MyContext, forceNew = false) {
     const night = nightLine(new Date());
     if (night) lines.push(night);
     lines.push("", countLine(count));
+    if (notice) lines.push("", escape(notice));
 
     const kb = new InlineKeyboard().text("Send test to me", "b_test").row();
     if (count !== null && count > 0) kb.text(`Send to ${peopleLabel(count)}`, "b_send").row();
@@ -256,10 +267,9 @@ broadcastComposeHandlers.callbackQuery(/^br_to_(city|loc)$/, async (ctx) => {
 broadcastComposeHandlers.callbackQuery(/^br_tc_(\d+)$/, async (ctx) => {
     const data = ctx.session.broadcastData;
     if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
-    const catalogue = await loadCatalogue();
-    const city = catalogue?.cities[Number(ctx.match![1])];
-    if (!city) return ctx.answerCallbackQuery("The list changed. Open it again.").catch(() => { });
-    data.cityNames = data.cityNames.includes(city.name) ? data.cityNames.filter(n => n !== city.name) : [...data.cityNames, city.name];
+    const name = data.cityList?.[Number(ctx.match![1])];
+    if (!name) return ctx.answerCallbackQuery("The list changed. Open it again.").catch(() => { });
+    data.cityNames = data.cityNames.includes(name) ? data.cityNames.filter(n => n !== name) : [...data.cityNames, name];
     await renderSelection(ctx, "city");
     await ctx.answerCallbackQuery().catch(() => { });
 });
@@ -319,6 +329,13 @@ broadcastComposeHandlers.callbackQuery("br_reply_next", async (ctx) => {
     if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     data.replyMode = "CONFIRM";
     await renderMessage(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+broadcastComposeHandlers.callbackQuery("br_reply_choice", async (ctx) => {
+    const data = ctx.session.broadcastData;
+    if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
+    await renderReply(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -426,6 +443,16 @@ export async function handleBroadcastContent(ctx: MyContext) {
     if (hasText) data.textHtml = html;
 
     try { await ctx.deleteMessage(); } catch { }
+    const groupId = message.media_group_id;
+    if (groupId && groupId === data.lastGroupId && data.screenMessageId !== undefined) {
+        // Следующая часть того же альбома: экран правим на месте, новое сообщение не шлём.
+        const { text, kb } = messageScreen(data);
+        await ctx.api.editMessageText(ctx.chat!.id, data.screenMessageId, text, {
+            parse_mode: "HTML", reply_markup: kb, link_preview_options: { is_disabled: true },
+        }).catch(() => { });
+        return true;
+    }
+    if (groupId) data.lastGroupId = groupId; else delete data.lastGroupId;
     await renderMessage(ctx, true);
     return true;
 }
@@ -455,9 +482,11 @@ broadcastComposeHandlers.callbackQuery("b_test", async (ctx) => {
             layout.textAsCaption, true,
         );
         audit({ event: "broadcast_test", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id });
+        // Предпросмотр заново — под тестовыми сообщениями, чтобы «Send to N people» был перед глазами.
+        await renderPreview(ctx, true);
     } catch (e: any) {
         logger.error({ err: e }, "Announcement test failed");
-        await ctx.reply(`Couldn't send the test: ${e.message}`);
+        await renderPreview(ctx, true, `Couldn't send the test: ${e.message}`);
     }
 });
 
@@ -508,5 +537,14 @@ broadcastComposeHandlers.callbackQuery("br_cancel", async (ctx) => {
     delete ctx.session.broadcastDraft;
     if (ctx.session.adminFlow === "BROADCAST") delete ctx.session.adminFlow;
     await ctx.answerCallbackQuery("Cancelled.").catch(() => { });
-    await show(ctx, "Announcement cancelled.", new InlineKeyboard().text("Back to announcements", "br_to_hub"));
+    await ScreenManager.goBack(ctx, "📢 <b>Broadcast Hub</b>", "admin-broadcast-hub");
+});
+
+// Стикер приходит не через общий фильтр сообщений админки (он протекал бы в ответы поддержки,
+// массовые задачи и т.д.): отказ живёт здесь и только на шаге «Message».
+broadcastComposeHandlers.on("message:sticker", async (ctx, next) => {
+    const data = ctx.session.broadcastData;
+    if (!data || ctx.session.adminFlow !== "BROADCAST" || data.step !== "MESSAGE" || ctx.chat?.type !== "private") return next();
+    if (!(await isAnnouncementAdmin(ctx))) return next();
+    await ctx.reply(UNSUPPORTED);
 });

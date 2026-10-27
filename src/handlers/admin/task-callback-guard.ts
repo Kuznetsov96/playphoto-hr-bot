@@ -12,9 +12,9 @@ export const TASK_CALLBACK_ROLES = ['SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT'] as c
 
 /**
  * Префиксы колбэков задач и рассылок внутри adminHandlers.
- * `b_` — это b_test и b_send, то есть отправка рассылки на всю сеть.
+ * `b_` — это b_test и b_send, то есть отправка рассылки на всю сеть; `br_` — экраны создания рассылки.
  */
-const GUARDED_PREFIXES = ["tbk_", "tas_", "task_", "b_"] as const;
+const GUARDED_PREFIXES = ["tbk_", "tas_", "task_", "b_", "br_"] as const;
 
 /**
  * Колбэки, которые внешне похожи на задачи, но принадлежат стороне сотрудника
