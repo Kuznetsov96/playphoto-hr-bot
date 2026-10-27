@@ -56,7 +56,16 @@ type EditableMessage = { message_id?: number; photo?: Array<{ file_id: string }>
  */
 export async function applyAnnouncementEdit(api: any, broadcastId: number, command: EditCommand): Promise<EditOutcome> {
     const none: EditOutcome = { edited: 0, failed: 0, reconfirmed: 0 };
-    if (await broadcastActionRepository.findLog(command.publicId)) return none;
+    const logged = await broadcastActionRepository.findLog(command.publicId);
+    if (logged) {
+        // Повтор после потерянного ack: итог тот же, что был, а не «0 чатов».
+        const stored = (logged.result ?? {}) as { edited?: unknown; failed?: unknown };
+        return {
+            edited: typeof stored.edited === "number" ? stored.edited : 0,
+            failed: typeof stored.failed === "number" ? stored.failed : 0,
+            reconfirmed: 0,
+        };
+    }
 
     const broadcast = await broadcastRepository.findById(broadcastId);
     if (!broadcast) throw new AnnouncementEditFailure("BROADCAST_NOT_FOUND");
@@ -185,6 +194,11 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
             if (carriesText) textHandledByMedia = true;
         }
         if (delivery.messageId == null || textHandledByMedia) return;
+        // Текст отдельным сообщением есть (старый непустой), а новый пуст и служебной строки нет:
+        // записать пустоту в чат нельзя, молча пропустить значит оставить старый текст.
+        if (!textAsCaption && !messageText && hasVisibleText(broadcast.messageText ?? "")) {
+            throw new Error("EMPTY_TEXT_MESSAGE");
+        }
         try {
             if (textAsCaption) {
                 await api.editMessageCaption(chatId, delivery.messageId, {
@@ -287,7 +301,10 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
         messageText: command.messageHtml,
         ...(command.replacements.length > 0 ? { attachmentKinds: kinds } : {}),
     });
-    await broadcastActionRepository.markDone(command.publicId, broadcastId, "EDIT");
+    await broadcastActionRepository.markDone(command.publicId, broadcastId, "EDIT", {
+        edited: outcome.edited,
+        failed: outcome.failed,
+    });
     await enqueueAnnouncementSyncSafe(broadcastId);
     return outcome;
 }

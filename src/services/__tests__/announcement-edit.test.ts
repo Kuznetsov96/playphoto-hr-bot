@@ -106,7 +106,7 @@ describe("applyAnnouncementEdit text", () => {
         });
         expect(api.editMessageText).not.toHaveBeenCalled();
         expect(broadcastUpdate).toHaveBeenCalledWith(7, { messageText: "<b>New</b>" });
-        expect(markDone).toHaveBeenCalledWith(ACTION, 7, "EDIT");
+        expect(markDone).toHaveBeenCalledWith(ACTION, 7, "EDIT", { edited: 1, failed: 0 });
     });
 
     it("edits text with the keyboard and no link preview", async () => {
@@ -144,6 +144,26 @@ describe("applyAnnouncementEdit text", () => {
         await applyAnnouncementEdit(api, 7, command());
         expect(api.editMessageText).toHaveBeenCalledWith(10, 55, "<b>New</b>", expect.objectContaining({ parse_mode: "HTML" }));
         expect(api.editMessageMedia).not.toHaveBeenCalled();
+    });
+
+    it("a redelivered action returns the stored per-chat result", async () => {
+        findLog.mockResolvedValue({ publicId: ACTION, result: { edited: 4, failed: 2 } });
+        const outcome = await applyAnnouncementEdit(api, 7, command());
+        expect(outcome).toMatchObject({ edited: 4, failed: 2 });
+    });
+
+    it("fails the chat instead of skipping when a separate text message would be cleared", async () => {
+        findById.mockResolvedValue(broadcastRow({ buttonType: "none", messageText: "Old text", attachmentKinds: ["photo", "photo"] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [101, 102])]);
+        await expect(applyAnnouncementEdit(api, 7, command({ messageHtml: "<b> </b>" }))).rejects.toBeInstanceOf(AnnouncementEditFailure);
+        expect(api.editMessageText).not.toHaveBeenCalled();
+    });
+
+    it("an attachment-only broadcast with no text keeps editing without error", async () => {
+        findById.mockResolvedValue(broadcastRow({ buttonType: "none", messageText: "", attachmentKinds: ["photo", "photo"] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [101, 102])]);
+        const outcome = await applyAnnouncementEdit(api, 7, command({ messageHtml: "" }));
+        expect(outcome).toMatchObject({ edited: 1, failed: 0 });
     });
 
     it("a redelivered action in the log does nothing", async () => {
@@ -388,7 +408,7 @@ describe("applyAnnouncementEdit outcome", () => {
         api.editMessageText.mockRejectedValueOnce({ description: "Bad Request: chat not found" });
         const outcome = await applyAnnouncementEdit(api, 7, command());
         expect(outcome).toMatchObject({ edited: 1, failed: 1 });
-        expect(markDone).toHaveBeenCalledWith(ACTION, 7, "EDIT");
+        expect(markDone).toHaveBeenCalledWith(ACTION, 7, "EDIT", { edited: 1, failed: 1 });
     });
 
     it("fails when no chat succeeded and keeps the action open", async () => {

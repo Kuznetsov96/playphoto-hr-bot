@@ -1270,10 +1270,10 @@ export class AwsBusinessClient {
         };
     }
 
-    /** `result` — только у WITHDRAW: сколько чатов очищено и у кого сообщение осталось. */
+    /** `result`: у WITHDRAW — сколько чатов очищено и у кого сообщение осталось; у EDIT — в скольких чатах обновлено и в скольких нет. */
     async ackAnnouncementCommandAccepted(
         publicId: string,
-        result?: { deletedChats: number; stayed: string[] },
+        result?: { deletedChats: number; stayed: string[] } | { edited: number; failed: number },
     ): Promise<void> {
         await this.request(
             `/announcements/commands/${encodeURIComponent(publicId)}/accepted`,

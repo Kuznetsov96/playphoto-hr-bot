@@ -117,7 +117,7 @@ export class AnnouncementCommandDispatcher {
             else if (command.kind === "REMIND") await this.remind(api, command);
             else if (command.kind === "STOP") await this.stop(command);
             else if (command.kind === "WITHDRAW") result = await this.withdraw(api, command);
-            else if (command.kind === "EDIT") await this.edit(api, command);
+            else if (command.kind === "EDIT") result = await this.edit(api, command);
             else failure = `UNKNOWN_KIND: ${command.receivedKind}`.slice(0, 200);
         } catch (error) {
             failure = error instanceof CommandFailure || error instanceof AnnouncementEditFailure ? error.code : "SEND_FAILED";
@@ -296,9 +296,10 @@ export class AnnouncementCommandDispatcher {
     }
 
     /** Правка текста и вложений, по желанию с переподтверждением; журнал и отметки по чатам — в самой правке. */
-    private async edit(api: Api, command: Extract<AnnouncementCommand, { kind: "EDIT" }>): Promise<void> {
+    private async edit(api: Api, command: Extract<AnnouncementCommand, { kind: "EDIT" }>): Promise<ActionAckResult> {
         const broadcast = await requireBroadcast(command.announcementPublicId);
-        await applyAnnouncementEdit(api, broadcast.id, command);
+        const { edited, failed } = await applyAnnouncementEdit(api, broadcast.id, command);
+        return { edited, failed };
     }
 
     private async test(api: Api, command: Extract<AnnouncementCommand, { kind: "TEST" }>): Promise<void> {
@@ -331,9 +332,9 @@ function toMediaItems(attachments: AnnouncementAttachment[]): BroadcastMediaItem
     }));
 }
 
-type ActionAckResult = { deletedChats: number; stayed: string[] };
+type ActionAckResult = { deletedChats: number; stayed: string[] } | { edited: number; failed: number };
 
-function parseStoredResult(value: unknown): ActionAckResult {
+function parseStoredResult(value: unknown): { deletedChats: number; stayed: string[] } {
     const raw = (value ?? {}) as { deletedChats?: unknown; stayed?: unknown };
     return {
         deletedChats: typeof raw.deletedChats === "number" ? raw.deletedChats : 0,

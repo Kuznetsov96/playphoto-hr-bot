@@ -168,7 +168,13 @@ describe("EDIT and future kinds", () => {
         applyAnnouncementEdit.mockResolvedValue({ edited: 1, failed: 0, reconfirmed: 0 });
         await run(edit);
         expect(applyAnnouncementEdit).toHaveBeenCalledWith(api, 7, expect.objectContaining({ kind: "EDIT", publicId: ACTION }));
-        expect(ackAccepted).toHaveBeenCalledWith(ACTION);
+        expect(ackAccepted).toHaveBeenCalledWith(ACTION, { edited: 1, failed: 0 });
+    });
+
+    it("EDIT that missed some chats reports the counts in the ack", async () => {
+        applyAnnouncementEdit.mockResolvedValue({ edited: 3, failed: 2, reconfirmed: 0 });
+        await run(edit);
+        expect(ackAccepted).toHaveBeenCalledWith(ACTION, { edited: 3, failed: 2 });
     });
 
     it("EDIT that failed everywhere is failed-acked with the code", async () => {
