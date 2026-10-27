@@ -55,6 +55,8 @@ export interface AnnouncementSnapshot {
     reminderUntil?: string;
     /** Ручное напоминание, отложенное на утро; null — отложенного нет (сработало или отменено). */
     manualRemindAt?: string | null;
+    /** publicId отложенного REMIND-действия; по нему вебапп переписывает запись активности в «scheduled». */
+    manualRemindActionId?: string | null;
     recipients: AnnouncementRecipient[];
     chats: AnnouncementChat[];
     activity: AnnouncementActivity[];

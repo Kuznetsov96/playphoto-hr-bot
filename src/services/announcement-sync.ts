@@ -261,6 +261,7 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         ...opt("nextReminderAt", minDate(nextPings)),
         ...opt("reminderUntil", maxDate(pingUntils)),
         manualRemindAt: broadcast.manualRemindAt ? broadcast.manualRemindAt.toISOString() : null,
+        manualRemindActionId: broadcast.manualRemindAt && broadcast.manualRemindActionId ? broadcast.manualRemindActionId : null,
         recipients: [...recipients.values()].slice(0, 5000),
         chats: chats.slice(0, 1000),
         activity: cappedActivity,

@@ -57,6 +57,12 @@ describe("stale buttons from removed screens", () => {
         "admin-broadcast-list/0,0/1",
         "admin-broadcast-archive/0,1/2",
         "admin-broadcast-manage/0,0/3",
+        "br_type_ALL",
+        "br_btn_none",
+        "br_media_skip",
+        "br_confirm_yes",
+        "br_scope_city",
+        "br_restart",
     ])("%s is answered quietly and does nothing", async (data) => {
         const { ctx, reachedNext } = await tap(data);
         expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: "This screen is no longer available." });

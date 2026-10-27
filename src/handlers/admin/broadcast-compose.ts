@@ -89,9 +89,9 @@ async function loadCatalogue(): Promise<AnnouncementRecipientCatalogue | null> {
     }
 }
 
-/** Ссылка на рассылку в вебаппе; адрес вебаппа не задан (или не https) — кнопки нет. */
+/** Ссылка на рассылку в вебаппе; адрес вебаппа не задан или не https (Telegram не принимает иные ссылки в кнопках) — кнопки нет. */
 export function announcementWebUrl(publicId: string | undefined | null): string | null {
-    if (!publicId || !TRAINING_MINIAPP_BASE_URL) return null;
+    if (!publicId || !TRAINING_MINIAPP_BASE_URL || !/^https:\/\//iu.test(TRAINING_MINIAPP_BASE_URL.trim())) return null;
     return `${TRAINING_MINIAPP_BASE_URL.replace(/\/+$/u, "")}/owner/announcements/${encodeURIComponent(publicId)}`;
 }
 
@@ -504,9 +504,10 @@ broadcastComposeHandlers.callbackQuery("b_send", async (ctx) => {
     if (!(await isAnnouncementAdmin(ctx))) return ctx.answerCallbackQuery().catch(() => { });
     data.step = "SENDING";
     await ctx.answerCallbackQuery("Sending…").catch(() => { });
+    let sent: { count: number; broadcastId: number; publicId: string };
     try {
         const name = await resolveActorName(ctx.from!.id);
-        const { count, broadcastId, publicId } = await broadcastService.createBotAnnouncement(
+        sent = await broadcastService.createBotAnnouncement(
             ctx.api,
             { telegramId: ctx.from!.id, name },
             {
@@ -524,20 +525,28 @@ broadcastComposeHandlers.callbackQuery("b_send", async (ctx) => {
                 })),
             },
         );
-        audit({ event: "broadcast_send", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, context: { count, broadcastId, publicId } });
-        delete ctx.session.broadcastData;
-        delete ctx.session.broadcastDraft;
-        if (ctx.session.adminFlow === "BROADCAST") delete ctx.session.adminFlow;
-        const kb = new InlineKeyboard();
-        const webUrl = announcementWebUrl(publicId);
-        if (webUrl) kb.url("Open in web", webUrl).row();
-        kb.text("New announcement", "br_new").row().text("Back to announcements", "br_to_hub");
-        await show(ctx, `Sent to ${peopleLabel(count)}.`, kb, true);
     } catch (e: any) {
         data.step = "PREVIEW";
         audit({ event: "broadcast_send", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, error: e.message });
         logger.error({ err: e }, "Announcement send failed");
         await ctx.reply(e.message === "NO_RECIPIENTS" ? "No one will get it. Change the recipients." : `Couldn't send: ${e.message}`);
+        return;
+    }
+    // Рассылка уже ушла: что бы ни случилось с экраном успеха, отправку не отменяем и не «проваливаем».
+    const { count, broadcastId, publicId } = sent;
+    audit({ event: "broadcast_send", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "broadcast", updateId: ctx.update.update_id, context: { count, broadcastId, publicId } });
+    delete ctx.session.broadcastData;
+    delete ctx.session.broadcastDraft;
+    if (ctx.session.adminFlow === "BROADCAST") delete ctx.session.adminFlow;
+    try {
+        const kb = new InlineKeyboard();
+        const webUrl = announcementWebUrl(publicId);
+        if (webUrl) kb.url("Open in web", webUrl).row();
+        kb.text("New announcement", "br_new").row().text("Back to announcements", "br_to_hub");
+        await show(ctx, `Sent to ${peopleLabel(count)}.`, kb, true);
+    } catch (e) {
+        logger.warn({ err: e }, "Announcement success screen failed; sent a plain reply");
+        await ctx.reply(`Sent to ${peopleLabel(count)}.`).catch(() => { });
     }
 });
 

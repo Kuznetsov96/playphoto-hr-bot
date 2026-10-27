@@ -478,6 +478,31 @@ describe("Preview and send", () => {
         expect(labels(lastScreen().kb)).toEqual(["New announcement", "Back to announcements"]);
     });
 
+    it("an http address gives no web button", async () => {
+        webBase.value = "http://web.example.com";
+        createBotAnnouncement.mockResolvedValue({ broadcastId: 5, publicId: "pub-123", count: 35 });
+        await sendOne(makeCtx());
+        expect(labels(lastScreen().kb)).toEqual(["New announcement", "Back to announcements"]);
+        webBase.value = undefined;
+    });
+
+    it("a failing success screen after a sent announcement still says Sent, never Couldn't send, and audits success", async () => {
+        const { audit } = await import("../../../core/audit-logger.js");
+        vi.mocked(audit).mockClear();
+        createBotAnnouncement.mockResolvedValue({ broadcastId: 5, publicId: "pub-123", count: 35 });
+        const ctx = makeCtx();
+        await toMessageStep(ctx);
+        await send(ctx, { text: "Hi" });
+        await tap(ctx, "br_msg_next");
+        renderScreen.mockRejectedValueOnce(new Error("telegram down"));
+        await tap(ctx, "b_send");
+        expect(ctx.reply).toHaveBeenCalledWith("Sent to 35 people.");
+        expect(ctx.reply).not.toHaveBeenCalledWith(expect.stringContaining("Couldn't send"));
+        const calls = vi.mocked(audit).mock.calls.map(c => (c[0] as any).result);
+        expect(calls).toEqual(["success"]);
+        expect(ctx.session.broadcastData).toBeUndefined();
+    });
+
     it("reminders are off when no reply is asked", async () => {
         const ctx = makeCtx();
         await toMessageStep(ctx);

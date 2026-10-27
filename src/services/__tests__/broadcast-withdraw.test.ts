@@ -10,9 +10,7 @@ const trackedUpdateMany = vi.fn();
 const pendingDeleteMany = vi.fn();
 const deliveryFindSent = vi.fn();
 const queueAdd = vi.fn();
-const activePingBroadcastIds = vi.fn();
 const syncSafe = vi.fn();
-const broadcastManualIds = vi.fn();
 const pingLogMessages = vi.fn();
 
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: { findActive: vi.fn().mockResolvedValue([]) } }));
@@ -24,7 +22,6 @@ vi.mock("../../repositories/broadcast-repository.js", () => ({
         create: broadcastCreate,
         update: broadcastUpdate,
         updateMany: broadcastUpdateMany,
-        findIdsWithManualRemind: broadcastManualIds,
         findById: broadcastFindById,
         delete: broadcastDelete,
     },
@@ -36,7 +33,6 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
         findManyWithReplies: trackedFindMany,
         updateMany: trackedUpdateMany,
-        findBroadcastIdsWithActivePings: activePingBroadcastIds,
     },
 }));
 vi.mock("../../repositories/broadcast-ping-log-repository.js", () => ({
@@ -278,8 +274,6 @@ describe("reminder stops and creation metadata", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         trackedUpdateMany.mockResolvedValue({ count: 4 });
-        activePingBroadcastIds.mockResolvedValue([3, 8]);
-        broadcastManualIds.mockResolvedValue([]);
         broadcastCreate.mockResolvedValue({ id: 42 });
         broadcastUpdate.mockResolvedValue({});
         queueAdd.mockResolvedValue({});

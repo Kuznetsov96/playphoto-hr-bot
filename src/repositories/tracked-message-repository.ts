@@ -14,16 +14,6 @@ export class TrackedMessageRepository {
         return prisma.trackedMessage.updateMany({ where, data });
     }
 
-    /** Рассылки, у которых сейчас есть запланированные напоминания. */
-    async findBroadcastIdsWithActivePings(): Promise<number[]> {
-        const rows = await prisma.trackedMessage.findMany({
-            where: { nextPingAt: { not: null } },
-            select: { broadcastId: true },
-            distinct: ["broadcastId"],
-        });
-        return rows.map(r => r.broadcastId);
-    }
-
     async findManyWithReplies(broadcastId: number) {
         return prisma.trackedMessage.findMany({
             where: { broadcastId },

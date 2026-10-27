@@ -307,6 +307,15 @@ describe("snapshot: deferred reminder and reminder authors", () => {
         expect((await buildAnnouncementSnapshot(7)).manualRemindAt).toBe(T(30).toISOString());
         broadcastFindUnique.mockResolvedValue(baseBroadcast({ manualRemindAt: null }));
         expect((await buildAnnouncementSnapshot(7)).manualRemindAt).toBeNull();
+        expect((await buildAnnouncementSnapshot(7)).manualRemindActionId).toBeNull();
+    });
+
+    it("names the deferred action next to manualRemindAt", async () => {
+        const ACTION = "5b1c1b8e-6f0a-4b53-9d56-0d9a0b6e6a11";
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ manualRemindAt: T(30), manualRemindActionId: ACTION }));
+        const snapshot = await buildAnnouncementSnapshot(7);
+        expect(snapshot.manualRemindAt).toBe(T(30).toISOString());
+        expect(snapshot.manualRemindActionId).toBe(ACTION);
     });
 
     it("REMINDED entries carry the actor of a manual reminder, auto reminders none; same minute different author stays apart", async () => {

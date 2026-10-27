@@ -32,9 +32,10 @@ adminBroadcastHubMenu.dynamic(async (_ctx, range) => {
 });
 
 // Кнопки со старых сообщений (список Active, архив, статистика, Withdraw, Stop all pings):
-// экранов больше нет, отвечаем тихо и ничего не делаем.
+// экранов больше нет, отвечаем тихо и ничего не делаем. Сюда же старые шаги прежнего мастера
+// (тип, кнопка, медиа, подтверждение, охват, перезапуск): новый поток этих callback data не использует.
 adminBroadcastHandlers.callbackQuery(
-    /^(?:br_withdraw_(?:exec|cancel)_\d+|br_stop_all_pings_(?:exec|cancel)|br_back_to_main|admin-broadcast-(?:list|archive|manage)\/.*)$/,
+    /^(?:br_withdraw_(?:exec|cancel)_\d+|br_stop_all_pings_(?:exec|cancel)|br_back_to_main|br_restart|br_(?:type|btn|media|confirm|scope)_[A-Za-z0-9_]+|admin-broadcast-(?:list|archive|manage)\/.*)$/,
     async (ctx) => {
         await ctx.answerCallbackQuery({ text: "This screen is no longer available." }).catch(() => { });
     },
