@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InputFile } from "grammy";
 import type { BroadcastMediaItem } from "../../types/context.js";
-import { AnnouncementPartsError, sendAnnouncementParts } from "../announcement-parts.js";
+import { AnnouncementPartsError, isAttachmentGone, sendAnnouncementParts } from "../announcement-parts.js";
 
 const KB = { inline_keyboard: [[{ text: "ok", callback_data: "x" }]] };
 const extra = { parse_mode: "HTML", reply_markup: KB };
@@ -65,7 +65,7 @@ describe("sendAnnouncementParts", () => {
         const api = makeApi();
         const r = await run(api, { media: [photo(1)], textAsCaption: false });
         expect(api.sendPhoto.mock.calls[0]?.[2]).toEqual({});
-        expect(api.sendMessage).toHaveBeenCalledWith(5, "Привіт", extra);
+        expect(api.sendMessage).toHaveBeenCalledWith(5, "Привіт", { ...extra, link_preview_options: { is_disabled: true } });
         expect(r.partMessageIds).toHaveLength(2);
         expect(r.buttonMessage?.message_id).toBe(r.partMessageIds[1]);
     });
@@ -74,7 +74,7 @@ describe("sendAnnouncementParts", () => {
         const api = makeApi();
         await run(api, { text: "x".repeat(2000), media: [photo(1)] });
         expect(JSON.stringify(api.sendPhoto.mock.calls[0]?.[2])).not.toContain("reply_markup");
-        expect(api.sendMessage.mock.calls[0]?.[2]).toBe(extra);
+        expect(api.sendMessage.mock.calls[0]?.[2]).toEqual({ ...extra, link_preview_options: { is_disabled: true } });
     });
 
     it("2-10 media go as ONE album without buttons, then text with buttons", async () => {
@@ -112,7 +112,7 @@ describe("sendAnnouncementParts", () => {
     it("empty text: CONFIRM sends the follow-up with buttons, NONE sends nothing after attachments", async () => {
         const confirm = makeApi();
         await run(confirm, { text: "", media: [photo(1)] });
-        expect(confirm.sendMessage).toHaveBeenCalledWith(5, "follow-default", extra);
+        expect(confirm.sendMessage).toHaveBeenCalledWith(5, "follow-default", { ...extra, link_preview_options: { is_disabled: true } });
         const none = makeApi();
         const r = await run(none, { text: "", media: [photo(1)], buttonType: "none", extra: { parse_mode: "HTML" } });
         expect(none.sendMessage).not.toHaveBeenCalled();
@@ -145,5 +145,43 @@ describe("sendAnnouncementParts", () => {
         expect(error.partMessageIds).toHaveLength(2);
         expect(error.learnedFileIds).toEqual({ "att-1": "big-1", "att-2": "big-2" });
         expect(error.message).toContain("blocked");
+    });
+
+    it("a retried request gets a fresh stream: the InputFile source opens on every attempt", async () => {
+        const api = makeApi();
+        await run(api, { media: [photo(1)], textAsCaption: true });
+        const file = api.sendPhoto.mock.calls[0]?.[1] as InputFile;
+        openAttachment.mockClear();
+        await file.toRaw();
+        await file.toRaw();
+        expect(openAttachment).toHaveBeenCalledTimes(2);
+    });
+
+    it("probes uncached attachments before any part; a 404 sends nothing", async () => {
+        const api = makeApi();
+        openAttachment.mockRejectedValueOnce(Object.assign(new Error("gone"), { status: 404 }));
+        const error = await run(api, { media: [photo(1)], documents: [doc(2)], fileIds: { "att-1": "cached" } }).catch(e => e);
+        expect(error).toBeInstanceOf(AnnouncementPartsError);
+        expect(isAttachmentGone(error)).toBe(true);
+        expect(api.sendPhoto).not.toHaveBeenCalled();
+        expect(api.sendDocument).not.toHaveBeenCalled();
+        expect(error.partMessageIds).toEqual([]);
+    });
+
+    it("streams opened for a failed send are destroyed", async () => {
+        const api = makeApi();
+        let readable: { destroyed: boolean } | undefined;
+        api.sendPhoto.mockImplementation(async (_c: number, file: InputFile) => {
+            readable = (await file.toRaw()) as unknown as { destroyed: boolean };
+            throw new Error("boom");
+        });
+        await run(api, { media: [photo(1)], textAsCaption: true }).catch(() => undefined);
+        expect(readable?.destroyed).toBe(true);
+    });
+
+    it("text and follow-up messages have link previews off; captions are untouched", async () => {
+        const api = makeApi();
+        await run(api, { text: "", media: [photo(1)] });
+        expect(api.sendMessage.mock.calls[0]?.[2]).toMatchObject({ link_preview_options: { is_disabled: true } });
     });
 });

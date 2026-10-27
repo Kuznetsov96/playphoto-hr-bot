@@ -49,6 +49,14 @@ export class AnnouncementPartsError extends Error {
     }
 }
 
+/** Вебапп сообщил, что вложения больше нет (404/410): слать рассылку дальше бессмысленно. */
+export const isAttachmentGone = (error: unknown): boolean => {
+    for (let e = error as { status?: number; cause?: unknown } | undefined, depth = 0; e && depth < 3; e = e.cause as typeof e, depth++) {
+        if (e.status === 404 || e.status === 410) return true;
+    }
+    return false;
+};
+
 type SentMessage = {
     message_id: number;
     photo?: Array<{ file_id: string }>;
@@ -80,11 +88,18 @@ export async function sendAnnouncementParts(
         (item.attachmentPublicId ? fileIds[item.attachmentPublicId] ?? learnedFileIds[item.attachmentPublicId] : undefined)
         || item.fileId || undefined;
 
-    const source = async (item: BroadcastMediaItem): Promise<string | InputFile> => {
+    // Потоки, открытые в этом вызове: при ошибке закрываем все, чтобы соединения не висели.
+    const openedStreams: Readable[] = [];
+    // Источник — функция: autoRetry grammY повторяет запрос, и каждая попытка берёт свежий поток.
+    const source = (item: BroadcastMediaItem): string | InputFile => {
         const fileId = known(item);
         if (fileId) return fileId;
-        const opened = await openAttachment(item.attachmentPublicId as string);
-        return new InputFile(Readable.fromWeb(opened.stream as never), item.fileName ?? "file");
+        return new InputFile(async () => {
+            const opened = await openAttachment(item.attachmentPublicId as string);
+            const readable = Readable.fromWeb(opened.stream as never);
+            openedStreams.push(readable);
+            return readable;
+        }, item.fileName ?? "file");
     };
     const learn = (item: BroadcastMediaItem, message: SentMessage): void => {
         if (!item.attachmentPublicId || known(item)) return;
@@ -105,7 +120,7 @@ export async function sendAnnouncementParts(
         ...(item.durationSec ? { duration: item.durationSec } : {}),
     });
     const single = async (item: BroadcastMediaItem, options: Record<string, unknown>): Promise<SentMessage> => {
-        const file = await source(item);
+        const file = source(item);
         if (item.type === "photo") return api.sendPhoto(chatId, file, options);
         if (item.type === "video") return api.sendVideo(chatId, file, { ...videoOptions(item), ...options });
         return api.sendDocument(chatId, file, options);
@@ -113,7 +128,7 @@ export async function sendAnnouncementParts(
     const album = async (items: BroadcastMediaItem[]): Promise<void> => {
         const group = [];
         for (const item of items) {
-            const file = await source(item);
+            const file = source(item);
             group.push(item.type === "video"
                 ? { type: "video", media: file, ...videoOptions(item) }
                 : { type: item.type, media: file });
@@ -126,6 +141,13 @@ export async function sendAnnouncementParts(
     };
 
     try {
+        // До первой части проверяем, что каждый ещё не загруженный в Telegram файл отдаётся:
+        // иначе адресат получил бы фото без документа. 404/410 останавливают всю рассылку.
+        for (const item of [...media, ...documents]) {
+            if (!item.attachmentPublicId || known(item)) continue;
+            const probe = await openAttachment(item.attachmentPublicId);
+            await probe.stream.cancel().catch(() => undefined);
+        }
         const all = [...media, ...documents];
         if (textAsCaption && all.length === 1) {
             const item = all[0] as BroadcastMediaItem;
@@ -140,11 +162,16 @@ export async function sendAnnouncementParts(
 
         let buttonMessage: SentMessage | null = null;
         if (text || buttonType !== "none") {
-            buttonMessage = await api.sendMessage(chatId, text || input.followUpText(buttonType), extra);
+            buttonMessage = await api.sendMessage(chatId, text || input.followUpText(buttonType), {
+                ...extra,
+                link_preview_options: { is_disabled: true },
+            });
             if (buttonMessage) partMessageIds.push(buttonMessage.message_id);
         }
         return { buttonMessage, partMessageIds, learnedFileIds };
     } catch (error) {
         throw new AnnouncementPartsError(partMessageIds, learnedFileIds, error);
+    } finally {
+        for (const readable of openedStreams) readable.destroy();
     }
 }

@@ -8,6 +8,7 @@ const markFailed = vi.fn();
 const trackedCreate = vi.fn();
 const openAttachment = vi.fn();
 const getStats = vi.fn();
+const failPending = vi.fn();
 
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: { findActive: vi.fn().mockResolvedValue([]) } }));
 vi.mock("../../repositories/location-repository.js", () => ({
@@ -21,7 +22,7 @@ vi.mock("../../repositories/broadcast-delivery-repository.js", () => ({
         createMany: vi.fn().mockResolvedValue({ count: 2 }),
         findUnique: deliveryFindUnique,
         claimPending: vi.fn().mockResolvedValue({ count: 1 }),
-        markSent, markSkipped: vi.fn(), markFailed,
+        failPending, markSent, markSkipped: vi.fn(), markFailed,
         getStats,
     },
 }));
@@ -63,6 +64,7 @@ describe("processBroadcast with webapp attachments", () => {
         getMediaFileIds.mockResolvedValue({});
         broadcastUpdate.mockResolvedValue({});
         getStats.mockResolvedValue({ SENT: 2 });
+        failPending.mockResolvedValue({ count: 1 });
         markFailed.mockResolvedValue({});
         markSent.mockResolvedValue({});
         deliveryFindUnique.mockResolvedValue({ id: 7, status: "PENDING" });
@@ -147,5 +149,51 @@ describe("processBroadcast with webapp attachments", () => {
         expect(message).toEqual({ message_id: 1001 });
         expect(broadcastUpdate).not.toHaveBeenCalled();
         expect(getMediaFileIds).not.toHaveBeenCalled();
+    });
+
+    it("404 on the very first recipient: nothing is sent to anyone, pending deliveries fail", async () => {
+        const { broadcastService } = await import("../broadcast.js");
+        const api = makeApi();
+        openAttachment.mockRejectedValue(Object.assign(new Error("gone"), { status: 404 }));
+        getStats.mockResolvedValue({ FAILED: 2 });
+        deliveryFindUnique.mockResolvedValueOnce({ id: 7, status: "PENDING" }).mockResolvedValue({ id: 8, status: "FAILED" });
+
+        await expect(broadcastService.processBroadcast(job(), api)).rejects.toThrow(/incomplete/);
+
+        expect(api.sendPhoto).not.toHaveBeenCalled();
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(markFailed).toHaveBeenCalledTimes(1);
+        expect(failPending).toHaveBeenCalledWith(42, "ATTACHMENT_UNAVAILABLE");
+    });
+
+    it("attachment gone after the first recipient's partial failure: later recipients get nothing", async () => {
+        const { broadcastService } = await import("../broadcast.js");
+        const api = makeApi();
+        // фото в кэше, документ нет: на первом адресате документ исчезает
+        getMediaFileIds.mockResolvedValue({ [A1]: "cached" });
+        openAttachment.mockRejectedValue(Object.assign(new Error("gone"), { status: 410 }));
+        getStats.mockResolvedValue({ FAILED: 2 });
+        deliveryFindUnique.mockResolvedValueOnce({ id: 7, status: "PENDING" }).mockResolvedValue({ id: 8, status: "FAILED" });
+
+        await expect(broadcastService.processBroadcast(
+            job({ media: [photoItem(A1), { type: "document", fileId: "", attachmentPublicId: A2, fileName: "b.pdf" }] }),
+            api,
+        )).rejects.toThrow(/incomplete/);
+
+        expect(api.sendPhoto).not.toHaveBeenCalled();
+        expect(failPending).toHaveBeenCalledWith(42, "ATTACHMENT_UNAVAILABLE");
+    });
+
+    it("a transient error fails only the current delivery", async () => {
+        const { broadcastService } = await import("../broadcast.js");
+        const api = makeApi();
+        openAttachment.mockRejectedValueOnce(Object.assign(new Error("timeout"), { status: 503 }));
+        getStats.mockResolvedValue({ FAILED: 1, SENT: 1 });
+
+        await expect(broadcastService.processBroadcast(job(), api)).rejects.toThrow(/incomplete/);
+
+        expect(failPending).not.toHaveBeenCalled();
+        expect(markFailed).toHaveBeenCalledTimes(1);
+        expect(markSent).toHaveBeenCalledTimes(1);
     });
 });

@@ -19,7 +19,7 @@ import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
 import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
-import { AnnouncementPartsError, sendAnnouncementParts } from "./announcement-parts.js";
+import { AnnouncementPartsError, isAttachmentGone, sendAnnouncementParts } from "./announcement-parts.js";
 
 export interface BroadcastStats {
     totalChats: number;
@@ -577,6 +577,22 @@ export const broadcastService = {
         // Части, успевшие уйти до сбоя, записываются в доставку; для обычных рассылок аргумента нет.
         const failedParts = (error: unknown): [number[]] | [] =>
             error instanceof AnnouncementPartsError ? [error.partMessageIds] : [];
+        // Вложение пропало у вебаппа: остальным ничего не шлём, иначе каждый получит часть рассылки.
+        const stopIfAttachmentGone = async (error: unknown) => {
+            if (!webappAttachments || !isAttachmentGone(error)) return;
+            const failed = await broadcastDeliveryRepository.failPending(broadcastId, "ATTACHMENT_UNAVAILABLE").catch(failError => {
+                logger.error({ err: failError, broadcastId }, "Failed to fail pending deliveries of a broadcast with a missing attachment");
+                return { count: 0 };
+            });
+            logBusinessEvent({
+                event: "bot.announcement_broadcast.attachment_unavailable",
+                level: "error", actorType: "system", actorRole: "system", result: "failed",
+                reasonCode: "ATTACHMENT_UNAVAILABLE",
+                module: "broadcast", operation: "processBroadcast",
+                safeContext: { broadcastId, skippedDeliveries: failed.count },
+                error,
+            });
+        };
         const markSent = (deliveryId: number, sent: { message: any; partMessageIds?: number[] }) =>
             sent.partMessageIds
                 ? broadcastDeliveryRepository.markSent(deliveryId, sent.message?.message_id, sent.partMessageIds)
@@ -612,6 +628,7 @@ export const broadcastService = {
                 await broadcastDeliveryRepository.markFailed(delivery.id, e, ...failedParts(e)).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
+                await stopIfAttachmentGone(e);
                 await enqueueAnnouncementSyncSafe(broadcastId);
             }
         }
@@ -679,6 +696,7 @@ export const broadcastService = {
                 await broadcastDeliveryRepository.markFailed(delivery.id, e, ...failedParts(e)).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
+                await stopIfAttachmentGone(e);
                 await enqueueAnnouncementSyncSafe(broadcastId);
             }
         }

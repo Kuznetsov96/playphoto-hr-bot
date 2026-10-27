@@ -53,6 +53,14 @@ export class BroadcastDeliveryRepository {
         });
     }
 
+    /** Всем ещё не начатым доставкам рассылки: отказ без отправки (например, вложение исчезло). */
+    async failPending(broadcastId: number, reason: string) {
+        return prisma.broadcastDelivery.updateMany({
+            where: { broadcastId, status: "PENDING" },
+            data: { status: "FAILED", lastError: reason },
+        });
+    }
+
     /** Сообщения, реально ушедшие в чаты: по ним withdraw удаляет сообщения. */
     async findSentMessages(broadcastId: number) {
         return prisma.broadcastDelivery.findMany({
