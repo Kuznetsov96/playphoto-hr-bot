@@ -58,7 +58,7 @@ describe("announcement created in the bot is sent like a webapp one", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         staffFindActive.mockResolvedValue([]);
-        broadcastCreate.mockResolvedValue({ id: 42 });
+        broadcastCreate.mockResolvedValue({ id: 42, publicId: "pub-42" });
         deliveryCreateMany.mockResolvedValue({ count: 2 });
         deliveryFindUnique.mockResolvedValue({ id: 7, status: "PENDING" });
         trackedCreate.mockResolvedValue({ id: 900 });
@@ -152,7 +152,7 @@ describe("announcement created in the bot is sent like a webapp one", () => {
         const api = { sendMessage: vi.fn().mockResolvedValue({ message_id: 2 }) };
         const { created } = await run({}, api);
         expect(resolveRecipients).toHaveBeenCalledWith(TARGET);
-        expect(created).toEqual({ broadcastId: 42, count: 3 });
+        expect(created).toEqual({ broadcastId: 42, publicId: "pub-42", count: 3 });
         expect(broadcastCreate).toHaveBeenCalledWith(expect.objectContaining({ targetSummary: "👤 Recipients (3)" }));
     });
 

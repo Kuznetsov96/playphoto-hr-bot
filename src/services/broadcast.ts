@@ -371,13 +371,13 @@ export const broadcastService = {
         return { chats: chats.length, users: users.length };
     },
 
-    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default', textAsCaption = false) {
+    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default', textAsCaption = false, partsSender = false) {
         const extra: any = { parse_mode: "HTML" };
         if (buttonType !== 'none') {
             extra.reply_markup = buildBroadcastKeyboard(buttonType);
         }
 
-        if (hasWebappAttachments(media)) {
+        if (hasWebappAttachments(media) || partsSender) {
             // Тест не кэширует file_id: файл каждый раз берётся у вебаппа.
             try {
                 const result = await sendAnnouncementParts(api, chatId, {
@@ -485,7 +485,7 @@ export const broadcastService = {
     },
 
     /** То же, что createBroadcast, но отдаёт и id рассылки (нужен боту для ссылки на вебапп). */
-    async createBroadcastWithId(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: BroadcastPingOptions, origin?: BroadcastOriginOptions): Promise<{ broadcastId: number; count: number }> {
+    async createBroadcastWithId(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: BroadcastPingOptions, origin?: BroadcastOriginOptions): Promise<{ broadcastId: number; publicId: string; count: number }> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -567,7 +567,7 @@ export const broadcastService = {
         await enqueueAnnouncementSyncSafe(broadcast.id);
 
         logToDebug(`📥 [SERVICE] Added to queue: ${broadcast.id}`);
-        return { broadcastId: broadcast.id, count: chats.length + users.length };
+        return { broadcastId: broadcast.id, publicId: broadcast.publicId, count: chats.length + users.length };
     },
 
     /**
@@ -575,7 +575,7 @@ export const broadcastService = {
      * раскрываются в вебаппе при отправке, раскладка и напоминания те же, части
      * шлёт sendAnnouncementParts по file_id админа (загрузки нет).
      */
-    async createBotAnnouncement(api: any, actor: BotAnnouncementActor, input: BotAnnouncementInput): Promise<{ broadcastId: number; count: number }> {
+    async createBotAnnouncement(api: any, actor: BotAnnouncementActor, input: BotAnnouncementInput): Promise<{ broadcastId: number; publicId: string; count: number }> {
         const resolved = await awsBusinessClient.resolveAnnouncementRecipients(input.target);
         const telegramIds = [...new Set(resolved.telegramIds.filter(id => /^\d+$/u.test(id)))];
         if (telegramIds.length === 0) throw new Error("NO_RECIPIENTS");

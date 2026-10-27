@@ -90,7 +90,7 @@ adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
 adminHandlers.use(adminMagnetCounterHandlers);
 
-adminHandlers.on(["message:text", "message:photo", "message:video", "message:document", "message:voice", "message:video_note", "message:audio", "message:animation", "message:checklist"], async (ctx, next) => {
+adminHandlers.on(["message:text", "message:photo", "message:video", "message:document", "message:voice", "message:video_note", "message:audio", "message:animation", "message:sticker", "message:checklist"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
 
     if (await handleAdminMagnetCounterMessage(ctx)) return;
@@ -149,11 +149,11 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
     if (
         ctx.session.broadcastData &&
         ctx.session.adminFlow !== 'BROADCAST' &&
-        (ctx.session.broadcastData.step === 'AWAITING_CONTENT' || ctx.session.broadcastData.step === 'CONFIRMATION')
+        ctx.session.broadcastData.step === 'MESSAGE'
     ) {
         await ctx.reply(
             "⚠️ You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
-            "Open System Settings → Broadcasts → New Broadcast and send the content after the bot asks for it. The message was not queued."
+            "Open System Settings → Broadcasts → New announcement and send the content after the bot asks for it. The message was not queued."
         );
         return;
     }

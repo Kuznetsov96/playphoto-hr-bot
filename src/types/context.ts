@@ -145,15 +145,17 @@ export interface SessionData {
     };
 
     broadcastData?: {
+        /** TO | CITIES | LOCATIONS | REPLY | MESSAGE | PREVIEW | SENDING */
         step: string;
-        targetType: string;
-        targetValue: any;
-        buttonType: string;
-        text?: string;
-        media?: BroadcastMediaItem;
-        mediaItems?: BroadcastMediaItem[];
-        selectedLocs: string[];
-        menuMessageId?: number;
+        everyone: boolean;
+        cityNames: string[];
+        locationPublicIds: string[];
+        replyMode?: 'CONFIRM' | 'NONE';
+        reminders: boolean;
+        textHtml?: string;
+        media: BroadcastMediaItem[];
+        /** Одноразовая строка над счётчиками («лишнее не добавлено»). */
+        notice?: string;
     };
 
     supportData?: {

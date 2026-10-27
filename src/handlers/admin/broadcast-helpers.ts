@@ -1,54 +1,78 @@
-import { InlineKeyboard } from "grammy";
+import { announcementLayout, visibleLength, type AnnouncementReplyMode, type Layout, type LayoutPart } from "../../services/announcement-layout.js";
+import { isQuietHour } from "../../utils/quiet-hours.js";
+import { PING_CONFIG } from "../../config.js";
+import type { BroadcastMediaItem } from "../../types/context.js";
 
-function formatButtonTypeLabel(buttonType: string): string {
-    const labels: Record<string, string> = {
-        default: "Confirm / Decline",
-        preferences: "Preferences",
-        none: "No buttons"
+/** Лимиты создания рассылки: те же, что в вебапп-форме. */
+export const MAX_MEDIA = 10;
+export const MAX_DOCUMENTS = 10;
+export const MAX_TEXT = 4096;
+
+export const peopleLabel = (count: number): string => `${count} ${count === 1 ? "person" : "people"}`;
+
+export const countMedia = (items: BroadcastMediaItem[]) => {
+    const documents = items.filter(item => item.type === "document").length;
+    return { media: items.length - documents, documents };
+};
+
+/** «Photos and videos: 3 of 10 · Files: 1 of 10» */
+export const attachmentCounters = (items: BroadcastMediaItem[]): string => {
+    const { media, documents } = countMedia(items);
+    return `Photos and videos: ${media} of ${MAX_MEDIA} · Files: ${documents} of ${MAX_DOCUMENTS}`;
+};
+
+/** Слова вебаппа (messages/owner.en.ts → announcements.compose): «Arrives as 3 messages: album, file, then the text with reply buttons.» */
+const ARRIVAL = {
+    one: "Arrives as 1 message.",
+    many: (n: number, parts: string) => `Arrives as ${n} messages: ${parts}.`,
+    then: "then",
+    album: "album",
+    photo: "photo",
+    video: "video",
+    file: "file",
+    files: "files",
+    textButtons: "the text with reply buttons",
+    text: "the text",
+    confirm: "a confirm line with reply buttons",
+} as const;
+
+export function describeArrival(layout: Layout, options: { singleMediaKind?: "photo" | "video"; replyMode?: AnnouncementReplyMode } = {}): string {
+    const { parts } = layout;
+    if (parts.length <= 1) return ARRIVAL.one;
+    const confirm = options.replyMode === "CONFIRM";
+    const word = (part: LayoutPart): string => {
+        switch (part) {
+            case "photo_or_video": return options.singleMediaKind === "video" ? ARRIVAL.video : ARRIVAL.photo;
+            case "album": return ARRIVAL.album;
+            case "document": return ARRIVAL.file;
+            case "document_album": return ARRIVAL.files;
+            case "text": return confirm ? ARRIVAL.textButtons : ARRIVAL.text;
+            case "follow_up": return ARRIVAL.confirm;
+        }
     };
-
-    return labels[buttonType] || buttonType;
+    const words = parts.map(word);
+    const last = words.pop() as string;
+    const list = words.length > 0 ? `${words.join(", ")}, ${ARRIVAL.then} ${last}` : last;
+    return ARRIVAL.many(parts.length, list);
 }
 
-function formatAudienceLabel(stats: { users: number, chats: number }): string {
-    const parts: string[] = [];
-    if (stats.users > 0) parts.push(`${stats.users} user${stats.users === 1 ? '' : 's'}`);
-    if (stats.chats > 0) parts.push(`${stats.chats} chat${stats.chats === 1 ? '' : 's'}`);
-    return parts.length > 0 ? parts.join(' and ') : 'No recipients';
+/** Раскладка и строка «Arrives as …» для текущего черновика. */
+export function draftLayout(items: BroadcastMediaItem[], textHtml: string, replyMode: AnnouncementReplyMode) {
+    const { media, documents } = countMedia(items);
+    const layout = announcementLayout({ media, documents, visibleLength: visibleLength(textHtml), replyMode });
+    const singleMedia = media === 1 ? items.find(item => item.type !== "document") : undefined;
+    const arrival = describeArrival(layout, {
+        replyMode,
+        ...(singleMedia ? { singleMediaKind: singleMedia.type === "video" ? "video" as const : "photo" as const } : {}),
+    });
+    return { layout, arrival };
 }
 
-export function formatTargetLabel(type: string): string {
-    const labels: Record<string, string> = {
-        'all': '🌐 All Teams Chats',
-        'hub': '🏢 HUB Only',
-        'city_chats': '🏘️ City Chats',
-        'pm_all': '👤 PM: All Staff',
-        'pm_city': '👤 PM: By Cities',
-        'pm_location': '👤 PM: Specific Locations',
-        'city_chat_location': '🏘️ Specific City Chats'
-    };
-    return labels[type] || type;
-}
-
-export function getBroadcastKb(confirmed: boolean, sent: boolean, stats: { users: number, chats: number }) {
-    const kb = new InlineKeyboard();
-
-    // Test button: Show "Send Test Again" if at least one test was sent OR if confirmed
-    if (sent || confirmed) {
-        kb.text("🧪 Send Test Again", "b_test").row();
-    } else {
-        kb.text("🧪 Send Test (to me)", "b_test").row();
+/** «It's 23:10 — people may be asleep.» — только в тихие часы 22:00–10:00 по Киеву; иначе null. */
+export function nightLine(now: Date): string | null {
+    if (isQuietHour(now)) {
+        const clock = new Intl.DateTimeFormat("en-GB", { timeZone: PING_CONFIG.TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+        return `It's ${clock} — people may be asleep.`;
     }
-
-    const audience = formatAudienceLabel(stats);
-    const sendLabel = confirmed ? `🔥 Send Broadcast (${audience})` : `✅ Send Broadcast (${audience})`;
-
-    return kb.text(sendLabel, "b_send");
-}
-
-export function getBroadcastPreview(textHtml: string, targetType: string, stats: { users: number, chats: number }, confirmed: boolean, sent: boolean, buttonType: string = 'default', mediaSummary = '') {
-    let status = confirmed ? "\n\n✅ <b>Test confirmed.</b> The broadcast is ready to send." : (sent ? "\n\n🧪 <b>Test message sent.</b> Review it in your PM before sending." : "\n\n📩 Send a test or launch the broadcast when everything looks correct.");
-    const targetLabel = formatTargetLabel(targetType);
-    const body = textHtml || "<i>No text caption</i>";
-    return `📢 <b>Broadcast Preview</b>\n\n${body}${mediaSummary ? `\n\n${mediaSummary}` : ''}\n\n🎯 Target: <b>${targetLabel}</b>\n🔘 Buttons: <b>${formatButtonTypeLabel(buttonType)}</b>\n👥 Audience: <b>${formatAudienceLabel(stats)}</b>${status}`;
+    return null;
 }
