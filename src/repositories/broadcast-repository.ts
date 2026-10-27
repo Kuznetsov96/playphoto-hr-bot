@@ -2,10 +2,18 @@ import prisma from "../db/core.js";
 import type { Prisma } from "@prisma/client";
 
 export class BroadcastRepository {
-    async create(data: { initiatorId: bigint; messageText?: string; targetSummary?: string; buttonType?: string; attachmentKinds?: string[] }) {
+    async create(data: { initiatorId: bigint; messageText?: string; targetSummary?: string; buttonType?: string; attachmentKinds?: string[]; publicId?: string; origin?: string; authorName?: string }) {
         return prisma.broadcast.create({
             data
         });
+    }
+
+    async findByPublicId(publicId: string) {
+        return prisma.broadcast.findUnique({ where: { publicId } });
+    }
+
+    async delete(id: number) {
+        return prisma.broadcast.delete({ where: { id } });
     }
 
     async findById(id: number) {

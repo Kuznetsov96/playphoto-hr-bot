@@ -166,6 +166,14 @@ on:
         required: true
         type: boolean
         default: true
+      # Команди розсилок із вебаппа: бот забирає їх раз на 15 с і надсилає.
+      # Умовчання `true`, як вимагає контракт; перший викат — зі ЗНЯТОЮ галочкою,
+      # доки вебапп із розсилками не випущений.
+      announcements_commands_enabled:
+        description: Poll and send broadcast commands from the webapp
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -400,6 +408,7 @@ jobs:
             printf 'AWS_RECRUITING_TATTOO_WEB_ENABLED=%q\n' "${{ inputs.recruiting_tattoo_web_enabled }}"
             printf 'SUPPORT_THREADS_ENABLED=%q\n' "${{ inputs.support_threads_enabled }}"
             printf 'ANNOUNCEMENTS_SYNC_ENABLED=%q\n' "${{ inputs.announcements_sync_enabled }}"
+            printf 'ANNOUNCEMENTS_COMMANDS_ENABLED=%q\n' "${{ inputs.announcements_commands_enabled }}"
             printf 'LIVE_SAFE_ROLLBACK_VERSION=%q\n' 1
             printf 'BOT_IMAGE=%q\n' "$BOT_IMAGE"
             printf 'GIT_SHA=%q\n' "$GITHUB_SHA"
@@ -501,6 +510,7 @@ jobs:
             echo '- Recruiting tattoo web routes: `${{ inputs.recruiting_tattoo_web_enabled }}`'
             echo '- Support person threads: `${{ inputs.support_threads_enabled }}`'
             echo '- Announcements history sync: `${{ inputs.announcements_sync_enabled }}`'
+            echo '- Announcements webapp commands: `${{ inputs.announcements_commands_enabled }}`'
             echo '- Previous live-safe rollback baseline: `${{ steps.rollback_baseline.outputs.safe }}`'
             echo '- Commit: `'$GITHUB_SHA'`'
             echo '- CodeDeploy: `${{ steps.deployment.outputs.deployment_id }}`'

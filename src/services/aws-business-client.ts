@@ -926,6 +926,47 @@ const recruitingCommandSchema = z.object({
     }),
 });
 
+const announcementReplyModeSchema = z.enum(["CONFIRM", "NONE"]);
+
+/**
+ * Команда рассылки из вебаппа. Неизвестный kind не должен ронять всю очередь
+ * (более свежий вебапп), поэтому разбор поштучный: битая запись становится
+ * `{ kind: "UNKNOWN" }` и отбивается failed-ack'ом.
+ */
+const announcementCommandSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("SEND"),
+        publicId: z.string().uuid(),
+        messageHtml: z.string(),
+        replyMode: announcementReplyModeSchema,
+        recipients: z.array(z.string()),
+        reminders: z.object({
+            firstAfterMs: z.number(),
+            everyMs: z.number(),
+            untilIso: z.string(),
+        }).nullable(),
+        authorName: z.string().nullable(),
+    }),
+    z.object({
+        kind: z.literal("TEST"),
+        publicId: z.string().uuid(),
+        telegramId: z.string(),
+        messageHtml: z.string(),
+        replyMode: announcementReplyModeSchema,
+    }),
+]);
+
+const announcementUnknownCommandSchema = z.object({
+    publicId: z.string().uuid(),
+    kind: z.string(),
+}).passthrough().transform(raw => ({ kind: "UNKNOWN" as const, publicId: raw.publicId, receivedKind: raw.kind }));
+
+const announcementCommandsSchema = z.object({
+    items: z.array(z.union([announcementCommandSchema, announcementUnknownCommandSchema])),
+});
+
+export type AnnouncementCommand = z.infer<typeof announcementCommandsSchema>["items"][number];
+
 const recruitingCommandsSchema = z.object({
     items: z.array(recruitingCommandSchema),
 });
@@ -1110,6 +1151,33 @@ export class AwsBusinessClient {
             body: JSON.stringify({ telegramId, reason: reason.slice(0, 120) }),
         });
         return recruitingSlotReleaseAckSchema.parse(body);
+    }
+
+    /** Команды рассылок из вебаппа: захват с лизом, at-least-once (publicId = ключ идемпотентности). */
+    async listPendingAnnouncementCommands(limit: number): Promise<{ items: AnnouncementCommand[] }> {
+        const body = await this.request(
+            `/announcements/commands/pending?limit=${encodeURIComponent(String(limit))}`,
+            { method: "GET" },
+        );
+        return announcementCommandsSchema.parse(body);
+    }
+
+    async ackAnnouncementCommandAccepted(publicId: string): Promise<void> {
+        await this.request(
+            `/announcements/commands/${encodeURIComponent(publicId)}/accepted`,
+            { method: "POST" },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async ackAnnouncementCommandFailed(publicId: string, error: string): Promise<void> {
+        await this.request(
+            `/announcements/commands/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ error: error.slice(0, 1000) }) },
+            undefined,
+            { expectsBody: false },
+        );
     }
 
     /** Очередь команд рекрутёра: старые вперёд, с Telegram-идентичностью кандидата. */

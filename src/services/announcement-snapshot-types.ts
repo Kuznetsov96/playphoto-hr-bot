@@ -31,7 +31,7 @@ export interface AnnouncementActivity {
 export interface AnnouncementSnapshot {
     snapshotAt: string;
     botBroadcastId: number;
-    source: "BOT";
+    source: "BOT" | "WEBAPP";
     authorTelegramId?: string;
     authorName?: string;
     messageHtml?: string;

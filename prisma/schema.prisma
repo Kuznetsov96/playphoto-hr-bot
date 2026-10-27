@@ -54,6 +54,10 @@ model Broadcast {
   attachmentKinds       String[]            @default([])
   /// Когда админ остановил напоминания.
   remindersStoppedAt    DateTime?
+  /// Откуда рассылка: BOT (админка бота) или WEBAPP (команда из вебаппа).
+  origin                String              @default("BOT")
+  /// Имя автора для рассылок из вебаппа (у них initiatorId = 0).
+  authorName            String?
   trackedMessages TrackedMessage[]
   deliveries      BroadcastDelivery[]
   pingLogs        BroadcastPingLog[]

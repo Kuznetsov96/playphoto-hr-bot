@@ -55,3 +55,48 @@ describe("AwsBusinessClient.putAnnouncementSnapshot", () => {
             .rejects.toMatchObject({ status });
     });
 });
+
+describe("AwsBusinessClient announcement commands", () => {
+    const ID = "11111111-1111-4111-8111-111111111111";
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn());
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("GETs the pending feed and parses SEND, TEST and unknown kinds per item", async () => {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+            items: [
+                { kind: "SEND", publicId: ID, messageHtml: "<b>x</b>", replyMode: "CONFIRM", recipients: ["1"], reminders: null, authorName: null },
+                { kind: "TEST", publicId: ID, telegramId: "5", messageHtml: "t", replyMode: "NONE" },
+                { kind: "FUTURE", publicId: ID, extra: 1 },
+            ],
+        }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        const result = await new AwsBusinessClient().listPendingAnnouncementCommands(20);
+
+        expect(fetch).toHaveBeenCalledWith(
+            "https://api.example.test/api/v1/internal/bot/announcements/commands/pending?limit=20",
+            expect.objectContaining({ method: "GET" }),
+        );
+        expect(result.items.map(i => i.kind)).toEqual(["SEND", "TEST", "UNKNOWN"]);
+    });
+
+    it("POSTs accepted and failed acks to the command path", async () => {
+        vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 204 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+        const client = new AwsBusinessClient();
+
+        await client.ackAnnouncementCommandAccepted(ID);
+        await client.ackAnnouncementCommandFailed(ID, "BOT_BLOCKED");
+
+        expect(fetch).toHaveBeenNthCalledWith(1,
+            `https://api.example.test/api/v1/internal/bot/announcements/commands/${ID}/accepted`,
+            expect.objectContaining({ method: "POST" }));
+        expect(fetch).toHaveBeenNthCalledWith(2,
+            `https://api.example.test/api/v1/internal/bot/announcements/commands/${ID}/failed`,
+            expect.objectContaining({ method: "POST", body: JSON.stringify({ error: "BOT_BLOCKED" }) }));
+    });
+});

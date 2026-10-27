@@ -167,9 +167,10 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         };
     });
 
-    const authorName = broadcast.initiatorId != null && userById.has(String(broadcast.initiatorId))
-        ? displayNameOf(userById.get(String(broadcast.initiatorId)))
-        : FALLBACK_NAME;
+    const authorName = broadcast.authorName
+        ?? (broadcast.initiatorId != null && userById.has(String(broadcast.initiatorId))
+            ? displayNameOf(userById.get(String(broadcast.initiatorId)))
+            : FALLBACK_NAME);
 
     const activity: AnnouncementActivity[] = [
         { at: broadcast.createdAt.toISOString(), kind: "SENT", actorName: authorName },
@@ -223,8 +224,8 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
     const snapshot: AnnouncementSnapshot = {
         snapshotAt: new Date().toISOString(),
         botBroadcastId: broadcast.id,
-        source: "BOT",
-        ...(broadcast.initiatorId != null ? { authorTelegramId: String(broadcast.initiatorId) } : {}),
+        source: broadcast.origin === "WEBAPP" ? "WEBAPP" : "BOT",
+        ...(broadcast.initiatorId != null && broadcast.origin !== "WEBAPP" ? { authorTelegramId: String(broadcast.initiatorId) } : {}),
         authorName,
         ...(broadcast.messageText ? { messageHtml: broadcast.messageText.slice(0, 20_000) } : {}),
         ...(broadcast.targetSummary ? { targetSummary: broadcast.targetSummary.slice(0, 1000) } : {}),

@@ -37,7 +37,7 @@ export interface BroadcastStats {
 }
 
 export interface BroadcastTarget {
-    type: 'all' | 'hub' | 'city_chats' | 'city_chat_location' | 'pm_all' | 'pm_city' | 'pm_location' | 'custom_chats';
+    type: 'all' | 'hub' | 'city_chats' | 'city_chat_location' | 'pm_all' | 'pm_city' | 'pm_location' | 'pm_ids' | 'custom_chats';
     value?: string | string[];
 }
 
@@ -351,6 +351,14 @@ export const broadcastService = {
             chats.push(...values.map(v => Number(v)));
         }
 
+        if (target.type === 'pm_ids') {
+            // Явный список Telegram id из вебаппа: каталог сотрудников не нужен.
+            for (const v of values) {
+                if (/^\d+$/.test(v)) userIds.push(BigInt(v));
+            }
+            return { chats: [], users: [...new Set(userIds)] };
+        }
+
         const staff = await staffRepository.findActive() as StaffWithRelations[];
         const filteredStaff = staff.filter(s => {
             if (target.type === 'pm_all') return true;
@@ -373,7 +381,7 @@ export const broadcastService = {
         };
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string, noReminders?: boolean }, origin?: { publicId?: string, origin?: 'BOT' | 'WEBAPP', authorName?: string }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -390,6 +398,7 @@ export const broadcastService = {
             case 'pm_all': targetSummary = "👤 All Staff (PM)"; break;
             case 'pm_city': targetSummary = `👤 City: ${valueStr}`; break;
             case 'pm_location': targetSummary = `👤 Location (ID: ${valueStr})`; break;
+            case 'pm_ids': targetSummary = `👤 Recipients (${values.length})`; break;
             case 'custom_chats': targetSummary = `💬 Custom Chats (${values.length})`; break;
             default: targetSummary = target.type;
         }
@@ -410,6 +419,9 @@ export const broadcastService = {
             targetSummary: targetSummary,
             buttonType: pingOptions?.buttonType ?? 'default',
             attachmentKinds: (Array.isArray(media) ? media : media ? [media] : []).map((item: any) => item.type),
+            ...(origin?.publicId ? { publicId: origin.publicId } : {}),
+            ...(origin?.origin ? { origin: origin.origin } : {}),
+            ...(origin?.authorName ? { authorName: origin.authorName } : {}),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
         await enqueueAnnouncementSyncSafe(broadcast.id);
@@ -437,9 +449,17 @@ export const broadcastService = {
                 removeOnFail: 1_000,
             });
         } catch (error) {
-            await broadcastRepository.update(broadcast.id, { cancelledAt: new Date() }).catch(updateError => {
-                logger.error({ err: updateError, broadcastId: broadcast.id }, "Failed to mark unqueued broadcast as cancelled");
-            });
+            if (origin?.publicId) {
+                // Команда вебаппа повторится с тем же publicId: «отменённая»
+                // строка превратила бы повтор в тихое accepted без отправки.
+                await broadcastRepository.delete(broadcast.id).catch(deleteError => {
+                    logger.error({ err: deleteError, broadcastId: broadcast.id }, "Failed to remove unqueued webapp broadcast");
+                });
+            } else {
+                await broadcastRepository.update(broadcast.id, { cancelledAt: new Date() }).catch(updateError => {
+                    logger.error({ err: updateError, broadcastId: broadcast.id }, "Failed to mark unqueued broadcast as cancelled");
+                });
+            }
             throw error;
         }
 
@@ -492,7 +512,7 @@ export const broadcastService = {
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(chatId),
                         messageId: sentMsg.message_id,
-                        nextPingAt: new Date(Date.now() + initialDelay),
+                        nextPingAt: pingOptions?.noReminders ? null : new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
                         pingUntil,
                         buttonType,
@@ -545,12 +565,20 @@ export const broadcastService = {
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(userId),
                         messageId: sentMsg.message_id,
-                        nextPingAt: new Date(Date.now() + initialDelay),
+                        nextPingAt: pingOptions?.noReminders ? null : new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
                         pingUntil,
                         buttonType,
                         targetMonth
                     });
+                    if (target.type === 'pm_ids') {
+                        // Получатель из вебаппа может быть неизвестен боту: PendingReply требует User.
+                        await userRepository.upsert({
+                            where: { telegramId: BigInt(userId) },
+                            create: { telegramId: BigInt(userId) },
+                            update: {},
+                        });
+                    }
                     await pendingReplyRepository.create({
                         trackedMessage: { connect: { id: tracked.id } },
                         user: { connect: { telegramId: BigInt(userId) } }

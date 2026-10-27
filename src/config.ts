@@ -44,6 +44,7 @@ const envSchema = z.object({
     // История рассылок: после каждого изменения рассылки бот шлёт в вебапп её
     // полный снимок (PUT /internal/bot/announcements/{publicId}).
     ANNOUNCEMENTS_SYNC_ENABLED: z.enum(["true", "false"]).default("false"),
+    ANNOUNCEMENTS_COMMANDS_ENABLED: z.enum(["true", "false"]).default("false"),
     // Канонические слоты интервью (фаза 2b): кандидатский флоу записи на
     // собеседование читает свободные слоты и бронирует их в вебаппе, а не в
     // локальных таблицах InterviewSlot. Слоты знакомств/навчання остаются
@@ -166,6 +167,7 @@ export const AWS_REPLACEMENT_AUTO_CONFIRM_ENABLED = env.AWS_REPLACEMENT_AUTO_CON
 export const AWS_ACCESS_REVOCATIONS_ENABLED = env.AWS_ACCESS_REVOCATIONS_ENABLED === "true";
 export const AWS_RECRUITING_MIRROR_ENABLED = env.AWS_RECRUITING_MIRROR_ENABLED === "true";
 export const ANNOUNCEMENTS_SYNC_ENABLED = env.ANNOUNCEMENTS_SYNC_ENABLED === "true";
+export const ANNOUNCEMENTS_COMMANDS_ENABLED = env.ANNOUNCEMENTS_COMMANDS_ENABLED === "true";
 export const AWS_RECRUITING_SLOTS_ENABLED = env.AWS_RECRUITING_SLOTS_ENABLED === "true";
 export const AWS_RECRUITING_COMMANDS_ENABLED = env.AWS_RECRUITING_COMMANDS_ENABLED === "true";
 

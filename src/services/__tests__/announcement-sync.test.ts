@@ -76,6 +76,17 @@ describe("buildAnnouncementSnapshot", () => {
         locationFindMany.mockResolvedValue([]);
     });
 
+    it("webapp-origin broadcast: source WEBAPP, author name from the broadcast, no fake telegram author", async () => {
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ initiatorId: 0n, origin: "WEBAPP", authorName: "Віталій" }));
+
+        const snap = await buildAnnouncementSnapshot(7);
+
+        expect(snap.source).toBe("WEBAPP");
+        expect(snap.authorName).toBe("Віталій");
+        expect(snap.authorTelegramId).toBeUndefined();
+        expect(snap.activity[0]).toMatchObject({ kind: "SENT", actorName: "Віталій" });
+    });
+
     it("personal broadcast with default buttons: statuses, decline reason, delivery error", async () => {
         broadcastFindUnique.mockResolvedValue(baseBroadcast({
             deliveries: [
