@@ -111,14 +111,41 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
         }, attachment.fileName || "file");
     };
 
+    const now = new Date();
+    const trackedByChat = new Map<string, typeof broadcast.trackedMessages>();
+    for (const t of broadcast.trackedMessages) {
+        const key = String(t.chatId);
+        trackedByChat.set(key, [...(trackedByChat.get(key) ?? []), t]);
+    }
+
     let botUsername: string | undefined;
     if (buttonType === "default" && deliveries.some(d => d.targetType === "GROUP")) {
-        botUsername = (await api.getMe().catch(() => null))?.username;
+        try {
+            botUsername = (await api.getMe())?.username;
+        } catch (error) {
+            // Без имени бота кнопка «Не згодна» в группе станет обычной callback-кнопкой.
+            logger.warn({ err: error, broadcastId }, "getMe failed while editing a group announcement; decline button falls back to callback");
+        }
     }
-    const markupFor = (delivery: { targetType: string }): Record<string, unknown> =>
+    const keyboard = (delivery: { targetType: string }): Record<string, unknown> =>
         buttonType === "none"
             ? {}
             : { reply_markup: buildBroadcastKeyboard(buttonType, broadcastId, botUsername, delivery.targetType === "GROUP") };
+    const trackedOf = (delivery: { chatId: bigint }) => trackedByChat.get(String(delivery.chatId)) ?? [];
+    /**
+     * Клавиатура правки. Группе — всегда; личке — пока ответ ждётся или команда его
+     * сбросит переподтверждением. Ответившей без переподтверждения кнопок нет (так в чате
+     * сейчас), а Telegram при правке без reply_markup их и не вернёт.
+     */
+    const markupFor = (delivery: { targetType: string; chatId: bigint }): Record<string, unknown> => {
+        if (delivery.targetType !== "GROUP") {
+            const replies = trackedOf(delivery).flatMap(t => t.pendingReplies);
+            const waiting = replies.some(r => r.status === "pending");
+            const willReset = command.reconfirm && replies.some(r => r.status === "confirmed" || r.status === "declined");
+            if (!waiting && !willReset) return {};
+        }
+        return keyboard(delivery);
+    };
 
     const editMedia = async (chatId: number, messageId: number, attachment: AnnouncementAttachment, extra: Record<string, unknown>) => {
         const file = source(attachment);
@@ -173,25 +200,37 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
         }
     };
 
-    const now = new Date();
-    const trackedByChat = new Map<string, typeof broadcast.trackedMessages>();
-    for (const t of broadcast.trackedMessages) {
-        const key = String(t.chatId);
-        trackedByChat.set(key, [...(trackedByChat.get(key) ?? []), t]);
-    }
-
     /** Переподтверждение одного чата: сброс ответов, сообщение ответом на правленое, id в доставку. */
     const reconfirmChat = async (delivery: (typeof deliveries)[number]): Promise<boolean> => {
         if (buttonType === "none") return false;
-        const tracked = trackedByChat.get(String(delivery.chatId)) ?? [];
+        const tracked = trackedOf(delivery);
         const answered = tracked.flatMap(t => t.pendingReplies.filter(r => r.status === "confirmed" || r.status === "declined"));
         if (answered.length === 0) return false;
         // Уже спрашивали этой командой — второй раз не шлём.
         if (!(await broadcastActionRepository.claimReminderMark(broadcastId, delivery.chatId, command.publicId))) return false;
 
+        // Напоминания возвращаем ДО отправки: сбой после сброса не оставит людей без напоминания.
+        // Условие — устойчивый факт рассылки (remindersEnabled), а не остатки в строках: stopTracking
+        // обнуляет nextPingAt, а у рассылок бота интервала в строке нет.
+        const resumed: Array<{ id: number; nextPingAt: Date | null }> = [];
+        const canRemind = broadcast.remindersEnabled && !broadcast.remindersStoppedAt && !broadcast.withdrawnAt;
+        if (canRemind) {
+            for (const t of tracked) {
+                if (!t.pendingReplies.some(r => answered.includes(r))) continue;
+                if (t.pingUntil && t.pingUntil.getTime() <= now.getTime()) continue;
+                resumed.push({ id: t.id, nextPingAt: t.nextPingAt });
+                await trackedMessageRepository.update(t.id, {
+                    nextPingAt: nextAllowedPingTime(new Date(now.getTime() + (t.pingIntervalMs ?? PING_CONFIG.REPEAT_DELAY_MS))),
+                });
+            }
+        }
+
         const restore = async () => {
             for (const r of answered) {
                 await pendingReplyRepository.update(r.id, { status: r.status, respondedAt: r.respondedAt }).catch(() => undefined);
+            }
+            for (const t of resumed) {
+                await trackedMessageRepository.update(t.id, { nextPingAt: t.nextPingAt }).catch(() => undefined);
             }
             await broadcastActionRepository.releaseReminderMark(delivery.chatId, command.publicId).catch(() => undefined);
         };
@@ -201,7 +240,7 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
             sent = await api.sendMessage(Number(delivery.chatId), RECONFIRM_PROMPT, {
                 reply_parameters: { message_id: delivery.messageId ?? tracked[0]?.messageId, allow_sending_without_reply: true },
                 parse_mode: "HTML",
-                ...markupFor(delivery),
+                ...keyboard(delivery),
             });
         } catch (error) {
             // Не ушло: ответы возвращаем и отметку снимаем, чтобы повтор команды мог дослать.
@@ -210,16 +249,6 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
         }
         await broadcastDeliveryRepository.appendPartMessageId(delivery.id, sent.message_id);
 
-        // Напоминания активны (идут или были заведены): следующее — через обычный интервал.
-        if (!broadcast.remindersStoppedAt) {
-            for (const t of tracked) {
-                if (!t.pendingReplies.some(r => answered.includes(r))) continue;
-                if (t.nextPingAt == null && t.pingIntervalMs == null) continue;
-                await trackedMessageRepository.update(t.id, {
-                    nextPingAt: nextAllowedPingTime(new Date(now.getTime() + (t.pingIntervalMs ?? PING_CONFIG.REPEAT_DELAY_MS))),
-                });
-            }
-        }
         return true;
     };
 

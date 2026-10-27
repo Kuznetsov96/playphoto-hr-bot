@@ -484,6 +484,7 @@ export const broadcastService = {
             ...(origin?.origin ? { origin: origin.origin } : {}),
             ...(origin?.authorName ? { authorName: origin.authorName } : {}),
             ...(origin?.textAsCaption ? { textAsCaption: true } : {}),
+            ...(pingOptions?.noReminders ? { remindersEnabled: false } : {}),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
 

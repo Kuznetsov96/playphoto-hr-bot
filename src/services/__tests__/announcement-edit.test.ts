@@ -30,11 +30,16 @@ vi.mock("../../repositories/pending-reply-repository.js", () => ({
 vi.mock("../../repositories/tracked-message-repository.js", () => ({ trackedMessageRepository: { update: trackedUpdate } }));
 vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: syncSafe }));
 vi.mock("../aws-business-client.js", () => ({ awsBusinessClient: { openAnnouncementAttachment: openAttachment } }));
+const buildKeyboardCalls: unknown[][] = [];
+const loggerWarn = vi.fn();
 vi.mock("../broadcast.js", () => ({
-    buildBroadcastKeyboard: (type: string, id: number) => ({ kb: type, id }),
+    buildBroadcastKeyboard: (type: string, id: number, username?: string, isGroup?: boolean) => {
+        buildKeyboardCalls.push([type, id, username, isGroup]);
+        return { kb: type, id };
+    },
     getBroadcastFollowUpText: () => "SERVICE LINE",
 }));
-vi.mock("../../core/logger.js", () => ({ default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../../core/logger.js", () => ({ default: { debug: vi.fn(), info: vi.fn(), warn: loggerWarn, error: vi.fn() } }));
 vi.mock("../../config.js", () => ({
     PING_CONFIG: { TIME_ZONE: "Europe/Kyiv", QUIET_FROM_HOUR: 22, QUIET_UNTIL_HOUR: 10, REPEAT_DELAY_MS: 6 * 3600_000 },
 }));
@@ -63,23 +68,26 @@ const delivery = (chatId: number, messageId: number | null, parts: number[], id 
     id, chatId: BigInt(chatId), targetType: "USER", messageId, partMessageIds: parts, status: "SENT",
 });
 const tracked = (chatId: number, messageId: number, statuses: string[], extra: Record<string, unknown> = {}) => ({
-    id: chatId, chatId: BigInt(chatId), messageId, buttonType: "default", nextPingAt: null, pingIntervalMs: 3600_000,
+    id: chatId, chatId: BigInt(chatId), messageId, buttonType: "default", nextPingAt: null, pingIntervalMs: 3600_000, pingUntil: null,
     pendingReplies: statuses.map((status, i) => ({ id: chatId * 10 + i, status, respondedAt: status === "pending" ? null : new Date("2026-10-26T10:00:00Z") })),
     ...extra,
 });
 const broadcastRow = (extra: Record<string, unknown> = {}) => ({
     id: 7, withdrawnAt: null, remindersStoppedAt: null, buttonType: "default", textAsCaption: false,
-    attachmentKinds: [], trackedMessages: [], ...extra,
+    attachmentKinds: [], remindersEnabled: true, trackedMessages: [tracked(10, 100, ["pending"])], ...extra,
 });
 
 beforeEach(() => {
     vi.clearAllMocks();
+    buildKeyboardCalls.length = 0;
     findLog.mockResolvedValue(null);
     getMediaFileIds.mockResolvedValue({});
     claimMark.mockResolvedValue(true);
     broadcastUpdate.mockResolvedValue({});
     releaseMark.mockResolvedValue(undefined);
     replyUpdate.mockResolvedValue({});
+    trackedUpdate.mockReset();
+    trackedUpdate.mockResolvedValue({});
     findById.mockResolvedValue(broadcastRow());
     findSentForEdit.mockResolvedValue([]);
     api.editMessageText.mockResolvedValue(true);
@@ -251,7 +259,7 @@ describe("applyAnnouncementEdit reconfirm", () => {
         expect(markDone).toHaveBeenCalled();
     });
 
-    it("moves the next reminder by the interval when reminders were running", async () => {
+    it("brings reminders back by the interval even when pings were cleared after everyone answered", async () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         vi.setSystemTime(new Date("2026-10-27T11:00:00Z"));
         setup();
@@ -260,13 +268,117 @@ describe("applyAnnouncementEdit reconfirm", () => {
         vi.useRealTimers();
     });
 
-    it("leaves reminders alone when they are stopped", async () => {
-        setup();
-        findById.mockResolvedValue(broadcastRow({
-            remindersStoppedAt: new Date(), trackedMessages: [tracked(10, 100, ["confirmed"])],
-        }));
+    it("bot-origin tracked message without interval gets the default delay", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        vi.setSystemTime(new Date("2026-10-27T08:00:00Z"));
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"], { pingIntervalMs: null })] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        expect(trackedUpdate).toHaveBeenCalledWith(10, { nextPingAt: new Date("2026-10-27T14:00:00Z") });
+        vi.useRealTimers();
+    });
+
+    it("a broadcast created without reminders does not get them", async () => {
+        findById.mockResolvedValue(broadcastRow({ remindersEnabled: false, trackedMessages: [tracked(10, 100, ["confirmed"])] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
         await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
         expect(trackedUpdate).not.toHaveBeenCalled();
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves reminders alone when stopped or past pingUntil", async () => {
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        findById.mockResolvedValue(broadcastRow({ remindersStoppedAt: new Date(), trackedMessages: [tracked(10, 100, ["confirmed"])] }));
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        findLog.mockResolvedValue(null);
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"], { pingUntil: new Date("2020-01-01T00:00:00Z") })] }));
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        expect(trackedUpdate).not.toHaveBeenCalled();
+    });
+
+    it("resumes reminders before the message goes out, so a crash after the reset still pings", async () => {
+        setup();
+        const order: string[] = [];
+        trackedUpdate.mockImplementation(async () => { order.push("ping"); });
+        api.sendMessage.mockImplementation(async () => { order.push("send"); return { message_id: 900 }; });
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        expect(order.indexOf("ping")).toBeLessThan(order.indexOf("send"));
+    });
+
+    it("a failed send puts the previous nextPingAt back", async () => {
+        const before = new Date("2026-10-27T20:00:00Z");
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"], { nextPingAt: before })] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        api.sendMessage.mockRejectedValue({ description: "Forbidden" });
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        expect(trackedUpdate).toHaveBeenLastCalledWith(10, { nextPingAt: before });
+    });
+});
+
+describe("applyAnnouncementEdit keyboard per delivery", () => {
+    it("answered private chat without reconfirm: edit without reply_markup", async () => {
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"])] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        await applyAnnouncementEdit(api, 7, command());
+        expect(api.editMessageText.mock.calls[0]![3]).not.toHaveProperty("reply_markup");
+    });
+
+    it("answered private chat without reconfirm: caption and caption-media edits carry no keyboard either", async () => {
+        findById.mockResolvedValue(broadcastRow({ textAsCaption: true, trackedMessages: [tracked(10, 100, ["declined"])] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        await applyAnnouncementEdit(api, 7, command({ textAsCaption: true }));
+        expect(api.editMessageCaption.mock.calls[0]![2]).not.toHaveProperty("reply_markup");
+        getMediaFileIds.mockResolvedValue({ [NEW_PHOTO]: "K" });
+        findLog.mockResolvedValue(null);
+        await applyAnnouncementEdit(api, 7, command({ textAsCaption: true, replacements: [{ position: 0, attachment: attachment() }] }));
+        expect(api.editMessageMedia.mock.calls[0]![4]).toBeUndefined();
+    });
+
+    it("answered private chat with reconfirm: edit keeps the keyboard", async () => {
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"])] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        expect(api.editMessageText.mock.calls[0]![3]).toHaveProperty("reply_markup", { kb: "default", id: 7 });
+    });
+
+    it("private chat still waiting keeps the keyboard", async () => {
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        await applyAnnouncementEdit(api, 7, command());
+        expect(api.editMessageText.mock.calls[0]![3]).toHaveProperty("reply_markup");
+    });
+});
+
+describe("applyAnnouncementEdit groups", () => {
+    const group = (chatId: number, messageId: number) => ({ ...delivery(chatId, messageId, [messageId]), targetType: "GROUP" });
+
+    it("group keeps the keyboard even when everyone answered, with the URL decline button from getMe", async () => {
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(-100, 500, ["confirmed", "declined"])] }));
+        findSentForEdit.mockResolvedValue([group(-100, 500)]);
+        api.getMe.mockResolvedValue({ username: "PlayPhotoBot" });
+        await applyAnnouncementEdit(api, 7, command());
+        expect(buildKeyboardCalls[0]).toEqual(["default", 7, "PlayPhotoBot", true]);
+        expect(api.editMessageText.mock.calls[0]![3]).toHaveProperty("reply_markup");
+    });
+
+    it("reconfirm in a group with several users: one message, all answers reset, group keyboard", async () => {
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(-100, 500, ["confirmed", "declined", "pending", "confirmed"])] }));
+        findSentForEdit.mockResolvedValue([group(-100, 500)]);
+        api.getMe.mockResolvedValue({ username: "PlayPhotoBot" });
+        await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+        expect(replyUpdateMany).toHaveBeenCalledWith({ id: { in: [-1000, -999, -997] } }, { status: "pending", respondedAt: null });
+        expect(api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(api.sendMessage.mock.calls[0]![2]).toMatchObject({ reply_parameters: { message_id: 500 } });
+        expect(buildKeyboardCalls.every(c => c[2] === "PlayPhotoBot" && c[3] === true)).toBe(true);
+    });
+
+    it("getMe failure is logged and falls back to the callback decline button", async () => {
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(-100, 500, ["pending"])] }));
+        findSentForEdit.mockResolvedValue([group(-100, 500)]);
+        api.getMe.mockRejectedValue(new Error("network"));
+        await applyAnnouncementEdit(api, 7, command());
+        expect(loggerWarn).toHaveBeenCalled();
+        expect(buildKeyboardCalls[0]).toEqual(["default", 7, undefined, true]);
+        expect(api.editMessageText).toHaveBeenCalled();
     });
 });
 

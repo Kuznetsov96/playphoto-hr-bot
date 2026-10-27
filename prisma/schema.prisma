@@ -71,6 +71,8 @@ model Broadcast {
   remindersStoppedByName String?
   /// Кто из вебаппа отозвал рассылку (у такой withdrawnByTelegramId пуст).
   withdrawnByName       String?
+  /// Рассылка создана с автонапоминаниями. false — без них (ручное «Remind» остаётся): переподтверждение их не заводит.
+  remindersEnabled      Boolean             @default(true)
   trackedMessages TrackedMessage[]
   deliveries      BroadcastDelivery[]
   pingLogs        BroadcastPingLog[]

@@ -2,7 +2,7 @@ import prisma from "../db/core.js";
 import type { Prisma } from "@prisma/client";
 
 export class BroadcastRepository {
-    async create(data: { initiatorId: bigint; messageText?: string; targetSummary?: string; buttonType?: string; attachmentKinds?: string[]; publicId?: string; origin?: string; authorName?: string; textAsCaption?: boolean }) {
+    async create(data: { initiatorId: bigint; messageText?: string; targetSummary?: string; buttonType?: string; attachmentKinds?: string[]; publicId?: string; origin?: string; authorName?: string; textAsCaption?: boolean; remindersEnabled?: boolean }) {
         return prisma.broadcast.create({
             data
         });
