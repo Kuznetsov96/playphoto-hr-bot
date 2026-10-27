@@ -120,6 +120,25 @@ describe("sendAnnouncementParts", () => {
         expect(r.partMessageIds).toHaveLength(1);
     });
 
+    it("visibly empty text (<b></b>, spaces, &nbsp;) counts as empty: follow-up for CONFIRM, nothing for NONE", async () => {
+        for (const text of ["<b></b>", "<p> </p>", "&nbsp;<i></i>"]) {
+            const confirm = makeApi();
+            await run(confirm, { text, media: [photo(1)], buttonType: "default" });
+            expect(confirm.sendMessage).toHaveBeenCalledTimes(1);
+            expect(confirm.sendMessage.mock.calls[0]?.[1]).toBe("follow-default");
+            const none = makeApi();
+            await run(none, { text, media: [photo(1)], buttonType: "none" });
+            expect(none.sendMessage).not.toHaveBeenCalled();
+        }
+    });
+
+    it("caption mode with a visibly empty text sends no caption", async () => {
+        const api = makeApi();
+        await run(api, { text: "<b></b>", media: [photo(1)], textAsCaption: true });
+        const options = (api.sendPhoto.mock.calls[0] as unknown as [number, unknown, Record<string, unknown>])[2];
+        expect(options).not.toHaveProperty("caption");
+    });
+
     it("video carries width, height, duration and supports_streaming", async () => {
         const api = makeApi();
         await run(api, { media: [item("video", 1, { width: 1920, height: 1080, durationSec: 12 })], text: "" , buttonType: "none"});

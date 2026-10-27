@@ -70,6 +70,14 @@ const fileIdOf = (item: BroadcastMediaItem, message: SentMessage): string | unde
     return message.document?.file_id;
 };
 
+function hasVisibleText(html: string): boolean {
+    return html
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")
+        .replace(/[\s\u00a0\u200b]+/g, "")
+        .length > 0;
+}
+
 /**
  * Отправляет вложения рассылки вебаппа и текст в порядке «Раскладки»:
  * одно вложение с подписью — одно сообщение; иначе медиа, документы, затем текст
@@ -81,7 +89,9 @@ export async function sendAnnouncementParts(
     chatId: number,
     input: AnnouncementPartsInput,
 ): Promise<AnnouncementPartsResult> {
-    const { text, media, documents, textAsCaption, extra, buttonType, fileIds, openAttachment } = input;
+    const { media, documents, textAsCaption, extra, buttonType, fileIds, openAttachment } = input;
+    // Текст без видимого содержимого («<b></b>», пробелы, &nbsp;) считается пустым.
+    const text = hasVisibleText(input.text) ? input.text : "";
     const partMessageIds: number[] = [];
     const learnedFileIds: Record<string, string> = {};
     const known = (item: BroadcastMediaItem): string | undefined =>
