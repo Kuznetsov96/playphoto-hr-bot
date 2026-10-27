@@ -1016,6 +1016,32 @@ const announcementCommandsSchema = z.object({
     items: z.array(z.union([announcementCommandSchema, announcementUnknownCommandSchema])),
 });
 
+const announcementRecipientCatalogueSchema = z.object({
+    cities: z.array(z.object({
+        name: z.string(),
+        peopleCount: z.number().int().nonnegative(),
+        locations: z.array(z.object({
+            publicId: z.string(),
+            name: z.string(),
+            peopleCount: z.number().int().nonnegative(),
+        })),
+    })),
+    everyoneCount: z.number().int().nonnegative(),
+});
+
+export type AnnouncementRecipientCatalogue = z.infer<typeof announcementRecipientCatalogueSchema>;
+
+const announcementResolvedRecipientsSchema = z.object({
+    count: z.number().int().nonnegative(),
+    telegramIds: z.array(z.string()),
+});
+
+export interface AnnouncementRecipientSelection {
+    everyone: boolean;
+    cityNames: string[];
+    locationPublicIds: string[];
+}
+
 export type AnnouncementCommand = z.infer<typeof announcementCommandsSchema>["items"][number];
 
 const recruitingCommandsSchema = z.object({
@@ -2019,6 +2045,27 @@ export class AwsBusinessClient {
             undefined,
             { expectsBody: false },
         );
+    }
+
+    /** Города и точки с числом людей для выбора адресатов в боте (тот же расчёт, что в вебаппе). */
+    async getAnnouncementRecipientCatalogue(): Promise<AnnouncementRecipientCatalogue> {
+        const body = await this.request("/announcements/recipients/catalogue", { method: "GET" });
+        return announcementRecipientCatalogueSchema.parse(body);
+    }
+
+    /** Telegram id людей выбора, каждый один раз; число — то же «N people», что у вебаппа. */
+    async resolveAnnouncementRecipients(
+        selection: AnnouncementRecipientSelection,
+    ): Promise<{ count: number; telegramIds: string[] }> {
+        const body = await this.request("/announcements/recipients/resolve", {
+            method: "POST",
+            body: JSON.stringify({
+                everyone: selection.everyone,
+                cityNames: selection.cityNames,
+                locationPublicIds: selection.locationPublicIds,
+            }),
+        });
+        return announcementResolvedRecipientsSchema.parse(body);
     }
 
     /** Полный снимок рассылки для истории в вебаппе (идемпотентный PUT). */

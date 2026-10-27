@@ -129,3 +129,38 @@ describe("AwsBusinessClient announcement commands", () => {
             expect.objectContaining({ body: JSON.stringify({ result: { deletedChats: 3, stayed: ["10"] } }) }));
     });
 });
+
+describe("AwsBusinessClient announcement recipients", () => {
+    beforeEach(() => {
+        vi.stubGlobal("fetch", vi.fn());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it("reads the catalogue", async () => {
+        const body = { cities: [{ name: "Kyiv", peopleCount: 3, locations: [{ publicId: "l1", name: "Mall", peopleCount: 2 }] }], everyoneCount: 5 };
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+
+        await expect(new AwsBusinessClient().getAnnouncementRecipientCatalogue()).resolves.toEqual(body);
+        expect(fetch).toHaveBeenCalledWith(
+            "https://api.example.test/api/v1/internal/bot/announcements/recipients/catalogue",
+            expect.objectContaining({ method: "GET" }),
+        );
+    });
+
+    it("resolves a selection with a POST body", async () => {
+        vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ count: 2, telegramIds: ["1", "2"] }), { status: 200 }));
+        const { AwsBusinessClient } = await import("../aws-business-client.js");
+        const selection = { everyone: false, cityNames: ["Kyiv"], locationPublicIds: [] };
+
+        await expect(new AwsBusinessClient().resolveAnnouncementRecipients(selection)).resolves.toEqual({ count: 2, telegramIds: ["1", "2"] });
+        expect(fetch).toHaveBeenCalledWith(
+            "https://api.example.test/api/v1/internal/bot/announcements/recipients/resolve",
+            expect.objectContaining({ method: "POST", body: JSON.stringify(selection) }),
+        );
+    });
+});

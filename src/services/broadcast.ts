@@ -20,7 +20,26 @@ import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
 import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
+import { announcementLayout, visibleLength } from "./announcement-layout.js";
 import { AnnouncementPartsError, isAttachmentGone, sendAnnouncementParts } from "./announcement-parts.js";
+
+/** Напоминания рассылки из бота — как умолчания вебаппа: через 20 ч, затем каждые 4 ч, до +4 дней. */
+const BOT_REMINDER_FIRST_AFTER_MS = 20 * 60 * 60 * 1000;
+const BOT_REMINDER_EVERY_MS = 4 * 60 * 60 * 1000;
+const BOT_REMINDER_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+
+export interface BotAnnouncementActor {
+    telegramId: number | bigint | string;
+    name: string;
+}
+
+export interface BotAnnouncementInput {
+    target: { everyone: boolean; cityNames: string[]; locationPublicIds: string[] };
+    replyMode: 'CONFIRM' | 'NONE';
+    reminders: boolean;
+    textHtml: string;
+    media: Array<{ kind: 'photo' | 'video' | 'document'; fileId: string; fileName?: string; width?: number | null; height?: number | null; durationSec?: number | null }>;
+}
 
 export interface BroadcastStats {
     totalChats: number;
@@ -41,6 +60,24 @@ export interface BroadcastStats {
 export interface BroadcastTarget {
     type: 'all' | 'hub' | 'city_chats' | 'city_chat_location' | 'pm_all' | 'pm_city' | 'pm_location' | 'pm_ids' | 'custom_chats';
     value?: string | string[];
+}
+
+interface BroadcastPingOptions {
+    initialDelayMs?: number;
+    repeatIntervalMs?: number;
+    buttonType?: 'default' | 'preferences' | 'none';
+    pingUntil?: Date;
+    targetMonth?: string;
+    noReminders?: boolean;
+}
+
+interface BroadcastOriginOptions {
+    publicId?: string;
+    origin?: 'BOT' | 'WEBAPP';
+    authorName?: string;
+    textAsCaption?: boolean;
+    /** Слать частями (sendAnnouncementParts) и без вложений вебаппа: рассылка из бота с известными file_id. */
+    partsSender?: boolean;
 }
 
 type BroadcastMediaInput = BroadcastMediaItem | BroadcastMediaItem[];
@@ -443,7 +480,12 @@ export const broadcastService = {
         });
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string, noReminders?: boolean }, origin?: { publicId?: string, origin?: 'BOT' | 'WEBAPP', authorName?: string, textAsCaption?: boolean }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: BroadcastPingOptions, origin?: BroadcastOriginOptions): Promise<number> {
+        return (await this.createBroadcastWithId(api, initiatorId, messageText, target, media, botUsername, pingOptions, origin)).count;
+    },
+
+    /** То же, что createBroadcast, но отдаёт и id рассылки (нужен боту для ссылки на вебапп). */
+    async createBroadcastWithId(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: BroadcastPingOptions, origin?: BroadcastOriginOptions): Promise<{ broadcastId: number; count: number }> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -503,6 +545,7 @@ export const broadcastService = {
                 botUsername,
                 pingOptions,
                 ...(origin?.textAsCaption ? { textAsCaption: true } : {}),
+                ...(origin?.partsSender ? { partsSender: true } : {}),
             });
         } catch (error) {
             if (origin?.publicId) {
@@ -524,11 +567,65 @@ export const broadcastService = {
         await enqueueAnnouncementSyncSafe(broadcast.id);
 
         logToDebug(`📥 [SERVICE] Added to queue: ${broadcast.id}`);
-        return chats.length + users.length;
+        return { broadcastId: broadcast.id, count: chats.length + users.length };
+    },
+
+    /**
+     * Рассылка, созданная в боте, уходит тем же путём, что из вебаппа: адресаты
+     * раскрываются в вебаппе при отправке, раскладка и напоминания те же, части
+     * шлёт sendAnnouncementParts по file_id админа (загрузки нет).
+     */
+    async createBotAnnouncement(api: any, actor: BotAnnouncementActor, input: BotAnnouncementInput): Promise<{ broadcastId: number; count: number }> {
+        const resolved = await awsBusinessClient.resolveAnnouncementRecipients(input.target);
+        const telegramIds = [...new Set(resolved.telegramIds.filter(id => /^\d+$/u.test(id)))];
+        if (telegramIds.length === 0) throw new Error("NO_RECIPIENTS");
+
+        const media: BroadcastMediaItem[] = input.media.map(item => ({
+            type: item.kind,
+            fileId: item.fileId,
+            ...(item.fileName ? { fileName: item.fileName } : {}),
+            ...(item.width != null ? { width: item.width } : {}),
+            ...(item.height != null ? { height: item.height } : {}),
+            ...(item.durationSec != null ? { durationSec: item.durationSec } : {}),
+        }));
+        const documents = media.filter(item => item.type === 'document').length;
+        const { textAsCaption } = announcementLayout({
+            media: media.length - documents,
+            documents,
+            visibleLength: visibleLength(input.textHtml),
+            replyMode: input.replyMode,
+        });
+
+        const buttonType = input.replyMode === 'CONFIRM' ? 'default' : 'none';
+        const pingOptions: BroadcastPingOptions = buttonType === 'default' && input.reminders
+            ? {
+                buttonType,
+                initialDelayMs: BOT_REMINDER_FIRST_AFTER_MS,
+                repeatIntervalMs: BOT_REMINDER_EVERY_MS,
+                pingUntil: new Date(Date.now() + BOT_REMINDER_WINDOW_MS),
+            }
+            : { buttonType, noReminders: true };
+
+        const created = await this.createBroadcastWithId(
+            api,
+            Number(actor.telegramId),
+            input.textHtml,
+            { type: 'pm_ids', value: telegramIds },
+            media.length > 0 ? media : undefined,
+            undefined,
+            pingOptions,
+            {
+                origin: 'BOT',
+                ...(actor.name ? { authorName: actor.name } : {}),
+                ...(textAsCaption ? { textAsCaption: true } : {}),
+                partsSender: true,
+            },
+        );
+        return created;
     },
 
     async processBroadcast(jobData: any, botApi: any) {
-        const { broadcastId, messageText, target, media, botUsername, pingOptions, textAsCaption } = jobData;
+        const { broadcastId, messageText, target, media, botUsername, pingOptions, textAsCaption, partsSender } = jobData;
         logToDebug(`⚙️ [WORKER] Processing broadcast ${broadcastId}`);
 
         const { chats, users } = await this.resolveTargets(target);
@@ -552,6 +649,8 @@ export const broadcastService = {
         // Вложения вебаппа: file_id переживает рестарт задачи (лежит в Broadcast.mediaFileIds)
         // и копится в памяти, чтобы второй адресат слал уже по file_id, а не потоком.
         const webappAttachments = hasWebappAttachments(media);
+        // Рассылка из бота (partsSender) тоже идёт частями, но файлы у неё уже в Telegram (file_id).
+        const useParts = webappAttachments || Boolean(partsSender);
         const fileIds: Record<string, string> = webappAttachments ? await broadcastRepository.getMediaFileIds(broadcastId) : {};
         const rememberFileIds = async (learned: Record<string, string>) => {
             if (Object.keys(learned).length === 0) return;
@@ -568,7 +667,7 @@ export const broadcastService = {
                 extra.reply_markup = buildBroadcastKeyboard(buttonType, broadcastId, botUsername, isGroup);
             }
 
-            if (webappAttachments) {
+            if (useParts) {
                 const result = await sendAnnouncementParts(botApi, numericChatId, {
                     text: messageText ?? "", ...splitAnnouncementMedia(media),
                     textAsCaption: Boolean(textAsCaption), extra, buttonType, fileIds,

@@ -1,0 +1,314 @@
+[
+  {
+    "name": "text only",
+    "input": {
+      "media": 0,
+      "documents": 0,
+      "visibleLength": 120,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["text"]
+    }
+  },
+  {
+    "name": "text only, no reply",
+    "input": {
+      "media": 0,
+      "documents": 0,
+      "visibleLength": 120,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["text"]
+    }
+  },
+  {
+    "name": "one photo, short text",
+    "input": {
+      "media": 1,
+      "documents": 0,
+      "visibleLength": 120,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["photo_or_video"]
+    }
+  },
+  {
+    "name": "one photo, caption exactly 1024",
+    "input": {
+      "media": 1,
+      "documents": 0,
+      "visibleLength": 1024,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["photo_or_video"]
+    }
+  },
+  {
+    "name": "one photo, 1025 characters leaves the caption",
+    "input": {
+      "media": 1,
+      "documents": 0,
+      "visibleLength": 1025,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["photo_or_video", "text"]
+    }
+  },
+  {
+    "name": "one photo, 4096 characters",
+    "input": {
+      "media": 1,
+      "documents": 0,
+      "visibleLength": 4096,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["photo_or_video", "text"]
+    }
+  },
+  {
+    "name": "one file, short text",
+    "input": {
+      "media": 0,
+      "documents": 1,
+      "visibleLength": 300,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["document"]
+    }
+  },
+  {
+    "name": "one file, caption exactly 1024",
+    "input": {
+      "media": 0,
+      "documents": 1,
+      "visibleLength": 1024,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["document"]
+    }
+  },
+  {
+    "name": "one file, 1025 characters",
+    "input": {
+      "media": 0,
+      "documents": 1,
+      "visibleLength": 1025,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["document", "text"]
+    }
+  },
+  {
+    "name": "one photo, empty text, Confirm",
+    "input": {
+      "media": 1,
+      "documents": 0,
+      "visibleLength": 0,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["photo_or_video"]
+    }
+  },
+  {
+    "name": "one photo, empty text, no reply",
+    "input": {
+      "media": 1,
+      "documents": 0,
+      "visibleLength": 0,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["photo_or_video"]
+    }
+  },
+  {
+    "name": "one file, empty text, Confirm",
+    "input": {
+      "media": 0,
+      "documents": 1,
+      "visibleLength": 0,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": true,
+      "parts": ["document"]
+    }
+  },
+  {
+    "name": "two photos, text",
+    "input": {
+      "media": 2,
+      "documents": 0,
+      "visibleLength": 50,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["album", "text"]
+    }
+  },
+  {
+    "name": "ten photos, text",
+    "input": {
+      "media": 10,
+      "documents": 0,
+      "visibleLength": 50,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["album", "text"]
+    }
+  },
+  {
+    "name": "two photos, empty text, Confirm",
+    "input": {
+      "media": 2,
+      "documents": 0,
+      "visibleLength": 0,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["album", "follow_up"]
+    }
+  },
+  {
+    "name": "two photos, empty text, no reply",
+    "input": {
+      "media": 2,
+      "documents": 0,
+      "visibleLength": 0,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["album"]
+    }
+  },
+  {
+    "name": "two files, text",
+    "input": {
+      "media": 0,
+      "documents": 2,
+      "visibleLength": 50,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["document_album", "text"]
+    }
+  },
+  {
+    "name": "ten files, empty text, Confirm",
+    "input": {
+      "media": 0,
+      "documents": 10,
+      "visibleLength": 0,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["document_album", "follow_up"]
+    }
+  },
+  {
+    "name": "ten files, empty text, no reply",
+    "input": {
+      "media": 0,
+      "documents": 10,
+      "visibleLength": 0,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["document_album"]
+    }
+  },
+  {
+    "name": "one photo and one file, text",
+    "input": {
+      "media": 1,
+      "documents": 1,
+      "visibleLength": 50,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["photo_or_video", "document", "text"]
+    }
+  },
+  {
+    "name": "one photo and one file, empty text, Confirm",
+    "input": {
+      "media": 1,
+      "documents": 1,
+      "visibleLength": 0,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["photo_or_video", "document", "follow_up"]
+    }
+  },
+  {
+    "name": "one photo and one file, empty text, no reply",
+    "input": {
+      "media": 1,
+      "documents": 1,
+      "visibleLength": 0,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["photo_or_video", "document"]
+    }
+  },
+  {
+    "name": "three photos and two files, text",
+    "input": {
+      "media": 3,
+      "documents": 2,
+      "visibleLength": 50,
+      "replyMode": "NONE"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["album", "document_album", "text"]
+    }
+  },
+  {
+    "name": "ten photos and ten files, 4096 characters",
+    "input": {
+      "media": 10,
+      "documents": 10,
+      "visibleLength": 4096,
+      "replyMode": "CONFIRM"
+    },
+    "expected": {
+      "textAsCaption": false,
+      "parts": ["album", "document_album", "text"]
+    }
+  }
+]
