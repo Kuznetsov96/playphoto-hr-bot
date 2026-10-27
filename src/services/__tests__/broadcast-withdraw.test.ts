@@ -182,6 +182,24 @@ describe("reminder stops and creation metadata", () => {
             attachmentKinds: [],
         }));
     });
+
+    it("createBroadcast syncs the announcement only after the job is queued", async () => {
+        broadcastCreate.mockResolvedValue({ id: 41 });
+        await broadcastService.createBroadcast({}, 1, "text", { type: "hub" });
+        expect(syncSafe).toHaveBeenCalledWith(41);
+        expect(queueAdd.mock.invocationCallOrder[0]!).toBeLessThan(syncSafe.mock.invocationCallOrder[0]!);
+    });
+
+    it("createBroadcast does not sync when queueing fails (webapp row is removed)", async () => {
+        broadcastCreate.mockResolvedValue({ id: 42 });
+        broadcastDelete.mockResolvedValue({});
+        queueAdd.mockRejectedValueOnce(new Error("redis down"));
+        await expect(broadcastService.createBroadcast(
+            {}, 1, "text", { type: "hub" }, undefined, undefined, undefined, { publicId: "p", origin: "WEBAPP" },
+        )).rejects.toThrow("redis down");
+        expect(broadcastDelete).toHaveBeenCalledWith(42);
+        expect(syncSafe).not.toHaveBeenCalled();
+    });
 });
 
 describe("'dropped' replies behave like deleted rows", () => {

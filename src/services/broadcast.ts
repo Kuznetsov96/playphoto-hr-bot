@@ -445,7 +445,6 @@ export const broadcastService = {
             ...(origin?.authorName ? { authorName: origin.authorName } : {}),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
-        await enqueueAnnouncementSyncSafe(broadcast.id);
 
         // 2. Resolve targets to get a count (optional, but good for UI)
         const { chats, users } = await this.resolveTargets(target);
@@ -475,6 +474,10 @@ export const broadcastService = {
             }
             throw error;
         }
+
+        // Синк — только после постановки в очередь: иначе компенсирующее удаление
+        // оставило бы в вебаппе строку DISPATCHED без рассылки.
+        await enqueueAnnouncementSyncSafe(broadcast.id);
 
         logToDebug(`📥 [SERVICE] Added to queue: ${broadcast.id}`);
         return chats.length + users.length;
