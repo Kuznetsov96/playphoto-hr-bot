@@ -47,6 +47,8 @@ export interface AnnouncementSnapshot {
     remindersStoppedByName?: string;
     /** Текст ушёл подписью к вложению. */
     textAsCaption?: boolean;
+    /** Когда текст исправляли последний раз. */
+    editedAt?: string;
     /** publicId выполненных действий вебаппа (последние 50). */
     actionsDone?: string[];
     nextReminderAt?: string;

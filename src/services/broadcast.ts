@@ -80,7 +80,7 @@ export function preferencesPingWindow(
     return { targetMonth, pingUntil };
 }
 
-function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
+export function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
     const kb = new InlineKeyboard();
 
     // Одна кнопка, не дві.
@@ -118,7 +118,7 @@ function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', 
     return kb;
 }
 
-function getBroadcastFollowUpText(buttonType: 'default' | 'preferences' | 'none') {
+export function getBroadcastFollowUpText(buttonType: 'default' | 'preferences' | 'none') {
     if (buttonType === 'preferences') {
         return "👇 Обери одну з кнопок нижче, щоб зафіксувати відповідь.";
     }
@@ -815,11 +815,8 @@ export const broadcastService = {
             return "already_confirmed";
         }
 
-        if (pending.status === "declined") {
-            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-already-declined"]);
-            return "already_declined";
-        }
-
+        // «Не згодна → Ознайомлена» разрешён (человек передумал или перечитала правку);
+        // обратный переход — нет. Причина отказа остаётся в истории ответа.
         await pendingReplyRepository.update(pending.id, { status: "confirmed", respondedAt: new Date() });
         await enqueueAnnouncementSyncSafe(broadcastId);
         await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-confirmed"]);

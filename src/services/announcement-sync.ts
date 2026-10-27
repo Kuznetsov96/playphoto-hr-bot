@@ -91,11 +91,13 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         include: {
             deliveries: true,
             pingLogs: true,
-            actionLogs: { orderBy: [{ doneAt: "desc" }, { publicId: "desc" }], take: ACTIONS_DONE_LIMIT, select: { publicId: true } },
+            actionLogs: { orderBy: [{ doneAt: "desc" }, { publicId: "desc" }], take: ACTIONS_DONE_LIMIT, select: { publicId: true, kind: true, doneAt: true } },
             trackedMessages: { orderBy: { id: "asc" }, include: { pendingReplies: true } },
         },
     });
     if (!broadcast) return null;
+    // Журнал отсортирован от свежих к старым: первая правка в нём и есть последняя.
+    const editedAt = broadcast.actionLogs.find(a => a.kind === "EDIT")?.doneAt ?? null;
 
     const userDeliveries = broadcast.deliveries.filter(d => d.targetType === "USER");
     const groupDeliveries = broadcast.deliveries.filter(d => d.targetType === "GROUP");
@@ -249,6 +251,7 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         ...(broadcast.remindersStoppedByName ? { remindersStoppedByName: broadcast.remindersStoppedByName.slice(0, 300) } : {}),
         textAsCaption: broadcast.textAsCaption,
         actionsDone: broadcast.actionLogs.map(a => a.publicId),
+        ...opt("editedAt", editedAt),
         ...opt("nextReminderAt", minDate(nextPings)),
         ...opt("reminderUntil", maxDate(pingUntils)),
         recipients: [...recipients.values()].slice(0, 5000),

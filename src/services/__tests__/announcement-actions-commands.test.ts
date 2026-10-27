@@ -30,6 +30,9 @@ vi.mock("../../repositories/broadcast-action-repository.js", () => ({
 }));
 vi.mock("../broadcast.js", () => ({ broadcastService: { stopPinging, withdrawBroadcast } }));
 vi.mock("../pinger.js", () => ({ remindBroadcast }));
+const applyAnnouncementEdit = vi.fn();
+class AnnouncementEditFailure extends Error { constructor(readonly code: string) { super(code); } }
+vi.mock("../announcement-edit.js", () => ({ applyAnnouncementEdit, AnnouncementEditFailure }));
 vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: syncSafe }));
 vi.mock("../../core/redis.js", () => ({ redis: { set: vi.fn().mockResolvedValue("OK"), eval: vi.fn().mockResolvedValue(1) } }));
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
@@ -159,8 +162,18 @@ describe("WITHDRAW", () => {
 });
 
 describe("EDIT and future kinds", () => {
-    it("EDIT parsed but not yet executed is failed with EDIT_NOT_IMPLEMENTED", async () => {
-        await run({ kind: "EDIT", publicId: ACTION, announcementPublicId: ANN, messageHtml: "x", reconfirm: false, textAsCaption: false, replacements: [], actorName: "O" });
-        expect(ackFailed).toHaveBeenCalledWith(ACTION, "EDIT_NOT_IMPLEMENTED");
+    const edit = { kind: "EDIT", publicId: ACTION, announcementPublicId: ANN, messageHtml: "x", reconfirm: false, textAsCaption: false, replacements: [], actorName: "O" };
+
+    it("EDIT is applied to the broadcast and acked", async () => {
+        applyAnnouncementEdit.mockResolvedValue({ edited: 1, failed: 0, reconfirmed: 0 });
+        await run(edit);
+        expect(applyAnnouncementEdit).toHaveBeenCalledWith(api, 7, expect.objectContaining({ kind: "EDIT", publicId: ACTION }));
+        expect(ackAccepted).toHaveBeenCalledWith(ACTION);
+    });
+
+    it("EDIT that failed everywhere is failed-acked with the code", async () => {
+        applyAnnouncementEdit.mockRejectedValue(new AnnouncementEditFailure("EDIT_FAILED"));
+        await run(edit);
+        expect(ackFailed).toHaveBeenCalledWith(ACTION, "EDIT_FAILED");
     });
 });

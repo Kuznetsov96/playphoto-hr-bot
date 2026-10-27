@@ -64,13 +64,13 @@ type SentMessage = {
     document?: { file_id: string };
 };
 
-const fileIdOf = (item: BroadcastMediaItem, message: SentMessage): string | undefined => {
+export const fileIdOf = (item: BroadcastMediaItem, message: SentMessage): string | undefined => {
     if (item.type === "photo") return message.photo?.[message.photo.length - 1]?.file_id;
     if (item.type === "video") return message.video?.file_id;
     return message.document?.file_id;
 };
 
-function hasVisibleText(html: string): boolean {
+export function hasVisibleText(html: string): boolean {
     return html
         .replace(/<[^>]*>/g, "")
         .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")

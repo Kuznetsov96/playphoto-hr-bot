@@ -100,7 +100,7 @@ describe("buildAnnouncementSnapshot", () => {
             remindersStoppedByName: "Olha",
             withdrawnAt: T(9),
             withdrawnByName: "Ivan",
-            actionLogs: [{ publicId: A1 }, { publicId: A2 }],
+            actionLogs: [{ publicId: A1, kind: "REMIND", doneAt: T(8) }, { publicId: A2, kind: "EDIT", doneAt: T(6) }],
         }));
 
         const snap = await buildAnnouncementSnapshot(7);
@@ -109,6 +109,7 @@ describe("buildAnnouncementSnapshot", () => {
         expect(snap.remindersStoppedByName).toBe("Olha");
         expect(snap.withdrawnByName).toBe("Ivan");
         expect(snap.actionsDone).toEqual([A1, A2]);
+        expect(snap.editedAt).toBe(T(6).toISOString());
         expect(snap.activity).toContainEqual(expect.objectContaining({ kind: "STOPPED", actorName: "Olha" }));
         expect(snap.activity).toContainEqual(expect.objectContaining({ kind: "WITHDRAWN", actorName: "Ivan" }));
     });

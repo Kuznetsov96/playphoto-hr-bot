@@ -70,6 +70,22 @@ export class BroadcastDeliveryRepository {
         });
     }
 
+    /** Доставки, которые правка должна догнать: сообщение реально ушло. */
+    async findSentForEdit(broadcastId: number) {
+        return prisma.broadcastDelivery.findMany({
+            where: { broadcastId, status: "SENT" },
+            orderBy: { id: "asc" },
+        });
+    }
+
+    /** Сообщение переподтверждения — часть доставки: отзыв удалит и его. */
+    async appendPartMessageId(id: number, messageId: number) {
+        return prisma.broadcastDelivery.update({
+            where: { id },
+            data: { partMessageIds: { push: messageId } },
+        });
+    }
+
     async getStats(broadcastId: number) {
         const groups = await prisma.broadcastDelivery.groupBy({
             by: ["status"],

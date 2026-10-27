@@ -11,6 +11,7 @@ import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
 import { isBotBlocked } from "../utils/bot-blocked.js";
 import { awsBusinessClient, type AnnouncementAttachment, type AnnouncementCommand } from "./aws-business-client.js";
 import { broadcastService } from "./broadcast.js";
+import { AnnouncementEditFailure, applyAnnouncementEdit } from "./announcement-edit.js";
 import type { BroadcastMediaItem } from "../types/context.js";
 
 const LEASE_KEY = "worker:announcement-command-dispatcher:lease";
@@ -116,10 +117,10 @@ export class AnnouncementCommandDispatcher {
             else if (command.kind === "REMIND") await this.remind(api, command);
             else if (command.kind === "STOP") await this.stop(command);
             else if (command.kind === "WITHDRAW") result = await this.withdraw(api, command);
-            else if (command.kind === "EDIT") throw new CommandFailure("EDIT_NOT_IMPLEMENTED");
+            else if (command.kind === "EDIT") await this.edit(api, command);
             else failure = `UNKNOWN_KIND: ${command.receivedKind}`.slice(0, 200);
         } catch (error) {
-            failure = error instanceof CommandFailure ? error.code : "SEND_FAILED";
+            failure = error instanceof CommandFailure || error instanceof AnnouncementEditFailure ? error.code : "SEND_FAILED";
             logBusinessEvent({
                 event: "bot.announcement_commands.command_failed",
                 level: "error", actorType: "system", actorRole: "system", result: "failed",
@@ -292,6 +293,12 @@ export class AnnouncementCommandDispatcher {
         await broadcastActionRepository.markDone(command.publicId, broadcast.id, "WITHDRAW", result);
         await enqueueAnnouncementSyncSafe(broadcast.id);
         return result;
+    }
+
+    /** Правка текста и вложений, по желанию с переподтверждением; журнал и отметки по чатам — в самой правке. */
+    private async edit(api: Api, command: Extract<AnnouncementCommand, { kind: "EDIT" }>): Promise<void> {
+        const broadcast = await requireBroadcast(command.announcementPublicId);
+        await applyAnnouncementEdit(api, broadcast.id, command);
     }
 
     private async test(api: Api, command: Extract<AnnouncementCommand, { kind: "TEST" }>): Promise<void> {
