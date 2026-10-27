@@ -7,6 +7,7 @@ const findByPublicId = vi.fn();
 const createBroadcast = vi.fn();
 const sendTestBroadcast = vi.fn();
 const enqueueBroadcastJob = vi.fn();
+const openAttachment = vi.fn();
 const redisSet = vi.fn();
 const redisEval = vi.fn();
 const flag = { enabled: true };
@@ -16,6 +17,7 @@ vi.mock("../aws-business-client.js", () => ({
         listPendingAnnouncementCommands: listPending,
         ackAnnouncementCommandAccepted: ackAccepted,
         ackAnnouncementCommandFailed: ackFailed,
+        openAnnouncementAttachment: openAttachment,
     },
 }));
 vi.mock("../../repositories/broadcast-repository.js", () => ({
@@ -46,6 +48,8 @@ const send = (overrides: Record<string, unknown> = {}) => ({
     recipients: ["100", "200", "100"],
     reminders: { firstAfterMs: 3_600_000, everyMs: 7_200_000, untilIso: "2026-11-01T10:00:00.000Z" },
     authorName: "Віталій",
+    attachments: [],
+    textAsCaption: false,
     ...overrides,
 });
 const test = (overrides: Record<string, unknown> = {}) => ({
@@ -54,6 +58,8 @@ const test = (overrides: Record<string, unknown> = {}) => ({
     telegramId: "555",
     messageHtml: "<i>тест</i>",
     replyMode: "CONFIRM" as const,
+    attachments: [],
+    textAsCaption: false,
     ...overrides,
 });
 
@@ -190,8 +196,8 @@ describe("AnnouncementCommandDispatcher", () => {
 
         await new AnnouncementCommandDispatcher().runOnce(api);
 
-        expect(sendTestBroadcast).toHaveBeenNthCalledWith(1, api, 555, "<i>тест</i>", undefined, "default");
-        expect(sendTestBroadcast).toHaveBeenNthCalledWith(2, api, 555, "<i>тест</i>", undefined, "none");
+        expect(sendTestBroadcast).toHaveBeenNthCalledWith(1, api, 555, "<i>тест</i>", undefined, "default", false);
+        expect(sendTestBroadcast).toHaveBeenNthCalledWith(2, api, 555, "<i>тест</i>", undefined, "none", false);
         expect(createBroadcast).not.toHaveBeenCalled();
         expect(findByPublicId).not.toHaveBeenCalled();
         expect(ackAccepted).toHaveBeenCalledTimes(2);
@@ -284,5 +290,82 @@ describe("startAnnouncementCommandPoller", () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+describe("AnnouncementCommandDispatcher: attachments", () => {
+    const A1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const A2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const photo = { publicId: A1, kind: "photo" as const, fileName: "a.jpg", mimeType: "image/jpeg", sizeBytes: 10, width: 800, height: 600, durationSec: null };
+    const doc = { publicId: A2, kind: "document" as const, fileName: "b.pdf", mimeType: "application/pdf", sizeBytes: 20, width: null, height: null, durationSec: null };
+    const cancel = vi.fn().mockResolvedValue(undefined);
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        redisSet.mockResolvedValue("OK");
+        redisEval.mockResolvedValue(1);
+        findByPublicId.mockResolvedValue(null);
+        createBroadcast.mockResolvedValue(2);
+        sendTestBroadcast.mockResolvedValue({ message_id: 1 });
+        ackAccepted.mockResolvedValue(undefined);
+        ackFailed.mockResolvedValue(undefined);
+        openAttachment.mockResolvedValue({ stream: { cancel }, contentType: "image/jpeg", sizeBytes: 10 });
+    });
+
+    it("SEND: checks every attachment, then creates the broadcast with media items and textAsCaption", async () => {
+        listPending.mockResolvedValue({ items: [send({ attachments: [photo, doc], textAsCaption: false })] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        expect(openAttachment).toHaveBeenCalledTimes(2);
+        expect(cancel).toHaveBeenCalledTimes(2);
+        const args = createBroadcast.mock.calls[0] as unknown[];
+        expect(args[4]).toEqual([
+            { type: "photo", fileId: "", attachmentPublicId: A1, fileName: "a.jpg", mimeType: "image/jpeg", width: 800, height: 600, durationSec: null },
+            { type: "document", fileId: "", attachmentPublicId: A2, fileName: "b.pdf", mimeType: "application/pdf", width: null, height: null, durationSec: null },
+        ]);
+        expect(args[7]).toEqual({ publicId: ID, origin: "WEBAPP", authorName: "Віталій" });
+        expect(ackAccepted).toHaveBeenCalledWith(ID);
+    });
+
+    it("SEND: textAsCaption goes into the broadcast", async () => {
+        listPending.mockResolvedValue({ items: [send({ attachments: [photo], textAsCaption: true })] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        expect((createBroadcast.mock.calls[0] as unknown[])[7]).toMatchObject({ textAsCaption: true });
+    });
+
+    it("SEND: an unavailable attachment fails the command and creates nothing", async () => {
+        openAttachment.mockRejectedValueOnce(Object.assign(new Error("gone"), { status: 404 }));
+        listPending.mockResolvedValue({ items: [send({ attachments: [photo, doc] })] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        expect(createBroadcast).not.toHaveBeenCalled();
+        expect(enqueueBroadcastJob).not.toHaveBeenCalled();
+        expect(ackFailed).toHaveBeenCalledWith(ID, "ATTACHMENT_UNAVAILABLE");
+        expect(ackAccepted).not.toHaveBeenCalled();
+    });
+
+    it("TEST: passes attachments and textAsCaption to the test send", async () => {
+        listPending.mockResolvedValue({ items: [test({ attachments: [photo], textAsCaption: true })] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        const args = sendTestBroadcast.mock.calls[0] as unknown[];
+        expect(args[3]).toEqual([expect.objectContaining({ type: "photo", attachmentPublicId: A1, fileId: "" })]);
+        expect(args[4]).toBe("default");
+        expect(args[5]).toBe(true);
+        expect(ackAccepted).toHaveBeenCalledWith(ID);
+    });
+
+    it("TEST: a vanished attachment maps to ATTACHMENT_UNAVAILABLE", async () => {
+        sendTestBroadcast.mockRejectedValue(Object.assign(new Error("gone"), { status: 404 }));
+        listPending.mockResolvedValue({ items: [test({ attachments: [photo] })] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        expect(ackFailed).toHaveBeenCalledWith(ID, "ATTACHMENT_UNAVAILABLE");
     });
 });

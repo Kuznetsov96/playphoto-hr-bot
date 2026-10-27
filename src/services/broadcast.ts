@@ -19,6 +19,7 @@ import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
 import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
+import { AnnouncementPartsError, sendAnnouncementParts } from "./announcement-parts.js";
 
 export interface BroadcastStats {
     totalChats: number;
@@ -42,6 +43,22 @@ export interface BroadcastTarget {
 }
 
 type BroadcastMediaInput = BroadcastMediaItem | BroadcastMediaItem[];
+
+const toMediaList = (media: BroadcastMediaInput | undefined): BroadcastMediaItem[] =>
+    Array.isArray(media) ? media : media ? [media] : [];
+
+/** Вложения рассылки вебаппа (а не файлы, присланные админом боту) идут через sendAnnouncementParts. */
+const hasWebappAttachments = (media: BroadcastMediaInput | undefined): boolean =>
+    toMediaList(media).some(item => item.attachmentPublicId);
+
+/** Разбор вложений на медиа (фото/видео) и файлы — порядок внутри групп сохраняется. */
+const splitAnnouncementMedia = (media: BroadcastMediaInput | undefined) => {
+    const items = toMediaList(media);
+    return {
+        media: items.filter(item => item.type !== 'document'),
+        documents: items.filter(item => item.type === 'document'),
+    };
+};
 
 /**
  * Месяц сбора и предел напоминаний для строки трекинга.
@@ -308,10 +325,25 @@ export const broadcastService = {
         return { chats: chats.length, users: users.length };
     },
 
-    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default') {
+    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default', textAsCaption = false) {
         const extra: any = { parse_mode: "HTML" };
         if (buttonType !== 'none') {
             extra.reply_markup = buildBroadcastKeyboard(buttonType);
+        }
+
+        if (hasWebappAttachments(media)) {
+            // Тест не кэширует file_id: файл каждый раз берётся у вебаппа.
+            try {
+                const result = await sendAnnouncementParts(api, chatId, {
+                    text, ...splitAnnouncementMedia(media), textAsCaption, extra, buttonType,
+                    fileIds: {},
+                    openAttachment: publicId => awsBusinessClient.openAnnouncementAttachment(publicId),
+                    followUpText: getBroadcastFollowUpText,
+                });
+                return result.buttonMessage;
+            } catch (error) {
+                throw error instanceof AnnouncementPartsError ? (error.cause ?? error) : error;
+            }
         }
 
         return await sendBroadcastPayload(api, chatId, text, media, extra, buttonType);
@@ -402,7 +434,7 @@ export const broadcastService = {
         });
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string, noReminders?: boolean }, origin?: { publicId?: string, origin?: 'BOT' | 'WEBAPP', authorName?: string }): Promise<number> {
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string, noReminders?: boolean }, origin?: { publicId?: string, origin?: 'BOT' | 'WEBAPP', authorName?: string, textAsCaption?: boolean }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -443,6 +475,7 @@ export const broadcastService = {
             ...(origin?.publicId ? { publicId: origin.publicId } : {}),
             ...(origin?.origin ? { origin: origin.origin } : {}),
             ...(origin?.authorName ? { authorName: origin.authorName } : {}),
+            ...(origin?.textAsCaption ? { textAsCaption: true } : {}),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
 
@@ -459,6 +492,7 @@ export const broadcastService = {
                 media,
                 botUsername,
                 pingOptions,
+                ...(origin?.textAsCaption ? { textAsCaption: true } : {}),
             });
         } catch (error) {
             if (origin?.publicId) {
@@ -484,7 +518,7 @@ export const broadcastService = {
     },
 
     async processBroadcast(jobData: any, botApi: any) {
-        const { broadcastId, messageText, target, media, botUsername, pingOptions } = jobData;
+        const { broadcastId, messageText, target, media, botUsername, pingOptions, textAsCaption } = jobData;
         logToDebug(`⚙️ [WORKER] Processing broadcast ${broadcastId}`);
 
         const { chats, users } = await this.resolveTargets(target);
@@ -505,15 +539,48 @@ export const broadcastService = {
         const { targetMonth, pingUntil } = preferencesPingWindow(pingOptions, new Date());
         const repeatInterval = pingOptions?.repeatIntervalMs || null;
 
-        const send = async (chatId: number | bigint, isGroup: boolean) => {
+        // Вложения вебаппа: file_id переживает рестарт задачи (лежит в Broadcast.mediaFileIds)
+        // и копится в памяти, чтобы второй адресат слал уже по file_id, а не потоком.
+        const webappAttachments = hasWebappAttachments(media);
+        const fileIds: Record<string, string> = webappAttachments ? await broadcastRepository.getMediaFileIds(broadcastId) : {};
+        const rememberFileIds = async (learned: Record<string, string>) => {
+            if (Object.keys(learned).length === 0) return;
+            Object.assign(fileIds, learned);
+            await broadcastRepository.update(broadcastId, { mediaFileIds: { ...fileIds } }).catch(error => {
+                logger.error({ err: error, broadcastId }, "Failed to persist announcement media file ids");
+            });
+        };
+
+        const send = async (chatId: number | bigint, isGroup: boolean): Promise<{ message: any; partMessageIds?: number[] }> => {
             const numericChatId = Number(chatId);
             const extra: any = { parse_mode: "HTML" };
             if (buttonType !== 'none') {
                 extra.reply_markup = buildBroadcastKeyboard(buttonType, broadcastId, botUsername, isGroup);
             }
 
-            return await sendBroadcastPayload(botApi, numericChatId, messageText, media, extra, buttonType);
+            if (webappAttachments) {
+                const result = await sendAnnouncementParts(botApi, numericChatId, {
+                    text: messageText ?? "", ...splitAnnouncementMedia(media),
+                    textAsCaption: Boolean(textAsCaption), extra, buttonType, fileIds,
+                    openAttachment: publicId => awsBusinessClient.openAnnouncementAttachment(publicId),
+                    followUpText: getBroadcastFollowUpText,
+                }).catch(async error => {
+                    if (error instanceof AnnouncementPartsError) await rememberFileIds(error.learnedFileIds);
+                    throw error;
+                });
+                await rememberFileIds(result.learnedFileIds);
+                return { message: result.buttonMessage, partMessageIds: result.partMessageIds };
+            }
+
+            return { message: await sendBroadcastPayload(botApi, numericChatId, messageText, media, extra, buttonType) };
         };
+        // Части, успевшие уйти до сбоя, записываются в доставку; для обычных рассылок аргумента нет.
+        const failedParts = (error: unknown): [number[]] | [] =>
+            error instanceof AnnouncementPartsError ? [error.partMessageIds] : [];
+        const markSent = (deliveryId: number, sent: { message: any; partMessageIds?: number[] }) =>
+            sent.partMessageIds
+                ? broadcastDeliveryRepository.markSent(deliveryId, sent.message?.message_id, sent.partMessageIds)
+                : broadcastDeliveryRepository.markSent(deliveryId, sent.message?.message_id);
 
         for (const chatId of chats) {
             const delivery = await broadcastDeliveryRepository.findUnique(broadcastId, BigInt(chatId));
@@ -522,7 +589,8 @@ export const broadcastService = {
             if (claimed.count !== 1) continue;
 
             try {
-                const sentMsg = await send(chatId, true);
+                const sent = await send(chatId, true);
+                const sentMsg = sent.message;
                 if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
                         broadcast: { connect: { id: broadcastId } },
@@ -536,12 +604,12 @@ export const broadcastService = {
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
-                await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
+                await markSent(delivery.id, sent);
                 await enqueueAnnouncementSyncSafe(broadcastId);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, chatId }, "Failed to broadcast to chat");
-                await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
+                await broadcastDeliveryRepository.markFailed(delivery.id, e, ...failedParts(e)).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
                 await enqueueAnnouncementSyncSafe(broadcastId);
@@ -585,7 +653,8 @@ export const broadcastService = {
                     });
                 }
 
-                const sentMsg = await send(userId, false);
+                const sent = await send(userId, false);
+                const sentMsg = sent.message;
                 if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
                         broadcast: { connect: { id: broadcastId } },
@@ -602,12 +671,12 @@ export const broadcastService = {
                         user: { connect: { telegramId: BigInt(userId) } }
                     });
                 }
-                await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
+                await markSent(delivery.id, sent);
                 await enqueueAnnouncementSyncSafe(broadcastId);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, userId }, "Failed to broadcast to user");
-                await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
+                await broadcastDeliveryRepository.markFailed(delivery.id, e, ...failedParts(e)).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
                 await enqueueAnnouncementSyncSafe(broadcastId);

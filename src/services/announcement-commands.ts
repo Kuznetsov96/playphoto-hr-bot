@@ -5,8 +5,9 @@ import { logBusinessEvent } from "../core/log-events.js";
 import { redis } from "../core/redis.js";
 import { broadcastRepository } from "../repositories/broadcast-repository.js";
 import { isBotBlocked } from "../utils/bot-blocked.js";
-import { awsBusinessClient, type AnnouncementCommand } from "./aws-business-client.js";
+import { awsBusinessClient, type AnnouncementAttachment, type AnnouncementCommand } from "./aws-business-client.js";
 import { broadcastService } from "./broadcast.js";
+import type { BroadcastMediaItem } from "../types/context.js";
 
 const LEASE_KEY = "worker:announcement-command-dispatcher:lease";
 const LEASE_TTL_MS = 5 * 60 * 1000;
@@ -25,6 +26,7 @@ const errorText = (error: unknown): string => {
 
 /** Короткий код отказа тестовой отправки для карточки в вебаппе. */
 export function describeTestFailure(error: unknown): string {
+    if ((error as { status?: number } | null)?.status === 404) return "ATTACHMENT_UNAVAILABLE";
     if (/can't parse entities/iu.test(errorText(error))) return "HTML_REJECTED";
     if (isBotBlocked(error)) return "BOT_BLOCKED";
     if (/blocked/iu.test(errorText(error))) return "BOT_BLOCKED";
@@ -155,6 +157,21 @@ export class AnnouncementCommandDispatcher {
                 : { noReminders: true }),
         };
 
+        const media = command.attachments.length > 0 ? toMediaItems(command.attachments) : undefined;
+
+        // Рассылка с недоступным вложением не создаётся: лучше отказ сразу, чем
+        // половина адресатов без файла. Поток отменяется после заголовков.
+        if (!existing && media) {
+            for (const attachment of command.attachments) {
+                try {
+                    const opened = await awsBusinessClient.openAnnouncementAttachment(attachment.publicId);
+                    await opened.stream.cancel().catch(() => undefined);
+                } catch (error) {
+                    throw new CommandFailure("ATTACHMENT_UNAVAILABLE", error);
+                }
+            }
+        }
+
         if (existing) {
             // Строка есть, а задания могло не быть (сбой между вставкой и постановкой):
             // повторная постановка с тем же jobId безопасна и дубля отправки не даёт.
@@ -163,9 +180,10 @@ export class AnnouncementCommandDispatcher {
                 initiatorId: WEBAPP_INITIATOR_ID,
                 messageText: existing.messageText ?? command.messageHtml,
                 target: { type: "pm_ids", value: recipients },
-                media: undefined,
+                media,
                 botUsername: undefined,
                 pingOptions,
+                ...(command.textAsCaption ? { textAsCaption: true } : {}),
             });
             return;
         }
@@ -176,10 +194,14 @@ export class AnnouncementCommandDispatcher {
                 WEBAPP_INITIATOR_ID,
                 command.messageHtml,
                 { type: "pm_ids", value: recipients },
-                undefined,
+                media,
                 undefined,
                 pingOptions,
-                { publicId: command.publicId, origin: "WEBAPP", ...(command.authorName ? { authorName: command.authorName } : {}) },
+                {
+                    publicId: command.publicId, origin: "WEBAPP",
+                    ...(command.authorName ? { authorName: command.authorName } : {}),
+                    ...(command.textAsCaption ? { textAsCaption: true } : {}),
+                },
             );
         } catch (error) {
             // Параллельный создатель успел первым: рассылка есть, второй отправки не будет.
@@ -191,7 +213,9 @@ export class AnnouncementCommandDispatcher {
                         initiatorId: WEBAPP_INITIATOR_ID,
                         messageText: raced.messageText ?? command.messageHtml,
                         target: { type: "pm_ids", value: recipients },
+                        media,
                         pingOptions,
+                        ...(command.textAsCaption ? { textAsCaption: true } : {}),
                     });
                 }
                 return;
@@ -206,13 +230,28 @@ export class AnnouncementCommandDispatcher {
                 api,
                 Number(command.telegramId),
                 command.messageHtml,
-                undefined,
+                command.attachments.length > 0 ? toMediaItems(command.attachments) : undefined,
                 command.replyMode === "CONFIRM" ? "default" : "none",
+                command.textAsCaption,
             );
         } catch (error) {
             throw new CommandFailure(describeTestFailure(error), error);
         }
     }
+}
+
+/** Вложение команды как элемент рассылки: file_id до первой отправки пуст. */
+function toMediaItems(attachments: AnnouncementAttachment[]): BroadcastMediaItem[] {
+    return attachments.map(a => ({
+        type: a.kind,
+        fileId: "",
+        attachmentPublicId: a.publicId,
+        fileName: a.fileName,
+        mimeType: a.mimeType,
+        width: a.width,
+        height: a.height,
+        durationSec: a.durationSec,
+    }));
 }
 
 class CommandFailure extends Error {

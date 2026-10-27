@@ -58,6 +58,11 @@ model Broadcast {
   origin                String              @default("BOT")
   /// Имя автора для рассылок из вебаппа (у них initiatorId = 0).
   authorName            String?
+  /// file_id Telegram по publicId вложения вебаппа: `{ [attachmentPublicId]: fileId }`.
+  /// Первый адресат грузит файл потоком, остальные и рестарт задачи шлют по file_id.
+  mediaFileIds          Json?
+  /// Текст рассылки ушёл подписью к единственному вложению (решает вебапп).
+  textAsCaption         Boolean             @default(false)
   trackedMessages TrackedMessage[]
   deliveries      BroadcastDelivery[]
   pingLogs        BroadcastPingLog[]
@@ -82,6 +87,8 @@ model BroadcastDelivery {
   status       String    @default("PENDING")
   attemptCount Int       @default(0)
   messageId    Int?
+  /// Все сообщения доставки с вложениями (в том числе при падении посреди).
+  partMessageIds Int[]   @default([])
   lastError    String?
   startedAt    DateTime?
   sentAt       DateTime?

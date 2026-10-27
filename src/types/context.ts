@@ -22,7 +22,15 @@ export interface StackEntry {
 
 export interface BroadcastMediaItem {
     type: 'photo' | 'video' | 'document' | 'voice' | 'video_note' | 'audio' | 'animation';
+    /** Для вложений вебаппа до первой отправки — "" (file_id узнаётся из ответа Telegram). */
     fileId: string;
+    /** Вложение из вебаппа: файл берётся у вебаппа потоком, а не по file_id. */
+    attachmentPublicId?: string;
+    fileName?: string;
+    mimeType?: string;
+    width?: number | null;
+    height?: number | null;
+    durationSec?: number | null;
 }
 
 export interface TaskAttachmentItem {

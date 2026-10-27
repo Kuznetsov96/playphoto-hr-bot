@@ -2,7 +2,7 @@ import prisma from "../db/core.js";
 import type { Prisma } from "@prisma/client";
 
 export class BroadcastRepository {
-    async create(data: { initiatorId: bigint; messageText?: string; targetSummary?: string; buttonType?: string; attachmentKinds?: string[]; publicId?: string; origin?: string; authorName?: string }) {
+    async create(data: { initiatorId: bigint; messageText?: string; targetSummary?: string; buttonType?: string; attachmentKinds?: string[]; publicId?: string; origin?: string; authorName?: string; textAsCaption?: boolean }) {
         return prisma.broadcast.create({
             data
         });
@@ -10,6 +10,13 @@ export class BroadcastRepository {
 
     async findByPublicId(publicId: string) {
         return prisma.broadcast.findUnique({ where: { publicId } });
+    }
+
+    /** Накопленные file_id вложений вебаппа: переживают рестарт задачи. */
+    async getMediaFileIds(id: number): Promise<Record<string, string>> {
+        const row = await prisma.broadcast.findUnique({ where: { id }, select: { mediaFileIds: true } });
+        const value = row?.mediaFileIds;
+        return value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, string>) } : {};
     }
 
     async delete(id: number) {

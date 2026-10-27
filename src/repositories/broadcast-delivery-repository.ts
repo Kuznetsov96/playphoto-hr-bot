@@ -25,12 +25,13 @@ export class BroadcastDeliveryRepository {
         });
     }
 
-    async markSent(id: number, messageId?: number) {
+    async markSent(id: number, messageId?: number, partMessageIds?: number[]) {
         return prisma.broadcastDelivery.update({
             where: { id },
             data: {
                 status: "SENT",
                 ...(messageId !== undefined ? { messageId } : {}),
+                ...(partMessageIds ? { partMessageIds } : {}),
                 sentAt: new Date(),
                 lastError: null,
             },
@@ -44,11 +45,11 @@ export class BroadcastDeliveryRepository {
         });
     }
 
-    async markFailed(id: number, error: unknown) {
+    async markFailed(id: number, error: unknown, partMessageIds?: number[]) {
         const message = error instanceof Error ? error.message : String(error);
         return prisma.broadcastDelivery.update({
             where: { id },
-            data: { status: "FAILED", lastError: message.slice(0, 2000) },
+            data: { status: "FAILED", lastError: message.slice(0, 2000), ...(partMessageIds ? { partMessageIds } : {}) },
         });
     }
 

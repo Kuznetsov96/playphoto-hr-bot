@@ -928,6 +928,19 @@ const recruitingCommandSchema = z.object({
 
 const announcementReplyModeSchema = z.enum(["CONFIRM", "NONE"]);
 
+/** Вложение команды: сначала медиа по порядку, затем файлы. Старый вебапп полей не шлёт. */
+const announcementAttachmentSchema = z.object({
+    publicId: z.string().uuid(),
+    kind: z.enum(["photo", "video", "document"]),
+    fileName: z.string(),
+    mimeType: z.string(),
+    sizeBytes: z.number(),
+    width: z.number().nullable().default(null),
+    height: z.number().nullable().default(null),
+    durationSec: z.number().nullable().default(null),
+});
+export type AnnouncementAttachment = z.infer<typeof announcementAttachmentSchema>;
+
 /**
  * Команда рассылки из вебаппа. Неизвестный kind не должен ронять всю очередь
  * (более свежий вебапп), поэтому разбор поштучный: битая запись становится
@@ -946,6 +959,8 @@ const announcementCommandSchema = z.discriminatedUnion("kind", [
             untilIso: z.string(),
         }).nullable(),
         authorName: z.string().nullable(),
+        attachments: z.array(announcementAttachmentSchema).default([]),
+        textAsCaption: z.boolean().default(false),
     }),
     z.object({
         kind: z.literal("TEST"),
@@ -953,6 +968,8 @@ const announcementCommandSchema = z.discriminatedUnion("kind", [
         telegramId: z.string(),
         messageHtml: z.string(),
         replyMode: announcementReplyModeSchema,
+        attachments: z.array(announcementAttachmentSchema).default([]),
+        textAsCaption: z.boolean().default(false),
     }),
 ]);
 
@@ -1188,6 +1205,37 @@ export class AwsBusinessClient {
             5_000,
             { expectsBody: false },
         );
+    }
+
+    /**
+     * Файл вложения рассылки: поток, без буферизации. Ответ не ok (404 — файл
+     * убран) бросает AwsBusinessApiError; отменить поток вызывающий может сам.
+     */
+    async openAnnouncementAttachment(publicId: string): Promise<{ stream: ReadableStream<Uint8Array>; contentType: string; sizeBytes: number | null }> {
+        const base = AWS_BUSINESS_API_URL.replace(/\/$/u, "");
+        const response = await fetch(`${base}/announcements/attachments/${encodeURIComponent(publicId)}/content`, {
+            method: "GET",
+            headers: {
+                authorization: `Bearer ${AWS_BUSINESS_API_TOKEN}`,
+                "x-request-id": `telegram-bot:${randomUUID()}`,
+            },
+            // Таймаут охватывает и тело: файл до 50 МБ уходит в Telegram, пока идёт чтение.
+            signal: AbortSignal.timeout(600_000),
+        });
+        if (!response.ok || !response.body) {
+            await response.body?.cancel().catch(() => undefined);
+            throw new AwsBusinessApiError(
+                response.status,
+                undefined,
+                `AWS business API attachment request failed with HTTP ${response.status}`,
+            );
+        }
+        const length = Number(response.headers.get("content-length"));
+        return {
+            stream: response.body,
+            contentType: response.headers.get("content-type") ?? "application/octet-stream",
+            sizeBytes: Number.isFinite(length) && length > 0 ? length : null,
+        };
     }
 
     async ackAnnouncementCommandAccepted(publicId: string): Promise<void> {
