@@ -1162,6 +1162,34 @@ export class AwsBusinessClient {
         return announcementCommandsSchema.parse(body);
     }
 
+    /**
+     * Завершує привʼязку Telegram до акаунта вебаппа за одноразовим кодом.
+     * Відмови вебаппа (404/410/409) приходять як AwsBusinessApiError зі статусом.
+     */
+    async completeTelegramLink(
+        code: string,
+        telegramId: string,
+        username?: string,
+        firstName?: string,
+        lastName?: string,
+    ): Promise<void> {
+        await this.request(
+            "/telegram-links/complete",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    code,
+                    telegramId,
+                    ...(username ? { username } : {}),
+                    ...(firstName ? { firstName } : {}),
+                    ...(lastName ? { lastName } : {}),
+                }),
+            },
+            5_000,
+            { expectsBody: false },
+        );
+    }
+
     async ackAnnouncementCommandAccepted(publicId: string): Promise<void> {
         await this.request(
             `/announcements/commands/${encodeURIComponent(publicId)}/accepted`,
