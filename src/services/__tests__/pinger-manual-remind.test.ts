@@ -143,6 +143,17 @@ describe("manual reminder", () => {
         expect(b.api.sendMessage).toHaveBeenCalledTimes(1);
     });
 
+    it("a deferred reminder does not fire after reminders were stopped, but the action is closed", async () => {
+        findDue.mockResolvedValue([{ id: 7, manualRemindActionId: ACTION, withdrawnAt: null, remindersStoppedAt: new Date() }]);
+        const b = bot();
+
+        await runPingerForTest(b);
+
+        expect(b.api.sendMessage).not.toHaveBeenCalled();
+        expect(logs.get(ACTION)).toBe("REMIND");
+        expect(broadcastUpdate).toHaveBeenCalledWith(7, { manualRemindAt: null, manualRemindActionId: null });
+    });
+
     it("a withdrawn broadcast sends nothing on the deferred tick but the action is closed", async () => {
         findDue.mockResolvedValue([{ id: 7, manualRemindActionId: ACTION, withdrawnAt: new Date(), remindersStoppedAt: null }]);
         const b = bot();

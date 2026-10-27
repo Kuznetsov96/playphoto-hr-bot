@@ -287,7 +287,7 @@ export class AnnouncementCommandDispatcher {
         const logged = await broadcastActionRepository.findLog(command.publicId);
         if (logged) return parseStoredResult(logged.result);
         const broadcast = await requireBroadcast(command.announcementPublicId);
-        const outcome = await broadcastService.withdrawBroadcast(api, broadcast.id, { name: command.actorName });
+        const outcome = await broadcastService.withdrawBroadcast(api, broadcast.id, { name: command.actorName }, { sweep: true });
         const result: ActionAckResult = { deletedChats: outcome.deletedChats, stayed: outcome.stayed };
         await broadcastActionRepository.markDone(command.publicId, broadcast.id, "WITHDRAW", result);
         await enqueueAnnouncementSyncSafe(broadcast.id);

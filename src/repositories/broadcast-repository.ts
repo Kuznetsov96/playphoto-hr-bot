@@ -38,6 +38,12 @@ export class BroadcastRepository {
         });
     }
 
+    /** Рассылки с отложенным ручным напоминанием (для общей остановки). */
+    async findIdsWithManualRemind(): Promise<number[]> {
+        const rows = await prisma.broadcast.findMany({ where: { manualRemindAt: { not: null } }, select: { id: true } });
+        return rows.map(r => r.id);
+    }
+
     /** Отложенные ручные напоминания, чей час настал. */
     async findDueManualReminders(now: Date) {
         return prisma.broadcast.findMany({

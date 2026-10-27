@@ -144,7 +144,7 @@ describe("WITHDRAW", () => {
 
     it("withdraws as the named actor and acks with the honest per-chat result", async () => {
         await run(withdraw);
-        expect(withdrawBroadcast).toHaveBeenCalledWith(api, 7, { name: "Olha" });
+        expect(withdrawBroadcast).toHaveBeenCalledWith(api, 7, { name: "Olha" }, { sweep: true });
         expect(ackAccepted).toHaveBeenCalledWith(ACTION, { deletedChats: 2, stayed: ["20"] });
     });
 

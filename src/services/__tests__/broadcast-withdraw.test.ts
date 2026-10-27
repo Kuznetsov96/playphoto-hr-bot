@@ -12,6 +12,7 @@ const deliveryFindSent = vi.fn();
 const queueAdd = vi.fn();
 const activePingBroadcastIds = vi.fn();
 const syncSafe = vi.fn();
+const broadcastManualIds = vi.fn();
 
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: { findActive: vi.fn().mockResolvedValue([]) } }));
 vi.mock("../../repositories/location-repository.js", () => ({
@@ -22,6 +23,7 @@ vi.mock("../../repositories/broadcast-repository.js", () => ({
         create: broadcastCreate,
         update: broadcastUpdate,
         updateMany: broadcastUpdateMany,
+        findIdsWithManualRemind: broadcastManualIds,
         findById: broadcastFindById,
         delete: broadcastDelete,
     },
@@ -179,6 +181,55 @@ describe("withdrawBroadcast", () => {
         expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({ remindersStoppedByName: "Olha" }));
     });
 
+    it("webapp sweep after a crash mid-deletion: claim lost, remaining messages are still deleted and a real result is returned", async () => {
+        broadcastUpdateMany.mockResolvedValue({ count: 0 }); // withdrawnAt уже стоит
+        broadcastUpdate.mockResolvedValue({});
+        trackedFindMany.mockResolvedValue([{ id: 1, chatId: 10n, messageId: 100, lastPingMsgId: null, pendingReplies: [] }]);
+        deliveryFindSent.mockResolvedValue([{ chatId: 10n, messageId: 100, partMessageIds: [100, 101] }]);
+        const api = {
+            deleteMessage: vi.fn(async (_c: number, m: number) => {
+                if (m === 100) throw { description: "Bad Request: message to delete not found" }; // ушло до сбоя
+                return true;
+            }),
+        };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, { name: "Olha" }, { sweep: true });
+
+        expect(api.deleteMessage).toHaveBeenCalledWith(10, 101);
+        expect(result).toEqual({ deleted: 2, failed: 0, deletedChats: 1, stayed: [] });
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, { manualRemindAt: null, manualRemindActionId: null });
+    });
+
+    it("webapp sweep after an admin withdraw reports honestly what stayed", async () => {
+        broadcastUpdateMany.mockResolvedValue({ count: 0 });
+        broadcastUpdate.mockResolvedValue({});
+        trackedFindMany.mockResolvedValue([{ id: 1, chatId: 10n, messageId: 100, pendingReplies: [] }]);
+        deliveryFindSent.mockResolvedValue([]);
+        const api = { deleteMessage: vi.fn().mockRejectedValue(new Error("message can't be deleted")) };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, { name: "Olha" }, { sweep: true });
+
+        expect(result).toEqual({ deleted: 0, failed: 1, deletedChats: 0, stayed: ["10"] });
+    });
+
+    it("stops pinging before it loads the targets", async () => {
+        await broadcastService.withdrawBroadcast({ deleteMessage: vi.fn().mockResolvedValue(true) }, 5, 99);
+
+        expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
+        expect(trackedUpdateMany.mock.invocationCallOrder[0]!).toBeLessThan(trackedFindMany.mock.invocationCallOrder[0]!);
+    });
+
+    it("admin path (numeric actor) also deletes partMessageIds", async () => {
+        trackedFindMany.mockResolvedValue([]);
+        deliveryFindSent.mockResolvedValue([{ chatId: 777n, messageId: 1, partMessageIds: [1, 2, 3] }]);
+        const api = { deleteMessage: vi.fn().mockResolvedValue(true) };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, 99);
+
+        expect(api.deleteMessage.mock.calls.map(c => c[1]).sort()).toEqual([1, 2, 3]);
+        expect(result).toMatchObject({ deleted: 3, deletedChats: 1 });
+    });
+
     it("does not export pruneCompletedArchive", () => {
         expect("pruneCompletedArchive" in broadcastService).toBe(false);
     });
@@ -189,6 +240,7 @@ describe("reminder stops and creation metadata", () => {
         vi.clearAllMocks();
         trackedUpdateMany.mockResolvedValue({ count: 4 });
         activePingBroadcastIds.mockResolvedValue([3, 8]);
+        broadcastManualIds.mockResolvedValue([]);
         broadcastCreate.mockResolvedValue({ id: 42 });
         broadcastUpdate.mockResolvedValue({});
         queueAdd.mockResolvedValue({});
@@ -205,11 +257,21 @@ describe("reminder stops and creation metadata", () => {
         expect(count).toBe(4);
         expect(broadcastUpdateMany).toHaveBeenCalledWith(
             { trackedMessages: { some: { nextPingAt: { not: null } } } },
-            { remindersStoppedAt: expect.any(Date) },
+            { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null },
         );
         // Рассылки запрашиваются ДО обнуления nextPingAt и синкаются все.
         expect(syncSafe).toHaveBeenCalledWith(3);
         expect(syncSafe).toHaveBeenCalledWith(8);
+    });
+
+    it("stopAllPings also cancels deferred manual reminders, even without auto pings", async () => {
+        broadcastManualIds.mockResolvedValue([11]);
+        await broadcastService.stopAllPings();
+        expect(broadcastUpdateMany).toHaveBeenCalledWith(
+            { manualRemindAt: { not: null } },
+            { manualRemindAt: null, manualRemindActionId: null },
+        );
+        expect(syncSafe).toHaveBeenCalledWith(11);
     });
 
     it("createBroadcast stores button type and attachment kinds", async () => {

@@ -580,7 +580,8 @@ async function runManualReminders(bot: BotLike, now: Date) {
     for (const broadcast of due) {
         try {
             const actionId = broadcast.manualRemindActionId;
-            const closed = broadcast.withdrawnAt !== null;
+            // Снята или остановлена после постановки: не шлём, но действие закрываем и очередь чистим.
+            const closed = broadcast.withdrawnAt !== null || broadcast.remindersStoppedAt !== null;
             if (actionId && !closed && !(await broadcastActionRepository.findLog(actionId))) {
                 const { failed } = await remindBroadcast(bot, broadcast.id, actionId, now);
                 if (failed > 0) logger.warn({ broadcastId: broadcast.id, failed }, "Deferred manual reminder had failed chats");

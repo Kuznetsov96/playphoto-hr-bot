@@ -942,15 +942,21 @@ export const broadcastService = {
 
     async stopAllPings(): Promise<number> {
         const affectedIds = await trackedMessageRepository.findBroadcastIdsWithActivePings();
+        // Отложенные ручные напоминания (в том числе у рассылок без автонапоминаний) тоже отменяются.
+        const manualIds = await broadcastRepository.findIdsWithManualRemind();
         await broadcastRepository.updateMany(
             { trackedMessages: { some: { nextPingAt: { not: null } } } },
-            { remindersStoppedAt: new Date() }
+            { remindersStoppedAt: new Date(), manualRemindAt: null, manualRemindActionId: null }
+        );
+        await broadcastRepository.updateMany(
+            { manualRemindAt: { not: null } },
+            { manualRemindAt: null, manualRemindActionId: null }
         );
         const result = await trackedMessageRepository.updateMany(
             { nextPingAt: { not: null } },
             { nextPingAt: null }
         );
-        for (const id of affectedIds) await enqueueAnnouncementSyncSafe(id);
+        for (const id of new Set([...affectedIds, ...manualIds])) await enqueueAnnouncementSyncSafe(id);
         return result.count;
     },
 
@@ -969,6 +975,7 @@ export const broadcastService = {
         api: any,
         broadcastId: number,
         actor: number | bigint | { name: string },
+        opts: { sweep?: boolean } = {},
     ): Promise<WithdrawResult> {
         const byName = typeof actor === "object" && actor !== null && "name" in actor;
         // Атомарный захват: параллельные вызовы не удалят сообщения дважды.
@@ -981,7 +988,17 @@ export const broadcastService = {
                 manualRemindActionId: null,
             },
         );
-        if (claim.count === 0) return { deleted: 0, failed: 0, deletedChats: 0, stayed: [] };
+        // Команда вебаппа (`sweep`) проход по сообщениям делает всегда: захват мог
+        // состояться до сбоя посреди удаления или в админке бота, и тогда
+        // «0 чатов» было бы ложью. Уже удалённое Telegram вернёт как «not found».
+        if (claim.count === 0 && !opts.sweep) return { deleted: 0, failed: 0, deletedChats: 0, stayed: [] };
+
+        // Напоминания глушим ДО выборки целей: пинг, ушедший посреди прохода, иначе
+        // оставил бы свежий lastPingMsgId, которого мы уже не удалим.
+        if (claim.count === 0) {
+            await broadcastRepository.update(broadcastId, { manualRemindAt: null, manualRemindActionId: null });
+        }
+        await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
 
         const [tracked, deliveries] = await Promise.all([
             trackedMessageRepository.findManyWithReplies(broadcastId),
@@ -1029,7 +1046,6 @@ export const broadcastService = {
             if (chatFailed) stayed.push(key); else deletedChats++;
         }
 
-        await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
         await enqueueAnnouncementSyncSafe(broadcastId);
 
         return { deleted, failed, deletedChats, stayed };
