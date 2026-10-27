@@ -10,7 +10,7 @@ const pendingUpdateMany = vi.fn();
 const pingLogCreate = vi.fn().mockResolvedValue({});
 const enqueueSync = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: enqueueSync }));
+vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: enqueueSync, processAnnouncementSync: vi.fn() }));
 
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -20,7 +20,11 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
     },
 }));
 vi.mock("../../repositories/broadcast-repository.js", () => ({
-    broadcastRepository: { findDueManualReminders: vi.fn().mockResolvedValue([]), update: vi.fn() },
+    broadcastRepository: {
+        findDueManualReminders: vi.fn().mockResolvedValue([]),
+        update: vi.fn(),
+        findReminderState: vi.fn().mockResolvedValue({ withdrawnAt: null, remindersStoppedAt: null }),
+    },
 }));
 vi.mock("../../repositories/broadcast-action-repository.js", () => ({
     broadcastActionRepository: {},
@@ -151,7 +155,7 @@ describe("pinger quiet hours", () => {
 
         await runPingerForTest(fakeBot());
 
-        expect(pingLogCreate).toHaveBeenCalledWith(7, 12345n);
+        expect(pingLogCreate).toHaveBeenCalledWith(7, 12345n, { messageId: expect.any(Number), actorName: null });
     });
 
     it("marks stale group replies 'dropped' (no delete) and stops tracking when none remain", async () => {

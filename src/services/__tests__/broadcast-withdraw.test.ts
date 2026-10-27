@@ -13,6 +13,7 @@ const queueAdd = vi.fn();
 const activePingBroadcastIds = vi.fn();
 const syncSafe = vi.fn();
 const broadcastManualIds = vi.fn();
+const pingLogMessages = vi.fn();
 
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: { findActive: vi.fn().mockResolvedValue([]) } }));
 vi.mock("../../repositories/location-repository.js", () => ({
@@ -38,6 +39,9 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
         findBroadcastIdsWithActivePings: activePingBroadcastIds,
     },
 }));
+vi.mock("../../repositories/broadcast-ping-log-repository.js", () => ({
+    broadcastPingLogRepository: { findMessages: pingLogMessages },
+}));
 vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: syncSafe }));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany },
@@ -61,6 +65,7 @@ describe("withdrawBroadcast", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         broadcastUpdateMany.mockResolvedValue({ count: 1 });
+        pingLogMessages.mockResolvedValue([]);
         trackedFindMany.mockResolvedValue([
             { id: 1, chatId: -100n, messageId: 11, pendingReplies: [] },
             { id: 2, chatId: -200n, messageId: 22, pendingReplies: [] },
@@ -85,7 +90,7 @@ describe("withdrawBroadcast", () => {
         expect(api.deleteMessage).toHaveBeenCalledTimes(3);
         expect(broadcastUpdateMany).toHaveBeenCalledWith(
             { id: 5, withdrawnAt: null },
-            { withdrawnAt: expect.any(Date), withdrawnByTelegramId: 99n, manualRemindAt: null, manualRemindActionId: null },
+            { withdrawnAt: expect.any(Date), withdrawnByTelegramId: 99n, manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null },
         );
         expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
         expect(broadcastDelete).not.toHaveBeenCalled();
@@ -176,6 +181,40 @@ describe("withdrawBroadcast", () => {
         expect(result).toMatchObject({ deletedChats: 1, stayed: [] });
     });
 
+    it("deletes every reminder logged for the broadcast, not just the last one (item 16)", async () => {
+        trackedFindMany.mockResolvedValue([{ id: 1, chatId: 10n, messageId: 100, lastPingMsgId: 502, pendingReplies: [] }]);
+        deliveryFindSent.mockResolvedValue([]);
+        pingLogMessages.mockResolvedValue([
+            { chatId: 10n, messageId: 500 }, { chatId: 10n, messageId: 501 }, { chatId: 10n, messageId: 502 },
+        ]);
+        const api = { deleteMessage: vi.fn().mockResolvedValue(true) };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, 99);
+
+        expect(api.deleteMessage.mock.calls.map(c => c.join(":")).sort()).toEqual(["10:100", "10:500", "10:501", "10:502"]);
+        expect(result).toMatchObject({ deleted: 4, failed: 0, deletedChats: 1, stayed: [] });
+    });
+
+    it("item 22: 'not found' on a retry means deleted; \"can't be deleted\" still means stayed", async () => {
+        broadcastUpdateMany.mockResolvedValue({ count: 0 });
+        broadcastUpdate.mockResolvedValue({});
+        trackedFindMany.mockResolvedValue([
+            { id: 1, chatId: 10n, messageId: 100, pendingReplies: [] },
+            { id: 2, chatId: 20n, messageId: 200, pendingReplies: [] },
+        ]);
+        deliveryFindSent.mockResolvedValue([]);
+        const api = {
+            deleteMessage: vi.fn(async (c: number) => {
+                if (c === 10) throw { description: "Bad Request: message to delete not found" };
+                throw { description: "Bad Request: message can't be deleted for everyone" };
+            }),
+        };
+
+        const result = await broadcastService.withdrawBroadcast(api, 5, { name: "Olha" }, { sweep: true });
+
+        expect(result).toMatchObject({ deletedChats: 1, stayed: ["20"] });
+    });
+
     it("stopPinging by a webapp actor records the name", async () => {
         await broadcastService.stopPinging(5, "Olha");
         expect(broadcastUpdate).toHaveBeenCalledWith(5, expect.objectContaining({ remindersStoppedByName: "Olha" }));
@@ -197,7 +236,7 @@ describe("withdrawBroadcast", () => {
 
         expect(api.deleteMessage).toHaveBeenCalledWith(10, 101);
         expect(result).toEqual({ deleted: 2, failed: 0, deletedChats: 1, stayed: [] });
-        expect(broadcastUpdate).toHaveBeenCalledWith(5, { manualRemindAt: null, manualRemindActionId: null });
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null });
     });
 
     it("webapp sweep after an admin withdraw reports honestly what stayed", async () => {
@@ -248,7 +287,7 @@ describe("reminder stops and creation metadata", () => {
 
     it("stopPinging records remindersStoppedAt", async () => {
         await broadcastService.stopPinging(5);
-        expect(broadcastUpdate).toHaveBeenCalledWith(5, { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null });
+        expect(broadcastUpdate).toHaveBeenCalledWith(5, { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null });
         expect(trackedUpdateMany).toHaveBeenCalledWith({ broadcastId: 5 }, { nextPingAt: null });
     });
 
@@ -257,7 +296,7 @@ describe("reminder stops and creation metadata", () => {
         expect(count).toBe(4);
         expect(broadcastUpdateMany).toHaveBeenCalledWith(
             { trackedMessages: { some: { nextPingAt: { not: null } } } },
-            { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null },
+            { remindersStoppedAt: expect.any(Date), manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null },
         );
         // Рассылки запрашиваются ДО обнуления nextPingAt и синкаются все.
         expect(syncSafe).toHaveBeenCalledWith(3);
@@ -269,7 +308,7 @@ describe("reminder stops and creation metadata", () => {
         await broadcastService.stopAllPings();
         expect(broadcastUpdateMany).toHaveBeenCalledWith(
             { manualRemindAt: { not: null } },
-            { manualRemindAt: null, manualRemindActionId: null },
+            { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null },
         );
         expect(syncSafe).toHaveBeenCalledWith(11);
     });

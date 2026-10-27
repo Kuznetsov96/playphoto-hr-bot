@@ -8,6 +8,7 @@ import { userRepository } from "../repositories/user-repository.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
 import { broadcastDeliveryRepository } from "../repositories/broadcast-delivery-repository.js";
+import { broadcastPingLogRepository } from "../repositories/broadcast-ping-log-repository.js";
 import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
@@ -933,6 +934,7 @@ export const broadcastService = {
             ...(actorName ? { remindersStoppedByName: actorName } : {}),
             manualRemindAt: null,
             manualRemindActionId: null,
+            manualRemindActorName: null,
         });
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
         await enqueueAnnouncementSyncSafe(broadcastId);
@@ -944,11 +946,11 @@ export const broadcastService = {
         const manualIds = await broadcastRepository.findIdsWithManualRemind();
         await broadcastRepository.updateMany(
             { trackedMessages: { some: { nextPingAt: { not: null } } } },
-            { remindersStoppedAt: new Date(), manualRemindAt: null, manualRemindActionId: null }
+            { remindersStoppedAt: new Date(), manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null }
         );
         await broadcastRepository.updateMany(
             { manualRemindAt: { not: null } },
-            { manualRemindAt: null, manualRemindActionId: null }
+            { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null }
         );
         const result = await trackedMessageRepository.updateMany(
             { nextPingAt: { not: null } },
@@ -984,6 +986,7 @@ export const broadcastService = {
                 ...(byName ? { withdrawnByName: actor.name } : { withdrawnByTelegramId: BigInt(actor as number | bigint) }),
                 manualRemindAt: null,
                 manualRemindActionId: null,
+            manualRemindActorName: null,
             },
         );
         // Команда вебаппа (`sweep`) проход по сообщениям делает всегда: захват мог
@@ -994,13 +997,14 @@ export const broadcastService = {
         // Напоминания глушим ДО выборки целей: пинг, ушедший посреди прохода, иначе
         // оставил бы свежий lastPingMsgId, которого мы уже не удалим.
         if (claim.count === 0) {
-            await broadcastRepository.update(broadcastId, { manualRemindAt: null, manualRemindActionId: null });
+            await broadcastRepository.update(broadcastId, { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null });
         }
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
 
-        const [tracked, deliveries] = await Promise.all([
+        const [tracked, deliveries, pings] = await Promise.all([
             trackedMessageRepository.findManyWithReplies(broadcastId),
             broadcastDeliveryRepository.findSentMessages(broadcastId),
+            broadcastPingLogRepository.findMessages(broadcastId),
         ]);
 
         const byChat = new Map<string, { chatId: number; messageIds: Set<number> }>();
@@ -1019,6 +1023,8 @@ export const broadcastService = {
             add(d.chatId, d.messageId);
             for (const id of d.partMessageIds ?? []) add(d.chatId, id);
         }
+        // Каждое отправленное напоминание, а не только последнее (пункт 16).
+        for (const p of pings) add(p.chatId, p.messageId);
 
         let deleted = 0;
         let failed = 0;
@@ -1032,7 +1038,9 @@ export const broadcastService = {
                     deleted++;
                 } catch (e: any) {
                     // Уже удалено руками — сообщения в чате и так нет.
-                    if (/message to delete not found/iu.test(String(e?.description ?? ""))) {
+                    // Пункт 22: так же отвечает Telegram на повторе для сообщения старше 48 часов, удалённого
+                    // раньше; «can't be deleted» — настоящее «осталось».
+                    if (/message (to delete )?not found/iu.test(String(e?.description ?? ""))) {
                         deleted++;
                         continue;
                     }

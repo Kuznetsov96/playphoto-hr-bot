@@ -295,6 +295,44 @@ describe("buildAnnouncementSnapshot", () => {
     });
 });
 
+describe("snapshot: deferred reminder and reminder authors", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        userFindMany.mockResolvedValue([]);
+        locationFindMany.mockResolvedValue([]);
+    });
+
+    it("carries manualRemindAt while a reminder is deferred and null once it fired", async () => {
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ manualRemindAt: T(30) }));
+        expect((await buildAnnouncementSnapshot(7)).manualRemindAt).toBe(T(30).toISOString());
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ manualRemindAt: null }));
+        expect((await buildAnnouncementSnapshot(7)).manualRemindAt).toBeNull();
+    });
+
+    it("REMINDED entries carry the actor of a manual reminder, auto reminders none; same minute different author stays apart", async () => {
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({
+            pingLogs: [
+                { chatId: 1n, sentAt: new Date(T(10).getTime() + 1_000), actorName: "Olha" },
+                { chatId: 2n, sentAt: new Date(T(10).getTime() + 2_000), actorName: "Olha" },
+                { chatId: 3n, sentAt: new Date(T(10).getTime() + 3_000), actorName: null },
+            ],
+        }));
+
+        const reminded = (await buildAnnouncementSnapshot(7)).activity.filter(a => a.kind === "REMINDED");
+
+        expect(reminded.map(a => [a.count, a.actorName])).toEqual([[2, "Olha"], [1, undefined]]);
+    });
+
+    it("does not send snapshots of preferences broadcasts (neither by tracked message nor by broadcast)", async () => {
+        putSnapshot.mockResolvedValue(undefined);
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ buttonType: "preferences" }));
+        await processAnnouncementSync(7);
+        broadcastFindUnique.mockResolvedValue(baseBroadcast({ buttonType: null, trackedMessages: [{ id: 1, buttonType: "preferences", nextPingAt: null, pingUntil: null, pendingReplies: [] }] }));
+        await processAnnouncementSync(7);
+        expect(putSnapshot).not.toHaveBeenCalled();
+    });
+});
+
 describe("enqueueAnnouncementSync", () => {
     beforeEach(() => {
         vi.clearAllMocks();

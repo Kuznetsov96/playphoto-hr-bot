@@ -48,8 +48,13 @@ export class BroadcastRepository {
     async findDueManualReminders(now: Date) {
         return prisma.broadcast.findMany({
             where: { manualRemindAt: { lte: now } },
-            select: { id: true, manualRemindActionId: true, withdrawnAt: true, remindersStoppedAt: true },
+            select: { id: true, manualRemindActionId: true, manualRemindActorName: true, withdrawnAt: true, remindersStoppedAt: true },
         });
+    }
+
+    /** Свежее состояние перед отправкой: снята или остановлена, пока задача ждала очереди. */
+    async findReminderState(id: number) {
+        return prisma.broadcast.findUnique({ where: { id }, select: { withdrawnAt: true, remindersStoppedAt: true } });
     }
 
     async updateMany(where: Prisma.BroadcastWhereInput, data: Prisma.BroadcastUpdateManyMutationInput) {

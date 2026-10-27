@@ -7,6 +7,7 @@ const findLog = vi.fn();
 const markDone = vi.fn();
 const claimMark = vi.fn();
 const releaseMark = vi.fn();
+const findMarkedChats = vi.fn();
 const findSentForEdit = vi.fn();
 const appendPart = vi.fn();
 const replyUpdate = vi.fn();
@@ -19,7 +20,7 @@ vi.mock("../../repositories/broadcast-repository.js", () => ({
     broadcastRepository: { findById, update: broadcastUpdate, getMediaFileIds },
 }));
 vi.mock("../../repositories/broadcast-action-repository.js", () => ({
-    broadcastActionRepository: { findLog, markDone, claimReminderMark: claimMark, releaseReminderMark: releaseMark },
+    broadcastActionRepository: { findLog, markDone, claimReminderMark: claimMark, releaseReminderMark: releaseMark, findMarkedChats },
 }));
 vi.mock("../../repositories/broadcast-delivery-repository.js", () => ({
     broadcastDeliveryRepository: { findSentForEdit, appendPartMessageId: appendPart },
@@ -85,6 +86,7 @@ beforeEach(() => {
     claimMark.mockResolvedValue(true);
     broadcastUpdate.mockResolvedValue({});
     releaseMark.mockResolvedValue(undefined);
+    findMarkedChats.mockResolvedValue(new Set());
     replyUpdate.mockResolvedValue({});
     trackedUpdate.mockReset();
     trackedUpdate.mockResolvedValue({});
@@ -323,6 +325,34 @@ describe("applyAnnouncementEdit reconfirm", () => {
         api.sendMessage.mockImplementation(async () => { order.push("send"); return { message_id: 900 }; });
         await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
         expect(order.indexOf("ping")).toBeLessThan(order.indexOf("send"));
+    });
+
+    it("a repeat after the chat was already reconfirmed does not give the answered person the keyboard back", async () => {
+        // Прошлый заход: ответы сброшены, переподтверждение ушло, человек ответил; лиз истёк до ack.
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"])] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100, 101])]);
+        findMarkedChats.mockResolvedValue(new Set(["10"]));
+        claimMark.mockResolvedValue(false);
+
+        const outcome = await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+
+        expect(outcome.reconfirmed).toBe(0);
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(api.editMessageText.mock.calls[0]![3]).not.toHaveProperty("reply_markup");
+    });
+
+    it("a failure between moving nextPingAt and resetting answers puts nextPingAt back and releases the mark", async () => {
+        const before = new Date("2026-10-27T20:00:00Z");
+        findById.mockResolvedValue(broadcastRow({ trackedMessages: [tracked(10, 100, ["confirmed"], { nextPingAt: before })] }));
+        findSentForEdit.mockResolvedValue([delivery(10, 100, [100])]);
+        replyUpdateMany.mockRejectedValueOnce(new Error("db down"));
+
+        const outcome = await applyAnnouncementEdit(api, 7, command({ reconfirm: true }));
+
+        expect(outcome.reconfirmed).toBe(0);
+        expect(api.sendMessage).not.toHaveBeenCalled();
+        expect(trackedUpdate).toHaveBeenLastCalledWith(10, { nextPingAt: before });
+        expect(releaseMark).toHaveBeenCalledWith(10n, ACTION);
     });
 
     it("a failed send puts the previous nextPingAt back", async () => {

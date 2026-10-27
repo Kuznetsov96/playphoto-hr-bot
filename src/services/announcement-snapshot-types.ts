@@ -53,6 +53,8 @@ export interface AnnouncementSnapshot {
     actionsDone?: string[];
     nextReminderAt?: string;
     reminderUntil?: string;
+    /** Ручное напоминание, отложенное на утро; null — отложенного нет (сработало или отменено). */
+    manualRemindAt?: string | null;
     recipients: AnnouncementRecipient[];
     chats: AnnouncementChat[];
     activity: AnnouncementActivity[];

@@ -186,16 +186,22 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
             count: broadcast.deliveries.filter(d => d.status === "SENT").length,
         });
     }
-    const pingsByMinute = new Map<string, { at: Date; chats: Set<string> }>();
+    // Группа — минута и тот, кто нажал: ручное напоминание и автоматическое в одну минуту не сливаются.
+    const pingsByMinute = new Map<string, { at: Date; chats: Set<string>; actorName: string | null }>();
     for (const p of broadcast.pingLogs) {
-        const key = p.sentAt.toISOString().slice(0, 16);
-        const group = pingsByMinute.get(key) ?? { at: p.sentAt, chats: new Set<string>() };
+        const key = `${p.sentAt.toISOString().slice(0, 16)}|${p.actorName ?? ""}`;
+        const group = pingsByMinute.get(key) ?? { at: p.sentAt, chats: new Set<string>(), actorName: p.actorName ?? null };
         if (p.sentAt < group.at) group.at = p.sentAt;
         group.chats.add(String(p.chatId));
         pingsByMinute.set(key, group);
     }
     for (const group of pingsByMinute.values()) {
-        activity.push({ at: group.at.toISOString(), kind: "REMINDED", count: group.chats.size });
+        activity.push({
+            at: group.at.toISOString(),
+            kind: "REMINDED",
+            count: group.chats.size,
+            ...(group.actorName ? { actorName: group.actorName.slice(0, 300) } : {}),
+        });
     }
     if (broadcast.remindersStoppedAt) {
         activity.push({
@@ -254,6 +260,7 @@ async function loadSnapshot(broadcastId: number): Promise<{ publicId: string; sn
         ...opt("editedAt", editedAt),
         ...opt("nextReminderAt", minDate(nextPings)),
         ...opt("reminderUntil", maxDate(pingUntils)),
+        manualRemindAt: broadcast.manualRemindAt ? broadcast.manualRemindAt.toISOString() : null,
         recipients: [...recipients.values()].slice(0, 5000),
         chats: chats.slice(0, 1000),
         activity: cappedActivity,
@@ -363,5 +370,7 @@ export async function processAnnouncementSync(broadcastId: number): Promise<void
         logger.warn({ broadcastId }, "Announcement sync skipped: broadcast not found");
         return;
     }
+    // Рассылки сбора пожеланий вебапп не принимает: единственный источник правды по ним — сам вебапп.
+    if (built.snapshot.replyMode === "PREFERENCES") return;
     await awsBusinessClient.putAnnouncementSnapshot(built.publicId, built.snapshot);
 }

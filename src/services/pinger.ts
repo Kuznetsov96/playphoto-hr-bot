@@ -19,7 +19,7 @@ import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { formatLocalDate } from "../utils/format-deadline.js";
 import { awsBusinessClient, type SchedulePreferenceSchedule } from "./aws-business-client.js";
-import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
+import { enqueueAnnouncementSyncSafe, processAnnouncementSync } from "./announcement-sync.js";
 import { monthNameFromCanonical } from "./preference-month.js";
 
 // Only HR-stage statuses — pinger broadcast targets early funnel
@@ -292,7 +292,7 @@ export async function sendReminder(
     msg: any,
     activePendingReplies: any[],
     now: Date,
-    opts: { manual: boolean; caches?: ReminderCaches } = { manual: false },
+    opts: { manual: boolean; caches?: ReminderCaches; actorName?: string | null } = { manual: false },
 ): Promise<ReminderOutcome> {
     const manual = opts.manual;
     const schedules = (opts.caches ??= newReminderCaches()).schedules;
@@ -346,7 +346,8 @@ export async function sendReminder(
             return "skipped";
         }
         const schedule = await preferencesScheduleFor(msg.targetMonth, schedules);
-        if (schedule === null) return "skipped";
+        // Вебапп недоступен — это неудача, а не «слать нечего»: ручное напоминание повторится.
+        if (schedule === null) return "failed";
         // Закрытие необратимо (личное окно открывает «Reopen», а не
         // рассылка) — напоминания кончаются насовсем.
         if (!schedule.open) {
@@ -365,7 +366,7 @@ export async function sendReminder(
             return "skipped";
         }
         const missing = await missingFor(msg.targetMonth, missingByMonth);
-        if (missing === null) return "skipped";
+        if (missing === null) return "failed";
         // Подано мимо бота (владелец вписал) — закрываем ожидание, как
         // это сделало бы сохранение в боте, и больше не напоминаем.
         if (!missing.has(String(msg.chatId))) {
@@ -396,6 +397,11 @@ export async function sendReminder(
 
         text = `🔔 <b>Нагадування!</b>\nПрохання підтвердити ознайомлення з повідомленням вище 👆\n\nНе відповіли: ${mentions}`;
     }
+
+    // Пока задача ждала очереди, рассылку могли отозвать или остановить: свежее состояние читаем
+    // прямо перед отправкой. Остаток окна в доли секунды принят: цена — одно лишнее напоминание.
+    const state = await broadcastRepository.findReminderState(msg.broadcastId);
+    if (state?.withdrawnAt || state?.remindersStoppedAt) return "skipped";
 
     // 3. Delete old ping
     if (msg.lastPingMsgId) {
@@ -441,7 +447,10 @@ export async function sendReminder(
 
         // История рассылки: пинг записан, даже если запись не удалась — не
         // ломаем отправку остальным.
-        await broadcastPingLogRepository.create(msg.broadcastId, BigInt(msg.chatId)).catch(err => {
+        await broadcastPingLogRepository.create(msg.broadcastId, BigInt(msg.chatId), {
+            messageId: sentPing.message_id,
+            actorName: manual ? (opts.actorName ?? null) : null,
+        }).catch(err => {
             logger.warn({ err, broadcastId: msg.broadcastId }, "Failed to record broadcast ping");
         });
         await enqueueAnnouncementSyncSafe(msg.broadcastId);
@@ -549,6 +558,7 @@ export async function remindBroadcast(
     broadcastId: number,
     actionPublicId: string,
     now: Date = new Date(),
+    actorName: string | null = null,
 ): Promise<{ sent: number; failed: number }> {
     const tracked = await trackedMessageRepository.findForManualRemind(broadcastId);
     const caches = newReminderCaches();
@@ -559,7 +569,7 @@ export async function remindBroadcast(
         if (pending.length === 0) continue;
         const chatId = BigInt(msg.chatId);
         if (!(await broadcastActionRepository.claimReminderMark(broadcastId, chatId, actionPublicId))) continue;
-        const outcome = await sendReminder(bot, msg, pending, now, { manual: true, caches });
+        const outcome = await sendReminder(bot, msg, pending, now, { manual: true, caches, actorName });
         if (outcome === "sent") sent++;
         else if (outcome === "failed") failed++;
         if (outcome === "failed" || outcome === "skipped") {
@@ -568,6 +578,9 @@ export async function remindBroadcast(
     }
     return { sent, failed };
 }
+
+/** Сколько тиков отложенное ручное напоминание пробуют доставить чатам с временной ошибкой. */
+const MANUAL_REMIND_MAX_ATTEMPTS = 3;
 
 /**
  * Тик ручных напоминаний, отложенных на утро: берёт рассылки с
@@ -583,11 +596,25 @@ async function runManualReminders(bot: BotLike, now: Date) {
             // Снята или остановлена после постановки: не шлём, но действие закрываем и очередь чистим.
             const closed = broadcast.withdrawnAt !== null || broadcast.remindersStoppedAt !== null;
             if (actionId && !closed && !(await broadcastActionRepository.findLog(actionId))) {
-                const { failed } = await remindBroadcast(bot, broadcast.id, actionId, now);
-                if (failed > 0) logger.warn({ broadcastId: broadcast.id, failed }, "Deferred manual reminder had failed chats");
+                const { failed } = await remindBroadcast(bot, broadcast.id, actionId, now, broadcast.manualRemindActorName);
+                if (failed > 0) {
+                    // Временная ошибка не должна терять напоминание: чаты без отметки досылаются на следующем
+                    // тике, но не больше MANUAL_REMIND_MAX_ATTEMPTS раз за действие.
+                    const attempts = await broadcastActionRepository.bumpAttempts(broadcast.id, actionId);
+                    if (attempts < MANUAL_REMIND_MAX_ATTEMPTS) {
+                        logger.warn({ broadcastId: broadcast.id, failed, attempts }, "Deferred manual reminder had failed chats; will retry on the next tick");
+                        continue;
+                    }
+                    logger.warn({ broadcastId: broadcast.id, failed, attempts }, "Deferred manual reminder gave up after repeated failures");
+                }
             }
             if (actionId) await broadcastActionRepository.markDone(actionId, broadcast.id, "REMIND");
-            await broadcastRepository.update(broadcast.id, { manualRemindAt: null, manualRemindActionId: null });
+            // Вебапп переписывает «Reminder requested» в «scheduled for…» только по снимку, где действие
+            // закрыто и manualRemindAt ещё стоит, поэтому этот снимок уходит до сброса поля.
+            await processAnnouncementSync(broadcast.id).catch(err => {
+                logger.warn({ err, broadcastId: broadcast.id }, "Snapshot of the fired deferred reminder failed");
+            });
+            await broadcastRepository.update(broadcast.id, { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null });
             await enqueueAnnouncementSyncSafe(broadcast.id);
         } catch (e) {
             logger.error({ err: e, broadcastId: broadcast.id }, "Deferred manual reminder failed");

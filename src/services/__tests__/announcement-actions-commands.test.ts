@@ -63,13 +63,13 @@ beforeEach(() => {
 });
 
 describe("REMIND", () => {
-    const remind = (notBefore: string | null = null) => ({ kind: "REMIND", publicId: ACTION, announcementPublicId: ANN, notBefore });
+    const remind = (notBefore: string | null = null) => ({ kind: "REMIND", publicId: ACTION, announcementPublicId: ANN, notBefore, actorName: "Olha" });
 
     it("by day reminds at once, closes the action and acks", async () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         vi.setSystemTime(new Date("2026-10-27T11:00:00Z")); // 13:00 Киев
         await run(remind());
-        expect(remindBroadcast).toHaveBeenCalledWith({ api }, 7, ACTION, expect.any(Date));
+        expect(remindBroadcast).toHaveBeenCalledWith({ api }, 7, ACTION, expect.any(Date), "Olha");
         expect(markDone).toHaveBeenCalledWith(ACTION, 7, "REMIND");
         expect(ackAccepted).toHaveBeenCalledWith(ACTION);
     });
@@ -79,7 +79,7 @@ describe("REMIND", () => {
         vi.setSystemTime(new Date("2026-10-27T21:10:00Z")); // 23:10 Киев (UTC+2)
         await run(remind());
         expect(remindBroadcast).not.toHaveBeenCalled();
-        expect(broadcastUpdate).toHaveBeenCalledWith(7, { manualRemindAt: new Date("2026-10-28T08:00:00.000Z"), manualRemindActionId: ACTION });
+        expect(broadcastUpdate).toHaveBeenCalledWith(7, { manualRemindAt: new Date("2026-10-28T08:00:00.000Z"), manualRemindActionId: ACTION, manualRemindActorName: "Olha" });
         expect(ackAccepted).toHaveBeenCalledWith(ACTION);
     });
 
@@ -88,7 +88,7 @@ describe("REMIND", () => {
         vi.setSystemTime(new Date("2026-10-27T11:00:00Z"));
         await run(remind("2026-10-28T08:00:00.000Z"));
         expect(remindBroadcast).not.toHaveBeenCalled();
-        expect(broadcastUpdate).toHaveBeenCalledWith(7, { manualRemindAt: new Date("2026-10-28T08:00:00.000Z"), manualRemindActionId: ACTION });
+        expect(broadcastUpdate).toHaveBeenCalledWith(7, { manualRemindAt: new Date("2026-10-28T08:00:00.000Z"), manualRemindActionId: ACTION, manualRemindActorName: "Olha" });
     });
 
     it("a redelivered action already in the log only acks", async () => {
@@ -102,7 +102,7 @@ describe("REMIND", () => {
     it("a redelivered deferred action does not move manualRemindAt", async () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         vi.setSystemTime(new Date("2026-10-27T21:30:00Z"));
-        findByPublicId.mockResolvedValue({ ...live, manualRemindAt: new Date("2026-10-28T08:00:00Z"), manualRemindActionId: ACTION });
+        findByPublicId.mockResolvedValue({ ...live, manualRemindAt: new Date("2026-10-28T08:00:00Z"), manualRemindActionId: ACTION, manualRemindActorName: null });
         await run(remind());
         expect(broadcastUpdate).not.toHaveBeenCalled();
         expect(ackAccepted).toHaveBeenCalledWith(ACTION);

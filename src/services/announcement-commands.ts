@@ -264,12 +264,16 @@ export class AnnouncementCommandDispatcher {
             if (broadcast.manualRemindActionId && broadcast.manualRemindActionId !== command.publicId) {
                 await broadcastActionRepository.markDone(broadcast.manualRemindActionId, broadcast.id, "REMIND");
             }
-            await broadcastRepository.update(broadcast.id, { manualRemindAt: at, manualRemindActionId: command.publicId });
+            await broadcastRepository.update(broadcast.id, {
+                manualRemindAt: at,
+                manualRemindActionId: command.publicId,
+                manualRemindActorName: command.actorName ?? null,
+            });
             await enqueueAnnouncementSyncSafe(broadcast.id);
             return;
         }
 
-        const { failed } = await remindBroadcast({ api }, broadcast.id, command.publicId, now);
+        const { failed } = await remindBroadcast({ api }, broadcast.id, command.publicId, now, command.actorName ?? null);
         // Не всем ушло: вебапп повторит (1/2/5/15 мин), отметки не дадут продублировать ушедшее.
         if (failed > 0) throw new CommandFailure("REMIND_FAILED");
         await broadcastActionRepository.markDone(command.publicId, broadcast.id, "REMIND");

@@ -977,6 +977,8 @@ const announcementCommandSchema = z.discriminatedUnion("kind", [
         publicId: z.string().uuid(),
         announcementPublicId: z.string().uuid(),
         notBefore: z.string().nullable().default(null),
+        /** Кто нажал «Remind» в вебаппе: попадает в историю напоминаний. */
+        actorName: z.string().nullable().default(null),
     }),
     z.object({
         kind: z.literal("STOP"),

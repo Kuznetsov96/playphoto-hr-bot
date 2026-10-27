@@ -121,6 +121,11 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
     };
 
     const now = new Date();
+    // Чаты, которым эта команда уже слала переподтверждение (прошлый заход оборвался): их ответы
+    // — уже ответы на него, кнопки обратно не возвращаем.
+    const alreadyReconfirmed = command.reconfirm
+        ? await broadcastActionRepository.findMarkedChats(broadcastId, command.publicId)
+        : new Set<string>();
     const trackedByChat = new Map<string, typeof broadcast.trackedMessages>();
     for (const t of broadcast.trackedMessages) {
         const key = String(t.chatId);
@@ -150,7 +155,7 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
         if (delivery.targetType !== "GROUP") {
             const replies = trackedOf(delivery).flatMap(t => t.pendingReplies);
             const waiting = replies.some(r => r.status === "pending");
-            const willReset = command.reconfirm && replies.some(r => r.status === "confirmed" || r.status === "declined");
+            const willReset = command.reconfirm && !alreadyReconfirmed.has(String(delivery.chatId)) && replies.some(r => r.status === "confirmed" || r.status === "declined");
             if (!waiting && !willReset) return {};
         }
         return keyboard(delivery);
@@ -227,18 +232,6 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
         // Условие — устойчивый факт рассылки (remindersEnabled), а не остатки в строках: stopTracking
         // обнуляет nextPingAt, а у рассылок бота интервала в строке нет.
         const resumed: Array<{ id: number; nextPingAt: Date | null }> = [];
-        const canRemind = broadcast.remindersEnabled && !broadcast.remindersStoppedAt && !broadcast.withdrawnAt;
-        if (canRemind) {
-            for (const t of tracked) {
-                if (!t.pendingReplies.some(r => answered.includes(r))) continue;
-                if (t.pingUntil && t.pingUntil.getTime() <= now.getTime()) continue;
-                resumed.push({ id: t.id, nextPingAt: t.nextPingAt });
-                await trackedMessageRepository.update(t.id, {
-                    nextPingAt: nextAllowedPingTime(new Date(now.getTime() + (t.pingIntervalMs ?? PING_CONFIG.REPEAT_DELAY_MS))),
-                });
-            }
-        }
-
         const restore = async () => {
             for (const r of answered) {
                 await pendingReplyRepository.update(r.id, { status: r.status, respondedAt: r.respondedAt }).catch(() => undefined);
@@ -248,16 +241,28 @@ export async function applyAnnouncementEdit(api: any, broadcastId: number, comma
             }
             await broadcastActionRepository.releaseReminderMark(delivery.chatId, command.publicId).catch(() => undefined);
         };
-        await pendingReplyRepository.updateMany({ id: { in: answered.map(r => r.id) } }, { status: "pending", respondedAt: null });
+        const canRemind = broadcast.remindersEnabled && !broadcast.remindersStoppedAt && !broadcast.withdrawnAt;
         let sent: { message_id: number };
         try {
+            if (canRemind) {
+                for (const t of tracked) {
+                    if (!t.pendingReplies.some(r => answered.includes(r))) continue;
+                    if (t.pingUntil && t.pingUntil.getTime() <= now.getTime()) continue;
+                    resumed.push({ id: t.id, nextPingAt: t.nextPingAt });
+                    await trackedMessageRepository.update(t.id, {
+                        nextPingAt: nextAllowedPingTime(new Date(now.getTime() + (t.pingIntervalMs ?? PING_CONFIG.REPEAT_DELAY_MS))),
+                    });
+                }
+            }
+            await pendingReplyRepository.updateMany({ id: { in: answered.map(r => r.id) } }, { status: "pending", respondedAt: null });
             sent = await api.sendMessage(Number(delivery.chatId), RECONFIRM_PROMPT, {
                 reply_parameters: { message_id: delivery.messageId ?? tracked[0]?.messageId, allow_sending_without_reply: true },
                 parse_mode: "HTML",
                 ...keyboard(delivery),
             });
         } catch (error) {
-            // Не ушло: ответы возвращаем и отметку снимаем, чтобы повтор команды мог дослать.
+            // Сбой на любом шаге (перенос напоминаний, сброс ответов, отправка): всё возвращаем и снимаем
+            // отметку, чтобы повтор команды мог начать заново, а nextPingAt не остался сдвинутым.
             await restore();
             throw error;
         }
