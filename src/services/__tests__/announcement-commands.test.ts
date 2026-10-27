@@ -6,6 +6,7 @@ const ackFailed = vi.fn();
 const findByPublicId = vi.fn();
 const createBroadcast = vi.fn();
 const sendTestBroadcast = vi.fn();
+const enqueueBroadcastJob = vi.fn();
 const redisSet = vi.fn();
 const redisEval = vi.fn();
 const flag = { enabled: true };
@@ -21,7 +22,7 @@ vi.mock("../../repositories/broadcast-repository.js", () => ({
     broadcastRepository: { findByPublicId },
 }));
 vi.mock("../broadcast.js", () => ({
-    broadcastService: { createBroadcast, sendTestBroadcast },
+    broadcastService: { createBroadcast, sendTestBroadcast, enqueueBroadcastJob },
 }));
 vi.mock("../../core/redis.js", () => ({ redis: { set: redisSet, eval: redisEval } }));
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
@@ -63,6 +64,7 @@ describe("AnnouncementCommandDispatcher", () => {
         redisEval.mockResolvedValue(1);
         findByPublicId.mockResolvedValue(null);
         createBroadcast.mockResolvedValue(2);
+        enqueueBroadcastJob.mockResolvedValue(undefined);
         sendTestBroadcast.mockResolvedValue({ message_id: 1 });
         ackAccepted.mockResolvedValue(undefined);
         ackFailed.mockResolvedValue(undefined);
@@ -97,14 +99,44 @@ describe("AnnouncementCommandDispatcher", () => {
         expect(ackFailed).not.toHaveBeenCalled();
     });
 
-    it("SEND is idempotent: an existing Broadcast only gets accepted", async () => {
-        findByPublicId.mockResolvedValue({ id: 5 });
+    it("SEND is idempotent: an existing Broadcast is not recreated; its job is re-enqueued (same jobId dedupes) and then accepted", async () => {
+        findByPublicId.mockResolvedValue({ id: 5, messageText: "<b>Привіт</b>" });
         listPending.mockResolvedValue({ items: [send()] });
 
         await new AnnouncementCommandDispatcher().runOnce(api);
 
         expect(createBroadcast).not.toHaveBeenCalled();
+        expect(enqueueBroadcastJob).toHaveBeenCalledTimes(1);
+        expect(enqueueBroadcastJob).toHaveBeenCalledWith(expect.objectContaining({
+            broadcastId: 5,
+            messageText: "<b>Привіт</b>",
+            target: { type: "pm_ids", value: ["100", "200"] },
+            pingOptions: expect.objectContaining({ buttonType: "default", initialDelayMs: 3_600_000, repeatIntervalMs: 7_200_000 }),
+        }));
         expect(ackAccepted).toHaveBeenCalledWith(ID);
+        // order: enqueue before ack
+        expect(enqueueBroadcastJob.mock.invocationCallOrder[0]).toBeLessThan(ackAccepted.mock.invocationCallOrder[0]!);
+    });
+
+    it("SEND with an existing Broadcast whose job is already queued adds no second job (enqueue is the deduping jobId add)", async () => {
+        findByPublicId.mockResolvedValue({ id: 5, messageText: "x" });
+        listPending.mockResolvedValue({ items: [send(), send()] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        // Both calls use the same deterministic id inside enqueueBroadcastJob; the dispatcher never sends directly.
+        expect(enqueueBroadcastJob.mock.calls.every(c => c[0].broadcastId === 5)).toBe(true);
+        expect(createBroadcast).not.toHaveBeenCalled();
+    });
+
+    it("SEND: a failed re-enqueue of an existing Broadcast is acked failed (retry later)", async () => {
+        findByPublicId.mockResolvedValue({ id: 5, messageText: "x" });
+        enqueueBroadcastJob.mockRejectedValue(new Error("Redis down"));
+        listPending.mockResolvedValue({ items: [send()] });
+
+        await new AnnouncementCommandDispatcher().runOnce(api);
+
+        expect(ackFailed).toHaveBeenCalledWith(ID, "SEND_FAILED");
     });
 
     it("SEND: a unique-index race (P2002) counts as already existing", async () => {

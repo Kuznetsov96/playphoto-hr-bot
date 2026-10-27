@@ -381,6 +381,27 @@ export const broadcastService = {
         };
     },
 
+    /**
+     * Единственное место постановки отправки в очередь. jobId детерминирован
+     * (`broadcast-<id>`): повторная постановка живого или недавно завершённого
+     * задания BullMQ игнорирует, а если запись уже вычищена, processBroadcast
+     * безопасно прогоняется заново (доставки createMany skipDuplicates, не
+     * PENDING пропускаются).
+     */
+    async enqueueBroadcastJob(data: { broadcastId: number } & Record<string, unknown>) {
+        const { broadcastQueue } = await import("../core/queue.js");
+        await broadcastQueue.add('send-broadcast', {
+            ...data,
+            api: null // API object cannot be serialized, worker must use its own bot instance
+        }, {
+            jobId: `broadcast-${data.broadcastId}`,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: 500,
+            removeOnFail: 1_000,
+        });
+    },
+
     async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string, noReminders?: boolean }, origin?: { publicId?: string, origin?: 'BOT' | 'WEBAPP', authorName?: string }): Promise<number> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
@@ -430,9 +451,8 @@ export const broadcastService = {
         const { chats, users } = await this.resolveTargets(target);
 
         // 3. Add to Queue
-        const { broadcastQueue } = await import("../core/queue.js");
         try {
-            await broadcastQueue.add('send-broadcast', {
+            await this.enqueueBroadcastJob({
                 broadcastId: broadcast.id,
                 initiatorId,
                 messageText,
@@ -440,13 +460,6 @@ export const broadcastService = {
                 media,
                 botUsername,
                 pingOptions,
-                api: null // API object cannot be serialized, worker must use its own bot instance
-            }, {
-                jobId: `broadcast-${broadcast.id}`,
-                attempts: 3,
-                backoff: { type: "exponential", delay: 5_000 },
-                removeOnComplete: 500,
-                removeOnFail: 1_000,
             });
         } catch (error) {
             if (origin?.publicId) {
@@ -559,6 +572,16 @@ export const broadcastService = {
                     continue;
                 }
 
+                if (buttonType !== 'none' && target.type === 'pm_ids') {
+                    // Получатель из вебаппа может быть неизвестен боту: PendingReply требует User.
+                    // Создаём до отправки, чтобы сбой не оставил отправленное сообщение без ответа.
+                    await userRepository.upsert({
+                        where: { telegramId: BigInt(userId) },
+                        create: { telegramId: BigInt(userId) },
+                        update: {},
+                    });
+                }
+
                 const sentMsg = await send(userId, false);
                 if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
@@ -571,14 +594,6 @@ export const broadcastService = {
                         buttonType,
                         targetMonth
                     });
-                    if (target.type === 'pm_ids') {
-                        // Получатель из вебаппа может быть неизвестен боту: PendingReply требует User.
-                        await userRepository.upsert({
-                            where: { telegramId: BigInt(userId) },
-                            create: { telegramId: BigInt(userId) },
-                            update: {},
-                        });
-                    }
                     await pendingReplyRepository.create({
                         trackedMessage: { connect: { id: tracked.id } },
                         user: { connect: { telegramId: BigInt(userId) } }

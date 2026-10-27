@@ -26,7 +26,8 @@ const errorText = (error: unknown): string => {
 /** Короткий код отказа тестовой отправки для карточки в вебаппе. */
 export function describeTestFailure(error: unknown): string {
     if (/can't parse entities/iu.test(errorText(error))) return "HTML_REJECTED";
-    if (isBotBlocked(error) || /blocked/iu.test(errorText(error))) return "BOT_BLOCKED";
+    if (isBotBlocked(error)) return "BOT_BLOCKED";
+    if (/blocked/iu.test(errorText(error))) return "BOT_BLOCKED";
     return "TEST_FAILED";
 }
 
@@ -137,9 +138,9 @@ export class AnnouncementCommandDispatcher {
     }
 
     private async send(command: Extract<AnnouncementCommand, { kind: "SEND" }>): Promise<void> {
-        if (await broadcastRepository.findByPublicId(command.publicId)) return;
+        const existing = await broadcastRepository.findByPublicId(command.publicId);
         const recipients = [...new Set(command.recipients.filter(id => /^\d+$/u.test(id)))];
-        if (recipients.length === 0) throw new CommandFailure("NO_RECIPIENTS");
+        if (!existing && recipients.length === 0) throw new CommandFailure("NO_RECIPIENTS");
 
         const buttonType = command.replyMode === "CONFIRM" ? "default" : "none";
         const reminders = buttonType === "default" ? command.reminders : null;
@@ -154,6 +155,21 @@ export class AnnouncementCommandDispatcher {
                 : { noReminders: true }),
         };
 
+        if (existing) {
+            // Строка есть, а задания могло не быть (сбой между вставкой и постановкой):
+            // повторная постановка с тем же jobId безопасна и дубля отправки не даёт.
+            await broadcastService.enqueueBroadcastJob({
+                broadcastId: existing.id,
+                initiatorId: WEBAPP_INITIATOR_ID,
+                messageText: existing.messageText ?? command.messageHtml,
+                target: { type: "pm_ids", value: recipients },
+                media: undefined,
+                botUsername: undefined,
+                pingOptions,
+            });
+            return;
+        }
+
         try {
             await broadcastService.createBroadcast(
                 null,
@@ -167,7 +183,19 @@ export class AnnouncementCommandDispatcher {
             );
         } catch (error) {
             // Параллельный создатель успел первым: рассылка есть, второй отправки не будет.
-            if (isUniqueViolation(error)) return;
+            if (isUniqueViolation(error)) {
+                const raced = await broadcastRepository.findByPublicId(command.publicId);
+                if (raced) {
+                    await broadcastService.enqueueBroadcastJob({
+                        broadcastId: raced.id,
+                        initiatorId: WEBAPP_INITIATOR_ID,
+                        messageText: raced.messageText ?? command.messageHtml,
+                        target: { type: "pm_ids", value: recipients },
+                        pingOptions,
+                    });
+                }
+                return;
+            }
             throw error;
         }
     }
@@ -196,7 +224,7 @@ class CommandFailure extends Error {
 export const announcementCommandDispatcher = new AnnouncementCommandDispatcher();
 
 /**
- * Запускает опрос раз в 15 с через `bot.api` (с autoRetry). Выключен, пока
+ * Запускает опрос раз в 15 с через `bot.api`. Выключен, пока
  * ANNOUNCEMENTS_COMMANDS_ENABLED не true; дубли между инстансами гасит лиз.
  */
 export function startAnnouncementCommandPoller(api: Api): NodeJS.Timeout | undefined {

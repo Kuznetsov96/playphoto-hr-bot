@@ -120,6 +120,8 @@ describe("broadcast to an explicit telegram id list (pm_ids)", () => {
         expect(tracked.nextPingAt.getTime()).toBeGreaterThanOrEqual(before + 3_600_000);
         expect(tracked.nextPingAt.getTime()).toBeLessThan(before + 3_600_000 + 5_000);
         expect(pendingReplyCreate).toHaveBeenCalledTimes(2);
+        // User создаётся до отправки сообщения этому получателю.
+        expect(userUpsert.mock.invocationCallOrder[0]).toBeLessThan(api.sendMessage.mock.invocationCallOrder[0]!);
         // Личная доставка: «Не згодна» — callback, а не URL группового чата.
         const markup = api.sendMessage.mock.calls[0]![2].reply_markup.inline_keyboard.flat();
         expect(markup.map((b: { callback_data?: string }) => b.callback_data)).toEqual([
