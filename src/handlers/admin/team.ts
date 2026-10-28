@@ -20,6 +20,7 @@ import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
+import { formatKyivDayMonth, surnameAndName } from "../../utils/person-name.js";
 import { getShiftTimeFromLocationSchedule } from "../../utils/shift-time.js";
 import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../utils/location-opening-hours.js";
 
@@ -252,26 +253,21 @@ async function showAdminConfirmedReplacementCancel(ctx: MyContext, requestId: st
         return;
     }
 
-    const date = request.shiftDate.toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        timeZone: "Europe/Kyiv"
-    });
+    const date = formatKyivDayMonth(request.shiftDate);
     const time = formatScheduleNotificationShiftTime({
         date: request.shiftDate,
         startTime: request.shiftStartTime,
         endTime: request.shiftEndTime,
         location: request.location
     });
-    const requester = request.requester?.fullName || "empty shift";
+    const requester = request.requester ? surnameAndName(request.requester.fullName) : "Open shift";
 
     const text = ADMIN_TEXTS["admin-replacement-cancel-confirmed-text"]({
         date: escapeHtml(date),
-        time: escapeHtml(time),
-        location: escapeHtml(request.location.name),
+        time: escapeHtml(time.replace("-", "–")),
+        location: escapeHtml(formatLocation(request.location, "listing")),
         requester: escapeHtml(requester),
-        replacement: escapeHtml(request.replacement.fullName)
+        replacement: escapeHtml(surnameAndName(request.replacement.fullName))
     });
     const kb = new InlineKeyboard()
         .text(

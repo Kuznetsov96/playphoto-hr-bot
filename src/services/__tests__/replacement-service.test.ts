@@ -49,6 +49,11 @@ const defaultQueue = {
     add: vi.fn(),
 };
 
+// Владелец берётся из ADMIN_IDS[0] (раньше id был вписан в код): тесты ждут его в чате 107794048.
+vi.mock("../../config.js", async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    ADMIN_IDS: [107794048],
+}));
 vi.mock("../../db/core.js", () => ({
     default: prismaMock,
 }));
@@ -1420,5 +1425,43 @@ describe("ReplacementService", () => {
             const result: Date = svc.kyivDateWithTime(winterDate, 14, 0);
             expect(result.toISOString()).toBe("2026-01-15T12:00:00.000Z");
         });
+    });
+});
+
+describe("formatAdminBoardText", () => {
+    const base = {
+        location: { name: "Leoland", city: "Львів", schedule: null },
+        city: "Львів",
+        shiftDate: new Date("2026-10-30T00:00:00.000Z"),
+        shiftStartTime: new Date("2026-10-30T12:00:00.000Z"),
+        shiftEndTime: new Date("2026-10-30T18:00:00.000Z"),
+        requester: { fullName: "Зубаль Діана Іванівна" },
+    };
+
+    it("states status in words, names without patronymic, and no emoji", async () => {
+        const { ReplacementService } = await import("../replacement-service.js");
+        const text = new ReplacementService().formatAdminBoardText([
+            {
+                ...base,
+                status: "FOUND",
+                replacement: { fullName: "Йорж Анна Сергіївна" },
+                currentWave: "2",
+                nextWaveAt: null,
+                responses: [{ status: "ACCEPTED" }, { status: "DECLINED" }],
+            },
+            {
+                ...base,
+                status: "ACTIVE",
+                replacement: null,
+                currentWave: null,
+                nextWaveAt: null,
+                responses: [],
+            },
+        ] as any);
+        expect(text).toMatch(/^<b>Replacement searches<\/b>\n1 searching · 1 confirmed\n/u);
+        expect(text).toContain("<b>1. Leoland (Lviv)</b> · Confirmed\n30.10 · 14:00–20:00\nЗубаль Діана → Йорж Анна\nWave 2\nResponses: 1 declined · 1 accepted");
+        expect(text).toContain("<b>2. Leoland (Lviv)</b> · Searching");
+        expect(text).toContain("Not started\nNo responses yet");
+        expect(text).not.toMatch(/Іванівна|Сергіївна|\p{Extended_Pictographic}/u);
     });
 });

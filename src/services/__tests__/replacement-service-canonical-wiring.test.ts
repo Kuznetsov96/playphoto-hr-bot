@@ -86,7 +86,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
     });
 
     it("flag OFF: never calls the canonical backend and still creates a local request", async () => {
-        vi.doMock("../../config.js", () => ({ AWS_REPLACEMENTS_CANONICAL_ENABLED: false }));
+        vi.doMock("../../config.js", () => ({ ADMIN_IDS: [1], AWS_REPLACEMENTS_CANONICAL_ENABLED: false }));
 
         const shift = buildShift();
         prismaMock.workShift.findUnique.mockResolvedValue(shift);
@@ -107,7 +107,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
     });
 
     it("flag ON + canonical success: persists the returned publicId on the local row", async () => {
-        vi.doMock("../../config.js", () => ({ AWS_REPLACEMENTS_CANONICAL_ENABLED: true }));
+        vi.doMock("../../config.js", () => ({ ADMIN_IDS: [1], AWS_REPLACEMENTS_CANONICAL_ENABLED: true }));
         startCanonicalReplacement.mockResolvedValue({ ok: true, replacementPublicId: "aws-pub-123" });
 
         const shift = buildShift();
@@ -133,7 +133,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
     });
 
     it("flag ON + canonical failure: creates no local request and throws with the reason code", async () => {
-        vi.doMock("../../config.js", () => ({ AWS_REPLACEMENTS_CANONICAL_ENABLED: true }));
+        vi.doMock("../../config.js", () => ({ ADMIN_IDS: [1], AWS_REPLACEMENTS_CANONICAL_ENABLED: true }));
         startCanonicalReplacement.mockResolvedValue({ ok: false, reasonCode: "EMPLOYEE_NOT_MAPPED" });
 
         const shift = buildShift();
@@ -147,7 +147,7 @@ describe("ReplacementService.startRequest canonical wiring", () => {
     });
 
     it("admin-initiated request (requesterStaffId null) stays on the legacy path even with the flag ON", async () => {
-        vi.doMock("../../config.js", () => ({ AWS_REPLACEMENTS_CANONICAL_ENABLED: true }));
+        vi.doMock("../../config.js", () => ({ ADMIN_IDS: [1], AWS_REPLACEMENTS_CANONICAL_ENABLED: true }));
 
         const location = { id: "location-9", city: "Київ" };
         prismaMock.location.findUnique.mockResolvedValue(location);

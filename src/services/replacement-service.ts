@@ -23,7 +23,7 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
 import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDay } from "./kyiv-date.js";
 import { replacementShadowService } from "./replacement-shadow.js";
-import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
+import { ADMIN_IDS, AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
 import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
 import { resolveCanonicalShift } from "./canonical-shift-resolver.js";
 import { formatLocation } from "../utils/location-label.js";
@@ -53,7 +53,8 @@ type ShiftDisplayLocation = {
  */
 const CANONICAL_WAVE_RETRY_MS = 60_000;
 
-export const MAIN_ADMIN_ID = 107794048;
+/** Владелец — первый из ADMIN_IDS, как у всех уведомлений; раньше id был вписан в код. */
+export const MAIN_ADMIN_ID = ADMIN_IDS[0] ?? 0;
 const KYIV_TIMEZONE = "Europe/Kyiv";
 const URGENT_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const DAY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -2039,42 +2040,49 @@ export class ReplacementService {
         return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(formatLocation(shift.location, "in-city"))}\n${escapeHtml(time)}\n\nПочати пошук?`;
     }
 
+    /**
+     * Доска поиска подмен в меню владельца. Статус — словом, без смайлов-подписей у строк (HIG):
+     * строки и так читаются по содержанию; нулевые счётчики ответов не показываем.
+     */
     formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listManageableRequestsForAdmin"]>>) {
         if (requests.length === 0) {
-            return "🔎 <b>Replacement management</b>\n\nNo active or confirmed replacements.";
+            return "<b>Replacement searches</b>\n\nNo active or confirmed replacements.";
         }
 
         const visibleRequests = requests.slice(0, 8);
         const activeCount = requests.filter(request => request.status === ReplacementRequestStatus.ACTIVE).length;
         const confirmedCount = requests.filter(request => request.status === ReplacementRequestStatus.FOUND).length;
-        let text = `🔎 <b>Replacement management</b>\n\nActive searches: <b>${activeCount}</b> · Confirmed: <b>${confirmedCount}</b>\n`;
+        let text = `<b>Replacement searches</b>\n${activeCount} searching · ${confirmedCount} confirmed\n`;
         if (requests.length > visibleRequests.length) {
-            text += `Showing first <b>${visibleRequests.length}</b>. Use Refresh after closing items.\n`;
+            text += `Showing the first ${visibleRequests.length}. Refresh after closing some.\n`;
         }
 
         visibleRequests.forEach((request, index) => {
-            const sent = request.responses.filter((response) => response.status === ReplacementResponseStatus.SENT).length;
-            const accepted = request.responses.filter((response) => response.status === ReplacementResponseStatus.ACCEPTED).length;
-            const declined = request.responses.filter((response) => response.status === ReplacementResponseStatus.DECLINED).length;
-            const failed = request.responses.filter((response) => response.status === ReplacementResponseStatus.DELIVERY_FAILED).length;
-            const nextWave = request.nextWaveAt
-                ? this.formatDateTime(request.nextWaveAt)
-                : "not scheduled";
+            const count = (status: ReplacementResponseStatus) =>
+                request.responses.filter((response) => response.status === status).length;
+            const responses = [
+                [count(ReplacementResponseStatus.SENT), "waiting"],
+                [count(ReplacementResponseStatus.DECLINED), "declined"],
+                [count(ReplacementResponseStatus.DELIVERY_FAILED), "not delivered"],
+                [count(ReplacementResponseStatus.ACCEPTED), "accepted"],
+            ].filter(([n]) => (n as number) > 0).map(([n, label]) => `${n} ${label}`);
             const photographer = request.requester
-                ? this.formatShortName(request.requester.fullName)
-                : "empty shift (main admin)";
-            const status = request.status === ReplacementRequestStatus.FOUND
-                ? "✅ CONFIRMED"
-                : "🔎 ACTIVE";
+                ? surnameAndName(request.requester.fullName)
+                : "Open shift";
             const replacement = request.replacement
-                ? ` → ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
+                ? ` → ${escapeHtml(surnameAndName(request.replacement.fullName))}`
                 : "";
+            const status = request.status === ReplacementRequestStatus.FOUND ? "Confirmed" : "Searching";
+            const wave = request.currentWave
+                ? `Wave ${escapeHtml(request.currentWave)}${request.nextWaveAt ? ` · next ${escapeHtml(this.formatDateTime(request.nextWaveAt))}` : ""}`
+                : "Not started";
 
             text +=
-                `\n<b>${index + 1}. ${escapeHtml(formatLocation(request.location, "in-city"))}</b> · ${escapeHtml(request.city)} · ${status}\n` +
-                `📅 ${this.formatAdminDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set"))}\n` +
-                `👤 ${escapeHtml(photographer)}${replacement} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
-                `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
+                `\n<b>${index + 1}. ${escapeHtml(formatLocation(request.location, "listing"))}</b> · ${status}\n` +
+                `${formatKyivDayMonth(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}\n` +
+                `${escapeHtml(photographer)}${replacement}\n` +
+                `${wave}\n` +
+                `${responses.length > 0 ? `Responses: ${responses.join(" · ")}` : "No responses yet"}\n`;
         });
 
         return text;
@@ -2097,16 +2105,6 @@ export class ReplacementService {
         const where = escapeHtml(formatLocation(request.location, "listing"));
 
         return ADMIN_TEXTS[`admin-notif-replacement-${kind}`]({ who, when, where });
-    }
-
-    /** `Sat, Oct 18` — дата для англійських повідомлень власнику. */
-    private formatAdminDate(date: Date) {
-        return date.toLocaleDateString("en-US", {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-            timeZone: KYIV_TIMEZONE
-        });
     }
 
     private formatRequesterFailureText(request: RequestWithRelations) {
@@ -2147,10 +2145,6 @@ export class ReplacementService {
 
     private formatDateKey(date: Date) {
         return date.toLocaleDateString("en-CA", { timeZone: KYIV_TIMEZONE });
-    }
-
-    private formatShortName(fullName: string) {
-        return fullName.trim().split(/\s+/).slice(0, 2).join(" ");
     }
 
     private kyivStartOfDay(date: Date) {

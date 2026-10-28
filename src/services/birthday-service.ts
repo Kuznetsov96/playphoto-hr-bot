@@ -122,22 +122,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
         }
     }
 
-    // Admin Report (English, Silent)
-    if (successCount > 0) {
-        const mainAdminId = ADMIN_IDS[0];
-        if (mainAdminId) {
-            const report = ADMIN_TEXTS["admin-notif-birthday-greeted"]({ count: successCount });
-            try {
-                await bot.api.sendMessage(mainAdminId, report, {
-                    parse_mode: "HTML",
-                    disable_notification: true
-                });
-            } catch (e) {
-                logger.error({ err: e, adminId: mainAdminId }, "Failed to send candidate birthday report to main admin");
-            }
-        }
-    }
-
+    // Отчёта владельцу нет (решение 28.10.2026): поздравления кандидаток идут сами.
     return successCount;
 }
 

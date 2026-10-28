@@ -139,9 +139,6 @@ ${p.where}
 
 Cancelled by the photographer.`,
   "admin-notif-btn-reply": `Reply`,
-  "admin-notif-birthday-greeted": (p: { count: number }) => `<b>Candidate birthdays greeted</b>
-
-${p.count} ${p.count === 1 ? "greeting" : "greetings"} sent today.`,
   "admin-notif-birthday-3d": (p: { names: string }) => `<b>Birthday in 3 days</b>
 
 ${p.names}
@@ -445,21 +442,20 @@ Deadline ${p.deadline}`,
   "admin-schedule-select-date": `<b>Select Date:</b>`,
   "admin-schedule-history": `History`,
   "admin-schedule-history-title": `<b>Past 7 Days</b>`,
-  "admin-replacement-cancel-search-button": (p: { index: string | number }) => `✖️ Cancel search #${p.index}`,
-  "admin-replacement-cancel-confirmed-button": (p: { index: string | number }) => `🛑 Cancel confirmed #${p.index}`,
-  "admin-replacement-cancel-confirmed-confirm": `🛑 Cancel confirmed replacement`,
+  "admin-replacement-cancel-search-button": (p: { index: string | number }) => `Cancel search ${p.index}`,
+  "admin-replacement-cancel-confirmed-button": (p: { index: string | number }) => `Cancel replacement ${p.index}`,
+  "admin-replacement-cancel-confirmed-confirm": `Cancel replacement`,
   "admin-replacement-cancel-confirmed-text": (p: {
     date: string | number,
     time: string | number,
     location: string | number,
     requester: string | number,
     replacement: string | number
-  }) => `🛑 <b>Cancel confirmed replacement?</b>
+  }) => `<b>Cancel the confirmed replacement?</b>
 
-📅 <b>${p.date}</b> · ${p.time}
-📍 <b>${p.location}</b>
-👤 Original photographer: <b>${p.requester}</b>
-✅ Confirmed replacement: <b>${p.replacement}</b>
+${p.requester} → ${p.replacement}
+${p.date} · ${p.time}
+${p.location}
 
 This action does not edit Google Sheets. It removes the confirmed assignment from the bot and notifies both photographers.
 

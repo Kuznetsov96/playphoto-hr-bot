@@ -26,7 +26,6 @@ const notifications: Record<string, string> = {
     "mirror failed": ADMIN_TEXTS["admin-notif-mirror-failed"]({ who: "@diana", attachment: "voice", body: "Привіт" }),
     "waiting for HR": ADMIN_TEXTS["admin-notif-waiting-for-hr"]({ name: SHORT, slot: "30.10 · 15:00" }),
     "support call": ADMIN_TEXTS["support-thread-called-dm"]({ caller: "Olena", title: "Бланк · Lviv" }),
-    "candidates greeted": ADMIN_TEXTS["admin-notif-birthday-greeted"]({ count: 3 }),
     "birthday in 3 days": ADMIN_TEXTS["admin-notif-birthday-3d"]({ names: `${SHORT} (@diana)` }),
     "birthday tomorrow": ADMIN_TEXTS["admin-notif-birthday-1d"]({ names: `${SHORT} (@diana)` }),
     "birthday today": ADMIN_TEXTS["admin-notif-birthday-today"]({ names: `${SHORT} (@diana)` }),
