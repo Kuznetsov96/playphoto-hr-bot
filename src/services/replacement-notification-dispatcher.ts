@@ -5,6 +5,7 @@ import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { formatLocation } from "../utils/location-label.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { surnameAndName } from "../utils/person-name.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
@@ -137,14 +138,6 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
         case "ACCEPTED_OWNER_REVIEW":
             return null;
     }
-}
-
-/**
- * «Зубаль Діана Іванівна» → «Зубаль Діана»: вебапп шлёт полное имя, а в сообщении владельцу
- * отчество только удлиняет строку (как на экранах вебаппа).
- */
-function surnameAndName(fullName: string): string {
-    return fullName.trim().split(/\s+/u).slice(0, 2).join(" ");
 }
 
 /**

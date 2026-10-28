@@ -5,6 +5,8 @@
  * вечер, проверяется на чистых данных, а не через мок HTTP-клиента.
  */
 
+import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
+
 export type DailySummaryView = {
     totals: { salesTotal: number; cashTotal: number; terminalTotal: number };
     locations: Array<{
@@ -31,10 +33,10 @@ const BUSINESS_TIMEZONE = "Europe/Kyiv";
  * именно в этом виде дефект живёт незамеченным неделями.
  */
 export function renderDailySummary(summary: DailySummaryView | null, localDate: string): string {
-    const heading = `📊 <b>Daily Summary</b> · ${escapeHtml(formatDate(localDate))}`;
+    const heading = `<b>Daily summary</b> · ${escapeHtml(formatDate(localDate))}`;
 
     if (summary === null) {
-        return `${heading}\n\n⚠️ Today's figures could not be loaded from the app.`;
+        return `${heading}\n\n${ADMIN_TEXTS["admin-notif-daily-summary-failed"]}`;
     }
 
     const lines: string[] = [heading, ""];
@@ -52,13 +54,13 @@ export function renderDailySummary(summary: DailySummaryView | null, localDate: 
 
         lines.push(
             "",
-            `💵 Cash ${escapeHtml(formatMoney(summary.totals.cashTotal))}`,
-            `💳 Terminal ${escapeHtml(formatMoney(summary.totals.terminalTotal))}`
+            `Cash ${escapeHtml(formatMoney(summary.totals.cashTotal))}`,
+            `Terminal ${escapeHtml(formatMoney(summary.totals.terminalTotal))}`
         );
     }
 
     if (summary.overdue.length > 0) {
-        lines.push("", `⚠️ <b>Still open (${summary.overdue.length})</b>`);
+        lines.push("", `<b>Still open (${summary.overdue.length})</b>`);
         for (const row of summary.overdue) {
             const since = row.openedAt ? ` — since ${escapeHtml(formatTime(row.openedAt))}` : "";
             lines.push(`• ${escapeHtml(row.label)}${since}`);
@@ -66,7 +68,7 @@ export function renderDailySummary(summary: DailySummaryView | null, localDate: 
     }
 
     if (summary.neverOpened.length > 0) {
-        lines.push("", `🚫 <b>Never opened (${summary.neverOpened.length})</b>`);
+        lines.push("", `<b>Never opened (${summary.neverOpened.length})</b>`);
         for (const row of summary.neverOpened) {
             lines.push(`• ${escapeHtml(row.label)}`);
         }

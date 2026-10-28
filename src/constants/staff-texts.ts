@@ -282,11 +282,12 @@ Are you sure you want to send invitations to all these candidates?`,
 Ticket will be closed after sending.`,
   "support-ans-urgent-status": (p: { ticketId: string | number, status: string | number }) => `Ticket #${p.ticketId} marked as ${p.status}`,
   "support-ans-user-not-found": `User not found.`,
-  "support-info-transferred-dm": (p: { urgent: string | number, ticketId: string | number, name: string | number, location: string | number, status?: string | number }) => `${p.urgent}🔔 <b>Ticket #${p.ticketId} transferred to you!</b>
-👤 <b>Photographer:</b> ${p.name}
-📍 <b>Location:</b> ${p.location}
-📝 <b>Status:</b> IN PROGRESS`,
-  "support-btn-go-to-topic": `➡️ Go to topic`,
+  "support-info-transferred-dm": (p: { urgent: boolean, ticketId: string | number, name: string | number, location: string | number }) => `<b>${p.urgent ? "Urgent ticket" : "Ticket"} #${p.ticketId} transferred to you</b>
+
+${p.name}
+${p.location}
+In progress`,
+  "support-btn-go-to-topic": `Go to topic`,
   "support-ans-transferred": (p: { adminName: string | number }) => `✅ Transferred to ${p.adminName}`,
   "support-ans-closed": `Ticket closed! ✖️`,
   "support-info-closed-by-user": `🔒 User closed the ticket.`,

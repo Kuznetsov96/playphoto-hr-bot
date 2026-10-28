@@ -1,5 +1,7 @@
 import { logBusinessEvent } from "../core/log-events.js";
 import { systemStateRepository } from "../repositories/system-state-repository.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { formatKyivDayMonth, formatKyivTimeOfDay } from "../utils/person-name.js";
 
 /**
  * Six missed sync cycles. Long enough that a single failed request or a slow
@@ -81,13 +83,7 @@ export async function checkScheduleMirrorFreshness(input: {
  */
 function formatKyivTime(isoTime: string | null): string {
     if (isoTime === null || Number.isNaN(Date.parse(isoTime))) return "unknown";
-    return new Date(isoTime).toLocaleString("en-GB", {
-        timeZone: "Europe/Kyiv",
-        hour: "2-digit",
-        minute: "2-digit",
-        day: "2-digit",
-        month: "short",
-    });
+    return `${formatKyivDayMonth(isoTime)} · ${formatKyivTimeOfDay(isoTime)}`;
 }
 
 /** Where the last alert time is kept, so a restart cannot reset the anti-spam window. */
@@ -152,11 +148,10 @@ export function startScheduleMirrorWatch(api: {
 
         if (!result.shouldNotify) return;
 
-        const text =
-            `⚠️ <b>Schedule sync has stopped</b>\n\n` +
-            `No successful sync for ${result.staleForMinutes} min.\n` +
-            `Photographers are seeing the schedule as of ${formatKyivTime(result.lastSyncAt)}.\n\n` +
-            `Changes and replacements made in the webapp are not reaching the bot.`;
+        const text = ADMIN_TEXTS["admin-notif-schedule-stale"]({
+            minutes: result.staleForMinutes,
+            lastSync: formatKyivTime(result.lastSyncAt),
+        });
 
         // The owner is ADMIN_IDS[0] by the convention the rest of the bot follows.
         // Fanning an operational alert out to every admin trains all of them to

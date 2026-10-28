@@ -634,13 +634,11 @@ staffSupportHandlers.callbackQuery(/^ticket_transfer_(\d+)_(\d+)$/, async (ctx) 
             : "Unknown";
 
         // Send DM to target admin with a button
-        const urgentFlag = ticket.isUrgent ? "🆘 " : "";
         const dmText = STAFF_TEXTS["support-info-transferred-dm"]({
-            urgent: urgentFlag,
+            urgent: Boolean(ticket.isUrgent),
             ticketId: ticketId.toString(),
-            name: formattedName,
-            location: locationText,
-            status: "IN PROGRESS"
+            name: escapeHtml(formattedName),
+            location: escapeHtml(locationText),
         });
 
         const topicUrl = `https://t.me/c/${String(TEAM_CHATS.SUPPORT).replace('-100', '')}/${ticket.topicId}`;

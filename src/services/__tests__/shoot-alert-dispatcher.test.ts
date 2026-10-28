@@ -31,7 +31,7 @@ describe("ShootAlertDispatcher", () => {
         expect(api.sendMessage).toHaveBeenCalledTimes(1);
         expect(api.sendMessage).toHaveBeenCalledWith(
             111,
-            expect.stringContaining("10.03 12:00 · Dragon Park &lt;1&gt; · Марта"),
+            expect.stringContaining("10.03 · 12:00 · Dragon Park &lt;1&gt; · Марта"),
             expect.objectContaining({ parse_mode: "HTML" }),
         );
         expect(client.markShootAlertDelivered).toHaveBeenCalledWith(alert.publicId);

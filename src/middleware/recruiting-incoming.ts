@@ -7,6 +7,7 @@ import { AwsBusinessApiError, awsBusinessClient } from "../services/aws-business
 import { getRichMessagePlainText } from "../utils/rich-message.js";
 import { ATTACHMENT_LABELS } from "../constants/attachment-labels.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 
 /** API-контракт: `body` ограничен @MaxLength(4000), Telegram отдаёт до 4096. */
 const MAX_BODY_LENGTH = 4000;
@@ -256,10 +257,11 @@ function forwardCandidateMessage(ctx: MyContext): void {
             const who = ctx.from?.username ? `@${ctx.from.username}` : `id ${telegramId}`;
             await ctx.api.sendMessage(
                 Number(target),
-                `⚠️ <b>Message did not reach the webapp</b>\n` +
-                `👤 ${escapeHtml(who)}\n` +
-                (attachment === null ? "" : `📎 Attachment: ${attachment.kind}\n`) +
-                `\n${escapeHtml(body)}`,
+                ADMIN_TEXTS["admin-notif-mirror-failed"]({
+                    who: escapeHtml(who),
+                    ...(attachment === null ? {} : { attachment: attachment.kind }),
+                    body: escapeHtml(body),
+                }),
                 { parse_mode: "HTML" },
             );
         } catch {

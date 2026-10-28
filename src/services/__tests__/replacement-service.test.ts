@@ -188,13 +188,13 @@ describe("ReplacementService", () => {
         await new ReplacementService().dispatchNextWave(api as any, request.id);
 
         // Мінімально, як просив власник 09.10.2026: хто, коли, де і одна дія.
-        // Дата англійською — «18 жовтня» в англійському повідомленні був шум.
+        // Дата — ДД.ММ, як у решті повідомлень власнику.
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            "⚠️ <b>No replacement found</b>\n\n" +
+            "<b>No replacement found</b>\n\n" +
                 "Бланк Анастасія\n" +
-                "Sat, May 11 · 14:00–21:00\n" +
-                "Dragon Park, Львів\n\n" +
+                "11.05 · 14:00–21:00\n" +
+                "Dragon Park (Lviv)\n\n" +
                 "Contact the photographer to sort it out.",
             { parse_mode: "HTML" }
         );
@@ -314,7 +314,7 @@ describe("ReplacementService", () => {
 
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            expect.stringContaining("🔁 <b>Replacement search started</b>\n\nБланк Анастасія\n"),
+            expect.stringContaining("<b>Replacement search started</b>\n\nБланк Анастасія\n"),
             { parse_mode: "HTML" }
         );
         // Пошук іде сам — дія від власника не потрібна, рядка дії немає.
@@ -361,10 +361,10 @@ describe("ReplacementService", () => {
         expect(result).toBe(true);
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            "🛑 <b>Replacement search cancelled</b>\n\n" +
+            "<b>Replacement search cancelled</b>\n\n" +
                 "Смірнова Дарина\n" +
-                "Sun, May 12 · 14:00–21:00\n" +
-                "Fantasy Town, Черкаси\n\n" +
+                "12.05 · 14:00–21:00\n" +
+                "Fantasy Town (Cherkasy)\n\n" +
                 "Cancelled by the photographer.",
             { parse_mode: "HTML" }
         );
@@ -551,7 +551,7 @@ describe("ReplacementService", () => {
         });
         expect(api.sendMessage).toHaveBeenCalledWith(
             107794048,
-            expect.stringContaining("🔁 <b>Replacement search started</b>\n\nOpen shift\n"),
+            expect.stringContaining("<b>Replacement search started</b>\n\nOpen shift\n"),
             { parse_mode: "HTML" }
         );
     });

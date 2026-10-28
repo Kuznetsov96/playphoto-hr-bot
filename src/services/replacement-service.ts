@@ -1,4 +1,6 @@
 import { InlineKeyboard, type Api } from "grammy";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { surnameAndName, formatKyivDayMonth } from "../utils/person-name.js";
 import {
     Prisma,
     ReplacementAvailabilityKind,
@@ -2085,30 +2087,16 @@ export class ReplacementService {
      * «18 жовтня» посеред англійського тексту були шумом (власник, 09.10.2026).
      */
     private formatAdminNotification(kind: "started" | "found" | "failed" | "cancelled", request: RequestWithRelations) {
-        const titleByKind = {
-            started: "🔁 <b>Replacement search started</b>",
-            found: "✅ <b>Replacement found</b>",
-            failed: "⚠️ <b>No replacement found</b>",
-            cancelled: "🛑 <b>Replacement search cancelled</b>"
-        };
-        const actionByKind: Record<typeof kind, string | null> = {
-            started: null,
-            found: "Update the schedule by hand.",
-            failed: "Contact the photographer to sort it out.",
-            cancelled: "Cancelled by the photographer."
-        };
-
         const requester = request.requester
-            ? escapeHtml(this.formatShortName(request.requester.fullName))
+            ? escapeHtml(surnameAndName(request.requester.fullName))
             : "Open shift";
         const who = request.replacement
-            ? `${requester} → ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
+            ? `${requester} → ${escapeHtml(surnameAndName(request.replacement.fullName))}`
             : requester;
-        const when = `${this.formatAdminDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}`;
-        const where = `${escapeHtml(formatLocation(request.location, "in-city"))}, ${escapeHtml(request.city)}`;
-        const action = actionByKind[kind];
+        const when = `${formatKyivDayMonth(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}`;
+        const where = escapeHtml(formatLocation(request.location, "listing"));
 
-        return `${titleByKind[kind]}\n\n${who}\n${when}\n${where}` + (action ? `\n\n${action}` : "");
+        return ADMIN_TEXTS[`admin-notif-replacement-${kind}`]({ who, when, where });
     }
 
     /** `Sat, Oct 18` — дата для англійських повідомлень власнику. */

@@ -28,13 +28,16 @@ Revert anyway?`,
   // Постійна тема співробітниці в чаті підтримки (spec 2026-10-08).
   "support-thread-btn-call-kuznetsov": `🔔 Kuznetsov`,
   "support-thread-btn-call-hupalova": `🔔 Hupalova`,
-  "support-thread-btn-back": `↩ Back to Support`,
+  "support-thread-btn-back": `Back to Support`,
   "support-thread-btn-open": `Open topic`,
   "support-thread-away": (p: { place: string }) => `📍 Today at ${p.place} (not the main point)`,
   "support-thread-recreated": `⚠️ Previous topic was deleted — history is in the archive.`,
   "support-thread-archived": (p: { day: string }) => `📦 Employment ended · ${p.day}`,
   "support-thread-called": (p: { mention: string; caller: string }) => `🔔 ${p.mention}, you're needed here · called by ${p.caller}`,
-  "support-thread-called-dm": (p: { caller: string; title: string }) => `🔔 ${p.caller} called you to <b>${p.title}</b>`,
+  "support-thread-called-dm": (p: { caller: string; title: string }) => `<b>Support needs you</b>
+
+${p.title}
+Called by ${p.caller}`,
   "support-thread-back": (p: { mention: string; actor: string }) => `↩ Back to ${p.mention} · from ${p.actor}`,
   "support-thread-ans-called": `Called. You can keep writing here.`,
   "support-thread-ans-back": `Handed back to Support.`,
@@ -91,10 +94,132 @@ Revert anyway?`,
   "admin-msg-err-delivery": `Send Error: bot blocked or invalid ID.`,
   "admin-msg-route-active-conversation": `<i>The message will use the active support conversation, or create a new topic if none exists.</i>`,
   "admin-msg-route-direct": `<i>Message will be delivered directly to the user.</i>`,
-  "admin-notif-interview-completed": (p: { name: string | number }) => `🏁 <b>Interview Completed: ${p.name}</b>\n\nTime is up, status updated to "Completed". Please review the profile and make an offer decision! ⚖️🌸`,
-  "admin-notif-training-completed": (p: { name: string | number }) => `🏁 <b>Training Completed: ${p.name}</b>\n\nSlot time is up. Please mark the result (Passed/Failed) in the candidate's profile so they can proceed to NDA and test! 🎓🌸`,
-  "admin-notif-new-staff-scheduled": (p: { name: string | number }) => `📅 <b>New Staff Scheduled</b>\n\nCandidate <b>${p.name}</b> has completed hiring and has been added to the schedule. 📸\n\nNo separate mentor onboarding is required.`,
-  "admin-notif-delivery-failed": (p: { name: string | number, error: string | number }) => `⚠️ <b>Offer not delivered!</b>\n\nCandidate: <b>${p.name}</b>\nError: ${p.error}\nCandidate might have blocked the bot. Please contact them manually.`,
+  "admin-notif-interview-completed": (p: { name: string | number }) => `<b>Interview completed</b>
+
+${p.name}
+
+Time is up and the status is now Completed. Review the profile and make an offer decision.`,
+  "admin-notif-training-completed": (p: { name: string | number }) => `<b>Training completed</b>
+
+${p.name}
+
+Slot time is up. Mark the result (Passed or Failed) in the candidate's profile so she can move on to the NDA and test.`,
+  "admin-notif-new-staff-scheduled": (p: { name: string | number }) => `<b>New staff scheduled</b>
+
+${p.name}
+
+Hiring is complete and she is on the schedule. No separate mentor onboarding is needed.`,
+  "admin-notif-delivery-failed": (p: { name: string | number, error: string | number }) => `<b>Offer not delivered</b>
+
+${p.name}
+${p.error}
+
+She may have blocked the bot. Contact her manually.`,
+  "admin-notif-mirror-failed": (p: { who: string; attachment?: string; body: string }) => `<b>Message did not reach the webapp</b>
+
+${p.who}${p.attachment ? `\nAttachment: ${p.attachment}` : ""}
+
+${p.body}`,
+  "admin-notif-waiting-for-hr": (p: { name: string; slot: string }) => `<b>Candidate is waiting for HR</b>
+
+${p.name}
+Interview ${p.slot}
+
+The signal did not reach the webapp.`,
+  "admin-notif-candidate-message": (p: { name: string; username: string; city: string; stage: string; status?: string; recovery?: boolean; text: string }) => `<b>Candidate message</b>
+
+${p.name} (@${p.username})
+${p.city}
+Stage: ${p.stage}${p.status ? `\nStatus: ${p.status}` : ""}${p.recovery ? `\nReturned after bot block` : ""}
+
+${p.text}`,
+  "admin-notif-replacement-started": (p: { who: string; when: string; where: string }) => `<b>Replacement search started</b>
+
+${p.who}
+${p.when}
+${p.where}`,
+  "admin-notif-replacement-found": (p: { who: string; when: string; where: string }) => `<b>Replacement found</b>
+
+${p.who}
+${p.when}
+${p.where}
+
+Update the schedule by hand.`,
+  "admin-notif-replacement-failed": (p: { who: string; when: string; where: string }) => `<b>No replacement found</b>
+
+${p.who}
+${p.when}
+${p.where}
+
+Contact the photographer to sort it out.`,
+  "admin-notif-replacement-cancelled": (p: { who: string; when: string; where: string }) => `<b>Replacement search cancelled</b>
+
+${p.who}
+${p.when}
+${p.where}
+
+Cancelled by the photographer.`,
+  "admin-notif-btn-reply": `Reply`,
+  "admin-notif-birthday-greeted": (p: { count: number }) => `<b>Candidate birthdays greeted</b>
+
+${p.count} ${p.count === 1 ? "greeting" : "greetings"} sent today.`,
+  "admin-notif-birthday-3d": (p: { names: string }) => `<b>Birthday in 3 days</b>
+
+${p.names}
+
+Prepare greetings.`,
+  "admin-notif-birthday-1d": (p: { names: string }) => `<b>Birthday tomorrow</b>
+
+${p.names}
+
+Don't forget to congratulate.`,
+  "admin-notif-birthday-today": (p: { names: string }) => `<b>Birthday today</b>
+
+${p.names}
+
+Don't forget to congratulate.`,
+  "admin-notif-staff-blocked": (p: { name: string }) => `<b>Staff blocked the bot</b>
+
+${p.name}
+
+Their status in the webapp was not changed. If they've left, deactivate them there.`,
+  "admin-notif-staff-blocked-offboarded": (p: { name: string }) => `<b>Staff blocked the bot</b>
+
+${p.name}
+
+Offboarded automatically: channel access removed, staff sheet updated.`,
+  "admin-notif-shoot-digest": `Shoots need a photographer`,
+  "admin-notif-shoot-eve": `Shoot tomorrow needs a photographer`,
+  "admin-notif-shoot-late": `New shoot needs a photographer`,
+  "admin-notif-btn-open": `Open`,
+  "admin-notif-schedule-stale": (p: { minutes: number; lastSync: string }) => `<b>Schedule sync has stopped</b>
+
+No successful sync for ${p.minutes} min
+Last sync ${p.lastSync}
+
+Changes and replacements made in the webapp are not reaching the bot.`,
+  "admin-notif-funnel-anomaly": (p: { count: number; preview: string }) => `<b>Funnel anomaly</b>
+
+${p.count} candidate ${p.count === 1 ? "record" : "records"} in mentor or final stages without HR or interview evidence.
+
+${p.preview}`,
+  "admin-notif-funnel-spike": (p: { count: number }) => `<b>Funnel spike</b>
+
+${p.count} candidates received mentor materials in the last 15 minutes without a recorded interview or HR approval.`,
+  "admin-notif-staging-completed": (p: { name: string; location: string }) => `<b>Staging completed</b>
+
+${p.name}
+${p.location}
+
+Mark the result: passed or failed.`,
+  "admin-notif-btn-view-decide": `View and decide`,
+  "admin-notif-task-overdue": (p: { name: string; task: string; deadline: string }) => `<b>Task overdue</b>
+
+${p.name}
+${p.task}
+Deadline ${p.deadline}`,
+  "admin-notif-btn-details": `Details`,
+  "admin-notif-daily-summary-failed": `Today's figures could not be loaded from the app.`,
   "admin-search-staff-not-found": `Staff not found.`,
   "admin-search-cand-prompt": `Enter Name, Surname or Username to search:`,
   "admin-search-staff-prompt": `Enter Name or Surname to search:`,
@@ -309,7 +434,7 @@ Revert anyway?`,
   "admin-bulk-result-failed": "<b>Bulk task failed",
   "hr-hub-title": `🚀 <b>HR Hub</b>`,
   "hr-error-generic": (p: { error: string | number }) => `❌ Error: ${p.error}`,
-  "support-btn-go-to-topic": "➡️ Go to topic",
+  "support-btn-go-to-topic": "Go to topic",
   "hr-menu-back": `⬅️ Back`,
   "admin-err-insufficient-perms": `Insufficient permissions.`,
   "admin-prompt-number": `Enter a number.`,
@@ -365,7 +490,7 @@ If the replacement is already in the main schedule, update and sync Google Sheet
   "admin-replacement-cancel-confirmed-still-scheduled": `This photographer is still assigned in the main schedule. Update and sync Google Sheets first, then cancel the confirmed replacement.`,
   "admin-staff-none-loc": `Staff not assigned.`,
   "support-btn-force-close": `🔒 Force Close`,
-  "training-review-title": (name: string) => `Pitch review · ${name}`,
+  "training-review-title": (name: string) => `<b>Pitch review</b> · ${name}`,
   "training-reject-reason": (code: string) =>
     ({ NOT_A_FIT: "Not a fit", CANDIDATE_DECLINED: "She declined", OTHER: "Other" } as Record<string, string>)[code] ?? code,
   "training-already-decided": `Already decided.`,

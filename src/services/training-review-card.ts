@@ -2,6 +2,8 @@ import { InlineKeyboard, type Api } from "grammy";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { redis } from "../core/redis.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
+import { surnameAndName } from "../utils/person-name.js";
 import type { PitchReviewPayload } from "./training-review.js";
 
 export const TRAINING_CB = {
@@ -21,13 +23,14 @@ export const cardKey = (reviewPublicId: string) => `training:review:card:${revie
 
 export function renderReviewCard(p: PitchReviewPayload): string {
     const lines = [
-        ADMIN_TEXTS["training-review-title"](p.candidateName),
-        `Location: ${p.locationName ?? "—"}`,
+        ADMIN_TEXTS["training-review-title"](escapeHtml(surnameAndName(p.candidateName))),
+        "",
+        `Location: ${escapeHtml(p.locationName ?? "—")}`,
         `Test score: ${p.scorePct === null ? "—" : `${p.scorePct}%`}`,
         `Attempt ${p.attemptNo}${p.reminder ? " · waiting over 24 h" : ""}`,
         "",
-        "Checklist:",
-        ...p.checklist.map((item, index) => `${index + 1}. ${item}`),
+        "Checklist",
+        ...p.checklist.map((item, index) => `${index + 1}. ${escapeHtml(item)}`),
     ];
     return lines.join("\n");
 }
@@ -92,7 +95,10 @@ export async function sendReviewCard(
         else await api.sendVideoNote(chatId, p.fileId);
         await redis.set(sentKey, "1", "EX", CARD_TTL_SECONDS);
     }
-    await api.sendMessage(chatId, renderReviewCard(p), { reply_markup: reviewKeyboard(p.reviewPublicId) });
+    await api.sendMessage(chatId, renderReviewCard(p), {
+        parse_mode: "HTML",
+        reply_markup: reviewKeyboard(p.reviewPublicId),
+    });
 }
 
 /** Разбор `<uuid>.<int>` из payload кнопки. */
