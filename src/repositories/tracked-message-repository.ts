@@ -14,10 +14,6 @@ export class TrackedMessageRepository {
         return prisma.trackedMessage.updateMany({ where, data });
     }
 
-    async deleteMany(where: Prisma.TrackedMessageWhereInput) {
-        return prisma.trackedMessage.deleteMany({ where });
-    }
-
     async findManyWithReplies(broadcastId: number) {
         return prisma.trackedMessage.findMany({
             where: { broadcastId },
@@ -36,6 +32,21 @@ export class TrackedMessageRepository {
                 // четыре часа, пока человек не сдастся.
                 OR: [{ pingUntil: null }, { pingUntil: { gt: now } }]
             },
+            include: {
+                broadcast: true,
+                pendingReplies: {
+                    where: { status: "pending" },
+                    include: { user: true }
+                }
+            }
+        });
+    }
+
+    /** Адресаты ручного напоминания: все сообщения рассылки с теми, кто ещё не ответил. */
+    async findForManualRemind(broadcastId: number) {
+        return prisma.trackedMessage.findMany({
+            where: { broadcastId },
+            orderBy: { id: "asc" },
             include: {
                 broadcast: true,
                 pendingReplies: {

@@ -1,5 +1,7 @@
 import type { MyContext } from "../../../types/context.js";
+import { enqueueAnnouncementSyncSafe } from "../../../services/announcement-sync.js";
 import logger from "../../../core/logger.js";
+import { pendingReplyRepository } from "../../../repositories/pending-reply-repository.js";
 import { userRepository } from "../../../repositories/user-repository.js";
 import { taskService } from "../../../services/task-service.js";
 import { taskProofService } from "../../../services/task-proof-service.js";
@@ -78,6 +80,11 @@ async function collectContexts(ctx: MyContext): Promise<ThreadContext[]> {
     }
 
     if (session.step === "broadcast_decline_reason" && session.broadcastId) {
+        const reason = ctx.message?.text || ctx.message?.caption || "[Медіа]";
+        await pendingReplyRepository.recordDeclineReason(BigInt(ctx.from!.id), Number(session.broadcastId), reason).catch(err => {
+            logger.warn({ err, broadcastId: session.broadcastId }, "Failed to record broadcast decline reason");
+        });
+        await enqueueAnnouncementSyncSafe(Number(session.broadcastId));
         contexts.push({ topicHtml: `📣 <b>Disagrees with broadcast #${session.broadcastId}</b>`, contextText: `Розсилка #${session.broadcastId}` });
     }
     delete session.broadcastId;

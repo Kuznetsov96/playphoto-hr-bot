@@ -25,12 +25,13 @@ export class BroadcastDeliveryRepository {
         });
     }
 
-    async markSent(id: number, messageId?: number) {
+    async markSent(id: number, messageId?: number, partMessageIds?: number[]) {
         return prisma.broadcastDelivery.update({
             where: { id },
             data: {
                 status: "SENT",
                 ...(messageId !== undefined ? { messageId } : {}),
+                ...(partMessageIds ? { partMessageIds } : {}),
                 sentAt: new Date(),
                 lastError: null,
             },
@@ -44,11 +45,44 @@ export class BroadcastDeliveryRepository {
         });
     }
 
-    async markFailed(id: number, error: unknown) {
+    async markFailed(id: number, error: unknown, partMessageIds?: number[]) {
         const message = error instanceof Error ? error.message : String(error);
         return prisma.broadcastDelivery.update({
             where: { id },
-            data: { status: "FAILED", lastError: message.slice(0, 2000) },
+            data: { status: "FAILED", lastError: message.slice(0, 2000), ...(partMessageIds ? { partMessageIds } : {}) },
+        });
+    }
+
+    /** Всем ещё не начатым доставкам рассылки: отказ без отправки (например, вложение исчезло). */
+    async failPending(broadcastId: number, reason: string) {
+        return prisma.broadcastDelivery.updateMany({
+            where: { broadcastId, status: "PENDING" },
+            data: { status: "FAILED", lastError: reason },
+        });
+    }
+
+    /** Сообщения, реально ушедшие в чаты: по ним withdraw удаляет сообщения. */
+    async findSentMessages(broadcastId: number) {
+        return prisma.broadcastDelivery.findMany({
+            // Часть сообщений могла уйти и у доставки, упавшей посреди (messageId пуст).
+            where: { broadcastId, OR: [{ messageId: { not: null } }, { partMessageIds: { isEmpty: false } }] },
+            select: { chatId: true, messageId: true, partMessageIds: true },
+        });
+    }
+
+    /** Доставки, которые правка должна догнать: сообщение реально ушло. */
+    async findSentForEdit(broadcastId: number) {
+        return prisma.broadcastDelivery.findMany({
+            where: { broadcastId, status: "SENT" },
+            orderBy: { id: "asc" },
+        });
+    }
+
+    /** Сообщение переподтверждения — часть доставки: отзыв удалит и его. */
+    async appendPartMessageId(id: number, messageId: number) {
+        return prisma.broadcastDelivery.update({
+            where: { id },
+            data: { partMessageIds: { push: messageId } },
         });
     }
 

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AnnouncementSnapshot } from "./announcement-snapshot-types.js";
 import { z } from "zod";
 import {
     AWS_BUSINESS_API_TOKEN,
@@ -925,6 +926,124 @@ const recruitingCommandSchema = z.object({
     }),
 });
 
+const announcementReplyModeSchema = z.enum(["CONFIRM", "NONE"]);
+
+/** Вложение команды: сначала медиа по порядку, затем файлы. Старый вебапп полей не шлёт. */
+const announcementAttachmentSchema = z.object({
+    publicId: z.string().uuid(),
+    kind: z.enum(["photo", "video", "document"]),
+    fileName: z.string(),
+    mimeType: z.string(),
+    sizeBytes: z.number(),
+    width: z.number().nullable().default(null),
+    height: z.number().nullable().default(null),
+    durationSec: z.number().nullable().default(null),
+});
+export type AnnouncementAttachment = z.infer<typeof announcementAttachmentSchema>;
+
+/**
+ * Команда рассылки из вебаппа. Неизвестный kind не должен ронять всю очередь
+ * (более свежий вебапп), поэтому разбор поштучный: битая запись становится
+ * `{ kind: "UNKNOWN" }` и отбивается failed-ack'ом.
+ */
+const announcementCommandSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("SEND"),
+        publicId: z.string().uuid(),
+        messageHtml: z.string(),
+        replyMode: announcementReplyModeSchema,
+        recipients: z.array(z.string()),
+        reminders: z.object({
+            firstAfterMs: z.number(),
+            everyMs: z.number(),
+            untilIso: z.string(),
+        }).nullable(),
+        authorName: z.string().nullable(),
+        attachments: z.array(announcementAttachmentSchema).default([]),
+        textAsCaption: z.boolean().default(false),
+    }),
+    z.object({
+        kind: z.literal("TEST"),
+        publicId: z.string().uuid(),
+        telegramId: z.string(),
+        messageHtml: z.string(),
+        replyMode: announcementReplyModeSchema,
+        attachments: z.array(announcementAttachmentSchema).default([]),
+        textAsCaption: z.boolean().default(false),
+    }),
+    // Действия над отправленной рассылкой (фаза 3). `publicId` — действия, не рассылки.
+    z.object({
+        kind: z.literal("REMIND"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        notBefore: z.string().nullable().default(null),
+        /** Кто нажал «Remind» в вебаппе: попадает в историю напоминаний. */
+        actorName: z.string().nullable().default(null),
+    }),
+    z.object({
+        kind: z.literal("STOP"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        actorName: z.string(),
+    }),
+    z.object({
+        kind: z.literal("WITHDRAW"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        actorName: z.string(),
+    }),
+    z.object({
+        kind: z.literal("EDIT"),
+        publicId: z.string().uuid(),
+        announcementPublicId: z.string().uuid(),
+        messageHtml: z.string(),
+        reconfirm: z.boolean().default(false),
+        textAsCaption: z.boolean().default(false),
+        replacements: z.array(z.object({
+            position: z.number().int().min(0),
+            attachment: announcementAttachmentSchema,
+        })).default([]),
+        actorName: z.string(),
+    }),
+]);
+
+const announcementUnknownCommandSchema = z.object({
+    publicId: z.string().uuid(),
+    kind: z.string(),
+}).passthrough().transform(raw => ({ kind: "UNKNOWN" as const, publicId: raw.publicId, receivedKind: raw.kind }));
+
+const announcementCommandsSchema = z.object({
+    items: z.array(z.union([announcementCommandSchema, announcementUnknownCommandSchema])),
+});
+
+const announcementRecipientCatalogueSchema = z.object({
+    cities: z.array(z.object({
+        name: z.string(),
+        peopleCount: z.number().int().nonnegative(),
+        locations: z.array(z.object({
+            publicId: z.string(),
+            name: z.string(),
+            peopleCount: z.number().int().nonnegative(),
+        })),
+    })),
+    everyoneCount: z.number().int().nonnegative(),
+});
+
+export type AnnouncementRecipientCatalogue = z.infer<typeof announcementRecipientCatalogueSchema>;
+
+const announcementResolvedRecipientsSchema = z.object({
+    count: z.number().int().nonnegative(),
+    telegramIds: z.array(z.string()),
+});
+
+export interface AnnouncementRecipientSelection {
+    everyone: boolean;
+    cityNames: string[];
+    locationPublicIds: string[];
+}
+
+export type AnnouncementCommand = z.infer<typeof announcementCommandsSchema>["items"][number];
+
 const recruitingCommandsSchema = z.object({
     items: z.array(recruitingCommandSchema),
 });
@@ -1109,6 +1228,96 @@ export class AwsBusinessClient {
             body: JSON.stringify({ telegramId, reason: reason.slice(0, 120) }),
         });
         return recruitingSlotReleaseAckSchema.parse(body);
+    }
+
+    /** Команды рассылок из вебаппа: захват с лизом, at-least-once (publicId = ключ идемпотентности). */
+    async listPendingAnnouncementCommands(limit: number): Promise<{ items: AnnouncementCommand[] }> {
+        const body = await this.request(
+            `/announcements/commands/pending?limit=${encodeURIComponent(String(limit))}`,
+            { method: "GET" },
+        );
+        return announcementCommandsSchema.parse(body);
+    }
+
+    /**
+     * Завершує привʼязку Telegram до акаунта вебаппа за одноразовим кодом.
+     * Відмови вебаппа (404/410/409) приходять як AwsBusinessApiError зі статусом.
+     */
+    async completeTelegramLink(
+        code: string,
+        telegramId: string,
+        username?: string,
+        firstName?: string,
+        lastName?: string,
+    ): Promise<void> {
+        await this.request(
+            "/telegram-links/complete",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    code,
+                    telegramId,
+                    ...(username ? { username } : {}),
+                    ...(firstName ? { firstName } : {}),
+                    ...(lastName ? { lastName } : {}),
+                }),
+            },
+            5_000,
+            { expectsBody: false },
+        );
+    }
+
+    /**
+     * Файл вложения рассылки: поток, без буферизации. Ответ не ok (404 — файл
+     * убран) бросает AwsBusinessApiError; отменить поток вызывающий может сам.
+     */
+    async openAnnouncementAttachment(publicId: string): Promise<{ stream: ReadableStream<Uint8Array>; contentType: string; sizeBytes: number | null }> {
+        const base = AWS_BUSINESS_API_URL.replace(/\/$/u, "");
+        const response = await fetch(`${base}/announcements/attachments/${encodeURIComponent(publicId)}/content`, {
+            method: "GET",
+            headers: {
+                authorization: `Bearer ${AWS_BUSINESS_API_TOKEN}`,
+                "x-request-id": `telegram-bot:${randomUUID()}`,
+            },
+            // Таймаут охватывает и тело: файл до 50 МБ уходит в Telegram, пока идёт чтение.
+            signal: AbortSignal.timeout(600_000),
+        });
+        if (!response.ok || !response.body) {
+            await response.body?.cancel().catch(() => undefined);
+            throw new AwsBusinessApiError(
+                response.status,
+                undefined,
+                `AWS business API attachment request failed with HTTP ${response.status}`,
+            );
+        }
+        const length = Number(response.headers.get("content-length"));
+        return {
+            stream: response.body,
+            contentType: response.headers.get("content-type") ?? "application/octet-stream",
+            sizeBytes: Number.isFinite(length) && length > 0 ? length : null,
+        };
+    }
+
+    /** `result`: у WITHDRAW — сколько чатов очищено и у кого сообщение осталось; у EDIT — в скольких чатах обновлено и в скольких нет. */
+    async ackAnnouncementCommandAccepted(
+        publicId: string,
+        result?: { deletedChats: number; stayed: string[] } | { edited: number; failed: number },
+    ): Promise<void> {
+        await this.request(
+            `/announcements/commands/${encodeURIComponent(publicId)}/accepted`,
+            { method: "POST", ...(result ? { body: JSON.stringify({ result }) } : {}) },
+            undefined,
+            { expectsBody: false },
+        );
+    }
+
+    async ackAnnouncementCommandFailed(publicId: string, error: string): Promise<void> {
+        await this.request(
+            `/announcements/commands/${encodeURIComponent(publicId)}/failed`,
+            { method: "POST", body: JSON.stringify({ error: error.slice(0, 1000) }) },
+            undefined,
+            { expectsBody: false },
+        );
     }
 
     /** Очередь команд рекрутёра: старые вперёд, с Telegram-идентичностью кандидата. */
@@ -1834,6 +2043,37 @@ export class AwsBusinessClient {
             `/access-revocations/${encodeURIComponent(publicId)}/failed`,
             { method: "POST", body: JSON.stringify({ reason: reason.slice(0, 500) }) },
             undefined,
+            { expectsBody: false },
+        );
+    }
+
+    /** Города и точки с числом людей для выбора адресатов в боте (тот же расчёт, что в вебаппе). */
+    async getAnnouncementRecipientCatalogue(): Promise<AnnouncementRecipientCatalogue> {
+        const body = await this.request("/announcements/recipients/catalogue", { method: "GET" });
+        return announcementRecipientCatalogueSchema.parse(body);
+    }
+
+    /** Telegram id людей выбора, каждый один раз; число — то же «N people», что у вебаппа. */
+    async resolveAnnouncementRecipients(
+        selection: AnnouncementRecipientSelection,
+    ): Promise<{ count: number; telegramIds: string[] }> {
+        const body = await this.request("/announcements/recipients/resolve", {
+            method: "POST",
+            body: JSON.stringify({
+                everyone: selection.everyone,
+                cityNames: selection.cityNames,
+                locationPublicIds: selection.locationPublicIds,
+            }),
+        });
+        return announcementResolvedRecipientsSchema.parse(body);
+    }
+
+    /** Полный снимок рассылки для истории в вебаппе (идемпотентный PUT). */
+    async putAnnouncementSnapshot(publicId: string, snapshot: AnnouncementSnapshot): Promise<void> {
+        await this.request(
+            `/announcements/${encodeURIComponent(publicId)}`,
+            { method: "PUT", body: JSON.stringify(snapshot) },
+            5_000,
             { expectsBody: false },
         );
     }

@@ -22,7 +22,15 @@ export interface StackEntry {
 
 export interface BroadcastMediaItem {
     type: 'photo' | 'video' | 'document' | 'voice' | 'video_note' | 'audio' | 'animation';
+    /** Для вложений вебаппа до первой отправки — "" (file_id узнаётся из ответа Telegram). */
     fileId: string;
+    /** Вложение из вебаппа: файл берётся у вебаппа потоком, а не по file_id. */
+    attachmentPublicId?: string;
+    fileName?: string;
+    mimeType?: string;
+    width?: number | null;
+    height?: number | null;
+    durationSec?: number | null;
 }
 
 export interface TaskAttachmentItem {
@@ -137,15 +145,22 @@ export interface SessionData {
     };
 
     broadcastData?: {
+        /** TO | CITIES | LOCATIONS | REPLY | MESSAGE | PREVIEW | SENDING */
         step: string;
-        targetType: string;
-        targetValue: any;
-        buttonType: string;
-        text?: string;
-        media?: BroadcastMediaItem;
-        mediaItems?: BroadcastMediaItem[];
-        selectedLocs: string[];
-        menuMessageId?: number;
+        everyone: boolean;
+        cityNames: string[];
+        locationPublicIds: string[];
+        replyMode?: 'CONFIRM' | 'NONE';
+        reminders: boolean;
+        textHtml?: string;
+        media: BroadcastMediaItem[];
+        /** Одноразовая строка над счётчиками («лишнее не добавлено»). */
+        notice?: string;
+        /** Города последнего показанного списка: кнопка несёт индекс в нём, а не в свежем каталоге. */
+        cityList?: string[];
+        /** Последний media_group_id и сообщение с экраном «Message»: части альбома правят его на месте. */
+        lastGroupId?: string;
+        screenMessageId?: number;
     };
 
     supportData?: {

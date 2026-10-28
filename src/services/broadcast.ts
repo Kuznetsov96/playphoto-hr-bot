@@ -8,6 +8,7 @@ import { userRepository } from "../repositories/user-repository.js";
 import { trackedMessageRepository } from "../repositories/tracked-message-repository.js";
 import { pendingReplyRepository, type PendingReplyWithRelations } from "../repositories/pending-reply-repository.js";
 import { broadcastDeliveryRepository } from "../repositories/broadcast-delivery-repository.js";
+import { broadcastPingLogRepository } from "../repositories/broadcast-ping-log-repository.js";
 import { TEAM_CHATS } from "../config.js";
 import { normalizeCity } from "../handlers/admin/utils.js";
 import { redis } from "../core/redis.js";
@@ -18,6 +19,27 @@ import { awsBusinessClient } from "./aws-business-client.js";
 import { collectionCanonicalMonth, firstDayAfterMonth, toCanonicalMonth } from "./preference-month.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { formatLocation } from "../utils/location-label.js";
+import { enqueueAnnouncementSyncSafe } from "./announcement-sync.js";
+import { announcementLayout, visibleLength } from "./announcement-layout.js";
+import { AnnouncementPartsError, isAttachmentGone, sendAnnouncementParts } from "./announcement-parts.js";
+
+/** Напоминания рассылки из бота — как умолчания вебаппа: через 20 ч, затем каждые 4 ч, до +4 дней. */
+const BOT_REMINDER_FIRST_AFTER_MS = 20 * 60 * 60 * 1000;
+const BOT_REMINDER_EVERY_MS = 4 * 60 * 60 * 1000;
+const BOT_REMINDER_WINDOW_MS = 4 * 24 * 60 * 60 * 1000;
+
+export interface BotAnnouncementActor {
+    telegramId: number | bigint | string;
+    name: string;
+}
+
+export interface BotAnnouncementInput {
+    target: { everyone: boolean; cityNames: string[]; locationPublicIds: string[] };
+    replyMode: 'CONFIRM' | 'NONE';
+    reminders: boolean;
+    textHtml: string;
+    media: Array<{ kind: 'photo' | 'video' | 'document'; fileId: string; fileName?: string; width?: number | null; height?: number | null; durationSec?: number | null }>;
+}
 
 export interface BroadcastStats {
     totalChats: number;
@@ -29,14 +51,52 @@ export interface BroadcastStats {
     deliveryFailed: number;
     deliveryUncertain: number;
     deliverySkipped: number;
+    /** Когда рассылку сняли из чатов; null — не снималась. */
+    withdrawnAt?: Date | null;
+    /** Число вложений рассылки (альбом — больше одного). */
+    attachmentCount?: number;
 }
 
 export interface BroadcastTarget {
-    type: 'all' | 'hub' | 'city_chats' | 'city_chat_location' | 'pm_all' | 'pm_city' | 'pm_location' | 'custom_chats';
+    type: 'all' | 'hub' | 'city_chats' | 'city_chat_location' | 'pm_all' | 'pm_city' | 'pm_location' | 'pm_ids' | 'custom_chats';
     value?: string | string[];
 }
 
+interface BroadcastPingOptions {
+    initialDelayMs?: number;
+    repeatIntervalMs?: number;
+    buttonType?: 'default' | 'preferences' | 'none';
+    pingUntil?: Date;
+    targetMonth?: string;
+    noReminders?: boolean;
+}
+
+interface BroadcastOriginOptions {
+    publicId?: string;
+    origin?: 'BOT' | 'WEBAPP';
+    authorName?: string;
+    textAsCaption?: boolean;
+    /** Слать частями (sendAnnouncementParts) и без вложений вебаппа: рассылка из бота с известными file_id. */
+    partsSender?: boolean;
+}
+
 type BroadcastMediaInput = BroadcastMediaItem | BroadcastMediaItem[];
+
+const toMediaList = (media: BroadcastMediaInput | undefined): BroadcastMediaItem[] =>
+    Array.isArray(media) ? media : media ? [media] : [];
+
+/** Вложения рассылки вебаппа (а не файлы, присланные админом боту) идут через sendAnnouncementParts. */
+const hasWebappAttachments = (media: BroadcastMediaInput | undefined): boolean =>
+    toMediaList(media).some(item => item.attachmentPublicId);
+
+/** Разбор вложений на медиа (фото/видео) и файлы — порядок внутри групп сохраняется. */
+const splitAnnouncementMedia = (media: BroadcastMediaInput | undefined) => {
+    const items = toMediaList(media);
+    return {
+        media: items.filter(item => item.type !== 'document'),
+        documents: items.filter(item => item.type === 'document'),
+    };
+};
 
 /**
  * Месяц сбора и предел напоминаний для строки трекинга.
@@ -58,7 +118,7 @@ export function preferencesPingWindow(
     return { targetMonth, pingUntil };
 }
 
-function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
+export function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', broadcastId?: number, botUsername?: string, isGroup = false) {
     const kb = new InlineKeyboard();
 
     // Одна кнопка, не дві.
@@ -96,7 +156,7 @@ function buildBroadcastKeyboard(buttonType: 'default' | 'preferences' | 'none', 
     return kb;
 }
 
-function getBroadcastFollowUpText(buttonType: 'default' | 'preferences' | 'none') {
+export function getBroadcastFollowUpText(buttonType: 'default' | 'preferences' | 'none') {
     if (buttonType === 'preferences') {
         return "👇 Обери одну з кнопок нижче, щоб зафіксувати відповідь.";
     }
@@ -297,16 +357,39 @@ async function resolveAlreadyFilledCheck(prefMonthName: string, prefMonthYear: n
     }
 }
 
+/** Итог отзыва: сообщения (`deleted`/`failed`) и чаты (`deletedChats`/`stayed` — Telegram id чатов, где что-то осталось). */
+export interface WithdrawResult {
+    deleted: number;
+    failed: number;
+    deletedChats: number;
+    stayed: string[];
+}
+
 export const broadcastService = {
     async getBroadcastTargetStats(target: BroadcastTarget): Promise<{ chats: number, users: number }> {
         const { chats, users } = await this.resolveTargets(target);
         return { chats: chats.length, users: users.length };
     },
 
-    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default') {
+    async sendTestBroadcast(api: any, chatId: number, text: string, media?: BroadcastMediaInput, buttonType: 'default' | 'preferences' | 'none' = 'default', textAsCaption = false, partsSender = false) {
         const extra: any = { parse_mode: "HTML" };
         if (buttonType !== 'none') {
             extra.reply_markup = buildBroadcastKeyboard(buttonType);
+        }
+
+        if (hasWebappAttachments(media) || partsSender) {
+            // Тест не кэширует file_id: файл каждый раз берётся у вебаппа.
+            try {
+                const result = await sendAnnouncementParts(api, chatId, {
+                    text, ...splitAnnouncementMedia(media), textAsCaption, extra, buttonType,
+                    fileIds: {},
+                    openAttachment: publicId => awsBusinessClient.openAnnouncementAttachment(publicId),
+                    followUpText: getBroadcastFollowUpText,
+                });
+                return result.buttonMessage;
+            } catch (error) {
+                throw error instanceof AnnouncementPartsError ? (error.cause ?? error) : error;
+            }
         }
 
         return await sendBroadcastPayload(api, chatId, text, media, extra, buttonType);
@@ -346,6 +429,14 @@ export const broadcastService = {
             chats.push(...values.map(v => Number(v)));
         }
 
+        if (target.type === 'pm_ids') {
+            // Явный список Telegram id из вебаппа: каталог сотрудников не нужен.
+            for (const v of values) {
+                if (/^\d+$/.test(v)) userIds.push(BigInt(v));
+            }
+            return { chats: [], users: [...new Set(userIds)] };
+        }
+
         const staff = await staffRepository.findActive() as StaffWithRelations[];
         const filteredStaff = staff.filter(s => {
             if (target.type === 'pm_all') return true;
@@ -368,7 +459,33 @@ export const broadcastService = {
         };
     },
 
-    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: { initialDelayMs?: number, repeatIntervalMs?: number, buttonType?: 'default' | 'preferences' | 'none', pingUntil?: Date, targetMonth?: string }): Promise<number> {
+    /**
+     * Единственное место постановки отправки в очередь. jobId детерминирован
+     * (`broadcast-<id>`): повторная постановка живого или недавно завершённого
+     * задания BullMQ игнорирует, а если запись уже вычищена, processBroadcast
+     * безопасно прогоняется заново (доставки createMany skipDuplicates, не
+     * PENDING пропускаются).
+     */
+    async enqueueBroadcastJob(data: { broadcastId: number } & Record<string, unknown>) {
+        const { broadcastQueue } = await import("../core/queue.js");
+        await broadcastQueue.add('send-broadcast', {
+            ...data,
+            api: null // API object cannot be serialized, worker must use its own bot instance
+        }, {
+            jobId: `broadcast-${data.broadcastId}`,
+            attempts: 3,
+            backoff: { type: "exponential", delay: 5_000 },
+            removeOnComplete: 500,
+            removeOnFail: 1_000,
+        });
+    },
+
+    async createBroadcast(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: BroadcastPingOptions, origin?: BroadcastOriginOptions): Promise<number> {
+        return (await this.createBroadcastWithId(api, initiatorId, messageText, target, media, botUsername, pingOptions, origin)).count;
+    },
+
+    /** То же, что createBroadcast, но отдаёт и id рассылки (нужен боту для ссылки на вебапп). */
+    async createBroadcastWithId(api: any, initiatorId: number, messageText: string, target: BroadcastTarget, media?: BroadcastMediaInput, botUsername?: string, pingOptions?: BroadcastPingOptions, origin?: BroadcastOriginOptions): Promise<{ broadcastId: number; publicId: string; count: number }> {
         logToDebug(`🚀 [SERVICE] createBroadcast (Queuing) called by ${initiatorId}`);
 
         if (!initiatorId && initiatorId !== 0) throw new Error("No user ID");
@@ -385,6 +502,7 @@ export const broadcastService = {
             case 'pm_all': targetSummary = "👤 All Staff (PM)"; break;
             case 'pm_city': targetSummary = `👤 City: ${valueStr}`; break;
             case 'pm_location': targetSummary = `👤 Location (ID: ${valueStr})`; break;
+            case 'pm_ids': targetSummary = `👤 Recipients (${values.length})`; break;
             case 'custom_chats': targetSummary = `💬 Custom Chats (${values.length})`; break;
             default: targetSummary = target.type;
         }
@@ -402,7 +520,14 @@ export const broadcastService = {
         const broadcast = await broadcastRepository.create({
             initiatorId: BigInt(initiatorId),
             messageText: messageText,
-            targetSummary: targetSummary
+            targetSummary: targetSummary,
+            buttonType: pingOptions?.buttonType ?? 'default',
+            attachmentKinds: (Array.isArray(media) ? media : media ? [media] : []).map((item: any) => item.type),
+            ...(origin?.publicId ? { publicId: origin.publicId } : {}),
+            ...(origin?.origin ? { origin: origin.origin } : {}),
+            ...(origin?.authorName ? { authorName: origin.authorName } : {}),
+            ...(origin?.textAsCaption ? { textAsCaption: true } : {}),
+            ...(pingOptions?.noReminders ? { remindersEnabled: false } : {}),
         });
         logToDebug(`✅ [SERVICE] Broadcast created in DB: ${broadcast.id}`);
 
@@ -410,9 +535,8 @@ export const broadcastService = {
         const { chats, users } = await this.resolveTargets(target);
 
         // 3. Add to Queue
-        const { broadcastQueue } = await import("../core/queue.js");
         try {
-            await broadcastQueue.add('send-broadcast', {
+            await this.enqueueBroadcastJob({
                 broadcastId: broadcast.id,
                 initiatorId,
                 messageText,
@@ -420,27 +544,88 @@ export const broadcastService = {
                 media,
                 botUsername,
                 pingOptions,
-                api: null // API object cannot be serialized, worker must use its own bot instance
-            }, {
-                jobId: `broadcast-${broadcast.id}`,
-                attempts: 3,
-                backoff: { type: "exponential", delay: 5_000 },
-                removeOnComplete: 500,
-                removeOnFail: 1_000,
+                ...(origin?.textAsCaption ? { textAsCaption: true } : {}),
+                ...(origin?.partsSender ? { partsSender: true } : {}),
             });
         } catch (error) {
-            await broadcastRepository.update(broadcast.id, { cancelledAt: new Date() }).catch(updateError => {
-                logger.error({ err: updateError, broadcastId: broadcast.id }, "Failed to mark unqueued broadcast as cancelled");
-            });
+            if (origin?.publicId) {
+                // Команда вебаппа повторится с тем же publicId: «отменённая»
+                // строка превратила бы повтор в тихое accepted без отправки.
+                await broadcastRepository.delete(broadcast.id).catch(deleteError => {
+                    logger.error({ err: deleteError, broadcastId: broadcast.id }, "Failed to remove unqueued webapp broadcast");
+                });
+            } else {
+                await broadcastRepository.update(broadcast.id, { cancelledAt: new Date() }).catch(updateError => {
+                    logger.error({ err: updateError, broadcastId: broadcast.id }, "Failed to mark unqueued broadcast as cancelled");
+                });
+            }
             throw error;
         }
 
+        // Синк — только после постановки в очередь: иначе компенсирующее удаление
+        // оставило бы в вебаппе строку DISPATCHED без рассылки.
+        await enqueueAnnouncementSyncSafe(broadcast.id);
+
         logToDebug(`📥 [SERVICE] Added to queue: ${broadcast.id}`);
-        return chats.length + users.length;
+        return { broadcastId: broadcast.id, publicId: broadcast.publicId, count: chats.length + users.length };
+    },
+
+    /**
+     * Рассылка, созданная в боте, уходит тем же путём, что из вебаппа: адресаты
+     * раскрываются в вебаппе при отправке, раскладка и напоминания те же, части
+     * шлёт sendAnnouncementParts по file_id админа (загрузки нет).
+     */
+    async createBotAnnouncement(api: any, actor: BotAnnouncementActor, input: BotAnnouncementInput): Promise<{ broadcastId: number; publicId: string; count: number }> {
+        const resolved = await awsBusinessClient.resolveAnnouncementRecipients(input.target);
+        const telegramIds = [...new Set(resolved.telegramIds.filter(id => /^\d+$/u.test(id)))];
+        if (telegramIds.length === 0) throw new Error("NO_RECIPIENTS");
+
+        const media: BroadcastMediaItem[] = input.media.map(item => ({
+            type: item.kind,
+            fileId: item.fileId,
+            ...(item.fileName ? { fileName: item.fileName } : {}),
+            ...(item.width != null ? { width: item.width } : {}),
+            ...(item.height != null ? { height: item.height } : {}),
+            ...(item.durationSec != null ? { durationSec: item.durationSec } : {}),
+        }));
+        const documents = media.filter(item => item.type === 'document').length;
+        const { textAsCaption } = announcementLayout({
+            media: media.length - documents,
+            documents,
+            visibleLength: visibleLength(input.textHtml),
+            replyMode: input.replyMode,
+        });
+
+        const buttonType = input.replyMode === 'CONFIRM' ? 'default' : 'none';
+        const pingOptions: BroadcastPingOptions = buttonType === 'default' && input.reminders
+            ? {
+                buttonType,
+                initialDelayMs: BOT_REMINDER_FIRST_AFTER_MS,
+                repeatIntervalMs: BOT_REMINDER_EVERY_MS,
+                pingUntil: new Date(Date.now() + BOT_REMINDER_WINDOW_MS),
+            }
+            : { buttonType, noReminders: true };
+
+        const created = await this.createBroadcastWithId(
+            api,
+            Number(actor.telegramId),
+            input.textHtml,
+            { type: 'pm_ids', value: telegramIds },
+            media.length > 0 ? media : undefined,
+            undefined,
+            pingOptions,
+            {
+                origin: 'BOT',
+                ...(actor.name ? { authorName: actor.name } : {}),
+                ...(textAsCaption ? { textAsCaption: true } : {}),
+                partsSender: true,
+            },
+        );
+        return created;
     },
 
     async processBroadcast(jobData: any, botApi: any) {
-        const { broadcastId, messageText, target, media, botUsername, pingOptions } = jobData;
+        const { broadcastId, messageText, target, media, botUsername, pingOptions, textAsCaption, partsSender } = jobData;
         logToDebug(`⚙️ [WORKER] Processing broadcast ${broadcastId}`);
 
         const { chats, users } = await this.resolveTargets(target);
@@ -461,15 +646,66 @@ export const broadcastService = {
         const { targetMonth, pingUntil } = preferencesPingWindow(pingOptions, new Date());
         const repeatInterval = pingOptions?.repeatIntervalMs || null;
 
-        const send = async (chatId: number | bigint, isGroup: boolean) => {
+        // Вложения вебаппа: file_id переживает рестарт задачи (лежит в Broadcast.mediaFileIds)
+        // и копится в памяти, чтобы второй адресат слал уже по file_id, а не потоком.
+        const webappAttachments = hasWebappAttachments(media);
+        // Рассылка из бота (partsSender) тоже идёт частями, но файлы у неё уже в Telegram (file_id).
+        const useParts = webappAttachments || Boolean(partsSender);
+        const fileIds: Record<string, string> = webappAttachments ? await broadcastRepository.getMediaFileIds(broadcastId) : {};
+        const rememberFileIds = async (learned: Record<string, string>) => {
+            if (Object.keys(learned).length === 0) return;
+            Object.assign(fileIds, learned);
+            await broadcastRepository.update(broadcastId, { mediaFileIds: { ...fileIds } }).catch(error => {
+                logger.error({ err: error, broadcastId }, "Failed to persist announcement media file ids");
+            });
+        };
+
+        const send = async (chatId: number | bigint, isGroup: boolean): Promise<{ message: any; partMessageIds?: number[] }> => {
             const numericChatId = Number(chatId);
             const extra: any = { parse_mode: "HTML" };
             if (buttonType !== 'none') {
                 extra.reply_markup = buildBroadcastKeyboard(buttonType, broadcastId, botUsername, isGroup);
             }
 
-            return await sendBroadcastPayload(botApi, numericChatId, messageText, media, extra, buttonType);
+            if (useParts) {
+                const result = await sendAnnouncementParts(botApi, numericChatId, {
+                    text: messageText ?? "", ...splitAnnouncementMedia(media),
+                    textAsCaption: Boolean(textAsCaption), extra, buttonType, fileIds,
+                    openAttachment: publicId => awsBusinessClient.openAnnouncementAttachment(publicId),
+                    followUpText: getBroadcastFollowUpText,
+                }).catch(async error => {
+                    if (error instanceof AnnouncementPartsError) await rememberFileIds(error.learnedFileIds);
+                    throw error;
+                });
+                await rememberFileIds(result.learnedFileIds);
+                return { message: result.buttonMessage, partMessageIds: result.partMessageIds };
+            }
+
+            return { message: await sendBroadcastPayload(botApi, numericChatId, messageText, media, extra, buttonType) };
         };
+        // Части, успевшие уйти до сбоя, записываются в доставку; для обычных рассылок аргумента нет.
+        const failedParts = (error: unknown): [number[]] | [] =>
+            error instanceof AnnouncementPartsError ? [error.partMessageIds] : [];
+        // Вложение пропало у вебаппа: остальным ничего не шлём, иначе каждый получит часть рассылки.
+        const stopIfAttachmentGone = async (error: unknown) => {
+            if (!webappAttachments || !isAttachmentGone(error)) return;
+            const failed = await broadcastDeliveryRepository.failPending(broadcastId, "ATTACHMENT_UNAVAILABLE").catch(failError => {
+                logger.error({ err: failError, broadcastId }, "Failed to fail pending deliveries of a broadcast with a missing attachment");
+                return { count: 0 };
+            });
+            logBusinessEvent({
+                event: "bot.announcement_broadcast.attachment_unavailable",
+                level: "error", actorType: "system", actorRole: "system", result: "failed",
+                reasonCode: "ATTACHMENT_UNAVAILABLE",
+                module: "broadcast", operation: "processBroadcast",
+                safeContext: { broadcastId, skippedDeliveries: failed.count },
+                error,
+            });
+        };
+        const markSent = (deliveryId: number, sent: { message: any; partMessageIds?: number[] }) =>
+            sent.partMessageIds
+                ? broadcastDeliveryRepository.markSent(deliveryId, sent.message?.message_id, sent.partMessageIds)
+                : broadcastDeliveryRepository.markSent(deliveryId, sent.message?.message_id);
 
         for (const chatId of chats) {
             const delivery = await broadcastDeliveryRepository.findUnique(broadcastId, BigInt(chatId));
@@ -478,13 +714,14 @@ export const broadcastService = {
             if (claimed.count !== 1) continue;
 
             try {
-                const sentMsg = await send(chatId, true);
+                const sent = await send(chatId, true);
+                const sentMsg = sent.message;
                 if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(chatId),
                         messageId: sentMsg.message_id,
-                        nextPingAt: new Date(Date.now() + initialDelay),
+                        nextPingAt: pingOptions?.noReminders ? null : new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
                         pingUntil,
                         buttonType,
@@ -492,13 +729,16 @@ export const broadcastService = {
                     });
                     await this.populatePendingUsers(tracked.id, chatId, botApi);
                 }
-                await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
+                await markSent(delivery.id, sent);
+                await enqueueAnnouncementSyncSafe(broadcastId);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, chatId }, "Failed to broadcast to chat");
-                await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
+                await broadcastDeliveryRepository.markFailed(delivery.id, e, ...failedParts(e)).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
+                await stopIfAttachmentGone(e);
+                await enqueueAnnouncementSyncSafe(broadcastId);
             }
         }
 
@@ -525,16 +765,28 @@ export const broadcastService = {
                 if (alreadyFilledCheck && await alreadyFilledCheck(userId)) {
                     logger.debug({ userId, month: prefMonthName }, "Preferences broadcast skipped because it was already completed");
                     await broadcastDeliveryRepository.markSkipped(delivery.id, "PREFERENCES_ALREADY_FILLED");
+                    await enqueueAnnouncementSyncSafe(broadcastId);
                     continue;
                 }
 
-                const sentMsg = await send(userId, false);
+                if (buttonType !== 'none' && target.type === 'pm_ids') {
+                    // Получатель из вебаппа может быть неизвестен боту: PendingReply требует User.
+                    // Создаём до отправки, чтобы сбой не оставил отправленное сообщение без ответа.
+                    await userRepository.upsert({
+                        where: { telegramId: BigInt(userId) },
+                        create: { telegramId: BigInt(userId) },
+                        update: {},
+                    });
+                }
+
+                const sent = await send(userId, false);
+                const sentMsg = sent.message;
                 if (buttonType !== 'none' && sentMsg) {
                     const tracked = await trackedMessageRepository.create({
                         broadcast: { connect: { id: broadcastId } },
                         chatId: BigInt(userId),
                         messageId: sentMsg.message_id,
-                        nextPingAt: new Date(Date.now() + initialDelay),
+                        nextPingAt: pingOptions?.noReminders ? null : new Date(Date.now() + initialDelay),
                         pingIntervalMs: repeatInterval,
                         pingUntil,
                         buttonType,
@@ -545,13 +797,16 @@ export const broadcastService = {
                         user: { connect: { telegramId: BigInt(userId) } }
                     });
                 }
-                await broadcastDeliveryRepository.markSent(delivery.id, sentMsg?.message_id);
+                await markSent(delivery.id, sent);
+                await enqueueAnnouncementSyncSafe(broadcastId);
                 sentCount++;
             } catch (e: any) {
                 logger.error({ err: e, userId }, "Failed to broadcast to user");
-                await broadcastDeliveryRepository.markFailed(delivery.id, e).catch(markError => {
+                await broadcastDeliveryRepository.markFailed(delivery.id, e, ...failedParts(e)).catch(markError => {
                     logger.error({ err: markError, deliveryId: delivery.id }, "Failed to persist broadcast delivery failure");
                 });
+                await stopIfAttachmentGone(e);
+                await enqueueAnnouncementSyncSafe(broadcastId);
             }
         }
 
@@ -566,6 +821,7 @@ export const broadcastService = {
         }
 
         await broadcastRepository.update(broadcastId, { completedAt: new Date() });
+        await enqueueAnnouncementSyncSafe(broadcastId);
         logToDebug(`✅ [WORKER] Broadcast ${broadcastId} completed. Sent: ${sentCount}`);
         return sentCount;
     },
@@ -613,9 +869,11 @@ export const broadcastService = {
                     }
                 }
 
+                // 'dropped' = снято системой: для рассылки это как будто строки нет.
                 const exists = await pendingReplyRepository.findFirst({
                     trackedMessageId,
-                    userId: s.user.telegramId
+                    userId: s.user.telegramId,
+                    status: { not: "dropped" }
                 });
                 if (!exists) {
                     await pendingReplyRepository.create({
@@ -644,7 +902,8 @@ export const broadcastService = {
 
         const pending = await pendingReplyRepository.findFirst({
             trackedMessageId: tracked.id,
-            userId: BigInt(userId)
+            userId: BigInt(userId),
+            status: { not: "dropped" }
         });
 
         if (!pending) {
@@ -657,12 +916,10 @@ export const broadcastService = {
             return "already_confirmed";
         }
 
-        if (pending.status === "declined") {
-            await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-already-declined"]);
-            return "already_declined";
-        }
-
+        // «Не згодна → Ознайомлена» разрешён (человек передумал или перечитала правку);
+        // обратный переход — нет. Причина отказа остаётся в истории ответа.
         await pendingReplyRepository.update(pending.id, { status: "confirmed", respondedAt: new Date() });
+        await enqueueAnnouncementSyncSafe(broadcastId);
         await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-confirmed"]);
         return "confirmed";
     },
@@ -684,7 +941,8 @@ export const broadcastService = {
 
         const pending = await pendingReplyRepository.findFirst({
             trackedMessageId: tracked.id,
-            userId: BigInt(userId)
+            userId: BigInt(userId),
+            status: { not: "dropped" }
         });
 
         if (!pending) {
@@ -703,6 +961,7 @@ export const broadcastService = {
         }
 
         await pendingReplyRepository.update(pending.id, { status: "declined", respondedAt: new Date() });
+        await enqueueAnnouncementSyncSafe(broadcastId);
         await ctx.answerCallbackQuery(STAFF_TEXTS["broadcast-popup-open-decline-form"]);
         return "declined";
     },
@@ -718,12 +977,14 @@ export const broadcastService = {
             },
             { status: "declined", respondedAt: new Date() }
         );
+        await enqueueAnnouncementSyncSafe(broadcastId);
     },
 
     async getStats(broadcastId: number): Promise<BroadcastStats> {
-        const [tracked, deliveryStats] = await Promise.all([
+        const [tracked, deliveryStats, broadcast] = await Promise.all([
             trackedMessageRepository.findManyWithReplies(broadcastId),
             broadcastDeliveryRepository.getStats(broadcastId),
+            broadcastRepository.findById(broadcastId),
         ]);
 
         let pending = 0;
@@ -753,6 +1014,8 @@ export const broadcastService = {
             deliveryFailed,
             deliveryUncertain,
             deliverySkipped,
+            withdrawnAt: broadcast?.withdrawnAt ?? null,
+            attachmentCount: broadcast?.attachmentKinds?.length ?? 0,
         };
     },
 
@@ -760,59 +1023,117 @@ export const broadcastService = {
         return await broadcastRepository.findRecent(limit);
     },
 
-    async pruneCompletedArchive(keepCompleted: number = 100): Promise<number> {
-        if (keepCompleted < 0) keepCompleted = 0;
-
-        const all = await broadcastRepository.findRecent(2000);
-        const completed = all.filter((broadcast: any) => {
-            const trackedMessages = broadcast.trackedMessages || [];
-            const hasActivePings = trackedMessages.some((tracked: any) => Boolean(tracked.nextPingAt));
-            if (hasActivePings) return false;
-            return !hasPendingReplies(trackedMessages);
+    /**
+     * Остановка напоминаний. `actorName` — кто нажал в вебаппе (у бота-админа
+     * имени нет). Отложенное ручное напоминание отменяется вместе с автоматическими.
+     */
+    async stopPinging(broadcastId: number, actorName?: string) {
+        await broadcastRepository.update(broadcastId, {
+            remindersStoppedAt: new Date(),
+            ...(actorName ? { remindersStoppedByName: actorName } : {}),
+            manualRemindAt: null,
+            manualRemindActionId: null,
+            manualRemindActorName: null,
         });
-
-        const toDelete = completed.slice(keepCompleted);
-        let deletedCount = 0;
-
-        for (const broadcast of toDelete) {
-            const trackedIds = (broadcast.trackedMessages || []).map((tracked: any) => tracked.id);
-            if (trackedIds.length > 0) {
-                await pendingReplyRepository.deleteMany({ trackedMessageId: { in: trackedIds } });
-                await trackedMessageRepository.deleteMany({ broadcastId: broadcast.id });
-            }
-            await broadcastRepository.delete(broadcast.id);
-            deletedCount++;
-        }
-
-        return deletedCount;
-    },
-
-    async stopPinging(broadcastId: number) {
         await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
+        await enqueueAnnouncementSyncSafe(broadcastId);
     },
 
-    async stopAllPings(): Promise<number> {
-        const result = await trackedMessageRepository.updateMany(
-            { nextPingAt: { not: null } },
-            { nextPingAt: null }
+    /**
+     * «Withdraw»: убрать сообщения из чатов, но оставить историю. Строки не
+     * удаляются; рассылка помечается снятой, напоминания останавливаются.
+     * Повторный вызов ничего не делает.
+     *
+     * Удаляются ВСЕ сообщения чата: рассылка, части альбома/вложений
+     * (`partMessageIds`, в них же переподтверждения), последнее напоминание.
+     * Чат «остался», если не удалось убрать хотя бы одно из его сообщений
+     * (Telegram не удаляет сообщения старше 48 часов).
+     * `actor`: Telegram id админа бота или имя из вебаппа.
+     */
+    async withdrawBroadcast(
+        api: any,
+        broadcastId: number,
+        actor: number | bigint | { name: string },
+        opts: { sweep?: boolean } = {},
+    ): Promise<WithdrawResult> {
+        const byName = typeof actor === "object" && actor !== null && "name" in actor;
+        // Атомарный захват: параллельные вызовы не удалят сообщения дважды.
+        const claim = await broadcastRepository.updateMany(
+            { id: broadcastId, withdrawnAt: null },
+            {
+                withdrawnAt: new Date(),
+                ...(byName ? { withdrawnByName: actor.name } : { withdrawnByTelegramId: BigInt(actor as number | bigint) }),
+                manualRemindAt: null,
+                manualRemindActionId: null,
+            manualRemindActorName: null,
+            },
         );
-        return result.count;
-    },
+        // Команда вебаппа (`sweep`) проход по сообщениям делает всегда: захват мог
+        // состояться до сбоя посреди удаления или в админке бота, и тогда
+        // «0 чатов» было бы ложью. Уже удалённое Telegram вернёт как «not found».
+        if (claim.count === 0 && !opts.sweep) return { deleted: 0, failed: 0, deletedChats: 0, stayed: [] };
 
-    async deleteBroadcast(ctx: MyContext, broadcastId: number) {
-        const tracked = await trackedMessageRepository.findManyWithReplies(broadcastId);
+        // Напоминания глушим ДО выборки целей: пинг, ушедший посреди прохода, иначе
+        // оставил бы свежий lastPingMsgId, которого мы уже не удалим.
+        if (claim.count === 0) {
+            await broadcastRepository.update(broadcastId, { manualRemindAt: null, manualRemindActionId: null, manualRemindActorName: null });
+        }
+        await trackedMessageRepository.updateMany({ broadcastId }, { nextPingAt: null });
+
+        const [tracked, deliveries, pings] = await Promise.all([
+            trackedMessageRepository.findManyWithReplies(broadcastId),
+            broadcastDeliveryRepository.findSentMessages(broadcastId),
+            broadcastPingLogRepository.findMessages(broadcastId),
+        ]);
+
+        const byChat = new Map<string, { chatId: number; messageIds: Set<number> }>();
+        const add = (chatId: bigint, messageId: number | null | undefined) => {
+            if (messageId == null) return;
+            const key = String(chatId);
+            const entry = byChat.get(key) ?? { chatId: Number(chatId), messageIds: new Set<number>() };
+            entry.messageIds.add(messageId);
+            byChat.set(key, entry);
+        };
         for (const t of tracked) {
-            try {
-                await ctx.api.deleteMessage(Number(t.chatId), t.messageId);
-            } catch (e) { /* ignore */ }
+            add(t.chatId, t.messageId);
+            add(t.chatId, t.lastPingMsgId);
+        }
+        for (const d of deliveries) {
+            add(d.chatId, d.messageId);
+            for (const id of d.partMessageIds ?? []) add(d.chatId, id);
+        }
+        // Каждое отправленное напоминание, а не только последнее (пункт 16).
+        for (const p of pings) add(p.chatId, p.messageId);
+
+        let deleted = 0;
+        let failed = 0;
+        let deletedChats = 0;
+        const stayed: string[] = [];
+        for (const [key, { chatId, messageIds }] of byChat) {
+            let chatFailed = false;
+            for (const messageId of messageIds) {
+                try {
+                    await api.deleteMessage(chatId, messageId);
+                    deleted++;
+                } catch (e: any) {
+                    // Уже удалено руками — сообщения в чате и так нет.
+                    // Пункт 22: так же отвечает Telegram на повторе для сообщения старше 48 часов, удалённого
+                    // раньше; «can't be deleted» — настоящее «осталось».
+                    if (/message (to delete )?not found/iu.test(String(e?.description ?? ""))) {
+                        deleted++;
+                        continue;
+                    }
+                    // Старше 48 часов или нет прав — Telegram не даст убрать.
+                    failed++;
+                    chatFailed = true;
+                }
+            }
+            if (chatFailed) stayed.push(key); else deletedChats++;
         }
 
-        const trackedIds = tracked.map(t => t.id);
-        if (trackedIds.length > 0) {
-            await pendingReplyRepository.deleteMany({ trackedMessageId: { in: trackedIds } });
-            await trackedMessageRepository.deleteMany({ broadcastId });
-        }
-        await broadcastRepository.delete(broadcastId);
+        await enqueueAnnouncementSyncSafe(broadcastId);
+
+        return { deleted, failed, deletedChats, stayed };
     },
 
     async getPendingUsers(broadcastId: number): Promise<string[]> {

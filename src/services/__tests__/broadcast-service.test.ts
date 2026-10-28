@@ -119,3 +119,10 @@ describe("preferences broadcast keyboard", () => {
         expect(rows.flat()).toHaveLength(1);
     });
 });
+
+describe("broadcast history is never pruned", () => {
+    it("does not export pruneCompletedArchive or deleteBroadcast", () => {
+        expect("pruneCompletedArchive" in broadcastService).toBe(false);
+        expect("deleteBroadcast" in broadcastService).toBe(false);
+    });
+});

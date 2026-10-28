@@ -20,8 +20,58 @@ import { broadcastService } from "../services/broadcast.js";
 
 import { accessService } from "../services/access-service.js";
 import { formatLocation } from "../utils/location-label.js";
+import { awsBusinessClient, AwsBusinessApiError } from "../services/aws-business-client.js";
+import { STAFF_TEXTS } from "../constants/staff-texts.js";
 
 export const commandHandlers = new Composer<MyContext>();
+
+const TELEGRAM_LINK_CODE = /^[0-9a-f]{32}$/;
+
+/**
+ * /start link_<код>: завершує привʼязку Telegram до акаунта вебаппа.
+ * У журнал іде лише результат — ні код, ні імена там не потрібні.
+ */
+async function completeTelegramLink(ctx: MyContext, userId: number, rawCode: string): Promise<void> {
+    const code = TELEGRAM_LINK_CODE.test(rawCode) ? rawCode : null;
+    let outcome: "linked" | "expired" | "already_linked" | "unavailable" | "malformed" = "malformed";
+    let text: string = STAFF_TEXTS["telegram-link-expired"];
+
+    if (code) {
+        try {
+            await awsBusinessClient.completeTelegramLink(
+                code,
+                String(userId),
+                ctx.from?.username,
+                ctx.from?.first_name,
+                ctx.from?.last_name,
+            );
+            outcome = "linked";
+            text = STAFF_TEXTS["telegram-link-success"];
+        } catch (err) {
+            const status = err instanceof AwsBusinessApiError ? err.status : undefined;
+            if (status === 404 || status === 410) {
+                outcome = "expired";
+            } else if (status === 409) {
+                outcome = "already_linked";
+                text = STAFF_TEXTS["telegram-link-already-linked"];
+            } else {
+                outcome = "unavailable";
+                text = STAFF_TEXTS["telegram-link-unavailable"];
+            }
+        }
+    }
+
+    logBusinessEvent({
+        event: "telegram.link.completed",
+        telegramId: userId,
+        result: outcome === "linked" ? "success" : "failure",
+        module: "commands",
+        operation: "start_link",
+        updateId: ctx.update.update_id,
+        safeContext: { outcome },
+    });
+    await ctx.reply(text);
+}
 
 const RESET_TESTER_IDS = [7096140693, 7455712248, 8253241676];
 const RESET_TESTER_ID_BIGINTS = new Set(RESET_TESTER_IDS.map((id) => BigInt(id)));
@@ -113,6 +163,10 @@ commandHandlers.command("start", async (ctx) => {
 
     try {
         const payload = ctx.match;
+        if (typeof payload === "string" && payload.startsWith("link_")) {
+            await completeTelegramLink(ctx, userId, payload.slice("link_".length));
+            return;
+        }
         if (ctx.message?.message_id) {
             await ctx.api.deleteMessage(ctx.chat!.id, ctx.message.message_id).catch(() => { });
         }

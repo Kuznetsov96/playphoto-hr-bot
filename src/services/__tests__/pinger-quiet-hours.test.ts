@@ -7,6 +7,10 @@ const pendingDeleteMany = vi.fn();
 const schedulePreferenceSchedule = vi.fn();
 const missingSchedulePreferences = vi.fn();
 const pendingUpdateMany = vi.fn();
+const pingLogCreate = vi.fn().mockResolvedValue({});
+const enqueueSync = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../announcement-sync.js", () => ({ enqueueAnnouncementSyncSafe: enqueueSync, processAnnouncementSync: vi.fn() }));
 
 vi.mock("../../repositories/tracked-message-repository.js", () => ({
     trackedMessageRepository: {
@@ -15,8 +19,21 @@ vi.mock("../../repositories/tracked-message-repository.js", () => ({
         update: trackedUpdate,
     },
 }));
+vi.mock("../../repositories/broadcast-repository.js", () => ({
+    broadcastRepository: {
+        findDueManualReminders: vi.fn().mockResolvedValue([]),
+        update: vi.fn(),
+        findReminderState: vi.fn().mockResolvedValue({ withdrawnAt: null, remindersStoppedAt: null }),
+    },
+}));
+vi.mock("../../repositories/broadcast-action-repository.js", () => ({
+    broadcastActionRepository: {},
+}));
 vi.mock("../../repositories/pending-reply-repository.js", () => ({
     pendingReplyRepository: { deleteMany: pendingDeleteMany, updateMany: pendingUpdateMany },
+}));
+vi.mock("../../repositories/broadcast-ping-log-repository.js", () => ({
+    broadcastPingLogRepository: { create: pingLogCreate },
 }));
 vi.mock("../../repositories/staff-repository.js", () => ({ staffRepository: {} }));
 vi.mock("../aws-business-client.js", () => ({
@@ -121,6 +138,50 @@ describe("pinger quiet hours", () => {
         expect(trackedUpdate).toHaveBeenCalledTimes(1);
         const moved = trackedUpdate.mock.calls[0]?.[1]?.nextPingAt as Date;
         expect(kyivHourOf(moved)).toBe(10);
+    });
+
+    it("enqueues an announcement sync after the quiet-hours deferral so 'Next reminder' is not stale", async () => {
+        vi.setSystemTime(new Date("2026-08-26T23:00:00Z")); // 02:00 Kyiv
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+
+        await runPingerForTest(fakeBot());
+
+        expect(enqueueSync).toHaveBeenCalledWith(7);
+    });
+
+    it("records every sent ping in the broadcast ping log", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z")); // 14:00 Kyiv
+        findToPing.mockResolvedValue([trackedMessage(60 * 60 * 1000)]);
+
+        await runPingerForTest(fakeBot());
+
+        expect(pingLogCreate).toHaveBeenCalledWith(7, 12345n, { messageId: expect.any(Number), actorName: null });
+    });
+
+    it("marks stale group replies 'dropped' (no delete) and stops tracking when none remain", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        const msg = { ...trackedMessage(60 * 60 * 1000), chatId: -1001 };
+        findToPing.mockResolvedValue([msg]);
+        const bot = fakeBot();
+        bot.api.getChatMember.mockResolvedValue({ status: "left" });
+
+        await runPingerForTest(bot);
+
+        expect(pendingDeleteMany).not.toHaveBeenCalled();
+        expect(pendingUpdateMany).toHaveBeenCalledWith({ id: { in: [11] } }, { status: "dropped" });
+        expect(stopTracking).toHaveBeenCalledWith(1);
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("stops tracking when only answered/dropped replies remain (none pending)", async () => {
+        vi.setSystemTime(new Date("2026-08-26T11:00:00Z"));
+        findToPing.mockResolvedValue([{ ...trackedMessage(60 * 60 * 1000), pendingReplies: [] }]);
+        const bot = fakeBot();
+
+        await runPingerForTest(bot);
+
+        expect(stopTracking).toHaveBeenCalledWith(1);
+        expect(bot.api.sendMessage).not.toHaveBeenCalled();
     });
 
     it("sends normally during the working day", async () => {

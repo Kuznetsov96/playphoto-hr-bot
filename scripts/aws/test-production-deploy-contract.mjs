@@ -101,6 +101,8 @@ const run = (failDeploy) => {
             AWS_PREFERENCES_CANONICAL_WRITE_ENABLED: "false",
             AWS_PARCELS_CANONICAL_READ_ENABLED: "false",
             SUPPORT_THREADS_ENABLED: "false",
+            ANNOUNCEMENTS_SYNC_ENABLED: "false",
+            ANNOUNCEMENTS_COMMANDS_ENABLED: "false",
             DEPLOY_DIRECTORY: deployDirectory,
             DEPLOY_TEST_STATE: root,
             FAIL_DEPLOY: failDeploy ? "true" : "false"
@@ -135,6 +137,12 @@ try {
     }
     if (!deployedEnv.includes("SUPPORT_THREADS_ENABLED=false")) {
         throw new Error("Live deploy did not force the reviewed support threads flag");
+    }
+    if (!deployedEnv.includes("ANNOUNCEMENTS_SYNC_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed announcements sync flag");
+    }
+    if (!deployedEnv.includes("ANNOUNCEMENTS_COMMANDS_ENABLED=false")) {
+        throw new Error("Live deploy did not force the reviewed announcements commands flag");
     }
     if (!deployedEnv.includes("AWS_PARCELS_CANONICAL_READ_ENABLED=false")) {
         throw new Error("Live deploy did not force the reviewed parcels canonical read flag");

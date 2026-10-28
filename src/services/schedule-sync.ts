@@ -184,7 +184,7 @@ export class ScheduleSyncService {
 
         if (affectedTelegramIds.length === 0) return 0;
 
-        const result = await pendingReplyRepository.deleteMany({
+        const result = await pendingReplyRepository.updateMany({
             userId: { in: affectedTelegramIds },
             status: "pending",
             trackedMessage: {
@@ -192,7 +192,7 @@ export class ScheduleSyncService {
                     messageText: { contains: "Побажання" }
                 }
             }
-        });
+        }, { status: "dropped" });
 
         logBusinessEvent({
             event: "staff.preferences_reminders_autoclosed",
@@ -998,10 +998,10 @@ export class ScheduleSyncService {
                         await (userRepository as any).update(user.id, { isBlocked: false });
                     } else {
                         await workShiftRepository.deleteManyForStaffSince(profile.id, todayKyiv);
-                        await pendingReplyRepository.deleteMany({
+                        await pendingReplyRepository.updateMany({
                             userId: telegramId,
                             status: "pending",
-                        });
+                        }, { status: "dropped" });
                     }
 
                     staffUpdated++;

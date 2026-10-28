@@ -4,6 +4,7 @@ import { redis } from '../core/redis.js';
 import logger from '../core/logger.js';
 import { broadcastService } from '../services/broadcast.js';
 import { Bot } from 'grammy';
+import { autoRetry } from '@grammyjs/auto-retry';
 import process from 'process';
 import { sendDailyIncomeReport } from '../services/finance-report.js';
 import { logBusinessEvent } from '../core/log-events.js';
@@ -33,12 +34,20 @@ export const startWorkers = () => {
             const { processCandidateMirrorPush } = await import('../services/recruiting-mirror/push-service.js');
             await processCandidateMirrorPush(job.data.candidateId);
         }
+        if (job.name === 'announcement-sync') {
+            // Ошибка пробрасывается — ретраи (attempts/backoff) ведёт BullMQ.
+            const { processAnnouncementSync } = await import('../services/announcement-sync.js');
+            await processAnnouncementSync(job.data.broadcastId);
+        }
     }, { connection });
 
     const broadcastWorker = new Worker(QUEUES.BROADCAST, async job => {
         logger.info({ jobId: job.id }, 'Processing broadcast');
         try {
-            await broadcastService.processBroadcast(job.data, new Bot(process.env.BOT_TOKEN!).api);
+            // autoRetry, как в core/bot.ts: 429 на большой рассылке ждёт retry_after, а не валит доставки.
+            const broadcastBot = new Bot(process.env.BOT_TOKEN!);
+            broadcastBot.api.config.use(autoRetry());
+            await broadcastService.processBroadcast(job.data, broadcastBot.api);
             logger.info({ jobId: job.id }, '✅ Broadcast job done');
         } catch (e) {
             logger.error({ err: e }, '❌ Broadcast job failed');

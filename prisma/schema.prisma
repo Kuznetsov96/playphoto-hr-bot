@@ -43,8 +43,87 @@ model Broadcast {
   completedAt     DateTime?
   cancelledAt     DateTime?
   targetSummary   String?
+  /// Стабильный id для вебаппа: числовой id бота наружу не уходит.
+  publicId              String              @unique @default(uuid()) @db.Uuid
+  /// Снята из чатов («Withdraw»): строки истории остаются.
+  withdrawnAt           DateTime?
+  withdrawnByTelegramId BigInt?
+  /// Какую кнопку несла рассылка: default | preferences | none.
+  buttonType            String?
+  /// Виды вложений по порядку: photo, document, ...
+  attachmentKinds       String[]            @default([])
+  /// Когда админ остановил напоминания.
+  remindersStoppedAt    DateTime?
+  /// Откуда рассылка: BOT (админка бота) или WEBAPP (команда из вебаппа).
+  origin                String              @default("BOT")
+  /// Имя автора для рассылок из вебаппа (у них initiatorId = 0).
+  authorName            String?
+  /// file_id Telegram по publicId вложения вебаппа: `{ [attachmentPublicId]: fileId }`.
+  /// Первый адресат грузит файл потоком, остальные и рестарт задачи шлют по file_id.
+  mediaFileIds          Json?
+  /// Текст рассылки ушёл подписью к единственному вложению (решает вебапп).
+  textAsCaption         Boolean             @default(false)
+  /// Ручное «Remind» из вебаппа, отложенное на утро: пингер шлёт на первом тике после этого момента.
+  manualRemindAt        DateTime?
+  /// publicId действия, ради которого стоит manualRemindAt (отметки «кому ушло» привязаны к нему).
+  manualRemindActionId  String?             @db.Uuid
+  /// Кто из вебаппа нажал отложенное «Remind»: имя уйдёт в историю напоминаний, когда оно сработает.
+  manualRemindActorName String?
+  /// Кто из вебаппа остановил напоминания.
+  remindersStoppedByName String?
+  /// Кто из вебаппа отозвал рассылку (у такой withdrawnByTelegramId пуст).
+  withdrawnByName       String?
+  /// Рассылка создана с автонапоминаниями. false — без них (ручное «Remind» остаётся): переподтверждение их не заводит.
+  remindersEnabled      Boolean             @default(true)
   trackedMessages TrackedMessage[]
   deliveries      BroadcastDelivery[]
+  pingLogs        BroadcastPingLog[]
+  actionLogs      BroadcastActionLog[]
+  reminderMarks   BroadcastReminderMark[]
+
+  @@index([manualRemindAt])
+}
+
+/// Выполненные действия вебаппа (REMIND/STOP/WITHDRAW/EDIT): повторная выдача по publicId только подтверждается.
+model BroadcastActionLog {
+  publicId    String    @id @db.Uuid
+  broadcastId Int
+  kind        String
+  doneAt      DateTime  @default(now())
+  /// Итог действия, чтобы повторный ack нёс тот же ответ (WITHDRAW: deletedChats/stayed).
+  result      Json?
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId, doneAt])
+}
+
+/// Кому ручное напоминание этого действия уже ушло: повтор команды второго не шлёт.
+model BroadcastReminderMark {
+  broadcastId    Int
+  chatId         BigInt
+  actionPublicId String    @db.Uuid
+  /// Для строки-счётчика (chatId = 0): сколько тиков отложенное напоминание уже повторяли после сбоя.
+  attempts       Int       @default(0)
+  createdAt      DateTime  @default(now())
+  broadcast      Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@id([actionPublicId, chatId])
+  @@index([broadcastId])
+}
+
+/// Каждое отправленное напоминание — для истории рассылки в вебаппе.
+model BroadcastPingLog {
+  id          Int       @id @default(autoincrement())
+  broadcastId Int
+  chatId      BigInt
+  sentAt      DateTime  @default(now())
+  /// Сообщение-напоминание в чате: по нему отзыв удаляет все напоминания, а не только последнее.
+  messageId   Int?
+  /// Кто нажал «Remind» в вебаппе; у автонапоминаний пусто.
+  actorName   String?
+  broadcast   Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+
+  @@index([broadcastId])
 }
 
 model BroadcastDelivery {
@@ -55,6 +134,8 @@ model BroadcastDelivery {
   status       String    @default("PENDING")
   attemptCount Int       @default(0)
   messageId    Int?
+  /// Все сообщения доставки с вложениями (в том числе при падении посреди).
+  partMessageIds Int[]   @default([])
   lastError    String?
   startedAt    DateTime?
   sentAt       DateTime?
@@ -95,8 +176,12 @@ model PendingReply {
   id               Int            @id @default(autoincrement())
   trackedMessageId Int
   userId           BigInt
+  /// pending | confirmed | declined | dropped (снято системой: ушёл из чата/неактивна; ни в чём не считается)
   status           String         @default("pending")
   respondedAt      DateTime?
+  /// Текст причины после «Не згодна».
+  declineReason    String?
+  createdAt        DateTime       @default(now())
   trackedMessage   TrackedMessage @relation(fields: [trackedMessageId], references: [id])
   user             User           @relation(fields: [userId], references: [telegramId])
 

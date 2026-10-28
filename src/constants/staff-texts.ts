@@ -843,4 +843,9 @@ Please check bot permissions (Manage Topics).`,
    */
   "staff-error-generic": `<b>Не вдалося виконати дію</b>\n\nНатисни /start і спробуй ще раз.`,
   "staff-error-stale-screen": `Цей екран уже застарів. Натисни /start, щоб відкрити актуальне меню.`,
+  /** Привʼязка Telegram до акаунта вебаппа: /start link_<код>. */
+  "telegram-link-success": `Готово, акаунт PlayPhoto підключено. Тепер можна надсилати тест собі.`,
+  "telegram-link-expired": `Посилання застаріло. Відкрий налаштування акаунта у вебзастосунку й натисни «Connect Telegram» ще раз.`,
+  "telegram-link-already-linked": `Цей Telegram уже підключено до іншого акаунта.`,
+  "telegram-link-unavailable": `Не вдалося підключити зараз. Спробуй ще раз за хвилину.`,
 };

@@ -176,6 +176,8 @@ export function msgToHtml(text: string, entities: any[] = []): string {
         url?: string;
         language?: string;
         userId?: number;
+        unix?: number;
+        format?: string;
     }
 
     const tagMap: Record<string, string> = {
@@ -188,6 +190,7 @@ export function msgToHtml(text: string, entities: any[] = []): string {
         blockquote: "blockquote",
         expandable_blockquote: "blockquote",
         spoiler: "tg-spoiler",
+        date_time: "tg-time",
     };
 
     const supportedEntities: HtmlEntity[] = entities
@@ -200,11 +203,14 @@ export function msgToHtml(text: string, entities: any[] = []): string {
             url: entity.url,
             language: entity.language,
             userId: entity.user?.id,
+            unix: entity.unix_time,
+            format: entity.date_time_format,
         }))
         .filter((entity) => {
             if (!Number.isFinite(entity.start) || !Number.isFinite(entity.end)) return false;
             if (entity.length <= 0 || entity.start < 0 || entity.end > text.length) return false;
             if (entity.type === "text_mention") return Number.isFinite(entity.userId);
+            if (entity.type === "date_time") return Number.isSafeInteger(entity.unix) && (entity.unix as number) >= 0;
             return Boolean(tagMap[entity.type] || entity.type === "text_link");
         });
 
@@ -224,6 +230,11 @@ export function msgToHtml(text: string, entities: any[] = []): string {
         if (entity.type === "text_link") return `<a href="${escapeHtmlAttribute(entity.url || "")}">`;
         if (entity.type === "text_mention") return `<a href="tg://user?id=${entity.userId}">`;
         if (entity.type === "expandable_blockquote") return "<blockquote expandable>";
+        if (entity.type === "date_time") {
+            // Формат («r», «wDT» …) бывает пустым: тогда Telegram показывает время как есть.
+            const format = entity.format && /^(r|w?[dD]?[tT]?)$/u.test(entity.format) ? ` format="${entity.format}"` : "";
+            return `<tg-time unix="${entity.unix}"${format}>`;
+        }
         if (entity.type === "pre" && entity.language) return `<pre><code class="language-${escapeHtmlAttribute(entity.language)}">`;
         return `<${entityTag(entity)}>`;
     };
