@@ -42,7 +42,7 @@ describe("leaving an announcement", () => {
 
     it.each(["br_done", "br_to_hub"])("%s returns to System and trims the stack to it", async (data) => {
         const { ctx } = await tap(data, [{ menuId: "admin-main" }, { menuId: "admin-system" }, { menuId: "admin-team-ops" }]);
-        expect(renderScreen).toHaveBeenCalledWith(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
+        expect(renderScreen).toHaveBeenCalledWith(ctx, `<b>${ADMIN_TEXTS["admin-main-system"]}</b>`, "admin-system");
         expect(ctx.session.navStack.map((e: any) => e.menuId)).toEqual(["admin-main", "admin-system"]);
         expect(goBack).not.toHaveBeenCalled();
     });

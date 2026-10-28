@@ -65,7 +65,6 @@ function startSearchFlow(ctx: MyContext) {
     delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
-    delete ctx.session.manualChannelAccess;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
 }
@@ -88,9 +87,9 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
         ? staffService.formatStaffName(staff.fullName)
         : (candidate?.fullName || user.username || `User ${user.telegramId}`);
 
-    const { getUserAdminRole } = await import("../../middleware/role-check.js");
+    const { getCtxAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
-    const role = await getUserAdminRole(BigInt(ctx.from!.id));
+    const role = await getCtxAdminRole(ctx);
     const canCreateTopic = !shouldUseDirectCandidateMessage(candidate, staff)
         && (hasPermission(role, 'SUPPORT_CHAT'));
 
@@ -370,9 +369,9 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
     let route: OutboundRoute;
 
-    const { getUserAdminRole } = await import("../../middleware/role-check.js");
+    const { getCtxAdminRole } = await import("../../middleware/role-check.js");
     const { hasPermission } = await import("../../config/roles.js");
-    const role = await getUserAdminRole(BigInt(ctx.from!.id));
+    const role = await getCtxAdminRole(ctx);
     const directCandidate = shouldUseDirectCandidateMessage(candidate, staff);
     const hasTopicPermission = hasPermission(role, 'SUPPORT_CHAT');
     const canCreateTopic = !directCandidate && hasTopicPermission;

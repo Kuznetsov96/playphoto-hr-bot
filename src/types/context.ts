@@ -174,15 +174,6 @@ export interface SessionData {
         ticketFilter?: string;
         preferredTarget?: "HR" | "MENTOR" | "RECOVERY";
         entryReason?: "RETURNED_AFTER_BOT_BLOCK";
-        magnetCount?: {
-            recordId?: string;
-            estimateTotal?: number;
-            confidence?: "high" | "medium" | "low";
-            stackCounts?: number[];
-            notes?: string;
-            correctedTotal?: number;
-            analyzedPhotoFileId?: string;
-        };
     };
 
     parcelPhotoDraft?: {
@@ -244,7 +235,6 @@ export interface SessionData {
     statsView?: "overview" | "losses";
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
-    customSyncPromptMessageId?: number;
     taskCreation?: {
         step?: string;
         date?: string;
@@ -287,16 +277,13 @@ export interface SessionData {
         mediaType?: TaskAttachmentItem["type"];
         deadlineTime?: string | null;
     };
-    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'BULK_TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
+    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'BULK_TASK' | 'EXPENSE' | 'LOGISTICS' | 'RECRUITMENT' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;
     teamSyncPreview?: {
         token: string;
         generatedAt: number;
         requiresConfirmation: boolean;
-    };
-    manualChannelAccess?: {
-        step: "AWAITING_GRANT_DETAILS" | "AWAITING_REVOKE_ID";
     };
 }
 

@@ -236,7 +236,7 @@ export class ScreenManager {
                 // was removed 2026-09-03; candidate-detail screens like
                 // hr-candidate-unified are now reached only from the admin tree,
                 // so admin-main is the correct fallback for them too.)
-                await navigateTo('admin-main', "<b>PlayPhoto Admin</b>");
+                await navigateTo('admin-main', "<b>PlayPhoto</b>");
             }
             return;
         }

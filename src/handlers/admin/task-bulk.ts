@@ -101,7 +101,6 @@ export async function startBulkTask(ctx: MyContext): Promise<void> {
     delete ctx.session.taskCreation;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
-    delete ctx.session.manualChannelAccess;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
 
@@ -556,9 +555,9 @@ export async function handleBulkTaskContent(ctx: MyContext): Promise<boolean> {
     if (data.step !== "AWAITING_TEXT" && data.step !== "SELECT_DEADLINE") return false;
     if (ctx.chat?.type !== "private") return false;
 
-    const { getUserAdminRole } = await import("../../middleware/role-check.js");
+    const { getCtxAdminRole } = await import("../../middleware/role-check.js");
     const { hasAnyRole } = await import("../../config/roles.js");
-    const role = await getUserAdminRole(BigInt(ctx.from!.id));
+    const role = await getCtxAdminRole(ctx);
     if (!hasAnyRole(role, 'SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT')) return false;
 
     const message = ctx.message;

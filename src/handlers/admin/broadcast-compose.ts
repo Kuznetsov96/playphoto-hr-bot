@@ -43,9 +43,9 @@ function escape(text: string): string {
 
 async function isAnnouncementAdmin(ctx: MyContext): Promise<boolean> {
     if (!ctx.from) return false;
-    const { getUserAdminRole } = await import("../../middleware/role-check.js");
+    const { getCtxAdminRole } = await import("../../middleware/role-check.js");
     const { hasAnyRole } = await import("../../config/roles.js");
-    const role = await getUserAdminRole(BigInt(ctx.from.id));
+    const role = await getCtxAdminRole(ctx);
     return hasAnyRole(role, "SUPER_ADMIN", "CO_FOUNDER", "SUPPORT");
 }
 
@@ -109,7 +109,7 @@ export async function backToSystem(ctx: MyContext) {
     const stack = ctx.session.navStack ?? [];
     const at = stack.map(entry => entry.menuId).lastIndexOf("admin-system");
     ctx.session.navStack = at >= 0 ? stack.slice(0, at + 1) : [...stack, { menuId: "admin-system" }];
-    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
+    await ScreenManager.renderScreen(ctx, `<b>${ADMIN_TEXTS["admin-main-system"]}</b>`, "admin-system");
 }
 
 /** Рассылка уходит очередью: «Sent» было бы раньше факта, доставку и ответы показывает вебапп. */
@@ -124,7 +124,6 @@ export async function startStatelessBroadcast(ctx: MyContext) {
     delete ctx.session.taskData;
     delete ctx.session.taskCreation;
     delete ctx.session.bulkTaskData;
-    delete ctx.session.manualChannelAccess;
     delete ctx.session.broadcastDraft;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;

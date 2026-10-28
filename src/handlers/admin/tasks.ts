@@ -5,7 +5,7 @@ import type { MyContext } from "../../types/context.js";
 import { taskService } from "../../services/task-service.js";
 import { taskProofService } from "../../services/task-proof-service.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
-import { getUserAdminRole } from "../../middleware/role-check.js";
+import { getCtxAdminRole } from "../../middleware/role-check.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 
 import {

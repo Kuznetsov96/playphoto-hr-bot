@@ -23,7 +23,6 @@ export async function startTaskFlow(ctx: MyContext, identifier?: string) {
     delete ctx.session.broadcastDraft;
     delete ctx.session.taskCreation;
     delete ctx.session.bulkTaskData;
-    delete ctx.session.manualChannelAccess;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
     ctx.session.taskData = { step: 'SELECT_STAFF' } as any;
@@ -105,9 +104,9 @@ export async function handleTaskText(ctx: MyContext) {
     if (step !== 'AWAITING_TEXT' && step !== 'SET_DEADLINE') return false;
     if (ctx.chat?.type !== "private") return false;
 
-    const { getUserAdminRole } = await import("../../middleware/role-check.js");
+    const { getCtxAdminRole } = await import("../../middleware/role-check.js");
     const { hasAnyRole } = await import("../../config/roles.js");
-    const role = await getUserAdminRole(BigInt(ctx.from!.id));
+    const role = await getCtxAdminRole(ctx);
     if (!hasAnyRole(role, 'SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT')) return false;
 
     const message = ctx.message;

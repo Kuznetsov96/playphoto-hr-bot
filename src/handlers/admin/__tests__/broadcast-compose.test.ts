@@ -15,7 +15,7 @@ vi.mock("../../../services/aws-business-client.js", () => ({
 vi.mock("../../../repositories/user-repository.js", () => ({
     userRepository: { findWithStaffProfileByTelegramId: vi.fn().mockResolvedValue({ firstName: "Ira", lastName: "K", username: null, staffProfile: { fullName: "Ira Kovalenko" } }) },
 }));
-vi.mock("../../../middleware/role-check.js", () => ({ getUserAdminRole: getRole }));
+vi.mock("../../../middleware/role-check.js", () => ({ getUserAdminRole: getRole, getCtxAdminRole: (ctx: any) => getRole(BigInt(ctx.from.id)) }));
 const webBase: { value: string | undefined } = { value: undefined };
 vi.mock("../../../config.js", async (importOriginal) => ({
     ...(await importOriginal<Record<string, unknown>>()),
@@ -187,7 +187,7 @@ describe("To step", () => {
         expect(ctx.session.broadcastData).toBeUndefined();
         expect(ctx.session.adminFlow).toBeUndefined();
         expect(ctx.answerCallbackQuery).toHaveBeenLastCalledWith("Cancelled.");
-        expect(renderScreen).toHaveBeenLastCalledWith(ctx, "System", "admin-system");
+        expect(renderScreen).toHaveBeenLastCalledWith(ctx, "<b>System</b>", "admin-system");
     });
 });
 

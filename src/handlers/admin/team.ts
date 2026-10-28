@@ -10,8 +10,7 @@ import { staffRepository } from "../../repositories/staff-repository.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { workShiftRepository } from "../../repositories/work-shift-repository.js";
 import { escapeHtml, formatLocation, normalizeCity } from "./utils.js";
-import { getUserAdminRole } from "../../middleware/role-check.js";
-import { hasPermission } from "../../config/roles.js";
+import { getCtxAdminRole } from "../../middleware/role-check.js";
 import { chatLogRepository } from "../../repositories/chat-log-repository.js";
 import { userRepository } from "../../repositories/user-repository.js";
 import { startAdminStaffSearch } from "./search.js";
@@ -21,7 +20,6 @@ import { audit } from "../../core/audit-logger.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import { candidateRepository } from "../../repositories/candidate-repository.js";
 import { MAIN_ADMIN_ID, replacementService } from "../../services/replacement-service.js";
-import { startManualChannelAccessFlow, startManualChannelRevokeFlow } from "./manual-channel-access.js";
 import { getShiftTimeFromLocationSchedule } from "../../utils/shift-time.js";
 import { getShiftTimeFromOpeningHours, type OpeningHoursDay } from "../../utils/location-opening-hours.js";
 
@@ -72,7 +70,7 @@ adminBirthdayMenu.dynamic(async (ctx, range) => {
         await handleBirthdayMonthCallback(ctx, 0);
     });
     range.row().text("Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team</b>", "admin-team-ops");
     });
 });
 
@@ -93,11 +91,7 @@ export async function handleBirthdayMonthCallback(ctx: MyContext, month: number)
 // --- 1. TEAM & OPS MENU ---
 export const adminTeamOpsMenu = new Menu<MyContext>("admin-team-ops");
 adminTeamOpsMenu.dynamic(async (ctx, range) => {
-    const telegramId = ctx.from?.id;
-    let userRole = null;
-    if (telegramId) {
-        userRole = await getUserAdminRole(BigInt(telegramId));
-    }
+    const userRole = await getCtxAdminRole(ctx);
 
     range.text("Schedule", async (ctx) => {
         ctx.session.adminFlow = 'SCHEDULE';
@@ -107,11 +101,10 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
-        delete ctx.session.manualChannelAccess;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;
         await ScreenManager.renderScreen(ctx, "<b>Schedule</b>", "admin-schedule-dates", { pushToStack: true });
-    }).row();
+    });
 
     range.text("Locations", async (ctx) => {
         ctx.session.adminFlow = 'LOCATIONS';
@@ -123,11 +116,10 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
-        delete ctx.session.manualChannelAccess;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;
         await ScreenManager.renderScreen(ctx, "<b>Locations</b>", "admin-team-cities", { pushToStack: true });
-    });
+    }).row();
 
     range.text("Staff Search", async (ctx) => {
         ctx.session.adminFlow = 'SEARCH';
@@ -136,74 +128,24 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.taskData;
         delete ctx.session.broadcastData;
         await startAdminStaffSearch(ctx);
-    }).row();
-
-    // Only Super Admin can sync or see reports
-    if (hasPermission(userRole as any, 'STAFF_SYNC')) {
-        if (userRole === "SUPER_ADMIN") {
-            range.text(ADMIN_TEXTS["admin-main-channel"], async (ctx) => {
-                await ScreenManager.renderScreen(
-                    ctx,
-                    `${ADMIN_TEXTS["admin-channel-title"]}\n\n${ADMIN_TEXTS["admin-channel-menu-prompt"]}`,
-                    "admin-channel",
-                    { pushToStack: true }
-                );
-            }).row();
-        }
-
-        range.text("Custom Sync", async (ctx) => {
-            ctx.session.adminFlow = "SCHEDULE";
-            ctx.session.step = "sync_other_sheet";
-            delete ctx.session.taskData;
-            delete ctx.session.taskCreation;
-            delete ctx.session.bulkTaskData;
-            delete ctx.session.broadcastData;
-            delete ctx.session.broadcastDraft;
-            delete ctx.session.manualChannelAccess;
-            delete ctx.session.supportData?.step;
-            delete ctx.session.supportData?.replyingToUserId;
-            const prompt = await ctx.reply(ADMIN_TEXTS["admin-sync-enter-sheet"]);
-            ctx.session.customSyncPromptMessageId = prompt.message_id;
-            ctx.session.messagesToDelete.push(prompt.message_id);
-        }).row();
-    }
+    });
 
     if (userRole !== 'SUPPORT') {
         range.text("Birthdays", async (ctx) => {
             await showBirthdayMenu(ctx);
-        }).row();
+        });
     }
+    range.row();
 
     range.text("Back", async (ctx) => {
-        const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
+        const userRole = await getCtxAdminRole(ctx);
         const text = await staffService.getAdminHeader(userRole as any);
         await ScreenManager.goBack(ctx, text, "admin-main");
     });
 });
 
-export const adminChannelMenu = new Menu<MyContext>("admin-channel");
-adminChannelMenu.dynamic(async (ctx, range) => {
-    const telegramId = ctx.from?.id;
-    const userRole = telegramId ? await getUserAdminRole(BigInt(telegramId)) : null;
-
-    if (userRole !== "SUPER_ADMIN") {
-        range.text("No access", async (ctx) => {
-            await ctx.answerCallbackQuery({ text: "No access.", show_alert: true }).catch(() => { });
-        }).row();
-    } else {
-        range.text(ADMIN_TEXTS["admin-channel-grant"], async (ctx) => {
-            await startManualChannelAccessFlow(ctx);
-        }).row();
-
-        range.text(ADMIN_TEXTS["admin-channel-revoke"], async (ctx) => {
-            await startManualChannelRevokeFlow(ctx);
-        }).row();
-    }
-
-    range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
-    });
-});
+// Кнопки Channel / Custom Sync со старых сообщений ("admin-channel/...") гасит
+// тихий обработчик в system.ts.
 
 // --- NEW SCHEDULE FLOW ---
 export const adminScheduleDateMenu = new Menu<MyContext>("admin-schedule-dates");
@@ -257,7 +199,7 @@ adminScheduleDateMenu.dynamic(async (ctx, range) => {
 
     // Ensure row before Back
     range.row().text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team</b>", "admin-team-ops");
     });
 });
 
@@ -652,7 +594,7 @@ adminScheduleStaffMenu.dynamic(async (ctx, range) => {
             range.text(`${staffService.shortenName(staff.fullName)}`, async (ctx) => {
                 ctx.session.selectedUserId = staff.userId;
                 const profile = staff;
-                const viewerRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
+                const viewerRole = ctx.from?.id ? await getCtxAdminRole(ctx) : null;
                 const text = (await staffService.getProfileText(profile, false, viewerRole)) + `\n${ADMIN_TEXTS["admin-profile-select-action"]}`;
 
                 const kb = new InlineKeyboard()
@@ -684,7 +626,7 @@ adminTeamCityMenu.dynamic(async (ctx, range) => {
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team</b>", "admin-team-ops");
     });
 });
 
@@ -720,7 +662,7 @@ adminLocationStaffMenu.dynamic(async (ctx, range) => {
         staff.forEach((s: any) => {
             range.text(`${staffService.shortenName(s.fullName)}`, async (ctx) => {
                 ctx.session.selectedUserId = s.userId;
-                const viewerRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
+                const viewerRole = ctx.from?.id ? await getCtxAdminRole(ctx) : null;
                 const text = (await staffService.getProfileText(s, false, viewerRole)) + `\n${ADMIN_TEXTS["admin-profile-select-action"]}`;
 
                 const kb = new InlineKeyboard()

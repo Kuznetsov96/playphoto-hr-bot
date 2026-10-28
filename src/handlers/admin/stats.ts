@@ -58,7 +58,7 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
         delete ctx.session.broadcastCity;
         delete ctx.session.broadcastLocationId;
         delete ctx.session.broadcastLocationName;
-        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team</b>", "admin-team-ops");
     });
 });
 

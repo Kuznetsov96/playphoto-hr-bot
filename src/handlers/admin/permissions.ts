@@ -1,5 +1,5 @@
 import type { MyContext } from "../../types/context.js";
-import { getUserAdminRole } from "../../middleware/role-check.js";
+import { getCtxAdminRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
 
 /**
@@ -10,7 +10,7 @@ export async function hasFinanceAccess(ctx: MyContext): Promise<boolean> {
     const telegramId = ctx.from?.id;
     if (!telegramId) return false;
 
-    const userRole = await getUserAdminRole(BigInt(telegramId));
+    const userRole = await getCtxAdminRole(ctx);
     return hasPermission(userRole, 'FINANCE_AUDIT');
 }
 
@@ -22,6 +22,6 @@ export async function hasStaffSyncAccess(ctx: MyContext): Promise<boolean> {
     const telegramId = ctx.from?.id;
     if (!telegramId) return false;
 
-    const userRole = await getUserAdminRole(BigInt(telegramId));
+    const userRole = await getCtxAdminRole(ctx);
     return hasPermission(userRole, 'STAFF_SYNC');
 }

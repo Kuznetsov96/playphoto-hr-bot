@@ -7,7 +7,7 @@ import { dashboardService } from "../../services/finance/dashboard-service.js";
 import { redis } from "../../core/redis.js";
 import { locationRepository } from "../../repositories/location-repository.js";
 import { InputFile, InlineKeyboard, Composer } from "grammy";
-import { getUserAdminRole } from "../../middleware/role-check.js";
+import { getCtxAdminRole } from "../../middleware/role-check.js";
 import { staffService } from "../../modules/staff/services/index.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
 import logger from "../../core/logger.js";
@@ -15,11 +15,7 @@ import logger from "../../core/logger.js";
 // --- 3. FINANCE MENU ---
 export const adminFinanceMenu = new Menu<MyContext>("admin-finance");
 adminFinanceMenu.dynamic(async (ctx, range) => {
-    const telegramId = ctx.from?.id;
-    let userRole = null;
-    if (telegramId) {
-        userRole = await getUserAdminRole(BigInt(telegramId));
-    }
+    const userRole = await getCtxAdminRole(ctx);
 
     const isSuperAdmin = userRole === 'SUPER_ADMIN';
     const isCoFounder = userRole === 'CO_FOUNDER';
@@ -66,7 +62,7 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
 
     range.row().text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
         const { staffService } = await import("../../modules/staff/services/index.js");
-        const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
+        const userRole = await getCtxAdminRole(ctx);
         const text = await staffService.getAdminHeader(userRole as any);
         await ScreenManager.goBack(ctx, text, "admin-main");
     });
@@ -77,13 +73,9 @@ export const financeHandlers = new Composer<MyContext>();
 
 financeHandlers.callbackQuery("admin_finance_back", async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => { });
-    const telegramId = ctx.from?.id;
-    let userRole = null;
-    if (telegramId) {
-        userRole = await getUserAdminRole(BigInt(telegramId));
-    }
+    const userRole = await getCtxAdminRole(ctx);
 
-    const text = "<b>Finance Management</b>";
+    const text = "<b>Finance</b>";
     const options = {
         parse_mode: "HTML" as const,
         reply_markup: adminFinanceMenu

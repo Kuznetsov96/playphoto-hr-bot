@@ -55,7 +55,6 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
-        delete ctx.session.manualChannelAccess;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;
         await ctx.reply("Please enter the 14-digit TTN number:");
@@ -69,7 +68,11 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
         if (ctx.session.step === "admin_logistics_add_ttn") {
             ctx.session.step = "idle";
         }
-        await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
+        // Logistics открывается с главного меню (SUPPORT) — назад туда же.
+        const { staffService } = await import("../../modules/staff/services/index.js");
+        const { getCtxAdminRole } = await import("../../middleware/role-check.js");
+        const text = await staffService.getAdminHeader(await getCtxAdminRole(ctx) as any);
+        await ScreenManager.goBack(ctx, text, "admin-main");
     });
 });
 
@@ -120,7 +123,7 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
 
 // Navigation to logistics list
 adminLogisticsHandlers.callbackQuery("admin_logistics_nav", async (ctx) => {
-    await ScreenManager.renderScreen(ctx, "<b>Logistics Management</b>", "admin-logistics");
+    await ScreenManager.renderScreen(ctx, `<b>${ADMIN_TEXTS["admin-main-logistics"]}</b>`, "admin-logistics");
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
