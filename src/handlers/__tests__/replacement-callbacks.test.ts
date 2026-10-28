@@ -203,7 +203,7 @@ describe("ownerRevertCallback", () => {
 
         const markup = (ctx.editMessageReplyMarkup.mock.calls[0]![0] as { reply_markup: unknown }).reply_markup;
         const buttons = buttonsOf(markup);
-        expect(buttons.map((button) => button.text)).toEqual(["↩️ Revert anyway", "Keep it"]);
+        expect(buttons.map((button) => button.text)).toEqual(["Revert anyway", "Keep it"]);
         expect(buttons[0]!.callback_data).toMatch(/^cb:replrvc:req-1:/u);
         expect(ctx.answerCallbackQuery).toHaveBeenCalledWith(expect.objectContaining({ show_alert: true }));
         expect(d.syncCanonicalRequest).not.toHaveBeenCalled();

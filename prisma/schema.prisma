@@ -28,7 +28,6 @@ model User {
   timelineEvents       UserTimelineEvent[]
   chatLogs             ChatLog[]
   outgoingTopics       OutgoingTopic[]
-  magnetCountRuns      MagnetCountRun[]
   lastSupportMessageId Int?
   supportThread        SupportThread?
   isBlocked            Boolean             @default(false)
@@ -882,26 +881,6 @@ model FirstShiftOnboardingStep {
   @@index([status])
 }
 
-model MagnetCountRun {
-  id                  String                @id @default(cuid())
-  adminUserId         String
-  photoFileId         String
-  estimatedTotal      Int
-  finalTotal          Int?
-  confidence          MagnetCountConfidence
-  stackCounts         String?
-  notes               String?
-  model               String?
-  isManuallyCorrected Boolean               @default(false)
-  finalizedAt         DateTime?
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
-  adminUser           User                  @relation(fields: [adminUserId], references: [id])
-
-  @@index([adminUserId, createdAt])
-  @@index([createdAt])
-}
-
 enum Role {
   CANDIDATE
   STAFF
@@ -958,12 +937,6 @@ enum TaskProofSupportTopicStatus {
   WAITING_FOR_STAFF
   WAITING_FOR_SUPPORT
   CLOSED
-}
-
-enum MagnetCountConfidence {
-  high
-  medium
-  low
 }
 
 enum FinanceLogType {

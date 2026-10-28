@@ -140,6 +140,14 @@ function renderCandidateMessage(row: AwsReplacementNotification): string | null 
 }
 
 /**
+ * «Зубаль Діана Іванівна» → «Зубаль Діана»: вебапп шлёт полное имя, а в сообщении владельцу
+ * отчество только удлиняет строку (как на экранах вебаппа).
+ */
+function surnameAndName(fullName: string): string {
+    return fullName.trim().split(/\s+/u).slice(0, 2).join(" ");
+}
+
+/**
  * `outcome` decides the owner's message: `confirmed` means the shift already
  * moved and the owner only needs a revert button; `needs_review` means the
  * automatic checks failed and the owner must decide. Getting this backwards
@@ -153,8 +161,8 @@ function renderOwnerReviewMessage(payload: AwsReplacementNotificationPayload): s
     // Escaped for the same reason as the location: this message is sent with
     // `parse_mode: "HTML"`, and a name carrying an angle bracket would make
     // Telegram reject it outright.
-    const requesterName = escapeHtml(payload.requesterDisplayName ?? "?");
-    const candidateName = escapeHtml(payload.candidateDisplayName ?? "?");
+    const requesterName = escapeHtml(surnameAndName(payload.requesterDisplayName ?? "?"));
+    const candidateName = escapeHtml(surnameAndName(payload.candidateDisplayName ?? "?"));
     return payload.outcome === "confirmed"
         ? ADMIN_TEXTS["admin-replacement-confirmed"]({
               requesterName,
