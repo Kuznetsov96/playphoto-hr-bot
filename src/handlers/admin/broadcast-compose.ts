@@ -112,6 +112,9 @@ export async function backToSystem(ctx: MyContext) {
     await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
 }
 
+/** Рассылка уходит очередью: «Sent» было бы раньше факта, доставку и ответы показывает вебапп. */
+const sendingText = (count: number) => `Sending to ${peopleLabel(count)}.\nDelivery and replies are in the web app.`;
+
 // --- Entry ---
 
 export async function startStatelessBroadcast(ctx: MyContext) {
@@ -619,10 +622,10 @@ broadcastComposeHandlers.callbackQuery("b_send", async (ctx) => {
         const webUrl = announcementWebUrl(publicId);
         if (webUrl) kb.url("Open in web", webUrl).row();
         kb.text("New announcement", "br_new").row().text("Done", "br_done");
-        await show(ctx, `Sent to ${peopleLabel(count)}.`, kb, true);
+        await show(ctx, sendingText(count), kb, true);
     } catch (e) {
         logger.warn({ err: e }, "Announcement success screen failed; sent a plain reply");
-        await ctx.reply(`Sent to ${peopleLabel(count)}.`).catch(() => { });
+        await ctx.reply(sendingText(count)).catch(() => { });
     }
 });
 

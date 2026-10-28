@@ -66,7 +66,8 @@ const lastScreen = () => {
     return { text: call[1] as string, kb: call[2] as any };
 };
 const labels = (kb: any): string[] => kb.inline_keyboard.flat().map((b: any) => b.text);
-const allLabels = (): string[] => renderScreen.mock.calls.flatMap(c => labels(c[2]));
+// Экраны с меню по id (System после Cancel) — не клавиатуры мастера, их метки проверяет тест меню.
+const allLabels = (): string[] => renderScreen.mock.calls.flatMap(c => (typeof c[2] === "string" ? [] : labels(c[2])));
 
 async function send(ctx: any, message: any) {
     ctx.callbackQuery = undefined;
@@ -488,7 +489,7 @@ describe("Preview and send", () => {
             },
         );
         const { text, kb } = lastScreen();
-        expect(text).toBe("Sent to 35 people.");
+        expect(text).toBe("Sending to 35 people.\nDelivery and replies are in the web app.");
         expect(labels(kb)).toEqual(["New announcement", "Done"]);
         expect(ctx.session.broadcastData).toBeUndefined();
     });
@@ -532,7 +533,7 @@ describe("Preview and send", () => {
         await tap(ctx, "br_msg_next");
         renderScreen.mockRejectedValueOnce(new Error("telegram down"));
         await tap(ctx, "b_send");
-        expect(ctx.reply).toHaveBeenCalledWith("Sent to 35 people.");
+        expect(ctx.reply).toHaveBeenCalledWith("Sending to 35 people.\nDelivery and replies are in the web app.");
         expect(ctx.reply).not.toHaveBeenCalledWith(expect.stringContaining("Couldn't send"));
         const calls = vi.mocked(audit).mock.calls.map(c => (c[0] as any).result);
         expect(calls).toEqual(["success"]);
