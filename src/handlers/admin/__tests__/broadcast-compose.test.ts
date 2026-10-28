@@ -119,18 +119,54 @@ describe("To step", () => {
         getCatalogue.mockResolvedValue({ ...catalogue, cities: [catalogue.cities[1], catalogue.cities[0]] });
         await tap(ctx, "br_tc_0");
         expect(ctx.session.broadcastData.cityNames).toEqual(["Kyiv"]);
-        expect(getCatalogue).toHaveBeenCalledTimes(1);
+        // Нажатие каталог не перечитывает: список тот, что на экране.
+        expect(getCatalogue).not.toHaveBeenCalled();
     });
 
-    it("By location selects by public id", async () => {
+    it("By location: city first, then its locations, by public id", async () => {
         const ctx = makeCtx();
         await startStatelessBroadcast(ctx);
         await tap(ctx, "br_to_loc");
+        expect(labels(lastScreen().kb)).toEqual(["Kyiv", "Lviv", "Back"]);
+        await tap(ctx, "br_lc_1");
+        expect(lastScreen().text).toContain("<b>Lviv</b>");
+        expect(labels(lastScreen().kb)).toEqual(["Leoland", "Done"]);
         await tap(ctx, `br_tl_${LOC_B}`);
-        expect(labels(lastScreen().kb)).toContain("✓ Leoland (Lviv)");
+        expect(labels(lastScreen().kb)).toEqual(["✓ Leoland", "Done"]);
+        expect(lastScreen().text).toContain("34 people will get it");
         expect(resolveRecipients).toHaveBeenLastCalledWith({ everyone: false, cityNames: [], locationPublicIds: [LOC_B] });
+        await tap(ctx, "br_lc_done");
+        expect(labels(lastScreen().kb)).toEqual(["Kyiv", "Lviv · 1 selected", "Continue (1)", "Back"]);
         await tap(ctx, "br_sel_next");
         expect(labels(lastScreen().kb)).toEqual(["Ask to confirm", "No reply needed", "Back"]);
+    });
+
+    it("By location keeps locations from several cities and loads the list once", async () => {
+        const ctx = makeCtx();
+        await startStatelessBroadcast(ctx);
+        await tap(ctx, "br_to_loc");
+        await tap(ctx, "br_lc_0");
+        await tap(ctx, `br_tl_${LOC_A}`);
+        await tap(ctx, "br_lc_done");
+        await tap(ctx, "br_lc_1");
+        await tap(ctx, `br_tl_${LOC_B}`);
+        await tap(ctx, "br_lc_done");
+        expect(ctx.session.broadcastData.locationPublicIds).toEqual([LOC_A, LOC_B]);
+        expect(labels(lastScreen().kb)).toEqual(["Kyiv · 1 selected", "Lviv · 1 selected", "Continue (2)", "Back"]);
+        expect(getCatalogue).toHaveBeenCalledTimes(1);
+        // «Back» с ответа возвращает к городам «By location», выбор цел.
+        await tap(ctx, "br_sel_next");
+        await tap(ctx, "br_reply_back");
+        expect(labels(lastScreen().kb)).toContain("Continue (2)");
+    });
+
+    it("re-entering a picker from To reloads the list", async () => {
+        const ctx = makeCtx();
+        await startStatelessBroadcast(ctx);
+        await tap(ctx, "br_to_loc");
+        await tap(ctx, "br_to_back");
+        await tap(ctx, "br_to_city");
+        expect(getCatalogue).toHaveBeenCalledTimes(2);
     });
 
     it("a selection nobody matches cannot continue", async () => {
@@ -150,7 +186,7 @@ describe("To step", () => {
         expect(ctx.session.broadcastData).toBeUndefined();
         expect(ctx.session.adminFlow).toBeUndefined();
         expect(ctx.answerCallbackQuery).toHaveBeenLastCalledWith("Cancelled.");
-        expect(goBack).toHaveBeenCalledWith(ctx, "Announcements", "admin-broadcast-hub");
+        expect(renderScreen).toHaveBeenLastCalledWith(ctx, "System", "admin-system");
     });
 });
 
@@ -453,7 +489,7 @@ describe("Preview and send", () => {
         );
         const { text, kb } = lastScreen();
         expect(text).toBe("Sent to 35 people.");
-        expect(labels(kb)).toEqual(["New announcement", "Back to announcements"]);
+        expect(labels(kb)).toEqual(["New announcement", "Done"]);
         expect(ctx.session.broadcastData).toBeUndefined();
     });
 
@@ -469,20 +505,20 @@ describe("Preview and send", () => {
         createBotAnnouncement.mockResolvedValue({ broadcastId: 5, publicId: "pub-123", count: 35 });
         await sendOne(makeCtx());
         const { kb } = lastScreen();
-        expect(labels(kb)).toEqual(["Open in web", "New announcement", "Back to announcements"]);
+        expect(labels(kb)).toEqual(["Open in web", "New announcement", "Done"]);
         expect(kb.inline_keyboard[0]![0]!.url).toBe("https://web.example.com/owner/announcements/pub-123");
     });
 
     it("success screen has no web button when the address is not set", async () => {
         await sendOne(makeCtx());
-        expect(labels(lastScreen().kb)).toEqual(["New announcement", "Back to announcements"]);
+        expect(labels(lastScreen().kb)).toEqual(["New announcement", "Done"]);
     });
 
     it("an http address gives no web button", async () => {
         webBase.value = "http://web.example.com";
         createBotAnnouncement.mockResolvedValue({ broadcastId: 5, publicId: "pub-123", count: 35 });
         await sendOne(makeCtx());
-        expect(labels(lastScreen().kb)).toEqual(["New announcement", "Back to announcements"]);
+        expect(labels(lastScreen().kb)).toEqual(["New announcement", "Done"]);
         webBase.value = undefined;
     });
 
@@ -540,7 +576,9 @@ describe("button labels", () => {
         await tap(ctx, "br_tc_0");
         await tap(ctx, "br_to_back");
         await tap(ctx, "br_to_loc");
+        await tap(ctx, "br_lc_0");
         await tap(ctx, `br_tl_${LOC_A}`);
+        await tap(ctx, "br_lc_done");
         await tap(ctx, "br_sel_next");
         await tap(ctx, "br_reply_confirm");
         await tap(ctx, "br_rem_toggle");

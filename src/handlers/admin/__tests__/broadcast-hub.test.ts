@@ -11,12 +11,12 @@ vi.mock("../../../core/logger.js", () => ({ default: { debug: vi.fn(), info: vi.
 vi.mock("../../../core/audit-logger.js", () => ({ audit: vi.fn() }));
 vi.mock("../../../utils/screen-manager.js", () => ({ ScreenManager: { renderScreen, goBack } }));
 
-const { adminBroadcastHandlers, adminBroadcastHubMenu } = await import("../broadcast.js");
+const { adminBroadcastHandlers } = await import("../broadcast.js");
 const { ADMIN_TEXTS } = await import("../../../constants/admin-texts.js");
 
-async function tap(data: string) {
+async function tap(data: string, navStack: any[] = []) {
     const ctx: any = {
-        from: { id: 99 }, chat: { id: 99, type: "private" }, session: {},
+        from: { id: 99 }, chat: { id: 99, type: "private" }, session: { navStack },
         callbackQuery: { id: "q", data, message: { message_id: 5 } },
         update: { update_id: 1, callback_query: { id: "q", data } },
         answerCallbackQuery: vi.fn().mockResolvedValue(true),
@@ -28,22 +28,23 @@ async function tap(data: string) {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("announcements hub", () => {
-    it("has only New announcement and Back", async () => {
-        expect(adminBroadcastHubMenu).toBeDefined();
-        const source = (await import("node:fs")).readFileSync(new URL("../broadcast.ts", import.meta.url), "utf8");
-        const labels = [...source.matchAll(/range\.text\("([^"]+)"/g)].map(m => m[1]);
-        expect(labels).toEqual(["New announcement", "Back"]);
-    });
-
-    it("title and button are emoji-free", () => {
+describe("leaving an announcement", () => {
+    it("the System button is emoji-free", () => {
         expect(ADMIN_TEXTS["admin-sys-broadcast"]).toBe("Announcements");
         expect(ADMIN_TEXTS["admin-sys-broadcast"]).not.toMatch(/\p{Extended_Pictographic}/u);
     });
 
-    it("Back to announcements returns to the hub with the shared title", async () => {
-        const { ctx } = await tap("br_to_hub");
-        expect(goBack).toHaveBeenCalledWith(ctx, "Announcements", "admin-broadcast-hub");
+    it("no intermediate Announcements screen: System opens the composer directly", async () => {
+        const source = (await import("node:fs")).readFileSync(new URL("../system.ts", import.meta.url), "utf8");
+        expect(source).not.toContain("admin-broadcast-hub");
+        expect(source).toContain("startStatelessBroadcast(ctx)");
+    });
+
+    it.each(["br_done", "br_to_hub"])("%s returns to System and trims the stack to it", async (data) => {
+        const { ctx } = await tap(data, [{ menuId: "admin-main" }, { menuId: "admin-system" }, { menuId: "admin-team-ops" }]);
+        expect(renderScreen).toHaveBeenCalledWith(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
+        expect(ctx.session.navStack.map((e: any) => e.menuId)).toEqual(["admin-main", "admin-system"]);
+        expect(goBack).not.toHaveBeenCalled();
     });
 });
 
@@ -63,6 +64,7 @@ describe("stale buttons from removed screens", () => {
         "br_confirm_yes",
         "br_scope_city",
         "br_restart",
+        "admin-broadcast-hub/0,0/0",
     ])("%s is answered quietly and does nothing", async (data) => {
         const { ctx, reachedNext } = await tap(data);
         expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: "This screen is no longer available." });

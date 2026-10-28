@@ -39,7 +39,8 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
 
     if (hasExtendedAccess) {
         range.text(ADMIN_TEXTS["admin-sys-broadcast"], async (ctx: MyContext) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-sys-broadcast"], "admin-broadcast-hub", { pushToStack: true });
+            const { startStatelessBroadcast } = await import("./broadcast-compose.js");
+            await startStatelessBroadcast(ctx);
         }).row();
 
         range.text(ADMIN_TEXTS["admin-sys-tasks"], async (ctx: MyContext) => {
@@ -54,10 +55,6 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
             }
         }).row();
 
-        range.text(ADMIN_TEXTS["admin-sys-tickets"], async (ctx: MyContext) => {
-            const { showTicketsDashboard } = await import("./tickets.js");
-            await showTicketsDashboard(ctx);
-        }).row();
     }
 
     if (hasPermission(userRole as any, 'LOGISTICS_MENU')) {

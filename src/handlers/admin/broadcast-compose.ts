@@ -24,6 +24,7 @@ import {
 export const broadcastComposeHandlers = new Composer<MyContext>();
 
 type Draft = NonNullable<MyContext["session"]["broadcastData"]>;
+type Catalogue = NonNullable<Draft["catalogue"]>;
 
 const UNSUPPORTED = "This type isn't supported. Send it as a file.";
 
@@ -99,6 +100,18 @@ async function show(ctx: MyContext, text: string, kb: InlineKeyboard, forceNew =
     await ScreenManager.renderScreen(ctx, text, kb, forceNew ? { forceNew: true } : {});
 }
 
+/**
+ * Выход из рассылки (Cancel, «Done») — в System, откуда её открыли. Мастер в стек навигации не
+ * кладётся (его экраны не меню), поэтому стек обрезаем до System сами: `goBack` снял бы System
+ * и вернул на главный экран.
+ */
+export async function backToSystem(ctx: MyContext) {
+    const stack = ctx.session.navStack ?? [];
+    const at = stack.map(entry => entry.menuId).lastIndexOf("admin-system");
+    ctx.session.navStack = at >= 0 ? stack.slice(0, at + 1) : [...stack, { menuId: "admin-system" }];
+    await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
+}
+
 // --- Entry ---
 
 export async function startStatelessBroadcast(ctx: MyContext) {
@@ -130,37 +143,83 @@ async function renderTo(ctx: MyContext) {
     await show(ctx, "<b>To</b>\nWho should get this announcement?", kb);
 }
 
-async function renderSelection(ctx: MyContext, kind: "city" | "loc") {
+/**
+ * Каталог городов и точек — один раз на мастер: нажатия в списках его не перечитывают, только
+ * пересчитывают людей. Заново грузится при входе в выбор с экрана «To».
+ */
+async function catalogueOf(data: Draft, fresh: boolean): Promise<Catalogue | null> {
+    if (!fresh && data.catalogue) return data.catalogue;
+    const loaded = await loadCatalogue();
+    if (!loaded) return null;
+    data.catalogue = loaded.cities.map(city => ({
+        name: city.name,
+        locations: city.locations.map(location => ({ publicId: location.publicId, name: location.name })),
+    }));
+    return data.catalogue;
+}
+
+const listFailed = (ctx: MyContext) =>
+    show(ctx, "Couldn't load the list. Try again in a minute.", new InlineKeyboard().text("Back", "br_to_back"));
+
+/** Строка «N people will get it» и «Continue (N)» — общие для всех экранов выбора. */
+async function selectionFooter(data: Draft, kb: InlineKeyboard, selected: number): Promise<string | null> {
+    if (selected === 0) return null;
+    const count = await countPeople(data);
+    if (count !== null && count > 0) kb.text(`Continue (${selected})`, "br_sel_next").row();
+    return countLine(count);
+}
+
+async function renderCities(ctx: MyContext, fresh = false) {
     const data = ctx.session.broadcastData;
     if (!data) return;
-    data.step = kind === "city" ? "CITIES" : "LOCATIONS";
-    const catalogue = await loadCatalogue();
-    if (!catalogue) {
-        const kb = new InlineKeyboard().text("Back", "br_to_back");
-        await show(ctx, "Couldn't load the list. Try again in a minute.", kb);
-        return;
-    }
+    data.step = "CITIES";
+    const catalogue = await catalogueOf(data, fresh);
+    if (!catalogue) return listFailed(ctx);
     const kb = new InlineKeyboard();
-    if (kind === "city") {
-        data.cityList = catalogue.cities.map(city => city.name);
-        catalogue.cities.forEach((city, index) => {
-            const mark = data.cityNames.includes(city.name) ? "✓ " : "";
-            kb.text(`${mark}${city.name}`, `br_tc_${index}`).row();
-        });
-    } else {
-        for (const city of catalogue.cities) {
-            for (const location of city.locations) {
-                const mark = data.locationPublicIds.includes(location.publicId) ? "✓ " : "";
-                kb.text(`${mark}${formatLocation({ name: location.name, city: city.name }, "listing")}`, `br_tl_${location.publicId}`).row();
-            }
-        }
-    }
-    const selected = kind === "city" ? data.cityNames.length : data.locationPublicIds.length;
-    const count = selected > 0 ? await countPeople(data) : null;
-    if (selected > 0 && count !== null && count > 0) kb.text(`Continue (${selected})`, "br_sel_next").row();
+    catalogue.forEach((city, index) => {
+        const mark = data.cityNames.includes(city.name) ? "✓ " : "";
+        kb.text(`${mark}${city.name}`, `br_tc_${index}`).row();
+    });
+    const footer = await selectionFooter(data, kb, data.cityNames.length);
     kb.text("Back", "br_to_back");
-    const heading = kind === "city" ? "<b>By city</b>\nChoose one or more cities." : "<b>By location</b>\nChoose one or more locations.";
-    await show(ctx, selected > 0 ? `${heading}\n\n${countLine(count)}` : heading, kb);
+    const heading = "<b>By city</b>\nChoose one or more cities.";
+    await show(ctx, footer ? `${heading}\n\n${footer}` : heading, kb);
+}
+
+/** «By location», шаг 1: города; у города — сколько его точек уже выбрано. */
+async function renderLocationCities(ctx: MyContext, fresh = false) {
+    const data = ctx.session.broadcastData;
+    if (!data) return;
+    data.step = "LOCATION_CITIES";
+    const catalogue = await catalogueOf(data, fresh);
+    if (!catalogue) return listFailed(ctx);
+    const kb = new InlineKeyboard();
+    catalogue.forEach((city, index) => {
+        const chosen = city.locations.filter(l => data.locationPublicIds.includes(l.publicId)).length;
+        kb.text(chosen > 0 ? `${city.name} · ${chosen} selected` : city.name, `br_lc_${index}`).row();
+    });
+    const footer = await selectionFooter(data, kb, data.locationPublicIds.length);
+    kb.text("Back", "br_to_back");
+    const heading = "<b>By location</b>\nChoose a city, then its locations. You can pick locations in several cities.";
+    await show(ctx, footer ? `${heading}\n\n${footer}` : heading, kb);
+}
+
+/** «By location», шаг 2: точки одного города; «Done» возвращает к городам, выбор сохраняется. */
+async function renderCityLocations(ctx: MyContext) {
+    const data = ctx.session.broadcastData;
+    if (!data) return;
+    const city = data.catalogue?.[data.locationCity ?? -1];
+    if (!city) return renderLocationCities(ctx, true);
+    data.step = "LOCATIONS";
+    const kb = new InlineKeyboard();
+    for (const location of city.locations) {
+        const mark = data.locationPublicIds.includes(location.publicId) ? "✓ " : "";
+        kb.text(`${mark}${formatLocation({ name: location.name, city: city.name }, "in-city")}`, `br_tl_${location.publicId}`).row();
+    }
+    const footer = data.locationPublicIds.length > 0 ? countLine(await countPeople(data)) : null;
+    kb.text("Done", "br_lc_done");
+    const heading = `<b>${escape(city.name)}</b>\nChoose one or more locations.`;
+    await show(ctx, footer ? `${heading}\n\n${footer}` : heading, kb);
 }
 
 async function renderReply(ctx: MyContext, confirmOptions = false) {
@@ -268,17 +327,17 @@ broadcastComposeHandlers.callbackQuery(/^br_to_(city|loc)$/, async (ctx) => {
     data.everyone = false;
     // Города и точки не смешиваются, как в вебаппе: выбор переключает режим.
     if (kind === "city") data.locationPublicIds = []; else data.cityNames = [];
-    await renderSelection(ctx, kind);
+    if (kind === "city") await renderCities(ctx, true); else await renderLocationCities(ctx, true);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
 broadcastComposeHandlers.callbackQuery(/^br_tc_(\d+)$/, async (ctx) => {
     const data = ctx.session.broadcastData;
     if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
-    const name = data.cityList?.[Number(ctx.match![1])];
+    const name = data.catalogue?.[Number(ctx.match![1])]?.name;
     if (!name) return ctx.answerCallbackQuery("The list changed. Open it again.").catch(() => { });
     data.cityNames = data.cityNames.includes(name) ? data.cityNames.filter(n => n !== name) : [...data.cityNames, name];
-    await renderSelection(ctx, "city");
+    await renderCities(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -287,7 +346,24 @@ broadcastComposeHandlers.callbackQuery(/^br_tl_([0-9a-f-]{36})$/i, async (ctx) =
     if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
     const id = ctx.match![1]!;
     data.locationPublicIds = data.locationPublicIds.includes(id) ? data.locationPublicIds.filter(x => x !== id) : [...data.locationPublicIds, id];
-    await renderSelection(ctx, "loc");
+    await renderCityLocations(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+broadcastComposeHandlers.callbackQuery(/^br_lc_(\d+)$/, async (ctx) => {
+    const data = ctx.session.broadcastData;
+    if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
+    const index = Number(ctx.match![1]);
+    if (!data.catalogue?.[index]) return ctx.answerCallbackQuery("The list changed. Open it again.").catch(() => { });
+    data.locationCity = index;
+    await renderCityLocations(ctx);
+    await ctx.answerCallbackQuery().catch(() => { });
+});
+
+broadcastComposeHandlers.callbackQuery("br_lc_done", async (ctx) => {
+    const data = ctx.session.broadcastData;
+    if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
+    await renderLocationCities(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -303,7 +379,7 @@ broadcastComposeHandlers.callbackQuery("br_sel_next", async (ctx) => {
 
 /** Из старой точки входа (кнопка «назад к городам» в чужом потоке): снова экран выбора города. */
 export async function renderCitySelection(ctx: MyContext) {
-    await renderSelection(ctx, "city");
+    await renderCities(ctx);
 }
 
 // --- Reply ---
@@ -350,8 +426,8 @@ broadcastComposeHandlers.callbackQuery("br_reply_choice", async (ctx) => {
 broadcastComposeHandlers.callbackQuery("br_reply_back", async (ctx) => {
     const data = ctx.session.broadcastData;
     if (!data) return ctx.answerCallbackQuery("Session expired.").catch(() => { });
-    if (data.cityNames.length > 0) await renderSelection(ctx, "city");
-    else if (data.locationPublicIds.length > 0) await renderSelection(ctx, "loc");
+    if (data.cityNames.length > 0) await renderCities(ctx);
+    else if (data.locationPublicIds.length > 0) await renderLocationCities(ctx);
     else await renderTo(ctx);
     await ctx.answerCallbackQuery().catch(() => { });
 });
@@ -542,7 +618,7 @@ broadcastComposeHandlers.callbackQuery("b_send", async (ctx) => {
         const kb = new InlineKeyboard();
         const webUrl = announcementWebUrl(publicId);
         if (webUrl) kb.url("Open in web", webUrl).row();
-        kb.text("New announcement", "br_new").row().text("Back to announcements", "br_to_hub");
+        kb.text("New announcement", "br_new").row().text("Done", "br_done");
         await show(ctx, `Sent to ${peopleLabel(count)}.`, kb, true);
     } catch (e) {
         logger.warn({ err: e }, "Announcement success screen failed; sent a plain reply");
@@ -557,7 +633,7 @@ broadcastComposeHandlers.callbackQuery("br_cancel", async (ctx) => {
     delete ctx.session.broadcastDraft;
     if (ctx.session.adminFlow === "BROADCAST") delete ctx.session.adminFlow;
     await ctx.answerCallbackQuery("Cancelled.").catch(() => { });
-    await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-sys-broadcast"], "admin-broadcast-hub");
+    await backToSystem(ctx);
 });
 
 // Стикер приходит не через общий фильтр сообщений админки (он протекал бы в ответы поддержки,

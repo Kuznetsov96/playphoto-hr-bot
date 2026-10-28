@@ -1,7 +1,6 @@
 import { staffRepository } from "../../../repositories/staff-repository.js";
 import { workShiftRepository } from "../../../repositories/work-shift-repository.js";
 import { locationRepository } from "../../../repositories/location-repository.js";
-import { supportRepository } from "../../../repositories/support-repository.js";
 import { taskService } from "../../../services/task-service.js";
 import logger from "../../../core/logger.js";
 import type { StaffProfile } from "@prisma/client";
@@ -93,14 +92,9 @@ export class StaffService {
     async getAdminHeader(role?: string) {
         try {
             if (role === 'SUPPORT') {
-                const openTickets = await supportRepository.countByStatus("OPEN" as any).catch(() => 0);
-                const inProgressTickets = await supportRepository.countByStatus("IN_PROGRESS" as any).catch(() => 0);
-                const urgentTickets = await supportRepository.countUrgent().catch(() => 0);
                 const overdueTasks = await taskService.countOverdueTasks(new Date()).catch(() => 0);
 
                 return t('support-panel-title') + "\n\n" +
-                    t('support-panel-tickets', { open: openTickets, inprogress: inProgressTickets }) + "\n" +
-                    t('support-panel-urgent', { urgent: urgentTickets }) + "\n" +
                     t('support-panel-tasks', { overdue: overdueTasks }) + "\n\n" +
                     t('support-panel-action');
             }
