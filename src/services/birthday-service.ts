@@ -14,6 +14,7 @@ import { staffRepository } from "../repositories/staff-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { ADMIN_IDS, CO_FOUNDER_IDS } from "../config.js";
 import { surnameAndName } from "../utils/person-name.js";
+import { formatLocation } from "../utils/location-label.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
@@ -266,10 +267,17 @@ export async function getBirthdaysByMonth(month?: number): Promise<string> {
 
         const locName = (s.location as any)?.name;
         const locCity = (s.location as any)?.city;
-        const locPart = locName ? ` • ${locName}` : (locCity ? ` • ${locCity}` : "");
+        // «Smile Park» есть в нескольких городах — точка с городом, как в остальной админке.
+        const where = locName ? formatLocation({ name: locName, city: locCity }, "listing") : locCity;
+        const parts = [
+            `${day}.${mon}`,
+            `<b>${escapeHtml(surnameAndName(s.fullName))}</b>`,
+            ...(where ? [escapeHtml(where)] : []),
+            `turns ${age}`,
+        ];
 
         if (!grouped[m]) grouped[m] = [];
-        grouped[m]!.push(`  ${day}.${mon} — <b>${s.fullName}</b>${locPart} (${age})`);
+        grouped[m]!.push(parts.join(" · "));
     }
 
     const monthName = month ? t(`month-${month}`) : undefined;

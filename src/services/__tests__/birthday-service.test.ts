@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const findBirthdaysToday = vi.fn();
 const updateCandidate = vi.fn();
 const sendMessage = vi.fn();
+const findActiveStaff = vi.fn().mockResolvedValue([]);
 
 vi.mock("../../repositories/candidate-repository.js", () => ({
     candidateRepository: {
@@ -17,7 +18,7 @@ vi.mock("../../repositories/user-repository.js", () => ({
 
 vi.mock("../../repositories/staff-repository.js", () => ({
     staffRepository: {
-        findActive: vi.fn().mockResolvedValue([]),
+        findActive: findActiveStaff,
     }
 }));
 
@@ -165,5 +166,24 @@ describe("greetCandidateBirthdays", () => {
                 reply_markup: expect.any(Object),
             })
         );
+    });
+});
+
+describe("getBirthdaysByMonth", () => {
+    it("lists surname and first name, the location with its city and the age, without emoji", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-10-01T09:00:00.000Z"));
+        findActiveStaff.mockResolvedValueOnce([
+            {
+                fullName: "Семенченко Орина Сергіївна",
+                birthDate: new Date("2007-10-06T00:00:00.000Z"),
+                location: { name: "Smile Park", city: "Київ" },
+            },
+        ]);
+        const { getBirthdaysByMonth } = await import("../birthday-service.js");
+        const text = await getBirthdaysByMonth(10);
+        expect(text).toContain("06.10 · <b>Семенченко Орина</b> · Smile Park (Kyiv) · turns 19");
+        expect(text).not.toMatch(/Сергіївна|\p{Extended_Pictographic}/u);
+        vi.useRealTimers();
     });
 });

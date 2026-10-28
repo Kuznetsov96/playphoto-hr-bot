@@ -435,34 +435,9 @@ Deadline ${p.deadline}`,
   "admin-pref-stats-none": `<i>none yet</i>`,
   "admin-pref-stats-all-filled": `<i>all filled!</i>`,
   "admin-shifts-none": `No shifts found for this day.`,
-  "admin-schedule-gaps": `Find Gaps`,
-  "admin-schedule-gaps-title": `<b>Schedule Gaps (Next 7 Days):</b>`,
-  "admin-schedule-gaps-empty": `<b>No gaps found for the next week!</b>\nAll locations are covered.`,
-  "admin-schedule-gaps-footer": `\n<i>Please find photographers for these slots urgently!</i>`,
   "admin-schedule-select-date": `<b>Select Date:</b>`,
   "admin-schedule-history": `History`,
   "admin-schedule-history-title": `<b>Past 7 Days</b>`,
-  "admin-replacement-cancel-search-button": (p: { index: string | number }) => `Cancel search ${p.index}`,
-  "admin-replacement-cancel-confirmed-button": (p: { index: string | number }) => `Cancel replacement ${p.index}`,
-  "admin-replacement-cancel-confirmed-confirm": `Cancel replacement`,
-  "admin-replacement-cancel-confirmed-text": (p: {
-    date: string | number,
-    time: string | number,
-    location: string | number,
-    requester: string | number,
-    replacement: string | number
-  }) => `<b>Cancel the confirmed replacement?</b>
-
-${p.requester} → ${p.replacement}
-${p.date} · ${p.time}
-${p.location}
-
-This action does not edit Google Sheets. It removes the confirmed assignment from the bot and notifies both photographers.
-
-If the replacement is already in the main schedule, update and sync Google Sheets first.`,
-  "admin-replacement-cancel-confirmed-success": `Confirmed replacement cancelled`,
-  "admin-replacement-cancel-confirmed-inactive": `This confirmed replacement is already inactive`,
-  "admin-replacement-cancel-confirmed-still-scheduled": `This photographer is still assigned in the main schedule. Update and sync Google Sheets first, then cancel the confirmed replacement.`,
   "admin-staff-none-loc": `Staff not assigned.`,
   "support-btn-force-close": `🔒 Force Close`,
   "training-review-title": (name: string) => `<b>Pitch review</b> · ${name}`,

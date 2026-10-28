@@ -96,46 +96,6 @@ type RequestWithRelations = ReplacementRequest & {
 type ReplacementMessageRef = Pick<ReplacementResponse, "id" | "requestId" | "chatId" | "messageId">;
 
 export class ReplacementService {
-    async listManageableRequestsForAdmin() {
-        return prisma.replacementRequest.findMany({
-            where: {
-                OR: [
-                    { status: ReplacementRequestStatus.ACTIVE },
-                    {
-                        status: ReplacementRequestStatus.FOUND,
-                        shiftDate: { gte: this.kyivStartOfDay(new Date()) }
-                    }
-                ]
-            },
-            include: {
-                location: true,
-                requester: { include: { user: true } },
-                replacement: { include: { user: true } },
-                responses: true
-            },
-            orderBy: [
-                { status: "asc" },
-                { shiftDate: "asc" },
-                { createdAt: "asc" }
-            ]
-        });
-    }
-
-    async getConfirmedRequestForAdmin(requestId: string) {
-        return prisma.replacementRequest.findFirst({
-            where: {
-                id: requestId,
-                status: ReplacementRequestStatus.FOUND,
-                replacementStaffId: { not: null }
-            },
-            include: {
-                location: true,
-                requester: { include: { user: true } },
-                replacement: { include: { user: true } }
-            }
-        });
-    }
-
     /**
      * Усі майбутні зміни, для яких можна запустити пошук підміни.
      *
@@ -477,41 +437,6 @@ export class ReplacementService {
         return request;
     }
 
-    async listManualSearchDateOptions(locationId: string, daysAhead: number = 14) {
-        const location = await prisma.location.findUnique({ where: { id: locationId } });
-        if (!location) return [];
-
-        const start = this.kyivStartOfDay(new Date());
-        const end = new Date(start.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-        const [shifts, activeRequests] = await Promise.all([
-            prisma.workShift.findMany({
-                where: { locationId, date: { gte: start, lt: end } },
-                select: { date: true }
-            }),
-            prisma.replacementRequest.findMany({
-                where: { locationId, status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES }, shiftDate: { gte: start, lt: end } },
-                select: { shiftDate: true }
-            })
-        ]);
-
-        const scheduledDates = new Set(shifts.map(shift => this.formatDateKey(shift.date)));
-        const blockedSearchDates = new Set(activeRequests.map(request => this.formatDateKey(request.shiftDate)));
-
-        return Array.from({ length: daysAhead }, (_, index) => {
-            const date = new Date(start.getTime() + index * 24 * 60 * 60 * 1000);
-            const dateKey = this.formatDateKey(date);
-            const shiftStartAt = this.getShiftStartAt({ shiftDate: date, location });
-            return {
-                date,
-                dateKey,
-                label: `${this.formatDate(date)} · ${this.formatShiftTime({ shiftDate: date, location })}`,
-                hasShift: scheduledDates.has(dateKey),
-                hasActiveSearch: blockedSearchDates.has(dateKey),
-                hasStarted: shiftStartAt <= new Date(),
-            };
-        }).filter(option => !option.hasShift && !option.hasActiveSearch && !option.hasStarted);
-    }
-
     async startAdminRequest(api: Api, locationId: string, shiftDate: Date) {
         const location = await prisma.location.findUnique({ where: { id: locationId } });
         if (!location) throw new Error("LOCATION_NOT_FOUND");
@@ -581,40 +506,6 @@ export class ReplacementService {
         if (request) {
             await this.inactivateOpenResponses(api, request.id, this.formatClosedCandidateText(request));
             await this.notifyAdminCancelled(api, request.id);
-        }
-
-        return true;
-    }
-
-    async cancelRequestByAdmin(api: Api, requestId: string) {
-        const updated = await prisma.replacementRequest.updateMany({
-            where: {
-                id: requestId,
-                status: ReplacementRequestStatus.ACTIVE
-            },
-            data: {
-                status: ReplacementRequestStatus.CANCELLED,
-                completedAt: new Date(),
-                closedReason: "cancelled_by_admin",
-                nextWaveAt: null
-            }
-        });
-
-        if (updated.count === 0) return false;
-
-        const request = await this.getRequest(requestId);
-        if (request) {
-            if (request.requester) {
-                await api.sendMessage(
-                    Number(request.requester.user.telegramId),
-                    "Пошук підміни скасовано адміністратором.\nЯкщо питання ще актуальне, напиши в підтримку.",
-                    {
-                        parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
-                    }
-                ).catch((err) => logger.warn({ err, requestId }, "Requester replacement admin-cancel notification failed"));
-            }
-            await this.inactivateOpenResponses(api, request.id, this.formatClosedCandidateText(request));
         }
 
         return true;
@@ -2038,54 +1929,6 @@ export class ReplacementService {
         });
 
         return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(formatLocation(shift.location, "in-city"))}\n${escapeHtml(time)}\n\nПочати пошук?`;
-    }
-
-    /**
-     * Доска поиска подмен в меню владельца. Статус — словом, без смайлов-подписей у строк (HIG):
-     * строки и так читаются по содержанию; нулевые счётчики ответов не показываем.
-     */
-    formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listManageableRequestsForAdmin"]>>) {
-        if (requests.length === 0) {
-            return "<b>Replacement searches</b>\n\nNo active or confirmed replacements.";
-        }
-
-        const visibleRequests = requests.slice(0, 8);
-        const activeCount = requests.filter(request => request.status === ReplacementRequestStatus.ACTIVE).length;
-        const confirmedCount = requests.filter(request => request.status === ReplacementRequestStatus.FOUND).length;
-        let text = `<b>Replacement searches</b>\n${activeCount} searching · ${confirmedCount} confirmed\n`;
-        if (requests.length > visibleRequests.length) {
-            text += `Showing the first ${visibleRequests.length}. Refresh after closing some.\n`;
-        }
-
-        visibleRequests.forEach((request, index) => {
-            const count = (status: ReplacementResponseStatus) =>
-                request.responses.filter((response) => response.status === status).length;
-            const responses = [
-                [count(ReplacementResponseStatus.SENT), "waiting"],
-                [count(ReplacementResponseStatus.DECLINED), "declined"],
-                [count(ReplacementResponseStatus.DELIVERY_FAILED), "not delivered"],
-                [count(ReplacementResponseStatus.ACCEPTED), "accepted"],
-            ].filter(([n]) => (n as number) > 0).map(([n, label]) => `${n} ${label}`);
-            const photographer = request.requester
-                ? surnameAndName(request.requester.fullName)
-                : "Open shift";
-            const replacement = request.replacement
-                ? ` → ${escapeHtml(surnameAndName(request.replacement.fullName))}`
-                : "";
-            const status = request.status === ReplacementRequestStatus.FOUND ? "Confirmed" : "Searching";
-            const wave = request.currentWave
-                ? `Wave ${escapeHtml(request.currentWave)}${request.nextWaveAt ? ` · next ${escapeHtml(this.formatDateTime(request.nextWaveAt))}` : ""}`
-                : "Not started";
-
-            text +=
-                `\n<b>${index + 1}. ${escapeHtml(formatLocation(request.location, "listing"))}</b> · ${status}\n` +
-                `${formatKyivDayMonth(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}\n` +
-                `${escapeHtml(photographer)}${replacement}\n` +
-                `${wave}\n` +
-                `${responses.length > 0 ? `Responses: ${responses.join(" · ")}` : "No responses yet"}\n`;
-        });
-
-        return text;
     }
 
     /**
