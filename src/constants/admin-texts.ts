@@ -94,27 +94,6 @@ Called by ${p.caller}`,
   "admin-msg-err-delivery": `Send Error: bot blocked or invalid ID.`,
   "admin-msg-route-active-conversation": `<i>The message will use the active support conversation, or create a new topic if none exists.</i>`,
   "admin-msg-route-direct": `<i>Message will be delivered directly to the user.</i>`,
-  "admin-notif-interview-completed": (p: { name: string | number }) => `<b>Interview completed</b>
-
-${p.name}
-
-Time is up and the status is now Completed. Review the profile and make an offer decision.`,
-  "admin-notif-training-completed": (p: { name: string | number }) => `<b>Training completed</b>
-
-${p.name}
-
-Slot time is up. Mark the result (Passed or Failed) in the candidate's profile so she can move on to the NDA and test.`,
-  "admin-notif-new-staff-scheduled": (p: { name: string | number }) => `<b>New staff scheduled</b>
-
-${p.name}
-
-Hiring is complete and she is on the schedule. No separate mentor onboarding is needed.`,
-  "admin-notif-delivery-failed": (p: { name: string | number, error: string | number }) => `<b>Offer not delivered</b>
-
-${p.name}
-${p.error}
-
-She may have blocked the bot. Contact her manually.`,
   "admin-notif-mirror-failed": (p: { who: string; attachment?: string; body: string }) => `<b>Message did not reach the webapp</b>
 
 ${p.who}${p.attachment ? `\nAttachment: ${p.attachment}` : ""}

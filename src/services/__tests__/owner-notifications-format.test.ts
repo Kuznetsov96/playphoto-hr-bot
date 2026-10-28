@@ -68,10 +68,6 @@ const notifications: Record<string, string> = {
         neverOpened: [{ publicId: "n", label: "Dragon Park" }],
     }, "2030-03-10"),
     "daily summary (unavailable)": renderDailySummary(null, "2030-03-10"),
-    "interview completed": ADMIN_TEXTS["admin-notif-interview-completed"]({ name: SHORT }),
-    "training completed": ADMIN_TEXTS["admin-notif-training-completed"]({ name: SHORT }),
-    "new staff scheduled": ADMIN_TEXTS["admin-notif-new-staff-scheduled"]({ name: SHORT }),
-    "offer not delivered": ADMIN_TEXTS["admin-notif-delivery-failed"]({ name: SHORT, error: "403" }),
 };
 
 const buttons = [
