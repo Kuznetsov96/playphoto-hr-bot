@@ -78,7 +78,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
 
     const user = await userRepository.findById(userId);
     if (!user) {
-        return ScreenManager.renderScreen(ctx, "⚠️ This user is not in the database.", new InlineKeyboard().text("← Back", "admin_main_back"));
+        return ScreenManager.renderScreen(ctx, "This user is not in the database.", new InlineKeyboard().text("← Back", "admin_main_back"));
     }
 
     const candidate = await candidateRepository.findByUserId(userId);
@@ -96,7 +96,7 @@ export async function startAdminMessageFlow(ctx: MyContext, userId: string) {
 
     ctx.session.step = `admin_msg_${userId}`;
 
-    const text = `Write message for <b>${displayName}</b>: ✉️\n\n` +
+    const text = `Write message for <b>${displayName}</b>:\n\n` +
         (canCreateTopic
             ? ADMIN_TEXTS["admin-msg-route-active-conversation"]
             : ADMIN_TEXTS["admin-msg-route-direct"]);
@@ -127,7 +127,7 @@ adminSearchHandlers.callbackQuery(/^admin_reply_to_(.+)$/, async (ctx) => {
 
     startSearchFlow(ctx);
     ctx.session.step = `admin_reply_direct_${telegramId}`;
-    await ScreenManager.renderScreen(ctx, `Write response for candidate (ID: ${telegramId}): ✍️\n\n<i>Message will be delivered directly to her bot chat.</i>`, new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "cancel_step").danger(), { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, `Write response for candidate (ID: ${telegramId}):\n\n<i>Message will be delivered directly to her bot chat.</i>`, new InlineKeyboard().text(ADMIN_TEXTS["btn-cancel"], "cancel_step").danger(), { pushToStack: true });
 });
 
 adminSearchHandlers.callbackQuery(/^forward_to_kuznetsov_(.+)$/, async (ctx) => {
@@ -214,21 +214,21 @@ adminSearchHandlers.on(["message:text", "message:photo", "message:video", "messa
             }
 
             const kb = new InlineKeyboard();
-            if (candidate) kb.text("👤 Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
+            if (candidate) kb.text("Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
             else {
                 const staff = await staffRepository.findByUserId(user.id);
-                if (staff) kb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
+                if (staff) kb.text("Back to Profile", `view_staff_${staff.id}`).row();
             }
             kb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
-            await ScreenManager.renderScreen(ctx, "✅ Response sent successfully!", kb);
+            await ScreenManager.renderScreen(ctx, "Response sent successfully!", kb);
             ctx.session.step = "idle";
             if (ctx.session.adminFlow === "SEARCH") {
                 delete ctx.session.adminFlow;
             }
         } catch (e: any) {
             logger.error({ err: e, targetTelegramId: targetTgId }, "Admin direct reply delivery failed");
-            await ScreenManager.renderScreen(ctx, `❌ Failed to send: ${e.message}`);
+            await ScreenManager.renderScreen(ctx, `Failed to send: ${e.message}`);
         }
         return;
     }
@@ -321,12 +321,12 @@ export async function sendToStaffThreadFromAdmin(ctx: MyContext, userId: string)
         });
         await ctx.deleteMessage().catch(() => { });
         backKb.url(ADMIN_TEXTS["support-thread-btn-open"], sent.topicUrl).row();
-        backKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
+        backKb.text("Back to Profile", `view_staff_${staff.id}`).row();
         backKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["support-thread-admin-sent"]({ title: escapeHtml(sent.title) }), backKb);
     } catch (e: any) {
         logger.error({ err: e, userId }, "Admin message to the staff support topic failed");
-        backKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
+        backKb.text("Back to Profile", `view_staff_${staff.id}`).row();
         backKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["support-thread-admin-failed"]({ error: escapeHtml(e?.description ?? e?.message ?? String(e)) }), backKb);
     }
@@ -521,9 +521,9 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
 
         // Add specific back button
         if (staff) {
-            replyMarkup.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
+            replyMarkup.text("Back to Profile", `view_staff_${staff.id}`).row();
         } else if (candidate) {
-            replyMarkup.text("👤 Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
+            replyMarkup.text("Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
         }
 
         replyMarkup.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
@@ -531,8 +531,8 @@ async function handleAdminMessageSend(ctx: MyContext, userId: string) {
     } catch (e: any) {
         logger.error({ err: e, userId: user.id, telegramId: user.telegramId }, "Admin message delivery failed");
         const errKb = new InlineKeyboard();
-        if (staff) errKb.text("👤 Back to Profile", `view_staff_${staff.id}`).row();
-        else if (candidate) errKb.text("👤 Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
+        if (staff) errKb.text("Back to Profile", `view_staff_${staff.id}`).row();
+        else if (candidate) errKb.text("Back to Profile", getCandidateBackCallback(ctx, candidate.id)).row();
         errKb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
         await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-msg-err-delivery"], errKb);
@@ -561,6 +561,6 @@ export async function handleAdminTimelineExport(ctx: MyContext, userId: string) 
 
     } catch (e: any) {
         logger.error({ err: e, userId }, "Admin timeline export failed");
-        await ctx.reply(`❌ Export failed: ${e.message}`);
+        await ctx.reply(`Export failed: ${e.message}`);
     }
 }

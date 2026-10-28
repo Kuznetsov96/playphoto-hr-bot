@@ -59,8 +59,8 @@ adminMenu.dynamic(async (ctx, range) => {
     }
 
     if (hasPermission(userRole as any, 'LOGISTICS_MENU')) {
-        range.text("📦 Logistics", async (ctx) => {
-            await ScreenManager.renderScreen(ctx, "📦 <b>Logistics Management</b>", "admin-logistics", { pushToStack: true });
+        range.text("Logistics", async (ctx) => {
+            await ScreenManager.renderScreen(ctx, "<b>Logistics Management</b>", "admin-logistics", { pushToStack: true });
         });
     }
     range.row();
@@ -131,13 +131,13 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
                 outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
             );
             await ctx.deleteMessage().catch(() => { });
-            await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent.", "admin-main");
+            await ScreenManager.renderScreen(ctx, "Your reply has been sent.", "admin-main");
             if (user) {
                 const { timelineRepository } = await import("../../repositories/timeline-repository.js");
                 await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', `[Direct Reply] ${replyText}`, { adminId: ctx.from?.id });
             }
         } catch (e: any) {
-            await ScreenManager.renderScreen(ctx, `❌ Send Error: ${e.message}`, "admin-main");
+            await ScreenManager.renderScreen(ctx, `Send Error: ${e.message}`, "admin-main");
         }
 
         delete ctx.session.supportData.step;
@@ -152,8 +152,8 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
         ctx.session.broadcastData.step === 'MESSAGE'
     ) {
         await ctx.reply(
-            "⚠️ You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
-            "Open System Settings → Broadcasts → New announcement and send the content after the bot asks for it. The message was not queued."
+            "You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
+            "Open System → Broadcasts → New announcement and send the content after the bot asks for it. The message was not queued."
         );
         return;
     }
@@ -216,7 +216,7 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
     if (flow === 'SCHEDULE' && ctx.session.selectedDate) {
         const date = new Date(ctx.session.selectedDate);
         const dateStr = date.toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
-        await ScreenManager.renderScreen(ctx, `🏢 <b>Select City (${dateStr}):</b>`, "admin-schedule-cities", { forceNew: true });
+        await ScreenManager.renderScreen(ctx, `<b>Select City (${dateStr}):</b>`, "admin-schedule-cities", { forceNew: true });
         await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
@@ -232,13 +232,13 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
     // 3. Task Flow (Active process)
     if (flow === 'TASK') {
         // If task was finished, go to generic city selection for locations
-        await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-team-cities", { forceNew: true });
+        await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-team-cities", { forceNew: true });
         await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
     // 4. Default: Main Team Cities (for LOCATIONS, SEARCH, or finished flows)
-    await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-team-cities", { forceNew: true });
+    await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-team-cities", { forceNew: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -274,13 +274,13 @@ protectedAdminCallbacks.callbackQuery(/^view_staff_(.+)$/, async (ctx) => {
     const text = (await staffService.getProfileText(staff, false, userRole as any)) + `\n${ADMIN_TEXTS["admin-profile-select-action"]}`;
 
     const kb = new InlineKeyboard()
-        .text("💬 Write Message", `admin_send_msg_${staff.userId}`).row()
-        .text("📝 Set Task", `admin_send_task_${staff.userId}`).row();
+        .text("Write Message", `admin_send_msg_${staff.userId}`).row()
+        .text("Set Task", `admin_send_task_${staff.userId}`).row();
 
     if (userRole === "SUPER_ADMIN") {
-        kb.text("📋 Chat History", `admin_timeline_export_${staff.userId}`).row();
+        kb.text("Chat History", `admin_timeline_export_${staff.userId}`).row();
     }
-    kb.text("🏠 Main Menu", "admin_main_back");
+    kb.text("Main Menu", "admin_main_back");
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 });

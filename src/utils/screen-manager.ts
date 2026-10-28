@@ -228,7 +228,7 @@ export class ScreenManager {
                 // Кандидатка в анкеті. Стек порожній — сесія в Redis живе
                 // добу, тож «почала ввечері, натиснула Назад вранці» це
                 // звичайний сценарій, а не край. Раніше вона потрапляла на
-                // екран «🤖 PlayPhoto Admin» з чужими кнопками; тепер бачить
+                // екран «PlayPhoto Admin» з чужими кнопками; тепер бачить
                 // свій же крок анкети з підписом, куди він веде.
                 await this.renderScreen(ctx, fallbackText);
             } else {
@@ -236,7 +236,7 @@ export class ScreenManager {
                 // was removed 2026-09-03; candidate-detail screens like
                 // hr-candidate-unified are now reached only from the admin tree,
                 // so admin-main is the correct fallback for them too.)
-                await navigateTo('admin-main', "🤖 <b>PlayPhoto Admin</b>");
+                await navigateTo('admin-main', "<b>PlayPhoto Admin</b>");
             }
             return;
         }

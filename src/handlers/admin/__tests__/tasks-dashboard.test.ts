@@ -69,7 +69,7 @@ describe("buildTasksDashboard pagination", () => {
         // Header counts reflect the whole day.
         expect(text).toContain("0/20");
         expect(text).toContain("3");
-        expect(text).toMatch(/🚨 <b>3<\/b> urgent/);
+        expect(text).toMatch(/<b>3<\/b> urgent/);
 
         // Only page 0's tasks (first 8 of the 20, by original ordering) appear
         // by name; tasks from later pages must not be rendered into the text.

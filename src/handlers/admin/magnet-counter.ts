@@ -15,12 +15,12 @@ export const adminMagnetCounterHandlers = new Composer<MyContext>();
 function getMagnetCounterKeyboard(hasResult = false) {
     const kb = new InlineKeyboard();
     if (hasResult) {
-        kb.text("✅ Confirm", "admin_magnet_counter_confirm")
-            .text("✏️ Correct", "admin_magnet_counter_correct").row();
+        kb.text("Confirm", "admin_magnet_counter_confirm")
+            .text("Correct", "admin_magnet_counter_correct").row();
     }
 
-    kb.text("🧲 New Photo", "admin_magnet_counter_start").row()
-        .text("⬅️ Back", "admin_system_back");
+    kb.text("New Photo", "admin_magnet_counter_start").row()
+        .text("Back", "admin_system_back");
 
     return kb;
 }
@@ -37,7 +37,7 @@ function buildResultText(result: {
     correctedTotal?: number | undefined;
     requiresManualConfirmation?: boolean | undefined;
 }) {
-    const lines = ["🧲 <b>Magnet Count</b>", ""];
+    const lines = ["<b>Magnet Count</b>", ""];
 
     const stackCounts = result.stackCounts || [];
     if (stackCounts.length > 0) {
@@ -76,7 +76,7 @@ function buildConfirmationText(result: {
 }) {
     const finalTotal = typeof result.correctedTotal === "number" ? result.correctedTotal : result.total;
     return [
-        "✅ <b>Magnet count saved</b>",
+        "<b>Magnet count saved</b>",
         "",
         typeof finalTotal === "number"
             ? `Final total: <b>${finalTotal}</b>`
@@ -127,7 +127,7 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_start", async (ct
     await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.renderScreen(
         ctx,
-        "🧲 <b>Count Magnets</b>\n\nSend one photo of the magnet stacks. I will return stack-by-stack counts, the total count, and the confidence level.",
+        "<b>Count Magnets</b>\n\nSend one photo of the magnet stacks. I will return stack-by-stack counts, the total count, and the confidence level.",
         getMagnetCounterKeyboard(false),
         { pushToStack: true }
     );
@@ -179,8 +179,8 @@ adminMagnetCounterHandlers.callbackQuery("admin_magnet_counter_correct", async (
     await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.renderScreen(
         ctx,
-        `✏️ <b>Correct Count</b>\n\nModel estimate: <b>${result.estimateTotal}</b>\nSend the correct total as a single number.`,
-        new InlineKeyboard().text("⬅️ Back", "admin_magnet_counter_start"),
+        `<b>Correct Count</b>\n\nModel estimate: <b>${result.estimateTotal}</b>\nSend the correct total as a single number.`,
+        new InlineKeyboard().text("Back", "admin_magnet_counter_start"),
         { pushToStack: true }
     );
 });
@@ -273,7 +273,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
         }
         await ScreenManager.renderScreen(
             ctx,
-            "⚠️ <b>Magnet counting is unavailable</b>\n\n`OPENAI_API_KEY` is not configured on the server yet, so vision analysis is currently disabled.",
+            "<b>Magnet counting is unavailable</b>\n\n`OPENAI_API_KEY` is not configured on the server yet, so vision analysis is currently disabled.",
             getMagnetCounterKeyboard(false),
             { forceNew: true }
         );
@@ -286,7 +286,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
         return true;
     }
 
-    await ctx.reply("🔍 Analyzing the photo. This may take a few seconds...");
+    await ctx.reply("Analyzing the photo. This may take a few seconds...");
 
     try {
         const result = await magnetCountService.countFromTelegramPhoto(photo.file_id);
@@ -350,7 +350,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
                 notes: result.notes,
                 requiresManualConfirmation: result.confidence === "low" || result.needsManualReview,
             }) + ((result.confidence === "low" || result.needsManualReview)
-                ? "\n\n⚠️ <b>Low confidence.</b> Please verify the result manually before using it."
+                ? "\n\n<b>Low confidence.</b> Please verify the result manually before using it."
                 : ""),
             getMagnetCounterKeyboard(true),
             { forceNew: true }
@@ -365,7 +365,7 @@ export async function handleAdminMagnetCounterMessage(ctx: MyContext): Promise<b
         }
         await ScreenManager.renderScreen(
             ctx,
-            "❌ <b>Could not count the magnets</b>\n\nTry another photo with less glare, and make sure the top and bottom of each stack are visible.",
+            "<b>Could not count the magnets</b>\n\nTry another photo with less glare, and make sure the top and bottom of each stack are visible.",
             getMagnetCounterKeyboard(false),
             { forceNew: true }
         );

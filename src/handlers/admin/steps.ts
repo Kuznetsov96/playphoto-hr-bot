@@ -61,7 +61,7 @@ adminStepHandlers.on("message:text", async (ctx: MyContext, next: NextFunction) 
         }
     } catch (error: any) {
         logger.error({ err: error, step, userId: ctx.from?.id }, "Error in admin step handler");
-        await ScreenManager.renderScreen(ctx, `❌ Error: ${error.message}`, "admin-main");
+        await ScreenManager.renderScreen(ctx, `Error: ${error.message}`, "admin-main");
         ctx.session.step = "idle";
     }
 
@@ -89,10 +89,10 @@ async function handleEditCity(ctx: MyContext, _step: string, _text: string) {
 
 async function handleSyncOtherSheet(ctx: MyContext, text: string) {
     const sheetName = text.trim();
-    const resultKeyboard = new InlineKeyboard().text("🏠 Main Menu", "admin_main_menu");
+    const resultKeyboard = new InlineKeyboard().text("Main Menu", "admin_main_menu");
 
     try {
-        await renderCustomSyncStatus(ctx, `⏳ <b>Syncing "${sheetName}"...</b>\n\nPlease wait, this can take a moment.`);
+        await renderCustomSyncStatus(ctx, `<b>Syncing "${sheetName}"...</b>\n\nPlease wait, this can take a moment.`);
 
         const prisma = (await import("../../db/core.js")).default;
         const { staffRepository } = await import("../../repositories/staff-repository.js");
@@ -152,13 +152,13 @@ async function handleSyncOtherSheet(ctx: MyContext, text: string) {
             }
         }
 
-        let report = `✅ Sync for "${sheetName}" complete!\n\nProcessed shifts: <b>${schedRes.count || 0}</b>`;
-        if (staffNotified > 0) report += `\n📅 <b>${staffNotified}</b> staff notified about schedule changes`;
+        let report = `Sync for "${sheetName}" complete!\n\nProcessed shifts: <b>${schedRes.count || 0}</b>`;
+        if (staffNotified > 0) report += `\n<b>${staffNotified}</b> staff notified about schedule changes`;
 
         await renderCustomSyncStatus(ctx, report, resultKeyboard);
     } catch (e: any) {
         logger.error({ err: e, sheetName }, "Custom sync failed");
-        await renderCustomSyncStatus(ctx, `❌ Error: ${e.message}`, resultKeyboard);
+        await renderCustomSyncStatus(ctx, `Error: ${e.message}`, resultKeyboard);
     }
     delete ctx.session.customSyncPromptMessageId;
     ctx.session.step = "idle";

@@ -14,16 +14,16 @@ function formatStatsLocationButton(name: string, city: string): string {
 adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
     const isAllSelected = !ctx.session.broadcastCity;
     const cityLabel = ctx.session.broadcastCity ? normalizeCity(ctx.session.broadcastCity) : "All Cities";
-    range.text(isAllSelected ? "🌍 🔘 All Cities" : `📍 ${cityLabel}`, async (ctx) => {
+    range.text(isAllSelected ? "✓ All Cities" : cityLabel, async (ctx) => {
         await ctx.answerCallbackQuery("Use Change City to adjust this filter").catch(() => { });
     });
 
-    range.text("🏙️ Change City", async (ctx) => {
+    range.text("Change City", async (ctx) => {
         await ctx.answerCallbackQuery().catch(() => { });
-        await ScreenManager.renderScreen(ctx, "🏙️ <b>Select Stats City</b>", "admin-stats-city");
+        await ScreenManager.renderScreen(ctx, "<b>Select Stats City</b>", "admin-stats-city");
     }).row();
 
-    range.text("🔎 Loss Drilldown", async (ctx) => {
+    range.text("Loss Drilldown", async (ctx) => {
         ctx.session.statsView = ctx.session.statsView === "losses" ? "overview" : "losses";
         await refreshStats(ctx);
     }).row();
@@ -32,7 +32,7 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
     if (ctx.session.broadcastCity) {
         const locations = await statsService.getLocationsForCity(ctx.session.broadcastCity);
         if (locations.length > 0) {
-            range.text(ctx.session.broadcastLocationId ? "📍 All Locations" : "📍 🔘 All Locations", async (ctx) => {
+            range.text(ctx.session.broadcastLocationId ? "All Locations" : "✓ All Locations", async (ctx) => {
                 delete ctx.session.broadcastLocationId;
                 delete ctx.session.broadcastLocationName;
                 await refreshStats(ctx);
@@ -43,7 +43,7 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
                 if (locCount % 2 === 0) range.row();
                 const isSelected = ctx.session.broadcastLocationId === loc.id;
                 const locLabel = formatStatsLocationButton(loc.name, loc.city);
-                range.text(isSelected ? `🔘 ${locLabel}` : locLabel, async (ctx) => {
+                range.text(isSelected ? `✓ ${locLabel}` : locLabel, async (ctx) => {
                     ctx.session.broadcastLocationId = loc.id;
                     ctx.session.broadcastLocationName = locLabel;
                     await refreshStats(ctx);
@@ -58,7 +58,7 @@ adminStatsMenu.dynamic(async (ctx, range: MenuRange<MyContext>) => {
         delete ctx.session.broadcastCity;
         delete ctx.session.broadcastLocationId;
         delete ctx.session.broadcastLocationName;
-        await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
     });
 });
 
@@ -79,7 +79,7 @@ export const adminStatsCityMenu = new Menu<MyContext>("admin-stats-city");
 adminStatsCityMenu.dynamic(async (_ctx, range: MenuRange<MyContext>) => {
     const cities = await statsService.getOfficialCities();
 
-    range.text((ctx) => !ctx.session.broadcastCity ? "🌍 🔘 All Cities" : "🌍 All Cities", async (ctx) => {
+    range.text((ctx) => !ctx.session.broadcastCity ? "✓ All Cities" : "All Cities", async (ctx) => {
         delete ctx.session.broadcastCity;
         delete ctx.session.broadcastLocationId;
         delete ctx.session.broadcastLocationName;
@@ -92,7 +92,7 @@ adminStatsCityMenu.dynamic(async (_ctx, range: MenuRange<MyContext>) => {
         const label = normalizeCity(city);
         range.text((ctx) => {
             const isSelected = ctx.session.broadcastCity === city && !ctx.session.broadcastLocationId;
-            return isSelected ? `🔘 ${label}` : label;
+            return isSelected ? `✓ ${label}` : label;
         }, async (ctx) => {
             ctx.session.broadcastCity = city;
             delete ctx.session.broadcastLocationId;

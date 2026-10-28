@@ -58,18 +58,18 @@ function buildStaffSelectionHint(dateStr?: string, source: "schedule" | "locatio
     const prettyDate = dateStr ? dateStr.split("-").reverse().slice(0, 2).join(".") : null;
 
     if (source === "schedule" && prettyDate) {
-        return `🗓️ <i>Showing photographers scheduled here on ${prettyDate}</i>`;
+        return `<i>Showing photographers scheduled here on ${prettyDate}</i>`;
     }
 
     if (source === "schedule") {
-        return `🗓️ <i>Showing photographers scheduled for this date</i>`;
+        return `<i>Showing photographers scheduled for this date</i>`;
     }
 
     if (prettyDate) {
-        return `⚠️ <i>No shifts found for ${prettyDate}. Showing all active staff for this location</i>`;
+        return `<i>No shifts found for ${prettyDate}. Showing all active staff for this location</i>`;
     }
 
-    return `⚠️ <i>Showing all active staff for this location</i>`;
+    return `<i>Showing all active staff for this location</i>`;
 }
 
 /**
@@ -89,15 +89,15 @@ export function taskLocationBackCallback(taskCreation: { locationId?: string } |
 
 async function renderTaskModeSelection(ctx: MyContext, backCallback: string) {
     const keyboard = new InlineKeyboard()
-        .text("⚡ Quick Completion", "tas_mode_quick").row()
-        .text("📎 Proof Required", "tas_mode_proof").row()
-        .text("⬅️ Back", backCallback);
+        .text("Quick Completion", "tas_mode_quick").row()
+        .text("Proof Required", "tas_mode_proof").row()
+        .text("Back", backCallback);
 
     await ScreenManager.renderScreen(
         ctx,
-        "✅ <b>Select task completion type:</b>\n\n" +
-        "⚡ <b>Quick Completion</b> — the photographer just taps \"Complete\".\n\n" +
-        "📎 <b>Proof Required</b> — the photographer first sends text/photos/files and then completes the task separately.",
+        "<b>Select task completion type:</b>\n\n" +
+        "<b>Quick Completion</b> — the photographer just taps \"Complete\".\n\n" +
+        "<b>Proof Required</b> — the photographer first sends text/photos/files and then completes the task separately.",
         keyboard,
         { pushToStack: true }
     );
@@ -127,22 +127,22 @@ composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
 
     if (preselectedDate) {
         const keyboard = new InlineKeyboard();
-        keyboard.text(`✅ Yes, for ${preselectedDate}`, `tas_d_${preselectedDate}`).row();
-        keyboard.text("📅 Choose another date", "task_add_by_date").row();
-        keyboard.text("⬅️ Back", `task_dash_${preselectedDate}`);
+        keyboard.text(`Yes, for ${preselectedDate}`, `tas_d_${preselectedDate}`).row();
+        keyboard.text("Choose another date", "task_add_by_date").row();
+        keyboard.text("Back", `task_dash_${preselectedDate}`);
 
         await ScreenManager.renderScreen(
             ctx,
-            `➕ <b>New Task Creation</b>\n\nDate: <b>${preselectedDate}</b>\n\nDo you want to use this date or pick another?`,
+            `<b>New Task Creation</b>\n\nDate: <b>${preselectedDate}</b>\n\nDo you want to use this date or pick another?`,
             keyboard,
             { pushToStack: true }
         );
     } else {
         const keyboard = new InlineKeyboard();
-        keyboard.text("📅 For specific date", "task_add_by_date").row();
-        keyboard.text("⬅️ Back", "admin_system_back");
+        keyboard.text("For specific date", "task_add_by_date").row();
+        keyboard.text("Back", "admin_system_back");
 
-        await ScreenManager.renderScreen(ctx, "⚙️ <b>How do you want to set the task?</b>", keyboard, { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "<b>How do you want to set the task?</b>", keyboard, { pushToStack: true });
     }
 
     await ctx.answerCallbackQuery().catch(() => { });
@@ -152,9 +152,9 @@ composer.callbackQuery(/^task_add_start(_.*)?$/, async (ctx) => {
 composer.callbackQuery("task_add_by_date", async (ctx) => {
     const keyboard = new InlineKeyboard();
     build14DayCalendar("tas_d_").forEach(row => keyboard.row(...row));
-    keyboard.text("⬅️ Back", "task_add_start");
+    keyboard.text("Back", "task_add_start");
 
-    await ScreenManager.renderScreen(ctx, "📅 <b>Select execution date:</b>", keyboard, { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, "<b>Select execution date:</b>", keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -172,15 +172,15 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
         ctx.session.taskCreation.step = "setting_time";
         const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
         const keyboard = new InlineKeyboard();
-        keyboard.text("🌑 End of day", "tas_time_23:59")
-        keyboard.text("⏩ No time", "tas_time_none").row();
-        keyboard.text("📝 Edit text", "tas_edit_text")
-        keyboard.text("📅 Change date", "tas_change_date").row();
-        keyboard.text("✖️ Cancel", "task_creation_cancel").danger();
+        keyboard.text("End of day", "tas_time_23:59")
+        keyboard.text("No time", "tas_time_none").row();
+        keyboard.text("Edit text", "tas_edit_text")
+        keyboard.text("Change date", "tas_change_date").row();
+        keyboard.text("Cancel", "task_creation_cancel").danger();
 
         await ScreenManager.renderScreen(
             ctx,
-            `📍 Task for ${ctx.session.taskCreation.staffName}:\n<i>${ctx.session.taskCreation.taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,
+            `Task for ${ctx.session.taskCreation.staffName}:\n<i>${ctx.session.taskCreation.taskText || "[Media]"}</i>\n<b>Date:</b> ${prettyDate}\n\n<b>Set deadline (e.g. 15:00):</b>`,
             keyboard,
             { pushToStack: true }
         );
@@ -192,9 +192,9 @@ composer.callbackQuery(/^tas_d_/, async (ctx) => {
     const cities = await locationRepository.findAllCities();
     const keyboard = new InlineKeyboard();
     cities.forEach(city => keyboard.text(city, `tas_city_${city}`).row());
-    keyboard.text("⬅️ Back", "task_add_by_date");
+    keyboard.text("Back", "task_add_by_date");
 
-    await ScreenManager.renderScreen(ctx, `📅 Date: ${dateStr}\n🏙️ <b>Select city:</b>`, keyboard, { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, `Date: ${dateStr}\n<b>Select city:</b>`, keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -221,16 +221,16 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
         for (const s of staff) {
             const name = formatStaffName(s.fullName);
             const isSelected = selectedIds.includes(s.id);
-            const icon = isSelected ? "✅" : "☐";
-            staffKeyboard.text(`${icon} ${name}`, `tas_st_tg_${s.id}`).row();
+            const icon = isSelected ? "✓ " : "";
+            staffKeyboard.text(`${icon}${name}`, `tas_st_tg_${s.id}`).row();
         }
 
-        if (selectedIds.length > 0) staffKeyboard.text("➡️ Done", "tas_st_done").row();
-        staffKeyboard.text("⬅️ Back", `tas_d_${ctx.session.taskCreation.date}`);
+        if (selectedIds.length > 0) staffKeyboard.text("Done", "tas_st_done").row();
+        staffKeyboard.text("Back", `tas_d_${ctx.session.taskCreation.date}`);
 
         await ScreenManager.renderScreen(
             ctx,
-            `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${formatLocation({ ...location, city }, "sentence")}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
+            `Date: ${ctx.session.taskCreation.date}\nLocation: ${formatLocation({ ...location, city }, "sentence")}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n<b>Select staff (multi-select):</b>`,
             staffKeyboard,
             { pushToStack: true }
         );
@@ -240,9 +240,9 @@ composer.callbackQuery(/^tas_city_/, async (ctx) => {
 
     const keyboard = new InlineKeyboard();
     for (const loc of locations) keyboard.text(formatLocation({ ...loc, city }, "in-city"), `tas_loc_${loc.id}`).row();
-    keyboard.text("⬅️ Back", `tas_d_${ctx.session.taskCreation.date}`);
+    keyboard.text("Back", `tas_d_${ctx.session.taskCreation.date}`);
 
-    await ScreenManager.renderScreen(ctx, `📅 Date: ${ctx.session.taskCreation.date}\n📍 <b>Select location:</b>`, keyboard, { pushToStack: true });
+    await ScreenManager.renderScreen(ctx, `Date: ${ctx.session.taskCreation.date}\n<b>Select location:</b>`, keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -265,16 +265,16 @@ composer.callbackQuery(/^tas_loc_/, async (ctx) => {
     for (const s of staff) {
         const name = formatStaffName(s.fullName);
         const isSelected = selectedIds.includes(s.id);
-        const icon = isSelected ? "✅" : "☐";
-        keyboard.text(`${icon} ${name}`, `tas_st_tg_${s.id}`).row();
+        const icon = isSelected ? "✓ " : "";
+        keyboard.text(`${icon}${name}`, `tas_st_tg_${s.id}`).row();
     }
 
-    if (selectedIds.length > 0) keyboard.text("➡️ Done", "tas_st_done").row();
-    keyboard.text("⬅️ Back", `tas_city_${ctx.session.taskCreation.city}`);
+    if (selectedIds.length > 0) keyboard.text("Done", "tas_st_done").row();
+    keyboard.text("Back", `tas_city_${ctx.session.taskCreation.city}`);
 
     await ScreenManager.renderScreen(
         ctx,
-        `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (multi-select):</b>`,
+        `Date: ${ctx.session.taskCreation.date}\nLocation: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n<b>Select staff (multi-select):</b>`,
         keyboard,
         { pushToStack: true }
     );
@@ -298,16 +298,16 @@ composer.callbackQuery(/^tas_st_tg_/, async (ctx) => {
     for (const s of staff) {
         const name = formatStaffName(s.fullName);
         const isSelected = selectedIds.includes(s.id);
-        const icon = isSelected ? "✅" : "☐";
-        keyboard.text(`${icon} ${name}`, `tas_st_tg_${s.id}`).row();
+        const icon = isSelected ? "✓ " : "";
+        keyboard.text(`${icon}${name}`, `tas_st_tg_${s.id}`).row();
     }
 
-    if (selectedIds.length > 0) keyboard.text("➡️ Done", "tas_st_done").row();
-    keyboard.text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
+    if (selectedIds.length > 0) keyboard.text("Done", "tas_st_done").row();
+    keyboard.text("Back", taskLocationBackCallback(ctx.session.taskCreation));
 
     await ScreenManager.renderScreen(
         ctx,
-        `📅 Date: ${ctx.session.taskCreation.date}\n📍 Location: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n👤 <b>Select staff (${selectedIds.length} selected):</b>`,
+        `Date: ${ctx.session.taskCreation.date}\nLocation: ${ctx.session.taskCreation.locationName}\n${buildStaffSelectionHint(ctx.session.taskCreation.date, source)}\n<b>Select staff (${selectedIds.length} selected):</b>`,
         keyboard
     );
     await ctx.answerCallbackQuery().catch(() => { });
@@ -333,10 +333,10 @@ composer.callbackQuery(/^tas_mode_(quick|proof)$/, async (ctx) => {
     ctx.session.taskCreation.completionMode = ctx.match?.[1] === "proof" ? "PROOF_REQUIRED" : "QUICK";
     ctx.session.taskCreation.step = "entering_text";
 
-    const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
+    const keyboard = new InlineKeyboard().text("Back", taskLocationBackCallback(ctx.session.taskCreation));
     await ScreenManager.renderScreen(
         ctx,
-        `📝 <b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n` +
+        `<b>Enter task for ${ctx.session.taskCreation.staffName}:</b>\n\n` +
         `<i>You can add <b>photo</b>, <b>video</b>, or <b>file</b> to the task. If you send media without text, the bot will ask for the text in the next message.</i>\n\n` +
         `Completion type: <b>${ctx.session.taskCreation.completionMode === "PROOF_REQUIRED" ? "Proof Required" : "Quick Completion"}</b>`,
         keyboard,
@@ -360,12 +360,12 @@ async function handleTaskInput(
 
     const taskText = options.text || getMessageHtml(ctx.message) || "";
     if (!taskText && !options.fileId) {
-        await ctx.reply("❌ Task text or file is required.");
+        await ctx.reply("Task text or file is required.");
         return;
     }
 
     if (taskText.length > TASK_TEXT_MAX_LENGTH) {
-        await ctx.reply(`❌ Task text is too long (${taskText.length}/${TASK_TEXT_MAX_LENGTH}). Please split it or shorten the instruction.`);
+        await ctx.reply(`Task text is too long (${taskText.length}/${TASK_TEXT_MAX_LENGTH}). Please split it or shorten the instruction.`);
         return;
     }
 
@@ -379,10 +379,10 @@ async function handleTaskInput(
     }
 
     if (!taskText) {
-        const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
+        const keyboard = new InlineKeyboard().text("Back", taskLocationBackCallback(ctx.session.taskCreation));
         await ScreenManager.renderScreen(
             ctx,
-            `📎 <b>Attachment saved for ${ctx.session.taskCreation.staffName}</b>\n\nNow send the full task text in a separate message.`,
+            `<b>Attachment saved for ${ctx.session.taskCreation.staffName}</b>\n\nNow send the full task text in a separate message.`,
             keyboard,
             { pushToStack: true }
         );
@@ -394,18 +394,18 @@ async function handleTaskInput(
 
     const dateStr = ctx.session.taskCreation.date!;
     const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
-    const attachmentLine = ctx.session.taskCreation.fileId ? `\n📎 <b>Attachment:</b> ${ctx.session.taskCreation.mediaType || "media"}` : "";
+    const attachmentLine = ctx.session.taskCreation.fileId ? `\n<b>Attachment:</b> ${ctx.session.taskCreation.mediaType || "media"}` : "";
 
     const keyboard = new InlineKeyboard();
-    keyboard.text("🌑 End of day", "tas_time_23:59")
-    keyboard.text("⏩ No time", "tas_time_none").row();
-    keyboard.text("📝 Edit text", "tas_edit_text")
-    keyboard.text("📅 Change date", "tas_change_date").row();
-    keyboard.text("✖️ Cancel", "task_creation_cancel").danger();
+    keyboard.text("End of day", "tas_time_23:59")
+    keyboard.text("No time", "tas_time_none").row();
+    keyboard.text("Edit text", "tas_edit_text")
+    keyboard.text("Change date", "tas_change_date").row();
+    keyboard.text("Cancel", "task_creation_cancel").danger();
 
     await ScreenManager.renderScreen(
         ctx,
-        `📍 Task for ${ctx.session.taskCreation.staffName}:${attachmentLine}\n<i>${taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,
+        `Task for ${ctx.session.taskCreation.staffName}:${attachmentLine}\n<i>${taskText || "[Media]"}</i>\n<b>Date:</b> ${prettyDate}\n\n<b>Set deadline (e.g. 15:00):</b>`,
         keyboard,
         { pushToStack: true }
     );
@@ -416,7 +416,7 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
     if (!ctx.session.taskCreation) return;
 
     const staffIds = ctx.session.taskCreation.selectedStaffIds || [];
-    if (staffIds.length === 0) return ctx.reply("❌ No staff selected!");
+    if (staffIds.length === 0) return ctx.reply("No staff selected!");
 
     ctx.session.taskCreation.deadlineTime = time === "none" ? null : time;
     const results: { name: string, success: boolean, error?: string }[] = [];
@@ -486,23 +486,23 @@ async function executeTaskCreation(ctx: MyContext, time: string | null) {
             delete ctx.session.adminFlow;
         }
 
-        let successText = `✅ <b>Tasks created successfully (${staffIds.length})!</b>\n\n`;
+        let successText = `<b>Tasks created successfully (${staffIds.length})!</b>\n\n`;
         const failed = results.filter(r => !r.success);
         if (failed.length === 0) successText += `All selected staff members have been notified.`;
         else {
-            successText += `⚠️ <b>Delivery issues:</b>\n`;
+            successText += `<b>Delivery issues:</b>\n`;
             failed.forEach(f => { successText += `• ${f.name}: Not notified (bot might be blocked)\n`; });
         }
 
         const kb = new InlineKeyboard()
-            .text("⬅️ To Dashboard", `task_dash_${createdTaskDate}`).row()
+            .text("To Dashboard", `task_dash_${createdTaskDate}`).row()
             .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
         await ScreenManager.renderScreen(ctx, successText, kb);
     } catch (error) {
         logger.error({ err: error }, "Error creating task");
         const errKb = new InlineKeyboard()
             .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
-        await ScreenManager.renderScreen(ctx, "❌ Error creating tasks. Please try again.", errKb);
+        await ScreenManager.renderScreen(ctx, "Error creating tasks. Please try again.", errKb);
     }
 }
 
@@ -526,7 +526,7 @@ composer.on("message:text", async (ctx, next) => {
             const errKb = new InlineKeyboard()
                 .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
                 .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
-            return await ScreenManager.renderScreen(ctx, "❌ Access Denied", errKb);
+            return await ScreenManager.renderScreen(ctx, "Access Denied", errKb);
         }
 
         if (step === "entering_text") {
@@ -557,7 +557,7 @@ composer.on("message:checklist", async (ctx, next) => {
         delete ctx.session.taskCreation;
         return await ScreenManager.renderScreen(
             ctx,
-            "❌ Access Denied",
+            "Access Denied",
             new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu"),
         );
     }
@@ -666,10 +666,10 @@ composer.callbackQuery(/^tas_time_/, async (ctx) => {
 composer.callbackQuery("tas_edit_text", async (ctx) => {
     if (!ctx.session.taskCreation) return ctx.answerCallbackQuery("Session lost").catch(() => { });
     ctx.session.taskCreation.step = "entering_text";
-    const keyboard = new InlineKeyboard().text("⬅️ Back", taskLocationBackCallback(ctx.session.taskCreation));
+    const keyboard = new InlineKeyboard().text("Back", taskLocationBackCallback(ctx.session.taskCreation));
     await ScreenManager.renderScreen(
         ctx,
-        `📝 <b>Correct task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>Current text:</i> ${ctx.session.taskCreation.taskText || "[Media]"}`,
+        `<b>Correct task for ${ctx.session.taskCreation.staffName}:</b>\n\n<i>Current text:</i> ${ctx.session.taskCreation.taskText || "[Media]"}`,
         keyboard,
         { pushToStack: true }
     );
@@ -681,8 +681,8 @@ composer.callbackQuery("tas_change_date", async (ctx) => {
     const keyboard = new InlineKeyboard();
     build14DayCalendar("tas_d_").forEach(row => keyboard.row(...row));
     const backCall = ctx.session.taskCreation?.taskText ? "tas_edit_done_back" : "task_add_start";
-    keyboard.text("⬅️ Back", backCall);
-    await ScreenManager.renderScreen(ctx, "📅 <b>Select NEW execution date:</b>", keyboard, { pushToStack: true });
+    keyboard.text("Back", backCall);
+    await ScreenManager.renderScreen(ctx, "<b>Select NEW execution date:</b>", keyboard, { pushToStack: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -692,12 +692,12 @@ composer.callbackQuery("tas_edit_done_back", async (ctx) => {
     const dateStr = ctx.session.taskCreation.date!;
     const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
     const keyboard = new InlineKeyboard();
-    keyboard.text("🌑 End of day", "tas_time_23:59").text("⏩ No time", "tas_time_none").row();
-    keyboard.text("📝 Edit text", "tas_edit_text").text("📅 Change date", "tas_change_date").row();
-    keyboard.text("✖️ Cancel", "task_creation_cancel").danger();
+    keyboard.text("End of day", "tas_time_23:59").text("No time", "tas_time_none").row();
+    keyboard.text("Edit text", "tas_edit_text").text("Change date", "tas_change_date").row();
+    keyboard.text("Cancel", "task_creation_cancel").danger();
     await ScreenManager.renderScreen(
         ctx,
-        `📍 Task for ${ctx.session.taskCreation.staffName}:\n<i>${ctx.session.taskCreation.taskText || "[Media]"}</i>\n📅 <b>Date:</b> ${prettyDate}\n\n⏰ <b>Set deadline (e.g. 15:00):</b>`,
+        `Task for ${ctx.session.taskCreation.staffName}:\n<i>${ctx.session.taskCreation.taskText || "[Media]"}</i>\n<b>Date:</b> ${prettyDate}\n\n<b>Set deadline (e.g. 15:00):</b>`,
         keyboard
     );
     await ctx.answerCallbackQuery().catch(() => { });
@@ -712,7 +712,7 @@ composer.callbackQuery("task_creation_cancel", async (ctx) => {
     const kb = new InlineKeyboard()
         .text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities")
         .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
-    await ScreenManager.renderScreen(ctx, "❌ Task creation cancelled.", kb);
+    await ScreenManager.renderScreen(ctx, "Task creation cancelled.", kb);
     await ctx.answerCallbackQuery().catch(() => { });
 });
 

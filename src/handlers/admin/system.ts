@@ -24,14 +24,14 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
     const canCountMagnets = userRole === "SUPPORT";
 
     if (canCountMagnets) {
-        range.text("🧲 Count Magnets", async (ctx: MyContext) => {
+        range.text("Count Magnets", async (ctx: MyContext) => {
             await ScreenManager.renderScreen(
                 ctx,
-                "🧲 <b>Count Magnets</b>\n\nTap the button below, then send a photo of the magnet stacks.",
+                "<b>Count Magnets</b>\n\nTap the button below, then send a photo of the magnet stacks.",
                 new InlineKeyboard()
-                    .text("📸 Upload Photo", "admin_magnet_counter_start")
+                    .text("Upload Photo", "admin_magnet_counter_start")
                     .row()
-                    .text("⬅️ Back", "admin_system_back"),
+                    .text("Back", "admin_system_back"),
                 { pushToStack: true }
             );
         }).row();
@@ -51,15 +51,15 @@ adminSystemMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
                 await ScreenManager.renderScreen(ctx, text, keyboard, { pushToStack: true });
             } catch (error: any) {
                 logger.error(`[ADMIN] Error in Tasks Dashboard button: ${error.message}`);
-                await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-sys-err-tasks"]({ error: error.message }), new InlineKeyboard().text("⬅️ Back", "admin_system_back"));
+                await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-sys-err-tasks"]({ error: error.message }), new InlineKeyboard().text("Back", "admin_system_back"));
             }
         }).row();
 
     }
 
     if (hasPermission(userRole as any, 'LOGISTICS_MENU')) {
-        range.text("📦 Logistics", async (ctx: MyContext) => {
-            await ScreenManager.renderScreen(ctx, "📦 <b>Logistics Management</b>", "admin-logistics", { pushToStack: true });
+        range.text("Logistics", async (ctx: MyContext) => {
+            await ScreenManager.renderScreen(ctx, "<b>Logistics Management</b>", "admin-logistics", { pushToStack: true });
         }).row();
     }
 
@@ -79,12 +79,12 @@ cityAdminMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) => {
         range.text(normalizeCity(city), async (ctx: MyContext) => {
             if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
             ctx.session.candidateData.city = city;
-            await ScreenManager.renderScreen(ctx, `🏢 Locations in ${normalizeCity(city)}:`, "admin-locations", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, `Locations in ${normalizeCity(city)}:`, "admin-locations", { pushToStack: true });
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-ops-back"], async (ctx: MyContext) => {
         // HR-хаб прибрано — повертаємось у меню System, звідки список міст і відкривають.
-        await ScreenManager.goBack(ctx, "⚙️ <b>System</b>", "admin-system");
+        await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
     });
 });
 
@@ -97,16 +97,16 @@ locationAdminMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>) =>
     const locations = await locationRepository.findByCityAdmin(city);
 
     locations.forEach((l: any) => {
-        const visibilityIcon = l.isHiddenFromCandidates ? "👻" : "👁️";
-        const status = l.neededCount > 0 ? `🟢 (${l.neededCount})` : "🔴 (0)";
+        const visibility = l.isHiddenFromCandidates ? " · hidden" : "";
+        const status = l.neededCount > 0 ? ` · needs ${l.neededCount}` : " · not needed";
         const displayName = formatLocation({ ...l, city }, "in-city");
 
-        range.text(`${visibilityIcon} ${displayName} ${status}`, async (ctx: MyContext) => {
+        range.text(`${displayName}${visibility}${status}`, async (ctx: MyContext) => {
             await renderLocationDetails(ctx, l, city);
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-ops-back"], async (ctx: MyContext) => {
-        await ScreenManager.goBack(ctx, "🏙️ Select City:", "admin-cities");
+        await ScreenManager.goBack(ctx, "Select City:", "admin-cities");
     });
 });
 
@@ -130,7 +130,7 @@ async function renderLocationDetails(ctx: MyContext, l: any, city: string) {
                  `<b>City:</b> ${l.city}\n` +
                  `<b>Current Need:</b> ${l.neededCount}\n` +
                  `───────────────────\n` +
-                 `<b>Candidate Status:</b> ${l.isHiddenFromCandidates ? 'Hidden (🔒)' : 'Visible (🔓)'}\n\n` +
+                 `<b>Candidate Status:</b> ${l.isHiddenFromCandidates ? 'Hidden' : 'Visible'}\n\n` +
                  `<i>${LOCATION_LEVERS_IN_WEBAPP}</i>`;
 
     // Під текстом — список локацій міста: це й «назад», і перехід до сусідньої.
@@ -160,11 +160,11 @@ selectCityForLocMenu.dynamic(async (ctx: MyContext, range: MenuRange<MyContext>)
             }
             
             // Return to city list (most logical after changing location ownership)
-            await ScreenManager.goBack(ctx, "🏙️ Select City:", "admin-cities");
+            await ScreenManager.goBack(ctx, "Select City:", "admin-cities");
         }).row();
     });
 
-    range.text("⬅️ Back", async (ctx: MyContext) => {
+    range.text("Back", async (ctx: MyContext) => {
         await ScreenManager.goBack(ctx, "Location details", "admin-locations");
     });
 });

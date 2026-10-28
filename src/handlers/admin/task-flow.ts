@@ -44,15 +44,15 @@ export async function startTaskFlow(ctx: MyContext, identifier?: string) {
             return await renderDateSelection(ctx);
         }
     }
-    await ctx.reply("❌ Please select a staff member.");
+    await ctx.reply("Please select a staff member.");
 }
 
 async function renderDateSelection(ctx: MyContext) {
     if (!ctx.session.taskData) return;
     const kb = new InlineKeyboard();
     build14DayCalendar("task_date_").forEach(row => kb.row(...row));
-    kb.text("✖️ Cancel", "task_cancel_flow").danger();
-    const text = `📅 <b>Task for ${ctx.session.taskData.staffName}</b>\n\nSelect date:`;
+    kb.text("Cancel", "task_cancel_flow").danger();
+    const text = `<b>Task for ${ctx.session.taskData.staffName}</b>\n\nSelect date:`;
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
@@ -60,14 +60,14 @@ async function renderCompletionModeSelection(ctx: MyContext) {
     if (!ctx.session.taskData) return;
 
     const kb = new InlineKeyboard()
-        .text("⚡ Quick Completion", "task_mode_quick").row()
-        .text("📎 Proof Required", "task_mode_proof").row()
-        .text("⬅️ Back", "task_back_date");
+        .text("Quick Completion", "task_mode_quick").row()
+        .text("Proof Required", "task_mode_proof").row()
+        .text("Back", "task_back_date");
 
     const text =
-        `✅ <b>Completion type for ${ctx.session.taskData.staffName}</b>\n\n` +
-        `⚡ <b>Quick Completion</b> — the photographer just taps "Complete".\n\n` +
-        `📎 <b>Proof Required</b> — the photographer can send any content and then completes the task separately.`;
+        `<b>Completion type for ${ctx.session.taskData.staffName}</b>\n\n` +
+        `<b>Quick Completion</b> — the photographer just taps "Complete".\n\n` +
+        `<b>Proof Required</b> — the photographer can send any content and then completes the task separately.`;
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
@@ -91,10 +91,10 @@ taskFlowHandlers.callbackQuery(/^task_mode_(quick|proof)$/, async (ctx) => {
 async function renderTextPrompt(ctx: MyContext) {
     const data = ctx.session.taskData;
     if (!data) return;
-    const attachmentLine = data.fileId ? `\n📎 <b>Attachment saved:</b> ${data.mediaType || "media"}` : "";
+    const attachmentLine = data.fileId ? `\n<b>Attachment saved:</b> ${data.mediaType || "media"}` : "";
     const modeLabel = data.completionMode === "PROOF_REQUIRED" ? "Proof Required" : "Quick Completion";
-    const text = `📝 <b>Task Content</b>\n👤 Staff: ${data.staffName}\n⚙️ Type: <b>${modeLabel}</b>${attachmentLine}\n\n👇 <b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
-    const kb = new InlineKeyboard().text("⬅️ Back", "task_back_date").text("✖️ Cancel", "task_cancel_flow").danger();
+    const text = `<b>Task Content</b>\nStaff: ${data.staffName}\nType: <b>${modeLabel}</b>${attachmentLine}\n\n<b>Send task text now.</b>\n<i>You can also attach a photo, video, or file. If you send media without text, the bot will ask for the text in the next message.</i>`;
+    const kb = new InlineKeyboard().text("Back", "task_back_date").text("Cancel", "task_cancel_flow").danger();
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
@@ -134,7 +134,7 @@ export async function handleTaskText(ctx: MyContext) {
 
         if (!text && !media) return false;
         if (text.length > TASK_TEXT_MAX_LENGTH) {
-            await ctx.reply(`❌ Task text is too long (${text.length}/${TASK_TEXT_MAX_LENGTH}). Please split it or shorten the instruction.`);
+            await ctx.reply(`Task text is too long (${text.length}/${TASK_TEXT_MAX_LENGTH}). Please split it or shorten the instruction.`);
             return true;
         }
 
@@ -192,12 +192,12 @@ async function renderDeadlineSelection(ctx: MyContext) {
     const prettyDate = dateStr.split("-").reverse().slice(0, 2).join(".");
 
     const kb = new InlineKeyboard();
-    kb.text("🌑 End of day", "task_time_23:59")
-    kb.text("⏩ No time", "task_time_none").row();
-    kb.text("⬅️ Back to Text", "task_back_text").text("✖️ Cancel", "task_cancel_flow").danger();
+    kb.text("End of day", "task_time_23:59")
+    kb.text("No time", "task_time_none").row();
+    kb.text("Back to Text", "task_back_text").text("Cancel", "task_cancel_flow").danger();
 
-    const attachmentLine = data.fileId ? `\n📎 Attachment: <b>${data.mediaType || "media"}</b>` : "";
-    const text = `⏰ <b>Set Deadline</b>\n👤 Staff: ${data.staffName}\n📅 Date: ${prettyDate}${attachmentLine}\n📝 Text: <i>${data.text}</i>\n\n👇 <b>Select or write time (e.g. 15:00):</b>`;
+    const attachmentLine = data.fileId ? `\nAttachment: <b>${data.mediaType || "media"}</b>` : "";
+    const text = `<b>Set Deadline</b>\nStaff: ${data.staffName}\nDate: ${prettyDate}${attachmentLine}\nText: <i>${data.text}</i>\n\n<b>Select or write time (e.g. 15:00):</b>`;
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 }
 
@@ -228,11 +228,11 @@ async function renderConfirmation(ctx: MyContext) {
     const data = ctx.session.taskData;
     if (!data) return;
     
-    const deadlineStr = data.deadlineTime ? ` ⏰ ${data.deadlineTime}` : " (No time)";
-    const attachmentLine = data.fileId ? `\n📎 <b>Attachment:</b> ${data.mediaType || "media"}` : "";
+    const deadlineStr = data.deadlineTime ? ` ${data.deadlineTime}` : " (No time)";
+    const attachmentLine = data.fileId ? `\n<b>Attachment:</b> ${data.mediaType || "media"}` : "";
 
-    const summary = `✅ <b>Task Confirmation</b>\n\n👤 <b>${data.staffName}</b>\n📅 ${new Date(data.workDate!).toLocaleDateString("uk-UA")}${deadlineStr}${attachmentLine}\n\n📝 <i>${data.text}</i>`;
-    const kb = new InlineKeyboard().text("✅ Create", "task_confirm_save").row().text("⬅️ Back", "task_back_deadline").text("✖️ Cancel", "task_cancel_flow").danger();
+    const summary = `<b>Task Confirmation</b>\n\n<b>${data.staffName}</b>\n${new Date(data.workDate!).toLocaleDateString("uk-UA")}${deadlineStr}${attachmentLine}\n\n<i>${data.text}</i>`;
+    const kb = new InlineKeyboard().text("Create", "task_confirm_save").row().text("Back", "task_back_deadline").text("Cancel", "task_cancel_flow").danger();
     await ScreenManager.renderScreen(ctx, summary, kb, { pushToStack: true });
 }
 
@@ -253,12 +253,12 @@ taskFlowHandlers.callbackQuery("task_cancel_flow", async (ctx) => {
     
     const kb = new InlineKeyboard();
     if (staffId) {
-        kb.text("👤 Back to Profile", `view_staff_${staffId}`).row();
+        kb.text("Back to Profile", `view_staff_${staffId}`).row();
     }
     kb.text(ADMIN_TEXTS["admin-btn-back-to-cities"], "admin_back_to_cities").row()
       .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
-    await ScreenManager.renderScreen(ctx, "❌ Task creation cancelled.", kb);
+    await ScreenManager.renderScreen(ctx, "Task creation cancelled.", kb);
 });
 
 taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
@@ -285,7 +285,7 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
         // Notify photographer and check delivery. The telegram id was already fetched in
         // startTaskFlow (step 0), where the staff record's `user` relation is in hand — no
         // need for a second user lookup here just to read the same field again.
-        let deliveryStatus = "✅ Task created and notification sent!";
+        let deliveryStatus = "Task created and notification sent!";
         try {
             const staffTelegramId = data.staffTelegramId;
             if (staffTelegramId) {
@@ -317,21 +317,21 @@ taskFlowHandlers.callbackQuery("task_confirm_save", async (ctx) => {
 
                 await sendTaskNotification(ctx, Number(staffTelegramId), notifText, notificationOptions);
             } else {
-                deliveryStatus = "✅ Task created, but user has no Telegram ID linked.";
+                deliveryStatus = "Task created, but user has no Telegram ID linked.";
             }
         } catch (notifErr: any) {
             logger.warn({ err: notifErr }, "Task notification delivery failed");
-            deliveryStatus = "⚠️ Task created, but <b>could not deliver notification</b> (user might have blocked the bot).";
+            deliveryStatus = "Task created, but <b>could not deliver notification</b> (user might have blocked the bot).";
         }
 
         const kb = new InlineKeyboard();
-        if (staffId) kb.text("👤 Back to Profile", `view_staff_${staffId}`).row();
+        if (staffId) kb.text("Back to Profile", `view_staff_${staffId}`).row();
         kb.text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
 
         await ScreenManager.renderScreen(ctx, deliveryStatus, kb);
     } catch (e: any) {
         const errKb = new InlineKeyboard()
             .text(ADMIN_TEXTS["admin-btn-main-menu"], "admin_main_menu");
-        await ScreenManager.renderScreen(ctx, `❌ Error: ${e.message}`, errKb);
+        await ScreenManager.renderScreen(ctx, `Error: ${e.message}`, errKb);
     }
 });

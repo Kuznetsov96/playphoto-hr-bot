@@ -1,5 +1,6 @@
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
+import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import prisma from "../../db/core.js";
 import { LOGISTICS_TEXTS_ADMIN } from "../../constants/logistics-constants.js";
 import { ScreenManager } from "../../utils/screen-manager.js";
@@ -32,11 +33,11 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
     });
 
     if (activeParcels.length === 0) {
-        range.text("No active parcels ✨", (ctx) => ctx.answerCallbackQuery("Everything is up to date!").catch(() => { }));
+        range.text("No active parcels", (ctx) => ctx.answerCallbackQuery("Everything is up to date!").catch(() => { }));
     } else {
         activeParcels.forEach(p => {
-            const statusIcon = p.status === 'VERIFYING' ? '📸' : (p.status === 'ARRIVED' ? '🔔' : '⏳');
-            const label = `${statusIcon} ${p.ttn} (${formatLogisticsLocation(p.location)})`;
+            const statusText = p.status === 'VERIFYING' ? 'verifying' : (p.status === 'ARRIVED' ? 'arrived' : 'in transit');
+            const label = `${p.ttn} (${formatLogisticsLocation(p.location)}) · ${statusText}`;
             range.text(label, async (ctx) => {
                 await showParcelDetails(ctx, p.id);
             }).row();
@@ -46,7 +47,7 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
     // Посилки приходять у вебапп самі, з кабінету Нової Пошти, а бот бере їх зі
     // списку вебаппа. Ручний ТТН вебапп не бачить, тож у боті він висів EXPECTED
     // назавжди, хоча кнопка обіцяла «Tracking will begin on next sync».
-    if (!AWS_PARCELS_CANONICAL_READ_ENABLED) range.row().text("➕ Add TTN", async (ctx) => {
+    if (!AWS_PARCELS_CANONICAL_READ_ENABLED) range.row().text("Add TTN", async (ctx) => {
         ctx.session.adminFlow = "LOGISTICS";
         ctx.session.step = "admin_logistics_add_ttn";
         delete ctx.session.taskData;
@@ -57,18 +58,18 @@ adminLogisticsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.manualChannelAccess;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;
-        await ctx.reply("Please enter the 14-digit TTN number: 📦");
+        await ctx.reply("Please enter the 14-digit TTN number:");
         await ctx.answerCallbackQuery().catch(() => { });
     });
 
-    range.row().text("⬅️ Back", async (ctx) => {
+    range.row().text("Back", async (ctx) => {
         if (ctx.session.adminFlow === "LOGISTICS") {
             delete ctx.session.adminFlow;
         }
         if (ctx.session.step === "admin_logistics_add_ttn") {
             ctx.session.step = "idle";
         }
-        await ScreenManager.goBack(ctx, "🛠 System Management", "admin-system");
+        await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system");
     });
 });
 
@@ -80,7 +81,7 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
 
     if (!parcel) return;
 
-    const text = `📦 <b>Parcel Details</b>\n\n` +
+    const text = `<b>Parcel Details</b>\n\n` +
         `<b>TTN:</b> <code>${parcel.ttn}</code>\n` +
         `<b>Status:</b> ${parcel.status}\n` +
         `<b>Location:</b> ${escapeHtml(formatLogisticsLocation(parcel.location))}\n` +
@@ -94,22 +95,22 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
     const kb = new InlineKeyboard();
 
     if (parcel.contentPhotoIds.length > 0) {
-        kb.text(`🖼 View Photo${parcel.contentPhotoIds.length > 1 ? 's' : ''} (${parcel.contentPhotoIds.length})`, `admin_parcel_view_${parcel.id}`).row();
+        kb.text(`View Photo${parcel.contentPhotoIds.length > 1 ? 's' : ''} (${parcel.contentPhotoIds.length})`, `admin_parcel_view_${parcel.id}`).row();
     }
 
     if (parcel.status !== 'COMPLETED' && parcel.status !== 'CANCELLED') {
         if (parcel.contentPhotoIds.length === 0) {
             kb.text(LOGISTICS_TEXTS_ADMIN.btn_mark_picked_up_manual, `admin_parcel_manual_pickup_${parcel.id}`).row();
         }
-        kb.text("✅ Complete", `admin_parcel_confirm_${parcel.id}`).row();
+        kb.text("Complete", `admin_parcel_confirm_${parcel.id}`).row();
     }
 
-    kb.text("🗑 Delete", `admin_parcel_delete_${parcel.id}`).danger().row();
-    kb.text("📍 Set Location", `admin_parcel_loc_${parcel.id}`).row();
-    kb.text("⬅️ Back to List", "admin_logistics_nav");
+    kb.text("Delete", `admin_parcel_delete_${parcel.id}`).danger().row();
+    kb.text("Set Location", `admin_parcel_loc_${parcel.id}`).row();
+    kb.text("Back to List", "admin_logistics_nav");
 
     if (TEAM_CHATS.LOGISTICS) {
-        kb.url("💬 Open Chat", `https://t.me/c/${Math.abs(TEAM_CHATS.SUPPORT).toString().substring(3)}/${TEAM_CHATS.LOGISTICS}`);
+        kb.url("Open Chat", `https://t.me/c/${Math.abs(TEAM_CHATS.SUPPORT).toString().substring(3)}/${TEAM_CHATS.LOGISTICS}`);
     }
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
@@ -119,7 +120,7 @@ async function showParcelDetails(ctx: MyContext, parcelId: string) {
 
 // Navigation to logistics list
 adminLogisticsHandlers.callbackQuery("admin_logistics_nav", async (ctx) => {
-    await ScreenManager.renderScreen(ctx, "📦 <b>Logistics Management</b>", "admin-logistics");
+    await ScreenManager.renderScreen(ctx, "<b>Logistics Management</b>", "admin-logistics");
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -135,11 +136,11 @@ adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_confirm_(?:direct_)?|apc_
 
     audit({ event: "parcel_confirm", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
-    await ctx.answerCallbackQuery("Parcel confirmed! ✅").catch(() => { });
+    await ctx.answerCallbackQuery("Parcel confirmed!").catch(() => { });
 
     if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
         // Safety: if triggered from support chat (even via old menu), stay silent
-        const text = `✅ <b>Parcel confirmed and archived.</b>\n\n<b>TTN:</b> <code>${parcel.ttn}</code>`;
+        const text = `<b>Parcel confirmed and archived.</b>\n\n<b>TTN:</b> <code>${parcel.ttn}</code>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
         } else {
@@ -194,7 +195,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_manual_proxy_done_(.+)$/, as
     await ctx.answerCallbackQuery("Manual proxy confirmed.").catch(() => { });
 
     if (ctx.chat?.id === TEAM_CHATS.SUPPORT) {
-        const text = `✅ <b>Manual proxy confirmed.</b>\n\nPhotographer can continue with the content photo flow.`;
+        const text = `<b>Manual proxy confirmed.</b>\n\nPhotographer can continue with the content photo flow.`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
         } else {
@@ -215,10 +216,10 @@ adminLogisticsHandlers.callbackQuery(/^(?:admin_parcel_delete_(?:direct_)?|apd_)
 
     audit({ event: "parcel_delete", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", entityId: parcelId, updateId: ctx.update.update_id });
 
-    await ctx.answerCallbackQuery("Parcel deleted. 🗑").catch(() => { });
+    await ctx.answerCallbackQuery("Parcel deleted.").catch(() => { });
 
     if (isDirect || ctx.chat?.id === TEAM_CHATS.SUPPORT) {
-        const text = `🗑 <b>Parcel deleted.</b>`;
+        const text = `<b>Parcel deleted.</b>`;
         if (ctx.callbackQuery.message?.photo) {
             await ctx.editMessageCaption({ caption: text, parse_mode: 'HTML' });
         } else {
@@ -240,9 +241,9 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_loc_(.+)$/, async (ctx) => {
     buildParcelLocationChoices(locations).forEach(choice => {
         kb.text(choice.label, buildParcelSetLocationCallback(parcelId, choice.id)).row();
     });
-    kb.text("✖️ Cancel", `admin_parcel_view_details_${parcelId}`).danger();
+    kb.text("Cancel", `admin_parcel_view_details_${parcelId}`).danger();
 
-    await ctx.editMessageText("📍 <b>Select Location for this parcel:</b>", { parse_mode: 'HTML', reply_markup: kb });
+    await ctx.editMessageText("<b>Select Location for this parcel:</b>", { parse_mode: 'HTML', reply_markup: kb });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
@@ -251,7 +252,7 @@ adminLogisticsHandlers.callbackQuery(/^apsl_([^_]+)_(.+)$/, async (ctx) => {
     const parcelId = ctx.match[1] as string;
     const locId = ctx.match[2] as string;
 
-    await ctx.answerCallbackQuery("Location updated! 📍").catch(() => { });
+    await ctx.answerCallbackQuery("Location updated!").catch(() => { });
 
     const parcel = await prisma.parcel.findUnique({ where: { id: parcelId } });
 
@@ -309,12 +310,12 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
 
     if (parcel && parcel.contentPhotoIds.length > 0) {
         const kb = new InlineKeyboard()
-            .text("✅ Everything is fine", `apc_${parcel.id}`)
-            .text("🗑 Delete", `apd_${parcel.id}`).danger();
+            .text("Everything is fine", `apc_${parcel.id}`)
+            .text("Delete", `apd_${parcel.id}`).danger();
 
         // Only show navigation in private bot chat
         if (ctx.chat?.type === 'private') {
-            kb.row().text("⬅️ Back to list", "admin_logistics_nav");
+            kb.row().text("Back to list", "admin_logistics_nav");
         }
 
         const caption = LOGISTICS_TEXTS_ADMIN.new_photo_caption({
@@ -341,7 +342,7 @@ adminLogisticsHandlers.callbackQuery(/^admin_parcel_view_(.+)$/, async (ctx) => 
                 ...(i === 0 ? { caption, parse_mode: 'HTML' as const } : {})
             }));
             await ctx.api.sendMediaGroup(chatId, media, threadOptions);
-            await ctx.api.sendMessage(chatId, `⬆️ ${parcel.contentPhotoIds.length} photos for TTN <code>${parcel.ttn}</code>`, {
+            await ctx.api.sendMessage(chatId, `${parcel.contentPhotoIds.length} photos for TTN <code>${parcel.ttn}</code>`, {
                 parse_mode: 'HTML', reply_markup: kb, ...threadOptions
             });
         }
@@ -357,7 +358,7 @@ adminLogisticsHandlers.on("message:text", async (ctx, next) => {
 
     const ttn = ctx.message.text.trim();
     if (ttn.length !== 14 || !/^\d+$/.test(ttn)) {
-        return ctx.reply("❌ Invalid TTN format. Please enter 14 digits.");
+        return ctx.reply("Invalid TTN format. Please enter 14 digits.");
     }
 
     try {
@@ -390,10 +391,10 @@ adminLogisticsHandlers.on("message:text", async (ctx, next) => {
 
         audit({ event: "parcel_add_ttn", result: "success", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", updateId: ctx.update.update_id, context: { ttn } });
 
-        await ctx.reply(`✅ TTN <code>${ttn}</code> added! Tracking will begin on next sync.`, { parse_mode: 'HTML' });
+        await ctx.reply(`TTN <code>${ttn}</code> added! Tracking will begin on next sync.`, { parse_mode: 'HTML' });
         await ScreenManager.renderScreen(ctx, LOGISTICS_TEXTS_ADMIN.menu_title, "admin-logistics");
     } catch (error: any) {
         audit({ event: "parcel_add_ttn", result: "failed", actorType: "admin", telegramId: ctx.from?.id, entityType: "parcel", updateId: ctx.update.update_id, error: error.message, context: { ttn } });
-        await ctx.reply(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        await ctx.reply(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 });

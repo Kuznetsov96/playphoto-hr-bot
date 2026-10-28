@@ -65,8 +65,8 @@ export async function buildTasksDashboard(dateStr: string, page = 0, hideComplet
 
     // Apple-style Summary
     if (total > 0) {
-        text += `📊 <b>${completed}/${total}</b> completed`;
-        if (urgent > 0) text += `  |  🚨 <b>${urgent}</b> urgent`;
+        text += `<b>${completed}/${total}</b> completed`;
+        if (urgent > 0) text += `  |  <b>${urgent}</b> urgent`;
         if (totalPages > 1) {
             text += "\n" + ADMIN_TEXTS["admin-tasks-page-indicator"]({ page: page + 1, totalPages });
         }
@@ -96,23 +96,23 @@ export async function buildTasksDashboard(dateStr: string, page = 0, hideComplet
                 const cityPrefix = englishCity ? `${englishCity}, ` : "";
                 const timeStr = task.deadlineTime ? ` • ${task.deadlineTime.replace(":", ".")}` : "";
                 const locationShort = truncateText(cityPrefix + resolvedLocationName, 25);
-                text += `  ⏳ <b>${staffName}</b>\n     └ ${locationShort}${timeStr}\n`;
+                text += `  <b>${staffName}</b>\n     └ ${locationShort}${timeStr}\n`;
             }
         }
 
         const grouped = groupTasksByLocation(regularTasks);
 
         for (const [city, locations] of Object.entries(grouped)) {
-            text += `\n🏙️ <b>${normalizeCity(city).toUpperCase()}</b>\n`;
+            text += `\n<b>${normalizeCity(city).toUpperCase()}</b>\n`;
             for (const [location, locationTasks] of Object.entries(locations)) {
                 const cleanLocation = location.replace(/\s*\([^)]*\)\s*$/, "");
                 const locationShort = truncateText(cleanLocation, 30);
-                text += `  📍 <i>${locationShort}</i>\n`;
+                text += `  <i>${locationShort}</i>\n`;
                 for (const task of locationTasks) {
-                    const statusEmoji = task.isCompleted ? "✅" : "⏳";
+                    const statusEmoji = task.isCompleted ? "done" : "open";
                     const staffName = formatStaffName(task.staff.fullName);
                     const timeStr = task.deadlineTime ? ` • ${task.deadlineTime.replace(":", ".")}` : "";
-                    text += `    ${statusEmoji} ${staffName}${timeStr}\n`;
+                    text += `    ${staffName}${timeStr} · ${statusEmoji}\n`;
                 }
             }
         }
@@ -210,7 +210,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string, 
     text += ADMIN_TEXTS["admin-tasks-date"]({ date: dateDisplay, deadline }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-city"]({ city: resolvedCity }) + "\n";
     text += ADMIN_TEXTS["admin-tasks-location"]({ location: resolvedLocationName }) + "\n";
-    text += `⚙️ <b>Completion Type:</b> ${completionModeLabel}\n`;
+    text += `<b>Completion Type:</b> ${completionModeLabel}\n`;
     text += ADMIN_TEXTS["admin-tasks-text"]({ text: task.taskText }) + "\n\n";
 
     if (task.fileId) {
@@ -219,7 +219,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string, 
 
     text += ADMIN_TEXTS["admin-tasks-status-label"]({ status }) + "\n";
     if (task.completedAt) {
-        text += `🕒 <b>Completed at:</b> ${new Date(task.completedAt).toLocaleString("uk-UA")}\n`;
+        text += `<b>Completed at:</b> ${new Date(task.completedAt).toLocaleString("uk-UA")}\n`;
     }
     if (task.completionMode === "PROOF_REQUIRED") {
         const proofStatus = proofSubmission?.status === "SUBMITTED"
@@ -227,7 +227,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string, 
             : proofSubmission?.status === "DRAFT"
                 ? `Draft (${proofSubmission.items.length})`
                 : "Not submitted";
-        text += `📎 <b>Proof:</b> ${proofStatus}\n`;
+        text += `<b>Proof:</b> ${proofStatus}\n`;
     }
 
     const hideFlag = hideCompleted ? 1 : 0;
@@ -238,7 +238,7 @@ async function showTaskDetails(ctx: MyContext, taskId: string, dateStr: string, 
         keyboard.text(ADMIN_TEXTS["admin-tasks-btn-view-file"], `task_view_file_${taskId}`).row();
     }
     if (proofSubmission?.items.length) {
-        keyboard.text("📎 View Proof", `task_view_proof_${taskId}`).row();
+        keyboard.text("View Proof", `task_view_proof_${taskId}`).row();
     }
 
     keyboard.text(ADMIN_TEXTS["admin-tasks-btn-msg-staff"], `admin_msg_staff_${task.staffId}`).row();
@@ -366,11 +366,11 @@ composer.callbackQuery(/^task_view_file_(.+)$/, async (ctx: MyContext) => {
     await ctx.answerCallbackQuery().catch(() => { });
     const task = await taskService.getTaskById(taskId);
     if (!task?.fileId) {
-        await ctx.reply("⚠️ File not found for this task.");
+        await ctx.reply("File not found for this task.");
         return;
     }
     await ctx.replyWithDocument(task.fileId).catch(async () => {
-        await ctx.reply("⚠️ Could not retrieve the file. It may have been deleted.");
+        await ctx.reply("Could not retrieve the file. It may have been deleted.");
     });
 });
 
@@ -380,22 +380,22 @@ composer.callbackQuery(/^task_view_proof_(.+)$/, async (ctx: MyContext) => {
 
     const submission = await taskProofService.getSubmission(taskId);
     if (!submission || submission.items.length === 0) {
-        await ctx.reply("⚠️ Proof has not been submitted yet.");
+        await ctx.reply("Proof has not been submitted yet.");
         return;
     }
 
     const header =
-        `📎 <b>Task Proof</b>\n` +
-        `👤 ${escapeHtml(submission.staff.fullName)}\n` +
-        `🆔 <code>${submission.task.id}</code>\n` +
-        `📦 Items: <b>${submission.items.length}</b>\n\n` +
+        `<b>Task Proof</b>\n` +
+        `${escapeHtml(submission.staff.fullName)}\n` +
+        `<code>${submission.task.id}</code>\n` +
+        `Items: <b>${submission.items.length}</b>\n\n` +
         `<i>${escapeHtml(htmlToPlainText(submission.task.taskText))}</i>`;
     await ctx.reply(header, { parse_mode: "HTML" });
 
     for (const item of submission.items) {
         const caption = item.caption || undefined;
         if (item.type === "TEXT" && item.text) {
-            await ctx.reply(`📝 ${item.text}`);
+            await ctx.reply(`${item.text}`);
             continue;
         }
 
@@ -423,7 +423,7 @@ composer.callbackQuery(/^admin_msg_staff_(.+)$/, async (ctx: MyContext) => {
     await ctx.answerCallbackQuery().catch(() => { });
     const staff = await staffRepository.findById(staffId);
     if (!staff) {
-        await ctx.reply("❌ Staff not found.");
+        await ctx.reply("Staff not found.");
         return;
     }
     const { startAdminMessageFlow } = await import("./search.js");

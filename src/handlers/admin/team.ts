@@ -71,8 +71,8 @@ adminBirthdayMenu.dynamic(async (ctx, range) => {
     range.row().text(ADMIN_TEXTS["admin-bday-btn-all-months"], async (ctx) => {
         await handleBirthdayMonthCallback(ctx, 0);
     });
-    range.row().text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
+    range.row().text("Back", async (ctx) => {
+        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
     });
 });
 
@@ -82,7 +82,7 @@ async function showBirthdayMenu(ctx: MyContext) {
 
 export async function handleBirthdayMonthCallback(ctx: MyContext, month: number) {
     const text = await getBirthdaysByMonth(month === 0 ? undefined : month);
-    const kb = new InlineKeyboard().text("⬅️ Back to Months", "admin_birthdays_back");
+    const kb = new InlineKeyboard().text("Back to Months", "admin_birthdays_back");
     await ctx.answerCallbackQuery().catch(() => { });
     await ScreenManager.renderScreen(ctx, text, kb, {
         pushToStack: true,
@@ -99,7 +99,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         userRole = await getUserAdminRole(BigInt(telegramId));
     }
 
-    range.text("📅 Schedule", async (ctx) => {
+    range.text("Schedule", async (ctx) => {
         ctx.session.adminFlow = 'SCHEDULE';
         ctx.session.step = "idle";
         delete ctx.session.taskData;
@@ -110,10 +110,10 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.manualChannelAccess;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;
-        await ScreenManager.renderScreen(ctx, "📅 <b>Schedule</b>", "admin-schedule-dates", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "<b>Schedule</b>", "admin-schedule-dates", { pushToStack: true });
     }).row();
 
-    range.text("🏢 Locations", async (ctx) => {
+    range.text("Locations", async (ctx) => {
         ctx.session.adminFlow = 'LOCATIONS';
         ctx.session.step = "idle";
         delete ctx.session.selectedDate;
@@ -126,10 +126,10 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
         delete ctx.session.manualChannelAccess;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;
-        await ScreenManager.renderScreen(ctx, "🏢 <b>Locations</b>", "admin-team-cities", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "<b>Locations</b>", "admin-team-cities", { pushToStack: true });
     });
 
-    range.text("🔍 Staff Search", async (ctx) => {
+    range.text("Staff Search", async (ctx) => {
         ctx.session.adminFlow = 'SEARCH';
         delete ctx.session.selectedDate;
         delete ctx.session.selectedLocationId;
@@ -151,7 +151,7 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
             }).row();
         }
 
-        range.text("📂 Custom Sync", async (ctx) => {
+        range.text("Custom Sync", async (ctx) => {
             ctx.session.adminFlow = "SCHEDULE";
             ctx.session.step = "sync_other_sheet";
             delete ctx.session.taskData;
@@ -169,12 +169,12 @@ adminTeamOpsMenu.dynamic(async (ctx, range) => {
     }
 
     if (userRole !== 'SUPPORT') {
-        range.text("🎂 Birthdays", async (ctx) => {
+        range.text("Birthdays", async (ctx) => {
             await showBirthdayMenu(ctx);
         }).row();
     }
 
-    range.text("⬅️ Back", async (ctx) => {
+    range.text("Back", async (ctx) => {
         const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
         const text = await staffService.getAdminHeader(userRole as any);
         await ScreenManager.goBack(ctx, text, "admin-main");
@@ -187,7 +187,7 @@ adminChannelMenu.dynamic(async (ctx, range) => {
     const userRole = telegramId ? await getUserAdminRole(BigInt(telegramId)) : null;
 
     if (userRole !== "SUPER_ADMIN") {
-        range.text("⛔ No access", async (ctx) => {
+        range.text("No access", async (ctx) => {
             await ctx.answerCallbackQuery({ text: "No access.", show_alert: true }).catch(() => { });
         }).row();
     } else {
@@ -201,7 +201,7 @@ adminChannelMenu.dynamic(async (ctx, range) => {
     }
 
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
     });
 });
 
@@ -209,18 +209,18 @@ adminChannelMenu.dynamic(async (ctx, range) => {
 export const adminScheduleDateMenu = new Menu<MyContext>("admin-schedule-dates");
 adminScheduleDateMenu.dynamic(async (ctx, range) => {
     // 1. Static buttons first (Today, Tomorrow, History)
-    range.text("📅 Today", async (ctx) => {
+    range.text("Today", async (ctx) => {
         const d = new Date();
         d.setHours(0, 0, 0, 0);
         ctx.session.selectedDate = d.toISOString();
-        await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
     });
-    range.text("📅 Tomorrow", async (ctx) => {
+    range.text("Tomorrow", async (ctx) => {
         const d = new Date();
         d.setDate(d.getDate() + 1);
         d.setHours(0, 0, 0, 0);
         ctx.session.selectedDate = d.toISOString();
-        await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
+        await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
     });
     range.text(ADMIN_TEXTS["admin-schedule-history"], async (ctx) => {
         await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-schedule-history-title"], "admin-schedule-history", { pushToStack: true });
@@ -234,7 +234,7 @@ adminScheduleDateMenu.dynamic(async (ctx, range) => {
         const dayStr = d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
         range.text(dayStr, async (ctx) => {
             ctx.session.selectedDate = d.toISOString();
-            await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
         });
         // Row every 3 buttons
         if ((i - 2 + 1) % 3 === 0) range.row();
@@ -250,14 +250,14 @@ adminScheduleDateMenu.dynamic(async (ctx, range) => {
     });
 
     if (ctx.from?.id === MAIN_ADMIN_ID) {
-        range.text("🔎 Replacement Searches", async (ctx) => {
+        range.text("Replacement Searches", async (ctx) => {
             await showAdminReplacementBoard(ctx);
         });
     }
 
     // Ensure row before Back
     range.row().text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
     });
 });
 
@@ -287,8 +287,8 @@ async function showAdminReplacementBoard(ctx: MyContext, forceNew: boolean = fal
         ).danger().row();
     });
 
-    kb.text("➕ Start manual search", "admin_repl_manual_start").row()
-        .text("🔄 Refresh", "admin_repl_board").row()
+    kb.text("Start manual search", "admin_repl_manual_start").row()
+        .text("Refresh", "admin_repl_board").row()
         .text(ADMIN_TEXTS["admin-btn-back"], "back_to_schedule_dates");
 
     await ScreenManager.renderScreen(
@@ -361,11 +361,11 @@ async function showAdminReplacementCityPicker(ctx: MyContext) {
         kb.text(normalizeCity(city), `admin_repl_city_${index}`);
         if ((index + 1) % 2 === 0) kb.row();
     });
-    kb.row().text("⬅️ Back", "admin_repl_board");
+    kb.row().text("Back", "admin_repl_board");
 
     await ScreenManager.renderScreen(
         ctx,
-        "➕ <b>Manual replacement search</b>\n\nSelect the city with an empty shift day.",
+        "<b>Manual replacement search</b>\n\nSelect the city with an empty shift day.",
         kb,
         { forceNew: true, pushToStack: true }
     );
@@ -391,11 +391,11 @@ async function showAdminReplacementLocationPicker(ctx: MyContext, cityIndex: num
     locations.slice(0, 20).forEach((location) => {
         kb.text(formatLocation(location, "in-city"), `admin_repl_loc_${location.id}`).row();
     });
-    kb.text("⬅️ Cities", "admin_repl_manual_start");
+    kb.text("Cities", "admin_repl_manual_start");
 
     await ScreenManager.renderScreen(
         ctx,
-        `➕ <b>Manual replacement search</b>\n\nCity: <b>${escapeHtml(normalizeCity(city))}</b>\nSelect location.`,
+        `<b>Manual replacement search</b>\n\nCity: <b>${escapeHtml(normalizeCity(city))}</b>\nSelect location.`,
         kb,
         { forceNew: true, pushToStack: true }
     );
@@ -424,7 +424,7 @@ async function showAdminReplacementDatePicker(ctx: MyContext, locationId: string
         if ((index + 1) % 2 === 0) kb.row();
     });
     const cityIndex = ((ctx.session as any).adminReplacementCities || []).indexOf(location.city);
-    kb.row().text("⬅️ Locations", cityIndex >= 0 ? `admin_repl_city_${cityIndex}` : "admin_repl_manual_start");
+    kb.row().text("Locations", cityIndex >= 0 ? `admin_repl_city_${cityIndex}` : "admin_repl_manual_start");
 
     const body = options.length > 0
         ? "Select an empty day. The search will use the location's regular shift time."
@@ -432,7 +432,7 @@ async function showAdminReplacementDatePicker(ctx: MyContext, locationId: string
 
     await ScreenManager.renderScreen(
         ctx,
-        `➕ <b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocation(location, "sentence"))}</b>\n${body}`,
+        `<b>Manual replacement search</b>\n\nLocation: <b>${escapeHtml(formatLocation(location, "sentence"))}</b>\n${body}`,
         kb,
         { forceNew: true, pushToStack: true }
     );
@@ -459,15 +459,15 @@ async function showAdminReplacementManualConfirm(ctx: MyContext, dateKey: string
     }
 
     const kb = new InlineKeyboard()
-        .text("✅ Start search", "admin_repl_manual_confirm").row()
-        .text("⬅️ Dates", `admin_repl_loc_${draft.locationId}`)
-        .text("✖️ Cancel", "admin_repl_board").danger();
+        .text("Start search", "admin_repl_manual_confirm").row()
+        .text("Dates", `admin_repl_loc_${draft.locationId}`)
+        .text("Cancel", "admin_repl_board").danger();
 
     await ScreenManager.renderScreen(
         ctx,
-        `➕ <b>Start manual replacement search?</b>\n\n` +
-        `📍 <b>${escapeHtml(formatLocation({ name: draft.locationName, city: draft.city }, "sentence"))}</b>\n` +
-        `📅 <b>${escapeHtml(option.label)}</b>\n\n` +
+        `<b>Start manual replacement search?</b>\n\n` +
+        `<b>${escapeHtml(formatLocation({ name: draft.locationName, city: draft.city }, "sentence"))}</b>\n` +
+        `<b>${escapeHtml(option.label)}</b>\n\n` +
         `The bot will ask available photographers using the usual replacement waves.`,
         kb,
         { forceNew: true, pushToStack: true }
@@ -589,7 +589,7 @@ adminScheduleHistoryMenu.dynamic(async (ctx, range) => {
         const dayStr = d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
         range.text(dayStr, async (ctx) => {
             ctx.session.selectedDate = d.toISOString();
-            await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-schedule-cities", { pushToStack: true });
         });
         if (i % 3 === 0) range.row();
     }
@@ -605,11 +605,11 @@ adminScheduleCityMenu.dynamic(async (ctx, range) => {
         range.text(normalizeCity(city), async (ctx) => {
             if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
             ctx.session.candidateData.city = city;
-            await ScreenManager.renderScreen(ctx, `📍 <b>Select Location in ${normalizeCity(city)}:</b>`, "admin-schedule-locations", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, `<b>Select Location in ${normalizeCity(city)}:</b>`, "admin-schedule-locations", { pushToStack: true });
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📅 <b>Select Date:</b>", "admin-schedule-dates");
+        await ScreenManager.goBack(ctx, "<b>Select Date:</b>", "admin-schedule-dates");
     });
 });
 
@@ -623,11 +623,11 @@ adminScheduleLocMenu.dynamic(async (ctx, range) => {
     locations.forEach((l: any) => {
         range.text(formatLocation({ ...l, city }, "in-city"), async (ctx) => {
             ctx.session.selectedLocationId = l.id;
-            await ScreenManager.renderScreen(ctx, "👥 <b>Select Staff:</b>", "admin-schedule-staff", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, "<b>Select Staff:</b>", "admin-schedule-staff", { pushToStack: true });
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🏢 <b>Select City:</b>", "admin-schedule-cities");
+        await ScreenManager.goBack(ctx, "<b>Select City:</b>", "admin-schedule-cities");
     });
 });
 
@@ -642,25 +642,25 @@ adminScheduleStaffMenu.dynamic(async (ctx, range) => {
     const shifts = await workShiftRepository.findByLocationAndDateRange(locId, date, endOfDay);
 
     if (shifts.length === 0) {
-        range.text("📭 No shifts", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-shifts-none"]).catch(() => { })).row();
+        range.text("No shifts", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-shifts-none"]).catch(() => { })).row();
     } else {
         const staffMap = new Map<string, any>();
         shifts.forEach((s: any) => staffMap.set(s.staff.id, s.staff));
         const uniqueStaff = Array.from(staffMap.values()).sort((a, b) => a.fullName.localeCompare(b.fullName));
 
         uniqueStaff.forEach((staff: any) => {
-            range.text(`👤 ${staffService.shortenName(staff.fullName)}`, async (ctx) => {
+            range.text(`${staffService.shortenName(staff.fullName)}`, async (ctx) => {
                 ctx.session.selectedUserId = staff.userId;
                 const profile = staff;
                 const viewerRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
                 const text = (await staffService.getProfileText(profile, false, viewerRole)) + `\n${ADMIN_TEXTS["admin-profile-select-action"]}`;
 
                 const kb = new InlineKeyboard()
-                    .text("💬 Write Message", `admin_send_msg_${staff.userId}`).row()
-                    .text("📝 Set Task", `admin_send_task_${staff.userId}`).row();
+                    .text("Write Message", `admin_send_msg_${staff.userId}`).row()
+                    .text("Set Task", `admin_send_task_${staff.userId}`).row();
 
                 if (viewerRole === "SUPER_ADMIN") {
-                    kb.text("📋 Chat History", `admin_timeline_export_${staff.userId}`).row();
+                    kb.text("Chat History", `admin_timeline_export_${staff.userId}`).row();
                 }
                 kb.text(ADMIN_TEXTS["admin-btn-back"], "back_to_schedule_staff");
                 await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
@@ -668,7 +668,7 @@ adminScheduleStaffMenu.dynamic(async (ctx, range) => {
         });
     }
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📍 <b>Select Location:</b>", "admin-schedule-locations");
+        await ScreenManager.goBack(ctx, "<b>Select Location:</b>", "admin-schedule-locations");
     });
 });
 
@@ -680,11 +680,11 @@ adminTeamCityMenu.dynamic(async (ctx, range) => {
         range.text(normalizeCity(city), async (ctx) => {
             if (!ctx.session.candidateData) ctx.session.candidateData = {} as any;
             ctx.session.candidateData.city = city;
-            await ScreenManager.renderScreen(ctx, `📍 <b>Select Location in ${normalizeCity(city)}:</b>`, "admin-team-locations", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, `<b>Select Location in ${normalizeCity(city)}:</b>`, "admin-team-locations", { pushToStack: true });
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📅 <b>Team Operations</b>", "admin-team-ops");
+        await ScreenManager.goBack(ctx, "<b>Team Operations</b>", "admin-team-ops");
     });
 });
 
@@ -698,11 +698,11 @@ adminTeamLocMenu.dynamic(async (ctx, range) => {
     locations.forEach((l: any) => {
         range.text(formatLocation({ ...l, city }, "in-city"), async (ctx) => {
             ctx.session.selectedLocationId = l.id;
-            await ScreenManager.renderScreen(ctx, "👥 <b>Select Staff:</b>", "admin-location-staff", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, "<b>Select Staff:</b>", "admin-location-staff", { pushToStack: true });
         }).row();
     });
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "🏢 <b>Select City:</b>", "admin-team-cities");
+        await ScreenManager.goBack(ctx, "<b>Select City:</b>", "admin-team-cities");
     });
 });
 
@@ -715,20 +715,20 @@ adminLocationStaffMenu.dynamic(async (ctx, range) => {
         .sort((a: any, b: any) => a.fullName.localeCompare(b.fullName));
 
     if (staff.length === 0) {
-        range.text("📭 No staff here", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-staff-none-loc"]).catch(() => { })).row();
+        range.text("No staff here", (ctx) => ctx.answerCallbackQuery(ADMIN_TEXTS["admin-staff-none-loc"]).catch(() => { })).row();
     } else {
         staff.forEach((s: any) => {
-            range.text(`👤 ${staffService.shortenName(s.fullName)}`, async (ctx) => {
+            range.text(`${staffService.shortenName(s.fullName)}`, async (ctx) => {
                 ctx.session.selectedUserId = s.userId;
                 const viewerRole = ctx.from?.id ? await getUserAdminRole(BigInt(ctx.from.id)) : null;
                 const text = (await staffService.getProfileText(s, false, viewerRole)) + `\n${ADMIN_TEXTS["admin-profile-select-action"]}`;
 
                 const kb = new InlineKeyboard()
-                    .text("💬 Write Message", `admin_send_msg_${s.userId}`).row()
-                    .text("📝 Set Task", `admin_send_task_${s.userId}`).row();
+                    .text("Write Message", `admin_send_msg_${s.userId}`).row()
+                    .text("Set Task", `admin_send_task_${s.userId}`).row();
 
                 if (viewerRole === "SUPER_ADMIN") {
-                    kb.text("📋 Chat History", `admin_timeline_export_${s.userId}`).row();
+                    kb.text("Chat History", `admin_timeline_export_${s.userId}`).row();
                 }
                 kb.text(ADMIN_TEXTS["admin-btn-back"], "back_to_loc_staff");
                 await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
@@ -736,6 +736,6 @@ adminLocationStaffMenu.dynamic(async (ctx, range) => {
         });
     }
     range.text(ADMIN_TEXTS["admin-btn-back"], async (ctx) => {
-        await ScreenManager.goBack(ctx, "📍 <b>Select Location:</b>", "admin-team-locations");
+        await ScreenManager.goBack(ctx, "<b>Select Location:</b>", "admin-team-locations");
     });
 });

@@ -28,7 +28,7 @@ describe("getErrorScreenTexts", () => {
 
         expect(texts.generic).toBe("<b>Something went wrong</b>\n\nTap /start and try again.");
         expect(texts.staleScreen).toBe("This screen is out of date. Tap /start for the current menu.");
-        expect(texts.toast).toBe("Technical error 🛠️");
+        expect(texts.toast).toBe("Technical error");
     });
 
     it("не админу плашка остаётся украинской", () => {

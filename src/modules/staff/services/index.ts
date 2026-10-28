@@ -108,7 +108,7 @@ export class StaffService {
                 t('admin-panel-category');
         } catch (e) {
             logger.error({ err: e }, "Failed to generate admin header");
-            return "🔧 <b>Admin Panel</b>\n\nWelcome back! (System stats temporarily unavailable)";
+            return "<b>Admin Panel</b>\n\nWelcome back! (System stats temporarily unavailable)";
         }
     }
 

@@ -158,7 +158,7 @@ async function renderCitySelection(ctx: MyContext, allCities?: string[]) {
 
     const keyboard = new InlineKeyboard();
     for (const city of cities) {
-        keyboard.text(selected.has(city) ? `✅ ${city}` : `⬜ ${city}`, `tbk_city_${city}`).row();
+        keyboard.text(selected.has(city) ? `✓ ${city}` : city, `tbk_city_${city}`).row();
     }
 
     if (selected.size > 0) {
@@ -263,7 +263,7 @@ async function renderLocationSelection(ctx: MyContext) {
     const keyboard = new InlineKeyboard();
     for (const loc of locations) {
         const label = formatLocation(loc, "listing");
-        keyboard.text(selected.has(loc.id) ? `✅ ${label}` : `⬜ ${label}`, `tbk_loc_${loc.id}`).row();
+        keyboard.text(selected.has(loc.id) ? `✓ ${label}` : label, `tbk_loc_${loc.id}`).row();
     }
 
     if (selected.size > 0) {
@@ -343,9 +343,9 @@ export function buildRecipientRows(
         rows.push([{ text: header, callback_data: "tbk_noop" }]);
 
         for (const member of group.staff) {
-            const mark = excluded.has(member.id) ? "⬜" : "✅";
+            const mark = excluded.has(member.id) ? "" : "✓ ";
             rows.push([{
-                text: `${mark} ${formatStaffName(member.fullName)}`,
+                text: `${mark}${formatStaffName(member.fullName)}`,
                 callback_data: `tbk_staff_${member.id}`,
             }]);
         }
@@ -641,14 +641,14 @@ export function buildConfirmationSummary(
     const breakdown = perLocation.map(entry => `• ${entry.label}: ${entry.count}`).join("\n");
 
     return [
-        `📋 <b>Bulk task review</b>`,
+        `<b>Bulk task review</b>`,
         ``,
         params.taskText,
         ``,
-        `📅 ${params.date} — ${deadlineLabel}`,
-        `⚙️ ${modeLabel}`,
+        `${params.date} — ${deadlineLabel}`,
+        `${modeLabel}`,
         ``,
-        `👥 <b>${staffTotal} staff · ${locationTotal} ${locationWord}</b>`,
+        `<b>${staffTotal} staff · ${locationTotal} ${locationWord}</b>`,
         breakdown,
     ].join("\n");
 }
@@ -780,7 +780,7 @@ export function buildResultReport(
     const lines = [`${header} — ${result.created.length} task(s) created.</b>`];
 
     if (result.failed.length > 0) {
-        lines.push("", `⚠️ <b>${result.failed.length} not created:</b>`);
+        lines.push("", `<b>${result.failed.length} not created:</b>`);
         for (const failure of result.failed) {
             const name = nameByStaffId.get(failure.staffId) || failure.staffId;
             lines.push(`• ${escapeHtml(name)}: ${formatResultError(failure.error)}`);
@@ -788,7 +788,7 @@ export function buildResultReport(
     }
 
     if (notifyFailures.length > 0) {
-        lines.push("", `📵 <b>${notifyFailures.length} not notified</b> (bot may be blocked):`);
+        lines.push("", `<b>${notifyFailures.length} not notified</b> (bot may be blocked):`);
         for (const name of notifyFailures) {
             lines.push(`• ${escapeHtml(name)}`);
         }

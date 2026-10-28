@@ -42,7 +42,7 @@ adminFinanceMenu.dynamic(async (ctx, range) => {
     if (isSuperAdmin || isCoFounder) {
         range.text(ADMIN_TEXTS["admin-finance-report"], async (ctx) => {
             if (!(await hasFinanceAccess(ctx))) {
-                await ctx.reply("🔒 Access denied.");
+                await ctx.reply("Access denied.");
                 return;
             }
             await ctx.answerCallbackQuery().catch(() => { });
@@ -83,7 +83,7 @@ financeHandlers.callbackQuery("admin_finance_back", async (ctx) => {
         userRole = await getUserAdminRole(BigInt(telegramId));
     }
 
-    const text = "💰 <b>Finance Management</b>";
+    const text = "<b>Finance Management</b>";
     const options = {
         parse_mode: "HTML" as const,
         reply_markup: adminFinanceMenu
@@ -160,24 +160,24 @@ async function handleDailyStatus(ctx: MyContext) {
         logger.error({ err: e }, "Finance daily status rendering failed");
         const currentLoadingId = await redis.get(redisKeyLoading);
         if (currentLoadingId) {
-            await ctx.api.editMessageText(ctx.chat!.id, parseInt(currentLoadingId), `❌ Error: ${e.message}`).catch(() => { });
+            await ctx.api.editMessageText(ctx.chat!.id, parseInt(currentLoadingId), `Error: ${e.message}`).catch(() => { });
             await redis.del(redisKeyLoading);
         } else {
-            await ctx.reply(`❌ Error: ${e.message}`);
+            await ctx.reply(`Error: ${e.message}`);
         }
     }
 }
 
 // --- 6. STATEMENT FOP SELECTION ---
 export const adminStatementFopMenu = new Menu<MyContext>("admin-statement-fop")
-    .text("👤 Kuznetsov", (ctx) => generateStatement(ctx, "kuznetsov"))
-    .text("👤 Posrednikova", (ctx) => generateStatement(ctx, "posrednikova"))
+    .text("Kuznetsov", (ctx) => generateStatement(ctx, "kuznetsov"))
+    .text("Posrednikova", (ctx) => generateStatement(ctx, "posrednikova"))
     .row()
-    .text("👤 Karpuk", (ctx) => generateStatement(ctx, "karpuk"))
-    .text("👤 Gupalova", (ctx) => generateStatement(ctx, "gupalova"))
+    .text("Karpuk", (ctx) => generateStatement(ctx, "karpuk"))
+    .text("Gupalova", (ctx) => generateStatement(ctx, "gupalova"))
     .row()
-    .text("⬅️ Back", async (ctx) => {
-        await ScreenManager.goBack(ctx, "💰 <b>Finance & Audit</b>", "admin-finance");
+    .text("Back", async (ctx) => {
+        await ScreenManager.goBack(ctx, "<b>Finance & Audit</b>", "admin-finance");
     });
 
 async function generateStatement(ctx: MyContext, fopKey: string) {
@@ -191,7 +191,7 @@ async function generateStatement(ctx: MyContext, fopKey: string) {
 
         const client = (monoClients as any)[fopKey];
         if (!client) {
-            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "❌ Client not found.");
+            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "Client not found.");
             return;
         }
 
@@ -210,7 +210,7 @@ async function generateStatement(ctx: MyContext, fopKey: string) {
         const accountIds = await client.getAccountIdsByIbans(fopIbans);
 
         if (accountIds.length === 0) {
-            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "❌ FOP account not found.");
+            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "FOP account not found.");
             return;
         }
 
@@ -228,11 +228,11 @@ async function generateStatement(ctx: MyContext, fopKey: string) {
                 reply_markup: new InlineKeyboard().text(ADMIN_TEXTS["admin-btn-home"], "admin_finance_back")
             });
         } else {
-            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "❌ No transactions found.");
+            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "No transactions found.");
         }
     } catch (error: any) {
         logger.error({ err: error, fopKey }, "Finance statement generation failed");
-        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `❌ Error: ${error.message}`);
+        await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `Error: ${error.message}`);
     }
 }
 
