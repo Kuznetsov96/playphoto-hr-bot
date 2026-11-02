@@ -1,6 +1,7 @@
 import { GrammyError, HttpError, InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { ADMIN_IDS } from "../config.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { awsBusinessClient, type AwsShootAlert } from "./aws-business-client.js";
@@ -16,9 +17,9 @@ const NO_ADMIN = "SHOOT_ALERT_NO_ADMIN_CONFIGURED";
 const INVALID = "SHOOT_ALERT_PAYLOAD_INVALID";
 
 const HEADERS: Record<AwsShootAlert["kind"], string> = {
-    DAILY_DIGEST: "📸 Shoots without a photographer · next 3 days",
-    EVE_OF_SHOOT: "⚠️ Shoot tomorrow, still no photographer",
-    LATE_CREATED: "📸 New shoot without a photographer",
+    DAILY_DIGEST: ADMIN_TEXTS["admin-notif-shoot-digest"],
+    EVE_OF_SHOOT: ADMIN_TEXTS["admin-notif-shoot-eve"],
+    LATE_CREATED: ADMIN_TEXTS["admin-notif-shoot-late"],
 };
 
 /** `YYYY-MM-DD` → `ДД.ММ` текстом: через Date дата зсунулась би в поясі процесу. */
@@ -29,9 +30,9 @@ function day(date: string): string {
 
 export function renderShootAlert(alert: AwsShootAlert): string {
     const lines = alert.payload.items.map((i) => {
-        const when = escapeHtml(i.startsAtLocalTime ? `${day(i.shootOn)} ${i.startsAtLocalTime}` : day(i.shootOn));
+        const when = escapeHtml(i.startsAtLocalTime ? `${day(i.shootOn)} · ${i.startsAtLocalTime}` : day(i.shootOn));
         const who = i.childName ? ` · ${escapeHtml(i.childName)}` : "";
-        return `• ${when} · ${escapeHtml(i.locationName)}${who}`;
+        return `${when} · ${escapeHtml(i.locationName)}${who}`;
     });
     return [`<b>${HEADERS[alert.kind]}</b>`, "", ...lines].join("\n");
 }
@@ -81,7 +82,7 @@ export function createShootAlertDispatcher(
                 try {
                     await api.sendMessage(target, renderShootAlert(alert), {
                         parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().url("Open", alert.payload.openUrl),
+                        reply_markup: new InlineKeyboard().url(ADMIN_TEXTS["admin-notif-btn-open"], alert.payload.openUrl),
                     });
                 } catch (error: unknown) {
                     // Только код ошибки: сырой текст Telegram может нести лишнее.

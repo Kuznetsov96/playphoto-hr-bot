@@ -1,4 +1,6 @@
 import { InlineKeyboard, type Api } from "grammy";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { surnameAndName, formatKyivDayMonth } from "../utils/person-name.js";
 import {
     Prisma,
     ReplacementAvailabilityKind,
@@ -21,7 +23,7 @@ import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { classifyAcceptedReplacement } from "./replacement-schedule-state.js";
 import { kyivStartOfDay as sharedKyivStartOfDay, nextKyivDay as sharedNextKyivDay } from "./kyiv-date.js";
 import { replacementShadowService } from "./replacement-shadow.js";
-import { AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
+import { ADMIN_IDS, AWS_REPLACEMENTS_CANONICAL_ENABLED } from "../config.js";
 import { dispatchCanonicalWave, startCanonicalReplacement } from "./replacement-canonical.js";
 import { resolveCanonicalShift } from "./canonical-shift-resolver.js";
 import { formatLocation } from "../utils/location-label.js";
@@ -51,7 +53,8 @@ type ShiftDisplayLocation = {
  */
 const CANONICAL_WAVE_RETRY_MS = 60_000;
 
-export const MAIN_ADMIN_ID = 107794048;
+/** Владелец — первый из ADMIN_IDS, как у всех уведомлений; раньше id был вписан в код. */
+export const MAIN_ADMIN_ID = ADMIN_IDS[0] ?? 0;
 const KYIV_TIMEZONE = "Europe/Kyiv";
 const URGENT_THRESHOLD_MS = 6 * 60 * 60 * 1000;
 const DAY_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -93,46 +96,6 @@ type RequestWithRelations = ReplacementRequest & {
 type ReplacementMessageRef = Pick<ReplacementResponse, "id" | "requestId" | "chatId" | "messageId">;
 
 export class ReplacementService {
-    async listManageableRequestsForAdmin() {
-        return prisma.replacementRequest.findMany({
-            where: {
-                OR: [
-                    { status: ReplacementRequestStatus.ACTIVE },
-                    {
-                        status: ReplacementRequestStatus.FOUND,
-                        shiftDate: { gte: this.kyivStartOfDay(new Date()) }
-                    }
-                ]
-            },
-            include: {
-                location: true,
-                requester: { include: { user: true } },
-                replacement: { include: { user: true } },
-                responses: true
-            },
-            orderBy: [
-                { status: "asc" },
-                { shiftDate: "asc" },
-                { createdAt: "asc" }
-            ]
-        });
-    }
-
-    async getConfirmedRequestForAdmin(requestId: string) {
-        return prisma.replacementRequest.findFirst({
-            where: {
-                id: requestId,
-                status: ReplacementRequestStatus.FOUND,
-                replacementStaffId: { not: null }
-            },
-            include: {
-                location: true,
-                requester: { include: { user: true } },
-                replacement: { include: { user: true } }
-            }
-        });
-    }
-
     /**
      * Усі майбутні зміни, для яких можна запустити пошук підміни.
      *
@@ -474,41 +437,6 @@ export class ReplacementService {
         return request;
     }
 
-    async listManualSearchDateOptions(locationId: string, daysAhead: number = 14) {
-        const location = await prisma.location.findUnique({ where: { id: locationId } });
-        if (!location) return [];
-
-        const start = this.kyivStartOfDay(new Date());
-        const end = new Date(start.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-        const [shifts, activeRequests] = await Promise.all([
-            prisma.workShift.findMany({
-                where: { locationId, date: { gte: start, lt: end } },
-                select: { date: true }
-            }),
-            prisma.replacementRequest.findMany({
-                where: { locationId, status: { in: REPLACEMENT_RESTART_BLOCKING_STATUSES }, shiftDate: { gte: start, lt: end } },
-                select: { shiftDate: true }
-            })
-        ]);
-
-        const scheduledDates = new Set(shifts.map(shift => this.formatDateKey(shift.date)));
-        const blockedSearchDates = new Set(activeRequests.map(request => this.formatDateKey(request.shiftDate)));
-
-        return Array.from({ length: daysAhead }, (_, index) => {
-            const date = new Date(start.getTime() + index * 24 * 60 * 60 * 1000);
-            const dateKey = this.formatDateKey(date);
-            const shiftStartAt = this.getShiftStartAt({ shiftDate: date, location });
-            return {
-                date,
-                dateKey,
-                label: `${this.formatDate(date)} · ${this.formatShiftTime({ shiftDate: date, location })}`,
-                hasShift: scheduledDates.has(dateKey),
-                hasActiveSearch: blockedSearchDates.has(dateKey),
-                hasStarted: shiftStartAt <= new Date(),
-            };
-        }).filter(option => !option.hasShift && !option.hasActiveSearch && !option.hasStarted);
-    }
-
     async startAdminRequest(api: Api, locationId: string, shiftDate: Date) {
         const location = await prisma.location.findUnique({ where: { id: locationId } });
         if (!location) throw new Error("LOCATION_NOT_FOUND");
@@ -578,40 +506,6 @@ export class ReplacementService {
         if (request) {
             await this.inactivateOpenResponses(api, request.id, this.formatClosedCandidateText(request));
             await this.notifyAdminCancelled(api, request.id);
-        }
-
-        return true;
-    }
-
-    async cancelRequestByAdmin(api: Api, requestId: string) {
-        const updated = await prisma.replacementRequest.updateMany({
-            where: {
-                id: requestId,
-                status: ReplacementRequestStatus.ACTIVE
-            },
-            data: {
-                status: ReplacementRequestStatus.CANCELLED,
-                completedAt: new Date(),
-                closedReason: "cancelled_by_admin",
-                nextWaveAt: null
-            }
-        });
-
-        if (updated.count === 0) return false;
-
-        const request = await this.getRequest(requestId);
-        if (request) {
-            if (request.requester) {
-                await api.sendMessage(
-                    Number(request.requester.user.telegramId),
-                    "Пошук підміни скасовано адміністратором.\nЯкщо питання ще актуальне, напиши в підтримку.",
-                    {
-                        parse_mode: "HTML",
-                        reply_markup: new InlineKeyboard().text("🤍 Написати в сапорт", "open_support_dialog")
-                    }
-                ).catch((err) => logger.warn({ err, requestId }, "Requester replacement admin-cancel notification failed"));
-            }
-            await this.inactivateOpenResponses(api, request.id, this.formatClosedCandidateText(request));
         }
 
         return true;
@@ -2037,47 +1931,6 @@ export class ReplacementService {
         return `Потрібна підміна на цю зміну:\n${this.formatDate(shift.date)}\n${escapeHtml(formatLocation(shift.location, "in-city"))}\n${escapeHtml(time)}\n\nПочати пошук?`;
     }
 
-    formatAdminBoardText(requests: Awaited<ReturnType<ReplacementService["listManageableRequestsForAdmin"]>>) {
-        if (requests.length === 0) {
-            return "🔎 <b>Replacement management</b>\n\nNo active or confirmed replacements.";
-        }
-
-        const visibleRequests = requests.slice(0, 8);
-        const activeCount = requests.filter(request => request.status === ReplacementRequestStatus.ACTIVE).length;
-        const confirmedCount = requests.filter(request => request.status === ReplacementRequestStatus.FOUND).length;
-        let text = `🔎 <b>Replacement management</b>\n\nActive searches: <b>${activeCount}</b> · Confirmed: <b>${confirmedCount}</b>\n`;
-        if (requests.length > visibleRequests.length) {
-            text += `Showing first <b>${visibleRequests.length}</b>. Use Refresh after closing items.\n`;
-        }
-
-        visibleRequests.forEach((request, index) => {
-            const sent = request.responses.filter((response) => response.status === ReplacementResponseStatus.SENT).length;
-            const accepted = request.responses.filter((response) => response.status === ReplacementResponseStatus.ACCEPTED).length;
-            const declined = request.responses.filter((response) => response.status === ReplacementResponseStatus.DECLINED).length;
-            const failed = request.responses.filter((response) => response.status === ReplacementResponseStatus.DELIVERY_FAILED).length;
-            const nextWave = request.nextWaveAt
-                ? this.formatDateTime(request.nextWaveAt)
-                : "not scheduled";
-            const photographer = request.requester
-                ? this.formatShortName(request.requester.fullName)
-                : "empty shift (main admin)";
-            const status = request.status === ReplacementRequestStatus.FOUND
-                ? "✅ CONFIRMED"
-                : "🔎 ACTIVE";
-            const replacement = request.replacement
-                ? ` → ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
-                : "";
-
-            text +=
-                `\n<b>${index + 1}. ${escapeHtml(formatLocation(request.location, "in-city"))}</b> · ${escapeHtml(request.city)} · ${status}\n` +
-                `📅 ${this.formatAdminDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set"))}\n` +
-                `👤 ${escapeHtml(photographer)}${replacement} · 🌊 <code>${escapeHtml(request.currentWave || "not started")}</code> · ⏭ ${escapeHtml(nextWave)}\n` +
-                `📨 Responses: ${sent} pending / ${declined} declined / ${failed} failed / ${accepted} accepted\n`;
-        });
-
-        return text;
-    }
-
     /**
      * Повідомлення власнику — англійською (AGENTS.md) і мінімально: заголовок,
      * хто, коли, де, і рядок дії лише там, де від власника щось потрібно.
@@ -2085,40 +1938,16 @@ export class ReplacementService {
      * «18 жовтня» посеред англійського тексту були шумом (власник, 09.10.2026).
      */
     private formatAdminNotification(kind: "started" | "found" | "failed" | "cancelled", request: RequestWithRelations) {
-        const titleByKind = {
-            started: "🔁 <b>Replacement search started</b>",
-            found: "✅ <b>Replacement found</b>",
-            failed: "⚠️ <b>No replacement found</b>",
-            cancelled: "🛑 <b>Replacement search cancelled</b>"
-        };
-        const actionByKind: Record<typeof kind, string | null> = {
-            started: null,
-            found: "Update the schedule by hand.",
-            failed: "Contact the photographer to sort it out.",
-            cancelled: "Cancelled by the photographer."
-        };
-
         const requester = request.requester
-            ? escapeHtml(this.formatShortName(request.requester.fullName))
+            ? escapeHtml(surnameAndName(request.requester.fullName))
             : "Open shift";
         const who = request.replacement
-            ? `${requester} → ${escapeHtml(this.formatShortName(request.replacement.fullName))}`
+            ? `${requester} → ${escapeHtml(surnameAndName(request.replacement.fullName))}`
             : requester;
-        const when = `${this.formatAdminDate(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}`;
-        const where = `${escapeHtml(formatLocation(request.location, "in-city"))}, ${escapeHtml(request.city)}`;
-        const action = actionByKind[kind];
+        const when = `${formatKyivDayMonth(request.shiftDate)} · ${escapeHtml(this.formatShiftTime(request, "time not set").replace("-", "–"))}`;
+        const where = escapeHtml(formatLocation(request.location, "listing"));
 
-        return `${titleByKind[kind]}\n\n${who}\n${when}\n${where}` + (action ? `\n\n${action}` : "");
-    }
-
-    /** `Sat, Oct 18` — дата для англійських повідомлень власнику. */
-    private formatAdminDate(date: Date) {
-        return date.toLocaleDateString("en-US", {
-            weekday: "short",
-            month: "short",
-            day: "numeric",
-            timeZone: KYIV_TIMEZONE
-        });
+        return ADMIN_TEXTS[`admin-notif-replacement-${kind}`]({ who, when, where });
     }
 
     private formatRequesterFailureText(request: RequestWithRelations) {
@@ -2159,10 +1988,6 @@ export class ReplacementService {
 
     private formatDateKey(date: Date) {
         return date.toLocaleDateString("en-CA", { timeZone: KYIV_TIMEZONE });
-    }
-
-    private formatShortName(fullName: string) {
-        return fullName.trim().split(/\s+/).slice(0, 2).join(" ");
     }
 
     private kyivStartOfDay(date: Date) {

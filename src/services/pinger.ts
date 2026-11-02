@@ -17,6 +17,8 @@ import { handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { isQuietHour, nextAllowedPingTime } from "../utils/quiet-hours.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { surnameAndName } from "../utils/person-name.js";
 import { formatLocalDate } from "../utils/format-deadline.js";
 import { awsBusinessClient, type SchedulePreferenceSchedule } from "./aws-business-client.js";
 import { enqueueAnnouncementSyncSafe, processAnnouncementSync } from "./announcement-sync.js";
@@ -44,6 +46,8 @@ async function handleBlockedUser(bot: BotLike, telegramId: number) {
         // --- Staff ---
         if (staff?.isActive) {
             const staffName = staff.surnameNameDot || staff.fullName;
+            // В уведомлении — «фамилия имя» из полного имени, а не «Зубаль Д.».
+            const noticeName = escapeHtml(surnameAndName(staff.fullName || staffName));
             if (BUSINESS_DATA_SOURCE === "aws") {
                 logger.warn({ telegramId, staffId: staff.id }, "Staff blocked bot; AWS owner notification started");
                 await scheduleSyncService.markStaffBotBlocked(telegramId);
@@ -65,9 +69,7 @@ async function handleBlockedUser(bot: BotLike, telegramId: number) {
                 });
                 const adminId = ADMIN_IDS[0];
                 if (adminId) {
-                    const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
-                        `👤 <b>${escapeHtml(staffName)}</b> blocked the bot.\n\n` +
-                        `Their status in the webapp was <b>not</b> changed. If they've left, deactivate them there.`;
+                    const text = ADMIN_TEXTS["admin-notif-staff-blocked"]({ name: noticeName });
                     await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => { });
                 }
                 return;
@@ -101,12 +103,7 @@ async function handleBlockedUser(bot: BotLike, telegramId: number) {
 
             const adminId = ADMIN_IDS[0];
             if (adminId) {
-                const text = `🚫 <b>Staff Bot Blocked</b>\n\n` +
-                    `👤 <b>${escapeHtml(staffName)}</b> blocked the bot.\n\n` +
-                    `Automatic actions completed:\n` +
-                    `• Status → <b>Offboarded</b>\n` +
-                    `• Channel access — removed\n` +
-                    `• Staff sheet — updated`;
+                const text = ADMIN_TEXTS["admin-notif-staff-blocked-offboarded"]({ name: noticeName });
                 await bot.api.sendMessage(adminId, text, { parse_mode: "HTML" }).catch(() => { });
             }
             return;

@@ -27,6 +27,11 @@ vi.mock('../../repositories/location-repository.js', () => ({
     }
 }));
 
+vi.mock('../../services/task-service.js', () => ({
+    taskService: { countOverdueTasks: vi.fn() }
+}));
+import { taskService } from '../../services/task-service.js';
+
 describe('StaffService', () => {
     let staffService: StaffService;
 
@@ -47,24 +52,48 @@ describe('StaffService', () => {
         });
     });
 
-    it('should return formatted header with counts', async () => {
-        vi.mocked(staffRepository.countActive).mockResolvedValue(10);
-        vi.mocked(locationRepository.countOperating).mockResolvedValue(2);
+    describe('getAdminHeader', () => {
+        it('owner and co-founder: title plus counts, no trailing prompt', async () => {
+            vi.mocked(staffRepository.countActive).mockResolvedValue(53);
+            vi.mocked(locationRepository.countOperating).mockResolvedValue(16);
 
-        const t = (key: string, args?: any) => {
-            if (key === 'admin-panel-team') return `Team: ${args.active} active`;
-            if (key === 'admin-panel-locations') return `Locations: ${args.active} active`;
-            if (key === 'admin-panel-title') return 'Admin Panel';
-            return key;
-        };
+            for (const role of ['SUPER_ADMIN', 'CO_FOUNDER']) {
+                expect(await staffService.getAdminHeader(role)).toBe('<b>PlayPhoto</b>\n53 photographers · 16 locations');
+            }
+            // Вся таблиця — це і закриті точки, і старі ручні рядки без вебаппу:
+            // власник бачив «20 active» замість реальної кількості (01.10.2026).
+            expect(locationRepository.findAll).not.toHaveBeenCalled();
+        });
 
-        const header = await staffService.getAdminHeader(null as any);
-        expect(header).toContain('10 active');
-        expect(header).toContain('2 active');
-        expect(header).toContain('Admin Panel');
-        // Вся таблиця — це і закриті точки, і старі ручні рядки без вебаппу:
-        // власник бачив «20 active» замість реальної кількості (01.10.2026).
-        expect(locationRepository.findAll).not.toHaveBeenCalled();
+        it('uses singular forms for one', async () => {
+            vi.mocked(staffRepository.countActive).mockResolvedValue(1);
+            vi.mocked(locationRepository.countOperating).mockResolvedValue(1);
+            expect(await staffService.getAdminHeader('SUPER_ADMIN')).toBe('<b>PlayPhoto</b>\n1 photographer · 1 location');
+        });
+
+        it('support: overdue tasks, singular, plural and none', async () => {
+            vi.mocked(taskService.countOverdueTasks).mockResolvedValueOnce(3);
+            expect(await staffService.getAdminHeader('SUPPORT')).toBe('<b>PlayPhoto</b>\n3 overdue tasks');
+            vi.mocked(taskService.countOverdueTasks).mockResolvedValueOnce(1);
+            expect(await staffService.getAdminHeader('SUPPORT')).toBe('<b>PlayPhoto</b>\n1 overdue task');
+            vi.mocked(taskService.countOverdueTasks).mockResolvedValueOnce(0);
+            expect(await staffService.getAdminHeader('SUPPORT')).toBe('<b>PlayPhoto</b>\nNo overdue tasks');
+        });
+
+        it('reads both counts in parallel', async () => {
+            const order: string[] = [];
+            vi.mocked(staffRepository.countActive).mockImplementation(async () => { order.push('staff:start'); await Promise.resolve(); order.push('staff:end'); return 2; });
+            vi.mocked(locationRepository.countOperating).mockImplementation(async () => { order.push('loc:start'); await Promise.resolve(); order.push('loc:end'); return 3; });
+            await staffService.getAdminHeader('SUPER_ADMIN');
+            expect(order.slice(0, 2)).toEqual(['staff:start', 'loc:start']);
+        });
+
+        it('falls back to the plain title when the counts cannot be read', async () => {
+            vi.mocked(staffRepository.countActive).mockRejectedValue(new Error('db'));
+            vi.mocked(locationRepository.countOperating).mockRejectedValue(new Error('db'));
+            // Ошибка счётчика даёт ноль, а не падение: заголовок остаётся читаемым.
+            expect(await staffService.getAdminHeader('SUPER_ADMIN')).toBe('<b>PlayPhoto</b>\n0 photographers · 0 locations');
+        });
     });
 
 });

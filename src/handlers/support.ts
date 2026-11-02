@@ -7,6 +7,8 @@ import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { escapeHtml } from "./admin/utils.js";
 import { getRichMessagePlainText } from "../utils/rich-message.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { renderCandidateMessageForAdmin } from "../utils/candidate-admin-message.js";
 
 export const supportHandlers = new Composer<MyContext>();
 
@@ -290,14 +292,16 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         if (isSetupStage) {
             const payload = getCandidateSupportPayload(ctx);
             const msgText = payload.content;
-            const adminMsgText =
-                `💬 <b>Message from Candidate (Admin/Setup)</b>\n` +
-                `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
-                `📍 City: ${escapeHtml(candidate.city || "—")}\n` +
-                `📊 Status: <b>${escapeHtml(candidate.status)}</b>\n\n` +
-                `<b>Text:</b> ${escapeHtml(msgText)}`;
+            const adminMsgText = renderCandidateMessageForAdmin({
+                fullName: candidate.fullName,
+                username: candidate.user.username,
+                city: candidate.city,
+                stage: "Setup",
+                status: candidate.status,
+                text: msgText,
+            });
 
-            const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
+            const adminKb = new InlineKeyboard().text(ADMIN_TEXTS["admin-notif-btn-reply"], `admin_reply_to_${telegramId}`);
 
             let delivered = false;
             for (const adminId of ADMIN_IDS) {
@@ -380,14 +384,16 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
                 return true;
             }
 
-            const adminMsgText =
-                `💬 <b>Message from Candidate (${categoryLabel})</b>\n` +
-                `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
-                `📍 City: ${escapeHtml(candidate.city || "—")}\n` +
-                `📊 Status: <b>${escapeHtml(candidate.status)}</b>\n\n` +
-                `<b>Text:</b> ${escapeHtml(msgText)}`;
+            const adminMsgText = renderCandidateMessageForAdmin({
+                fullName: candidate.fullName,
+                username: candidate.user.username,
+                city: candidate.city,
+                stage: "Mentor",
+                status: candidate.status,
+                text: msgText,
+            });
 
-            const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
+            const adminKb = new InlineKeyboard().text(ADMIN_TEXTS["admin-notif-btn-reply"], `admin_reply_to_${telegramId}`);
 
             let delivered = false;
             for (const adminId of targetAdminIds) {
@@ -681,19 +687,16 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
         }
 
-        const recoveryBadge = entryReason === "RETURNED_AFTER_BOT_BLOCK"
-            ? `🛟 <b>Recovery Case:</b> Returned after bot block\n`
-            : "";
+        const adminMsgText = renderCandidateMessageForAdmin({
+            fullName: candidate.fullName,
+            username: candidate.user.username,
+            city: candidate.city,
+            stage: categoryLabel.replace(/^Admin \((.*)\)$/u, "$1"),
+            recovery: entryReason === "RETURNED_AFTER_BOT_BLOCK",
+            text: msgText,
+        });
 
-        const adminMsgText =
-            `💬 <b>Message from Candidate (${categoryLabel})</b>\n` +
-            `👤 <b>${escapeHtml(candidate.fullName || "Candidate")}</b> (@${escapeHtml(candidate.user.username || "no_user")})\n` +
-            `📍 City: ${escapeHtml(candidate.city || "—")}\n` +
-            recoveryBadge +
-            `\n` +
-            `<b>Text:</b> ${escapeHtml(msgText)}`;
-
-        const adminKb = new InlineKeyboard().text("✍️ Reply", `admin_reply_to_${telegramId}`);
+        const adminKb = new InlineKeyboard().text(ADMIN_TEXTS["admin-notif-btn-reply"], `admin_reply_to_${telegramId}`);
 
         let delivered = false;
         for (const adminId of targetAdminIds) {

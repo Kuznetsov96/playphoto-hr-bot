@@ -183,8 +183,6 @@ bot.use(async (ctx, next) => {
             delete ctx.session.bulkTaskData;
             delete ctx.session.broadcastData;
             delete ctx.session.broadcastDraft;
-            delete ctx.session.manualChannelAccess;
-            delete ctx.session.customSyncPromptMessageId;
             delete ctx.session.broadcastId;
             delete ctx.session.supportData?.step;
             delete ctx.session.supportData?.replyingToUserId;

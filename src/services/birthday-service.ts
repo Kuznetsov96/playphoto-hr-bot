@@ -13,6 +13,9 @@ import { userRepository } from "../repositories/user-repository.js";
 import { staffRepository } from "../repositories/staff-repository.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { ADMIN_IDS, CO_FOUNDER_IDS } from "../config.js";
+import { surnameAndName } from "../utils/person-name.js";
+import { formatLocation } from "../utils/location-label.js";
+import { escapeHtml } from "../handlers/admin/utils.js";
 import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
@@ -120,22 +123,7 @@ export async function greetCandidateBirthdays(bot: Bot<MyContext>, day: number, 
         }
     }
 
-    // Admin Report (English, Silent)
-    if (successCount > 0) {
-        const mainAdminId = ADMIN_IDS[0];
-        if (mainAdminId) {
-            const report = `🎂 <b>Candidate Birthdays Report</b>\n\nToday <b>${successCount}</b> candidates were greeted automatically.`;
-            try {
-                await bot.api.sendMessage(mainAdminId, report, {
-                    parse_mode: "HTML",
-                    disable_notification: true
-                });
-            } catch (e) {
-                logger.error({ err: e, adminId: mainAdminId }, "Failed to send candidate birthday report to main admin");
-            }
-        }
-    }
-
+    // Отчёта владельцу нет (решение 28.10.2026): поздравления кандидаток идут сами.
     return successCount;
 }
 
@@ -182,7 +170,7 @@ export async function checkBirthdays(bot: Bot<MyContext>) {
 
         const user = await userRepository.findById(s.userId);
         const mention = user?.username ? `@${user.username}` : (user?.firstName || "No Name");
-        const entry = `• <b>${s.fullName}</b> (${mention})`;
+        const entry = `${escapeHtml(surnameAndName(s.fullName))} (${escapeHtml(mention)})`;
 
         if (isToday) todayBday.push(entry);
         if (isIn1Day) in1DayBday.push(entry);
@@ -194,24 +182,15 @@ export async function checkBirthdays(bot: Bot<MyContext>) {
     for (const adminId of recipients) {
         try {
             if (in3DaysBday.length > 0) {
-                let msg = "🔔 <b>Birthday Reminder</b>\n\nIn 3 days birthday for:\n";
-                msg += in3DaysBday.join("\n");
-                msg += "\n\nPrepare greetings! 🎈";
-                await bot.api.sendMessage(adminId, msg, { parse_mode: "HTML" });
+                await bot.api.sendMessage(adminId, ADMIN_TEXTS["admin-notif-birthday-3d"]({ names: in3DaysBday.join("\n") }), { parse_mode: "HTML" });
             }
 
             if (in1DayBday.length > 0) {
-                let msg = "🔔 <b>Birthday Reminder</b>\n\nTomorrow birthday for:\n";
-                msg += in1DayBday.join("\n");
-                msg += "\n\nDon't forget to congratulate! 🎁";
-                await bot.api.sendMessage(adminId, msg, { parse_mode: "HTML" });
+                await bot.api.sendMessage(adminId, ADMIN_TEXTS["admin-notif-birthday-1d"]({ names: in1DayBday.join("\n") }), { parse_mode: "HTML" });
             }
 
             if (todayBday.length > 0) {
-                let msg = "🎉 <b>Birthday Today!</b>\n\nCongratulations to our photographers:\n";
-                msg += todayBday.join("\n");
-                msg += "\n\nDon't forget to congratulate! 🥳";
-                await bot.api.sendMessage(adminId, msg, { parse_mode: "HTML" });
+                await bot.api.sendMessage(adminId, ADMIN_TEXTS["admin-notif-birthday-today"]({ names: todayBday.join("\n") }), { parse_mode: "HTML" });
             }
         } catch (e) {
             logger.error({ err: e, adminId }, "Failed to send birthday alert");
@@ -288,10 +267,17 @@ export async function getBirthdaysByMonth(month?: number): Promise<string> {
 
         const locName = (s.location as any)?.name;
         const locCity = (s.location as any)?.city;
-        const locPart = locName ? ` • ${locName}` : (locCity ? ` • ${locCity}` : "");
+        // «Smile Park» есть в нескольких городах — точка с городом, как в остальной админке.
+        const where = locName ? formatLocation({ name: locName, city: locCity }, "listing") : locCity;
+        const parts = [
+            `${day}.${mon}`,
+            `<b>${escapeHtml(surnameAndName(s.fullName))}</b>`,
+            ...(where ? [escapeHtml(where)] : []),
+            `turns ${age}`,
+        ];
 
         if (!grouped[m]) grouped[m] = [];
-        grouped[m]!.push(`  ${day}.${mon} — <b>${s.fullName}</b>${locPart} (${age})`);
+        grouped[m]!.push(parts.join(" · "));
     }
 
     const monthName = month ? t(`month-${month}`) : undefined;
