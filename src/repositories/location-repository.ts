@@ -98,8 +98,12 @@ export class LocationRepository {
     async findAllCities(onlyVisible: boolean = true, candidateOnly: boolean = false): Promise<string[]> {
         return citiesCache.get(`${onlyVisible}:${candidateOnly}`, async () => {
             const locations = await prisma.location.findMany({
+                // Закриту точку синк ховає, а рядок лишається: місто без відкритих точок
+                // не показуємо. onlyVisible=false — екран керування, там потрібні всі.
                 // candidateOnly means we filter for the candidate questionnaire
-                where: (onlyVisible && candidateOnly) ? { isHiddenFromCandidates: false } : {},
+                where: onlyVisible
+                    ? { isHidden: false, ...(candidateOnly ? { isHiddenFromCandidates: false } : {}) }
+                    : {},
                 select: { city: true },
                 distinct: ['city'],
                 orderBy: { city: 'asc' }
@@ -158,7 +162,7 @@ export class LocationRepository {
 
     async findByCity(city: string, candidateOnly: boolean = false): Promise<Location[]> {
         return byCityCache.get(`${city}:${candidateOnly}`, async () => {
-            const where: any = { city };
+            const where: any = { city, isHidden: false };
             if (candidateOnly) {
                 where.isHiddenFromCandidates = false;
             }

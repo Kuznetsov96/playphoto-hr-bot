@@ -20,6 +20,7 @@ export const CITY_MAP: Record<string, string> = {
     "Sambir": "Sambir",
     "Sheptytskyi": "Sheptytskyi",
     "Kharkiv": "Kharkiv",
+    "Myrhorod": "Myrhorod",
     "Chortkiv": "Chortkiv",
     "Ternopil": "Ternopil",
     // UA keys -> EN
@@ -35,6 +36,7 @@ export const CITY_MAP: Record<string, string> = {
     "Самбір": "Sambir",
     "Шептицький": "Sheptytskyi",
     "Харків": "Kharkiv",
+    "Миргород": "Myrhorod",
     "Чортків": "Chortkiv",
     "Тернопіль": "Ternopil",
     // Emoji variants -> EN
@@ -78,6 +80,7 @@ const CITY_LABELS_UK: Record<string, string> = {
     "Sambir": "Самбір",
     "Sheptytskyi": "Шептицький",
     "Kharkiv": "Харків",
+    "Myrhorod": "Миргород",
     "Chortkiv": "Чортків",
     "Ternopil": "Тернопіль",
 };

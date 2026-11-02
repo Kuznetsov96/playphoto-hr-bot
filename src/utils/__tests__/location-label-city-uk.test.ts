@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { formatCityUk } from "../location-label.js";
 
 describe("formatCityUk", () => {
+    it("показує Миргород українською, а не латиницею з бази", () => {
+        expect(formatCityUk("Myrhorod")).toBe("Миргород");
+        expect(formatCityUk("Миргород")).toBe("Миргород");
+    });
+
     it("канонические значения показываются по-украински", () => {
         expect(["Kyiv", "Lviv", "Zaporizhzhia", "Kolomyya", "Khmelnytskyi", "Cherkasy", "Rivne", "Sambir", "Sheptytskyi", "Kharkiv", "Chortkiv", "Ternopil"].map(formatCityUk))
             .toEqual(["Київ", "Львів", "Запоріжжя", "Коломия", "Хмельницький", "Черкаси", "Рівне", "Самбір", "Шептицький", "Харків", "Чортків", "Тернопіль"]);
