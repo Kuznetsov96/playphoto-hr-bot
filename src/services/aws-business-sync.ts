@@ -8,6 +8,7 @@ import { findUnresolvedCities, UNRESOLVED_CITIES_KEY } from "./unresolved-city-w
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
+import { withSerializableRetry } from "../utils/serializable-retry.js";
 import {
     awsBusinessClient,
     type AwsBusinessSnapshot,
@@ -380,7 +381,9 @@ export class AwsBusinessSyncService {
         // їх із чатів команди сам — після коміту, щоб не тримати транзакцію.
         const droppedTelegramIds: bigint[] = [];
         const activeBefore = await prisma.staffProfile.count({ where: { isActive: true } });
-        const result = await prisma.$transaction(async (transaction) => {
+        const result = await withSerializableRetry("syncEmployeesAndLocations", () => prisma.$transaction(async (transaction) => {
+            // Повтор починає транзакцію заново: попередня спроба сюди вже дописала.
+            droppedTelegramIds.length = 0;
             const locationIds = new Map<string, string>();
             for (const location of snapshot.locations) {
                 const existing = await transaction.location.findFirst({
@@ -588,7 +591,7 @@ export class AwsBusinessSyncService {
                 deactivatedMissingEmployees: deactivated.count,
                 locations: snapshot.locations.length,
             };
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 }));
         return { ...result, droppedTelegramIds };
     }
 
@@ -660,7 +663,7 @@ export class AwsBusinessSyncService {
     private async syncShifts(snapshot: AwsBusinessSnapshot) {
         const from = new Date(`${snapshot.scheduleWindow.from}T00:00:00.000Z`);
         const toExclusive = new Date(new Date(`${snapshot.scheduleWindow.to}T00:00:00.000Z`).getTime() + DAY_MS);
-        return prisma.$transaction(async (transaction) => {
+        return withSerializableRetry("syncShifts", () => prisma.$transaction(async (transaction) => {
             const existing = await transaction.workShift.findMany({
                 where: { date: { gte: from, lt: toExclusive } },
                 include: {
@@ -741,7 +744,7 @@ export class AwsBusinessSyncService {
                 shiftsUpdated,
                 shiftsDeleted: deleted.count,
             };
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 120_000 }));
     }
 }
 
