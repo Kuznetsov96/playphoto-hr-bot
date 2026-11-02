@@ -59,7 +59,7 @@ export const normalizeCity = (city: string) => {
     const trimmed = city.trim();
     if (CITY_MAP[trimmed]) return CITY_MAP[trimmed];
     // Fallback: strip emojis and non-alphanumeric (except space) to try and match
-    const clean = trimmed.replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+    const clean = trimmed.replace(/[^\p{L}\p{N}\s-]/gu, '').trim();
     return CITY_MAP[clean] || clean;
 };
 
@@ -146,7 +146,7 @@ export function formatLocation(location: LocationParts, context: LocationDisplay
     const venue = formatVenuePart(rawName, city, branch);
     if (context === "in-city") return venue;
 
-    const englishCity = normalizeCity(city.replace(/[^\p{L}\p{N}\s]/gu, '').trim().normalize('NFC'));
+    const englishCity = normalizeCity(city.replace(/[^\p{L}\p{N}\s-]/gu, '').trim().normalize('NFC'));
     return context === "sentence" ? `${venue}, ${englishCity}` : `${venue} (${englishCity})`;
 }
 
