@@ -3,6 +3,8 @@ import type { Api } from "grammy";
 import { Prisma, Role } from "@prisma/client";
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
+import { systemStateRepository } from "../repositories/system-state-repository.js";
+import { findUnresolvedCities, UNRESOLVED_CITIES_KEY } from "./unresolved-city-watch.js";
 import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
@@ -239,6 +241,16 @@ export class AwsBusinessSyncService {
             create: { key: LAST_SYNC_STATE_KEY, value: JSON.stringify(result) },
             update: { value: JSON.stringify(result) },
         });
+        // Список точек с городом вне справочника для watch-цикла. Сбой записи
+        // не должен ронять проход синка.
+        try {
+            await systemStateRepository.setJson(
+                UNRESOLVED_CITIES_KEY,
+                findUnresolvedCities(snapshot.locations),
+            );
+        } catch (error) {
+            logger.warn({ err: error }, "failed to record unresolved cities");
+        }
         logBusinessEvent({
             event: "bot.aws_business_snapshot.synced",
             actorType: "system",
