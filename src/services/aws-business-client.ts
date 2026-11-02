@@ -94,6 +94,11 @@ export const locationSchema = z.object({
      * адресу в боті не чіпаємо, null — адреси немає.
      */
     address: z.string().nullable().optional(),
+    /**
+     * Optional: бот викочується раніше за вебапп. Відсутнє поле — старий вебапп,
+     * збережену назву не чіпаємо; null — міста немає в довіднику.
+     */
+    cityUk: z.string().nullable().optional(),
     timezone: z.string().min(1),
     /**
      * Empty when the owner has not recorded hours; never defaulted to a guess.

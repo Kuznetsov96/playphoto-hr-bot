@@ -20,6 +20,7 @@ export const CITY_MAP: Record<string, string> = {
     "Sambir": "Sambir",
     "Sheptytskyi": "Sheptytskyi",
     "Kharkiv": "Kharkiv",
+    "Myrhorod": "Myrhorod",
     "Chortkiv": "Chortkiv",
     "Ternopil": "Ternopil",
     // UA keys -> EN
@@ -35,6 +36,7 @@ export const CITY_MAP: Record<string, string> = {
     "Самбір": "Sambir",
     "Шептицький": "Sheptytskyi",
     "Харків": "Kharkiv",
+    "Миргород": "Myrhorod",
     "Чортків": "Chortkiv",
     "Тернопіль": "Ternopil",
     // Emoji variants -> EN
@@ -57,7 +59,7 @@ export const normalizeCity = (city: string) => {
     const trimmed = city.trim();
     if (CITY_MAP[trimmed]) return CITY_MAP[trimmed];
     // Fallback: strip emojis and non-alphanumeric (except space) to try and match
-    const clean = trimmed.replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+    const clean = trimmed.replace(/[^\p{L}\p{N}\s-]/gu, '').trim();
     return CITY_MAP[clean] || clean;
 };
 
@@ -78,12 +80,19 @@ const CITY_LABELS_UK: Record<string, string> = {
     "Sambir": "Самбір",
     "Sheptytskyi": "Шептицький",
     "Kharkiv": "Харків",
+    "Myrhorod": "Миргород",
     "Chortkiv": "Чортків",
     "Ternopil": "Тернопіль",
 };
 
-/** Канонічне (або будь-яке відоме CITY_MAP) значення міста → українська назва; невідоме — як є. */
-export function formatCityUk(city: string): string {
+/**
+ * Канонічне (або будь-яке відоме CITY_MAP) значення міста → українська назва.
+ * Спершу назва зі знімка вебаппу (`cityUk`, довідник міст), потім статична карта як
+ * страховка; невідоме — як є.
+ */
+export function formatCityUk(city: string, cityUk?: string | null): string {
+    const fromDirectory = cityUk?.trim();
+    if (fromDirectory) return fromDirectory;
     return CITY_LABELS_UK[normalizeCity(city)] ?? city;
 }
 
@@ -137,7 +146,7 @@ export function formatLocation(location: LocationParts, context: LocationDisplay
     const venue = formatVenuePart(rawName, city, branch);
     if (context === "in-city") return venue;
 
-    const englishCity = normalizeCity(city.replace(/[^\p{L}\p{N}\s]/gu, '').trim().normalize('NFC'));
+    const englishCity = normalizeCity(city.replace(/[^\p{L}\p{N}\s-]/gu, '').trim().normalize('NFC'));
     return context === "sentence" ? `${venue}, ${englishCity}` : `${venue} (${englishCity})`;
 }
 

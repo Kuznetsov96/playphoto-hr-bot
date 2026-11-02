@@ -112,7 +112,7 @@ describe("locationRepository — candidate questionnaire order", () => {
         await locationRepository.findByCity("Lviv", true);
 
         expect(findMany).toHaveBeenCalledWith({
-            where: { city: "Lviv", isHiddenFromCandidates: false },
+            where: { city: "Lviv", isHidden: false, isHiddenFromCandidates: false },
             orderBy: [{ name: "asc" }, { branch: "asc" }, { id: "asc" }],
         });
     });

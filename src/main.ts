@@ -16,6 +16,7 @@ import { startWorker, startScheduleNotificationDispatcher, startReplacementNotif
 import { startBirthdayLoop } from "./services/birthday-service.js";
 import { startShiftReminderLoop } from "./services/shift-reminder-service.js";
 import { startScheduleMirrorWatch } from "./services/stale-schedule-mirror.js";
+import { startUnresolvedCityWatch } from "./services/unresolved-city-watch.js";
 import { startDailyReportLoop } from "./services/finance-report.js";
 import { startPingerLoop } from "./services/pinger.js";
 import { startMonthlyPreferencesLoop } from "./services/monthly-preferences-trigger.js";
@@ -50,6 +51,7 @@ let replacementStatusSweepTimer: NodeJS.Timeout | undefined;
 let staffActivationSweepTimer: NodeJS.Timeout | undefined;
 let supportThreadJobsTimer: NodeJS.Timeout | undefined;
 let scheduleMirrorTimer: NodeJS.Timeout | undefined;
+let unresolvedCityTimer: NodeJS.Timeout | undefined;
 
 async function bootstrap() {
     configureContainer();
@@ -178,6 +180,8 @@ async function bootstrap() {
         // own failure into a log line, and a timer that stops firing produces no
         // log at all. The bot would keep serving the last-written schedule.
         scheduleMirrorTimer = startScheduleMirrorWatch(bot.api, ADMIN_IDS);
+        // Город точки вне справочника вебаппа: админам уходит предупреждение.
+        unresolvedCityTimer = startUnresolvedCityWatch(bot.api, ADMIN_IDS);
         startDailyReportLoop(bot);
         startPingerLoop(bot);
         startMonthlyPreferencesLoop(bot);
@@ -285,6 +289,7 @@ async function shutdown(signal: string) {
         if (staffActivationSweepTimer) clearInterval(staffActivationSweepTimer);
         if (supportThreadJobsTimer) clearInterval(supportThreadJobsTimer);
         if (scheduleMirrorTimer) clearInterval(scheduleMirrorTimer);
+        if (unresolvedCityTimer) clearInterval(unresolvedCityTimer);
         if (shiftReminderTimer) clearInterval(shiftReminderTimer);
         // Опитування зйомок у польоті дописує пару в Redis — чекаємо його до redis.quit().
         if (shootTaskPoller && !(await shootTaskPoller.stop(SHOOT_TASK_STOP_TIMEOUT_MS))) {

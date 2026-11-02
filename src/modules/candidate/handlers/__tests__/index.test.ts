@@ -328,7 +328,7 @@ describe("отказ на шаге даты рождения и без вака�
             from: { id: 1 },
             update: { update_id: 1 },
             di: {
-                locationRepository: { findByCity: vi.fn(async () => []) },
+                locationRepository: { findByCity: vi.fn(async () => []), findCityUkLabels: vi.fn(async () => new Map([["Dnipro", "Дніпро"]])) },
                 candidateRepository: { upsert: vi.fn(async () => ({})) },
                 userRepository: {
                     upsert: vi.fn(async () => ({ id: "u1" })),
@@ -364,6 +364,18 @@ describe("отказ на шаге даты рождения и без вака�
 
         const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
         expect(text).toBe(CANDIDATE_TEXTS["candidate-reject-underage"]);
+    });
+
+    it("город без вакансий берёт украинское имя из справочника городов", async () => {
+        const { handleNoVacancies } = await import("../index.js");
+        const { ScreenManager } = await import("../../../../utils/screen-manager.js");
+        vi.mocked(ScreenManager.renderScreen).mockClear();
+        const ctx = ctxFor({ gender: "female", fullName: "Анна Коваль", birthDate: "2005-01-01T00:00:00.000Z", city: "Dnipro" });
+
+        await handleNoVacancies(ctx, "Dnipro");
+
+        const [, text] = vi.mocked(ScreenManager.renderScreen).mock.calls[0]!;
+        expect(text).toContain("У місті Дніпро зараз немає відкритих вакансій.");
     });
 
     it("город без вакансий называется по-украински, хотя в сессии канонический ключ", async () => {
