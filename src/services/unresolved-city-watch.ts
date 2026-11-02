@@ -46,52 +46,85 @@ export function buildCityAlertText(city: string, locationName: string): string {
     return `⚠️ Місто ${city} немає в довіднику, точка ${locationName}`;
 }
 
+type CityWatchApi = { sendMessage(chatId: number, text: string): Promise<unknown> };
+type CityWatchStore = {
+    getJson<T>(key: string): Promise<T | null>;
+    setJson(key: string, value: unknown): Promise<void>;
+};
+
 /**
- * Раз в 10 минут читает список, записанный синком, и пишет админам о городах
- * вне справочника. Один раз в сутки на город; вернувшиеся в норму города
- * убираются из записи, чтобы следующий сбой не потонул в старом окне тишины.
+ * Один проход проверки: читает список от синка, шлёт предупреждения владельцу
+ * (ADMIN_IDS[0], как в startScheduleMirrorWatch) и обновляет last-alert.
+ * Город записывается как предупреждённый только если отправка удалась,
+ * иначе следующий проход повторит. Вернувшиеся в норму города удаляются.
  */
-export function startUnresolvedCityWatch(api: {
-    sendMessage(chatId: number, text: string): Promise<unknown>;
-}, adminIds: number[]): NodeJS.Timeout {
-    const run = async () => {
-        const stored = await systemStateRepository.getJson<unknown>(UNRESOLVED_CITIES_KEY);
-        const unresolved: UnresolvedCity[] = Array.isArray(stored)
-            ? stored.filter(
-                  (item): item is UnresolvedCity =>
-                      typeof item === "object" && item !== null &&
-                      typeof (item as UnresolvedCity).city === "string" &&
-                      typeof (item as UnresolvedCity).locationName === "string",
-              )
-            : [];
+export async function runUnresolvedCityCheck(deps: {
+    api: CityWatchApi;
+    adminIds: number[];
+    store: CityWatchStore;
+    now: Date;
+}): Promise<void> {
+    const { api, adminIds, store, now } = deps;
+    const stored = await store.getJson<unknown>(UNRESOLVED_CITIES_KEY);
+    const unresolved: UnresolvedCity[] = Array.isArray(stored)
+        ? stored.filter(
+              (item): item is UnresolvedCity =>
+                  typeof item === "object" && item !== null &&
+                  typeof (item as UnresolvedCity).city === "string" &&
+                  typeof (item as UnresolvedCity).locationName === "string",
+          )
+        : [];
 
-        const previous = await systemStateRepository.getJson<Record<string, string>>(LAST_ALERT_KEY);
-        const alertedAt: Record<string, string> =
-            previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {};
+    const previous = await store.getJson<Record<string, string>>(LAST_ALERT_KEY);
+    const alertedAt: Record<string, string> =
+        previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {};
 
-        const now = new Date();
-        const toAlert = pickCitiesToAlert(unresolved, alertedAt, now);
+    const toAlert = pickCitiesToAlert(unresolved, alertedAt, now);
 
-        // Только города, всё ещё вне справочника: остальные записи удаляются.
-        const next: Record<string, string> = {};
-        for (const { city } of unresolved) {
-            if (alertedAt[city] !== undefined) next[city] = alertedAt[city];
-        }
+    // Только города, всё ещё вне справочника: остальные записи удаляются.
+    const next: Record<string, string> = {};
+    for (const { city } of unresolved) {
+        if (alertedAt[city] !== undefined) next[city] = alertedAt[city];
+    }
 
-        for (const city of toAlert) {
-            const locations = unresolved.filter((item) => item.city === city).map((item) => item.locationName);
-            const text = buildCityAlertText(city, locations.join(", "));
-            for (const adminId of adminIds) {
-                // Сбой отправки не должен ронять цикл.
-                await api.sendMessage(adminId, text).catch(() => undefined);
+    // Владелец — ADMIN_IDS[0]: рассылка всем админам приучает их смахивать алерты.
+    const owner = adminIds.at(0);
+    for (const city of toAlert) {
+        const locations = unresolved.filter((item) => item.city === city).map((item) => item.locationName);
+        const text = buildCityAlertText(city, locations.join(", "));
+        let delivered = false;
+        if (owner !== undefined) {
+            try {
+                await api.sendMessage(owner, text);
+                delivered = true;
+            } catch (error) {
+                // Сбой отправки не роняет цикл, но виден в логах.
+                logBusinessEvent({
+                    event: "bot.unresolved_city.send_failed",
+                    level: "warn",
+                    actorType: "system",
+                    actorRole: "system",
+                    result: "failed",
+                    module: "unresolved-city-watch",
+                    operation: "alert",
+                    safeContext: {
+                        adminId: owner,
+                        errorType: error instanceof Error ? error.constructor.name : "UnknownError",
+                    },
+                });
             }
-            next[city] = now.toISOString();
         }
+        if (delivered) next[city] = now.toISOString();
+    }
 
-        if (JSON.stringify(next) !== JSON.stringify(alertedAt)) {
-            await systemStateRepository.setJson(LAST_ALERT_KEY, next);
-        }
-    };
+    if (JSON.stringify(next) !== JSON.stringify(alertedAt)) {
+        await store.setJson(LAST_ALERT_KEY, next);
+    }
+}
+
+/** Раз в 10 минут запускает проверку городов вне справочника. */
+export function startUnresolvedCityWatch(api: CityWatchApi, adminIds: number[]): NodeJS.Timeout {
+    const run = () => runUnresolvedCityCheck({ api, adminIds, store: systemStateRepository, now: new Date() });
 
     const timer = setInterval(() => {
         void run().catch((error: unknown) => {
