@@ -437,4 +437,46 @@ describe("AwsBusinessSyncService — location pay", () => {
         expect(data).not.toHaveProperty("pay");
         expect(data).not.toHaveProperty("address");
     });
+
+    it("writes cityUk from the snapshot, null included", async () => {
+        expect((await syncWithLocation({ cityUk: "Дніпро" }))).toMatchObject({ cityUk: "Дніпро" });
+        expect((await syncWithLocation({ cityUk: null }))).toHaveProperty("cityUk", null);
+    });
+
+    it("does not touch cityUk when an older webapp omits it", async () => {
+        expect(await syncWithLocation({})).not.toHaveProperty("cityUk");
+    });
+});
+
+describe("AwsBusinessSyncService — конфлікт серіалізації", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+    });
+
+    it("повторює транзакцію, не падає прохід і не задвоює тих, кому знімаємо доступ", async () => {
+        // Конфлікт із ранковим дайджестом о 08:00: перша спроба встигла зібрати випалих.
+        const transaction = {
+            ...transactionStub(),
+            parcel: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        };
+        transaction.staffProfile.findMany.mockResolvedValue([
+            { id: "gone", user: { telegramId: 555n } },
+        ]);
+        transaction.staffProfile.updateMany
+            .mockRejectedValueOnce(Object.assign(new Error("conflict"), { code: "P2034" }))
+            .mockResolvedValue({ count: 1 });
+        prismaMock.$transaction.mockImplementation((callback: (tx: ReturnType<typeof transactionStub>) => unknown) =>
+            callback(transaction));
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await expect(new AwsBusinessSyncService().syncAll()).resolves.toBeDefined();
+
+        expect(syncUserAccess).toHaveBeenCalledTimes(1);
+        expect(syncUserAccess.mock.calls[0]?.[0]).toBe(555n);
+    });
 });

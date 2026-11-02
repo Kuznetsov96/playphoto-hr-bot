@@ -1,7 +1,6 @@
 import { staffRepository } from "../../../repositories/staff-repository.js";
 import { workShiftRepository } from "../../../repositories/work-shift-repository.js";
 import { locationRepository } from "../../../repositories/location-repository.js";
-import { supportRepository } from "../../../repositories/support-repository.js";
 import { taskService } from "../../../services/task-service.js";
 import logger from "../../../core/logger.js";
 import type { StaffProfile } from "@prisma/client";
@@ -93,28 +92,19 @@ export class StaffService {
     async getAdminHeader(role?: string) {
         try {
             if (role === 'SUPPORT') {
-                const openTickets = await supportRepository.countByStatus("OPEN" as any).catch(() => 0);
-                const inProgressTickets = await supportRepository.countByStatus("IN_PROGRESS" as any).catch(() => 0);
-                const urgentTickets = await supportRepository.countUrgent().catch(() => 0);
                 const overdueTasks = await taskService.countOverdueTasks(new Date()).catch(() => 0);
-
-                return t('support-panel-title') + "\n\n" +
-                    t('support-panel-tickets', { open: openTickets, inprogress: inProgressTickets }) + "\n" +
-                    t('support-panel-urgent', { urgent: urgentTickets }) + "\n" +
-                    t('support-panel-tasks', { overdue: overdueTasks }) + "\n\n" +
-                    t('support-panel-action');
+                return t('admin-panel-title') + "\n" + t('support-panel-overdue', { overdue: overdueTasks });
             }
 
-            const activePhotographers = await staffRepository.countActive().catch(() => 0);
-            const locations = await locationRepository.countOperating().catch(() => 0);
+            const [photographers, locations] = await Promise.all([
+                staffRepository.countActive().catch(() => 0),
+                locationRepository.countOperating().catch(() => 0),
+            ]);
 
-            return t('admin-panel-title') + "\n\n" +
-                t('admin-panel-team', { active: activePhotographers }) + "\n" +
-                t('admin-panel-locations', { active: locations }) + "\n\n" +
-                t('admin-panel-category');
+            return t('admin-panel-title') + "\n" + t('admin-panel-summary', { photographers, locations });
         } catch (e) {
             logger.error({ err: e }, "Failed to generate admin header");
-            return "🔧 <b>Admin Panel</b>\n\nWelcome back! (System stats temporarily unavailable)";
+            return t('admin-panel-title');
         }
     }
 

@@ -32,6 +32,8 @@ import { createKyivDate } from "../utils/bot-utils.js";
 import { getBirthDateRejection } from "../utils/candidate-age.js";
 import { redis } from "../core/redis.js";
 import { formatLocation } from "../utils/location-label.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
+import { surnameAndName } from "../utils/person-name.js";
 import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
 
 
@@ -1075,11 +1077,11 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
             if (ADMIN_IDS.length > 0 && await shouldSendFunnelAlert("FUNNEL_IMPOSSIBLE_MENTOR_STATE", fingerprint, 6)) {
                 const preview = impossibleMentorStates
                     .slice(0, 5)
-                    .map(c => `• ${escapeHtml(c.fullName || c.id)} — ${escapeHtml(c.status)}/${escapeHtml(c.currentStep)}`)
+                    .map(c => `${escapeHtml(surnameAndName(c.fullName || c.id))} · ${escapeHtml(c.status)}/${escapeHtml(c.currentStep)}`)
                     .join("\n");
                 await bot.api.sendMessage(
                     ADMIN_IDS[0]!,
-                    `⚠️ <b>Funnel anomaly detected</b>\n\nFound <b>${impossibleMentorStates.length}</b> candidate records in mentor/final stages without HR/interview evidence.\n\n${preview}`,
+                    ADMIN_TEXTS["admin-notif-funnel-anomaly"]({ count: impossibleMentorStates.length, preview }),
                     { parse_mode: "HTML" }
                 ).catch(() => { });
                 await saveFunnelAlertState("FUNNEL_IMPOSSIBLE_MENTOR_STATE", fingerprint);
@@ -1120,7 +1122,7 @@ async function processFunnelAnomalies(bot: Bot<MyContext>) {
             if (ADMIN_IDS.length > 0 && await shouldSendFunnelAlert("FUNNEL_SUSPICIOUS_MATERIALS_SPIKE", fingerprint, 2)) {
                 await bot.api.sendMessage(
                     ADMIN_IDS[0]!,
-                    `⚠️ <b>Funnel spike detected</b>\n\n<b>${recentSuspiciousMaterials}</b> candidates received mentor materials in the last 15 minutes without recorded interview completion or HR approval.`,
+                    ADMIN_TEXTS["admin-notif-funnel-spike"]({ count: recentSuspiciousMaterials }),
                     { parse_mode: "HTML" }
                 ).catch(() => { });
                 await saveFunnelAlertState("FUNNEL_SUSPICIOUS_MATERIALS_SPIKE", fingerprint);
@@ -1376,13 +1378,15 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
 
     for (const task of overdueTasks) {
         try {
-            const staffName = truncateText(task.staff.fullName, 30);
+            const staffName = escapeHtml(truncateText(surnameAndName(task.staff.fullName), 30));
             const taskPreview = escapeHtml(truncateText(htmlToPlainText(task.taskText), 60));
-            const text = `🔴 <b>Overdue:</b> ${staffName}\n` +
-                `📝 ${taskPreview}\n` +
-                `⏰ Deadline: <b>${task.deadlineTime}</b>`;
+            const text = ADMIN_TEXTS["admin-notif-task-overdue"]({
+                name: staffName,
+                task: taskPreview,
+                deadline: escapeHtml(String(task.deadlineTime)),
+            });
 
-            const kb = new InlineKeyboard().text("📋 Details", `task_det_${task.id}_${dateStr}`);
+            const kb = new InlineKeyboard().text(ADMIN_TEXTS["admin-notif-btn-details"], `task_det_${task.id}_${dateStr}`);
 
             // Надсилаємо кожному з підтримки
             for (const adminId of SUPPORT_IDS) {
@@ -1697,13 +1701,16 @@ async function processPostStagingReminder(bot: Bot<MyContext>) {
 
             try {
                 const name = cand.fullName || "Candidate";
-                const loc = cand.location?.name || cand.city || "";
-                const text = `📸 <b>Staging completed: ${escapeHtml(name)}</b>\n` +
-                    `📍 ${escapeHtml(loc)}\n\n` +
-                    `Please mark the result — did the candidate pass or fail? ⚖️`;
+                const loc = cand.location
+                    ? formatLocation(cand.location, "listing")
+                    : (cand.city || "");
+                const text = ADMIN_TEXTS["admin-notif-staging-completed"]({
+                    name: escapeHtml(surnameAndName(name)),
+                    location: escapeHtml(loc),
+                });
 
                 const kb = new InlineKeyboard()
-                    .text("👤 View & Decide", `view_candidate_${cand.id}`);
+                    .text(ADMIN_TEXTS["admin-notif-btn-view-decide"], `view_candidate_${cand.id}`);
 
                 const recipientIds = [ADMIN_IDS[0]].filter((id): id is number => typeof id === "number" && !Number.isNaN(id));
                 let deliveredCount = 0;

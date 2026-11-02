@@ -22,15 +22,15 @@ describe("buildRecipientRows", () => {
         const staffRows = rows.flat().filter(b => b.callback_data.startsWith("tbk_staff_"));
 
         expect(staffRows).toHaveLength(2);
-        expect(staffRows.every(b => b.text.startsWith("✅"))).toBe(true);
+        expect(staffRows.every(b => b.text.startsWith("✓ "))).toBe(true);
     });
 
     it("unchecks only the excluded staff", () => {
         const rows = buildRecipientRows(groups, ["s1"]);
         const staffRows = rows.flat().filter(b => b.callback_data.startsWith("tbk_staff_"));
 
-        expect(staffRows.find(b => b.callback_data === "tbk_staff_s1")!.text.startsWith("⬜")).toBe(true);
-        expect(staffRows.find(b => b.callback_data === "tbk_staff_s2")!.text.startsWith("✅")).toBe(true);
+        expect(staffRows.find(b => b.callback_data === "tbk_staff_s1")!.text.startsWith("✓")).toBe(false);
+        expect(staffRows.find(b => b.callback_data === "tbk_staff_s2")!.text.startsWith("✓ ")).toBe(true);
     });
 
     it("shows a location header that cannot be clicked", () => {

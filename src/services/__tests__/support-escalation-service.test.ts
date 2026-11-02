@@ -64,7 +64,7 @@ describe("покликати", () => {
         await service.call(api, "t1", "hupalova", caller);
         const dm = api.sendMessage.mock.calls[1];
         expect(dm[0]).toBe(HUPALOVA);
-        expect(dm[1]).toBe("🔔 Olena called you to <b>Бланк · Lviv · Dragon Park 2</b>");
+        expect(dm[1]).toBe("<b>Support needs you</b>\n\nБланк · Lviv · Dragon Park 2\nCalled by Olena");
         expect(JSON.stringify(dm[2].reply_markup)).toContain("https://t.me/c/1234/77");
         expect(JSON.stringify(dm[2].reply_markup)).toContain("sth:b:t1");
         expect(repo.listIncomingSince).toHaveBeenCalledWith("t1", new Date("2026-10-08T10:00:00Z"), 3);

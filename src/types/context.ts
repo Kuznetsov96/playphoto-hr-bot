@@ -145,7 +145,7 @@ export interface SessionData {
     };
 
     broadcastData?: {
-        /** TO | CITIES | LOCATIONS | REPLY | MESSAGE | PREVIEW | SENDING */
+        /** TO | CITIES | LOCATION_CITIES | LOCATIONS | REPLY | MESSAGE | PREVIEW | SENDING */
         step: string;
         everyone: boolean;
         cityNames: string[];
@@ -156,8 +156,13 @@ export interface SessionData {
         media: BroadcastMediaItem[];
         /** Одноразовая строка над счётчиками («лишнее не добавлено»). */
         notice?: string;
-        /** Города последнего показанного списка: кнопка несёт индекс в нём, а не в свежем каталоге. */
-        cityList?: string[];
+        /**
+         * Города и точки, загруженные при входе в выбор: кнопка города несёт индекс в этом списке,
+         * а нажатия не перечитывают каталог.
+         */
+        catalogue?: { name: string; locations: { publicId: string; name: string }[] }[];
+        /** Город, точки которого открыты в «By location» (индекс в `catalogue`). */
+        locationCity?: number;
         /** Последний media_group_id и сообщение с экраном «Message»: части альбома правят его на месте. */
         lastGroupId?: string;
         screenMessageId?: number;
@@ -169,15 +174,6 @@ export interface SessionData {
         ticketFilter?: string;
         preferredTarget?: "HR" | "MENTOR" | "RECOVERY";
         entryReason?: "RETURNED_AFTER_BOT_BLOCK";
-        magnetCount?: {
-            recordId?: string;
-            estimateTotal?: number;
-            confidence?: "high" | "medium" | "low";
-            stackCounts?: number[];
-            notes?: string;
-            correctedTotal?: number;
-            analyzedPhotoFileId?: string;
-        };
     };
 
     parcelPhotoDraft?: {
@@ -239,7 +235,6 @@ export interface SessionData {
     statsView?: "overview" | "losses";
     broadcastDraft?: any;
     broadcastTestConfirmed?: boolean;
-    customSyncPromptMessageId?: number;
     taskCreation?: {
         step?: string;
         date?: string;
@@ -282,16 +277,13 @@ export interface SessionData {
         mediaType?: TaskAttachmentItem["type"];
         deadlineTime?: string | null;
     };
-    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'BULK_TASK' | 'EXPENSE' | 'MANUAL_CHANNEL_ACCESS' | 'LOGISTICS' | 'MAGNET_COUNTER' | 'RECRUITMENT' | undefined;
+    adminFlow?: 'SCHEDULE' | 'LOCATIONS' | 'SEARCH' | 'BROADCAST' | 'TASK' | 'BULK_TASK' | 'EXPENSE' | 'LOGISTICS' | 'RECRUITMENT' | undefined;
     viewingFromInbox?: boolean;
     broadcastId?: number;
     teamSyncPreview?: {
         token: string;
         generatedAt: number;
         requiresConfirmation: boolean;
-    };
-    manualChannelAccess?: {
-        step: "AWAITING_GRANT_DETAILS" | "AWAITING_REVOKE_ID";
     };
 }
 

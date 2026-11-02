@@ -68,10 +68,8 @@ describe("bulk task wiring pins", () => {
             "../task-flow.ts",
             "../search.ts",
             "../broadcast.ts",
-            "../magnet-counter.ts",
             "../logistics.ts",
             "../team.ts",
-            "../manual-channel-access.ts",
             "../system.ts",
             "../index.ts",
         ];

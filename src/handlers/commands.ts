@@ -103,8 +103,6 @@ commandHandlers.callbackQuery("cancel_step", async (ctx) => {
     delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
-    delete ctx.session.manualChannelAccess;
-    delete ctx.session.customSyncPromptMessageId;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
     const telegramId = ctx.from?.id;
@@ -185,8 +183,6 @@ commandHandlers.command("start", async (ctx) => {
         delete ctx.session.bulkTaskData;
         delete ctx.session.broadcastData;
         delete ctx.session.broadcastDraft;
-        delete ctx.session.manualChannelAccess;
-        delete ctx.session.customSyncPromptMessageId;
         delete ctx.session.broadcastId;
         delete ctx.session.supportData?.step;
         delete ctx.session.supportData?.replyingToUserId;

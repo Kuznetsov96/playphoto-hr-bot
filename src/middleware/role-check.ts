@@ -164,3 +164,23 @@ export async function getUserAdminRole(telegramId: bigint): Promise<AdminRole | 
 
     return user.adminRole;
 }
+
+/**
+ * Роль админа в рамках одного апдейта: первое обращение идёт в базу, остальные
+ * (диапазоны grammY-меню пересобираются на каждое нажатие, плюс обработчик кнопки
+ * и заголовок) берут ту же роль из памяти. Между апдейтами кэша нет: у каждого
+ * апдейта свой ctx, так что смена роли подхватывается со следующего нажатия.
+ */
+const roleByUpdate = new WeakMap<object, Promise<AdminRole | null>>();
+
+export function getCtxAdminRole(ctx: MyContext): Promise<AdminRole | null> {
+    const telegramId = ctx.from?.id;
+    if (!telegramId) return Promise.resolve(null);
+    const cached = roleByUpdate.get(ctx);
+    if (cached) return cached;
+    const pending = getUserAdminRole(BigInt(telegramId));
+    roleByUpdate.set(ctx, pending);
+    // Упавший запрос не запоминаем: следующий вызов в этом апдейте попробует снова.
+    pending.catch(() => { if (roleByUpdate.get(ctx) === pending) roleByUpdate.delete(ctx); });
+    return pending;
+}

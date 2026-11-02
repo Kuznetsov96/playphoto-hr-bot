@@ -5,6 +5,7 @@ import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { STAFF_TEXTS } from "../constants/staff-texts.js";
 import { formatLocation } from "../utils/location-label.js";
 import { escapeHtml } from "../handlers/admin/utils.js";
+import { surnameAndName } from "../utils/person-name.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { buildSignedCallback } from "../utils/signed-callback.js";
 import {
@@ -153,8 +154,8 @@ function renderOwnerReviewMessage(payload: AwsReplacementNotificationPayload): s
     // Escaped for the same reason as the location: this message is sent with
     // `parse_mode: "HTML"`, and a name carrying an angle bracket would make
     // Telegram reject it outright.
-    const requesterName = escapeHtml(payload.requesterDisplayName ?? "?");
-    const candidateName = escapeHtml(payload.candidateDisplayName ?? "?");
+    const requesterName = escapeHtml(surnameAndName(payload.requesterDisplayName ?? "?"));
+    const candidateName = escapeHtml(surnameAndName(payload.candidateDisplayName ?? "?"));
     return payload.outcome === "confirmed"
         ? ADMIN_TEXTS["admin-replacement-confirmed"]({
               requesterName,

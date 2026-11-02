@@ -359,7 +359,7 @@ export async function handleNoVacancies(ctx: MyContext, city: string) {
             ctx,
             // Місто в реченні — українською: канонічний ключ «Zaporizhzhia»
             // посеред українського тексту читався як збій (аудит 01.10.2026).
-            CANDIDATE_TEXTS["candidate-info-no-vacancies"](formatCityUk(city)),
+            CANDIDATE_TEXTS["candidate-info-no-vacancies"](formatCityUk(city, (await ctx.di.locationRepository.findCityUkLabels()).get(city))),
             buildFinalScreenKeyboard(ctx.session.candidateData.gender, ageMeta.status),
         );
     }

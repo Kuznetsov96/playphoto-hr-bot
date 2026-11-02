@@ -2,7 +2,7 @@ import { ADMIN_TEXTS } from "../../constants/admin-texts.js";
 import { Menu } from "@grammyjs/menu";
 import { Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../types/context.js";
-import { getUserAdminRole, requireRole } from "../../middleware/role-check.js";
+import { getCtxAdminRole, requireRole } from "../../middleware/role-check.js";
 import { hasPermission } from "../../config/roles.js";
 import logger from "../../core/logger.js";
 import { staffRepository } from "../../repositories/staff-repository.js";
@@ -16,7 +16,6 @@ import { financeHandlers } from "./finance.js";
 import { adminSystemHandlers } from "./system.js";
 import { adminBroadcastHandlers, handleBroadcastContent } from "./broadcast.js";
 import { adminSearchHandlers, startAdminStaffSearch, startAdminSearch, startAdminMessageFlow } from "./search.js";
-import { adminStepHandlers } from "./steps.js";
 import { taskFlowHandlers, handleTaskText, startTaskFlow } from "./task-flow.js";
 import tasksHandlers from "./tasks.js";
 import taskCreationHandlers from "./task-creation.js";
@@ -24,8 +23,6 @@ import { taskBulkHandlers, handleBulkTaskContent } from "./task-bulk.js";
 import { buildTaskCallbackGuard } from "./task-callback-guard.js";
 import { adminTeamHandlers } from "./team.js";
 import { adminLogisticsHandlers } from "./logistics.js";
-import { adminMagnetCounterHandlers, handleAdminMagnetCounterMessage } from "./magnet-counter.js";
-import { handleManualChannelAccess } from "./manual-channel-access.js";
 import { buildAdminOutboundReplyKeyboard, getAdminOutboundText, sendAdminOutboundMessage } from "./utils.js";
 
 export { startAdminStaffSearch, startAdminSearch, startAdminMessageFlow };
@@ -33,37 +30,32 @@ export { startAdminStaffSearch, startAdminSearch, startAdminMessageFlow };
 // --- MAIN MENU CORE ---
 export const adminMenu = new Menu<MyContext>("admin-main");
 adminMenu.dynamic(async (ctx, range) => {
-    const telegramId = ctx.from?.id;
-    let userRole: any = null;
-    if (telegramId) {
-        userRole = await getUserAdminRole(BigInt(telegramId));
-    }
+    const userRole = await getCtxAdminRole(ctx);
+
+    // Порядок: чаще всего нужное первым. Team — отдельной строкой, остальное — второй.
     if (hasPermission(userRole, 'STAFF_SCHEDULE')) {
         range.text(ADMIN_TEXTS["admin-main-team"], async (ctx) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-team"], "admin-team-ops", { pushToStack: true });
-        });
+            await ScreenManager.renderScreen(ctx, `<b>${ADMIN_TEXTS["admin-main-team"]}</b>`, "admin-team-ops", { pushToStack: true });
+        }).row();
     }
 
-    range.row();
-
-    if (hasPermission(userRole as any, 'FINANCE_AUDIT')) {
+    if (hasPermission(userRole, 'FINANCE_AUDIT')) {
         range.text(ADMIN_TEXTS["admin-main-finance"], async (ctx) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-finance"], "admin-finance", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, `<b>${ADMIN_TEXTS["admin-main-finance"]}</b>`, "admin-finance", { pushToStack: true });
         });
     }
 
-    if (hasPermission(userRole as any, 'SUPPORT_CHAT')) {
+    if (hasPermission(userRole, 'SUPPORT_CHAT')) {
         range.text(ADMIN_TEXTS["admin-main-system"], async (ctx) => {
-            await ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-main-system"], "admin-system", { pushToStack: true });
+            await ScreenManager.renderScreen(ctx, `<b>${ADMIN_TEXTS["admin-main-system"]}</b>`, "admin-system", { pushToStack: true });
         });
     }
 
-    if (hasPermission(userRole as any, 'LOGISTICS_MENU')) {
-        range.text("📦 Logistics", async (ctx) => {
-            await ScreenManager.renderScreen(ctx, "📦 <b>Logistics Management</b>", "admin-logistics", { pushToStack: true });
+    if (hasPermission(userRole, 'LOGISTICS_MENU')) {
+        range.text(ADMIN_TEXTS["admin-main-logistics"], async (ctx) => {
+            await ScreenManager.renderScreen(ctx, `<b>${ADMIN_TEXTS["admin-main-logistics"]}</b>`, "admin-logistics", { pushToStack: true });
         });
     }
-    range.row();
 });
 
 export const adminHandlers = new Composer<MyContext>();
@@ -73,9 +65,6 @@ export const adminHandlers = new Composer<MyContext>();
 // поэтому protectedAdminCallbacks в конце файла для префиксов tbk_/tas_/task_/b_
 // не выполняется вовсе. Политика та же, что уже стоит на вводе текста этих флоу.
 adminHandlers.use(buildTaskCallbackGuard());
-
-// 1. Step handlers
-adminHandlers.use(adminStepHandlers);
 
 // 2. Sub-module handlers
 adminHandlers.use(adminSearchHandlers);
@@ -88,13 +77,10 @@ adminHandlers.use(taskBulkHandlers);
 adminHandlers.use(adminSystemHandlers);
 adminHandlers.use(adminTeamHandlers);
 adminHandlers.use(adminLogisticsHandlers);
-adminHandlers.use(adminMagnetCounterHandlers);
 
 adminHandlers.on(["message:text", "message:photo", "message:video", "message:document", "message:voice", "message:video_note", "message:audio", "message:animation", "message:checklist"], async (ctx, next) => {
     if (ctx.chat?.type !== "private") return await next();
 
-    if (await handleAdminMagnetCounterMessage(ctx)) return;
-    if (await handleManualChannelAccess(ctx)) return;
     if (await handleBroadcastContent(ctx)) return;
     if (await handleBulkTaskContent(ctx)) return;
 
@@ -131,13 +117,13 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
                 outboundReplyMarkup ? { replyMarkup: outboundReplyMarkup } : undefined
             );
             await ctx.deleteMessage().catch(() => { });
-            await ScreenManager.renderScreen(ctx, "✅ Your reply has been sent.", "admin-main");
+            await ScreenManager.renderScreen(ctx, "Your reply has been sent.", "admin-main");
             if (user) {
                 const { timelineRepository } = await import("../../repositories/timeline-repository.js");
                 await timelineRepository.createEvent(user.id, 'MESSAGE', 'ADMIN', `[Direct Reply] ${replyText}`, { adminId: ctx.from?.id });
             }
         } catch (e: any) {
-            await ScreenManager.renderScreen(ctx, `❌ Send Error: ${e.message}`, "admin-main");
+            await ScreenManager.renderScreen(ctx, `Send Error: ${e.message}`, "admin-main");
         }
 
         delete ctx.session.supportData.step;
@@ -152,8 +138,8 @@ adminHandlers.on(["message:text", "message:photo", "message:video", "message:doc
         ctx.session.broadcastData.step === 'MESSAGE'
     ) {
         await ctx.reply(
-            "⚠️ You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
-            "Open System Settings → Broadcasts → New announcement and send the content after the bot asks for it. The message was not queued."
+            "You have an unfinished broadcast draft, but this chat is not in Broadcast mode.\n\n" +
+            "Open System → Broadcasts → New announcement and send the content after the bot asks for it. The message was not queued."
         );
         return;
     }
@@ -180,7 +166,7 @@ const protectedAdminCallbacks = adminProtected.filter(c => c.has("callback_query
 protectedAdminCallbacks.use(requireRole('SUPER_ADMIN', 'CO_FOUNDER', 'SUPPORT', 'HR_LEAD'));
 
 protectedAdminCallbacks.callbackQuery("admin_main_back", async (ctx: MyContext) => {
-    const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
+    const userRole = await getCtxAdminRole(ctx);
     const text = await staffService.getAdminHeader(userRole as any);
     await ScreenManager.goBack(ctx, text, "admin-main");
     await ctx.answerCallbackQuery().catch(() => { });
@@ -197,13 +183,11 @@ protectedAdminCallbacks.callbackQuery("admin_main_menu", async (ctx: MyContext) 
     delete ctx.session.bulkTaskData;
     delete ctx.session.broadcastData;
     delete ctx.session.broadcastDraft;
-    delete ctx.session.manualChannelAccess;
-    delete ctx.session.customSyncPromptMessageId;
     delete ctx.session.supportData?.step;
     delete ctx.session.supportData?.replyingToUserId;
     ctx.session.candidateData = {};
 
-    const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
+    const userRole = await getCtxAdminRole(ctx);
     const text = await staffService.getAdminHeader(userRole as any);
     await ScreenManager.renderScreen(ctx, text, "admin-main", { forceNew: true });
     await ctx.answerCallbackQuery().catch(() => { });
@@ -216,7 +200,7 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
     if (flow === 'SCHEDULE' && ctx.session.selectedDate) {
         const date = new Date(ctx.session.selectedDate);
         const dateStr = date.toLocaleDateString("uk-UA", { day: '2-digit', month: '2-digit' });
-        await ScreenManager.renderScreen(ctx, `🏢 <b>Select City (${dateStr}):</b>`, "admin-schedule-cities", { forceNew: true });
+        await ScreenManager.renderScreen(ctx, `<b>Select City (${dateStr}):</b>`, "admin-schedule-cities", { forceNew: true });
         await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
@@ -232,18 +216,18 @@ protectedAdminCallbacks.callbackQuery("admin_back_to_cities", async (ctx: MyCont
     // 3. Task Flow (Active process)
     if (flow === 'TASK') {
         // If task was finished, go to generic city selection for locations
-        await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-team-cities", { forceNew: true });
+        await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-team-cities", { forceNew: true });
         await ctx.answerCallbackQuery().catch(() => { });
         return;
     }
 
     // 4. Default: Main Team Cities (for LOCATIONS, SEARCH, or finished flows)
-    await ScreenManager.renderScreen(ctx, "🏢 <b>Select City:</b>", "admin-team-cities", { forceNew: true });
+    await ScreenManager.renderScreen(ctx, "<b>Select City:</b>", "admin-team-cities", { forceNew: true });
     await ctx.answerCallbackQuery().catch(() => { });
 });
 
 protectedAdminCallbacks.callbackQuery("admin_system_back", async (ctx: MyContext) => {
-    const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
+    const userRole = await getCtxAdminRole(ctx);
     const text = await staffService.getAdminHeader(userRole as any);
     await ScreenManager.goBack(ctx, text, "admin-system");
     await ctx.answerCallbackQuery().catch(() => { });
@@ -266,7 +250,7 @@ protectedAdminCallbacks.callbackQuery(/^view_staff_(.+)$/, async (ctx) => {
     const staffId = ctx.match![1]!;
     await ctx.answerCallbackQuery().catch(() => { });
 
-    const userRole = await getUserAdminRole(BigInt(ctx.from!.id));
+    const userRole = await getCtxAdminRole(ctx);
     const staff = await staffRepository.findById(staffId);
     if (!staff) return ScreenManager.renderScreen(ctx, ADMIN_TEXTS["admin-search-staff-not-found"], "admin-main");
 
@@ -274,13 +258,13 @@ protectedAdminCallbacks.callbackQuery(/^view_staff_(.+)$/, async (ctx) => {
     const text = (await staffService.getProfileText(staff, false, userRole as any)) + `\n${ADMIN_TEXTS["admin-profile-select-action"]}`;
 
     const kb = new InlineKeyboard()
-        .text("💬 Write Message", `admin_send_msg_${staff.userId}`).row()
-        .text("📝 Set Task", `admin_send_task_${staff.userId}`).row();
+        .text("Write Message", `admin_send_msg_${staff.userId}`).row()
+        .text("Set Task", `admin_send_task_${staff.userId}`).row();
 
     if (userRole === "SUPER_ADMIN") {
-        kb.text("📋 Chat History", `admin_timeline_export_${staff.userId}`).row();
+        kb.text("Chat History", `admin_timeline_export_${staff.userId}`).row();
     }
-    kb.text("🏠 Main Menu", "admin_main_back");
+    kb.text("Main Menu", "admin_main_back");
 
     await ScreenManager.renderScreen(ctx, text, kb, { pushToStack: true });
 });
@@ -321,12 +305,12 @@ protectedAdminCallbacks.callbackQuery(/^view_candidate(_new)?_(.+)$/, async (ctx
 
 protectedAdminCallbacks.callbackQuery("back_to_schedule_staff", async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => { });
-    await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-team"], "admin-schedule-staff");
+    await ScreenManager.goBack(ctx, `<b>${ADMIN_TEXTS["admin-main-team"]}</b>`, "admin-schedule-staff");
 });
 
 protectedAdminCallbacks.callbackQuery("back_to_loc_staff", async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => { });
-    await ScreenManager.goBack(ctx, ADMIN_TEXTS["admin-main-team"], "admin-location-staff");
+    await ScreenManager.goBack(ctx, `<b>${ADMIN_TEXTS["admin-main-team"]}</b>`, "admin-location-staff");
 });
 
 protectedAdminCallbacks.callbackQuery("admin_birthdays_back", async (ctx) => {

@@ -33,6 +33,8 @@ import { getBirthDateRejection } from "../utils/candidate-age.js";
 // відправок ковтає помилку — тобто кандидатка могла тихо вимкнути власні
 // сповіщення менторам. Екрануємо в місці, де ім'я береться.
 import { escapeHtml } from "./admin/utils.js";
+import { surnameAndName, formatKyivDayMonth, formatKyivTimeOfDay } from "../utils/person-name.js";
+import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 
 export const bookingHandlers = new Composer<MyContext>();
 
@@ -588,17 +590,10 @@ function formatBookedSlot(startTime: Date | string | null | undefined): string {
     return `${day} о ${time}`;
 }
 
-/** `Oct 9, 14:30` — для англійського повідомлення власнику. */
+/** `09.10 · 14:30` — для англійського повідомлення власнику. */
 function formatBookedSlotForAdmin(startTime: Date | string | null | undefined): string {
     if (!startTime) return "time unknown";
-    return new Date(startTime).toLocaleString("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-        timeZone: "Europe/Kyiv"
-    });
+    return `${formatKyivDayMonth(startTime)} · ${formatKyivTimeOfDay(startTime)}`;
 }
 
 /**
@@ -633,7 +628,10 @@ bookingHandlers.on("callback_query:data", async (ctx, next) => {
             logger.error({ err: error, telegramId: ctx.from.id, slotId }, "Waiting-for-HR signal could not reach the web thread");
             const target = ADMIN_IDS[0];
             if (target !== undefined) {
-                ctx.api.sendMessage(target, `⏳ ${escapeHtml(candidate.fullName ?? String(ctx.from.id))} is waiting for HR · interview ${formatBookedSlotForAdmin(candidate.interviewSlot?.startTime)}\n\nThe signal did not reach the webapp.`).catch(() => {});
+                ctx.api.sendMessage(target, ADMIN_TEXTS["admin-notif-waiting-for-hr"]({
+                    name: escapeHtml(surnameAndName(candidate.fullName ?? String(ctx.from.id))),
+                    slot: formatBookedSlotForAdmin(candidate.interviewSlot?.startTime),
+                }), { parse_mode: "HTML" }).catch(() => {});
             }
         });
     }

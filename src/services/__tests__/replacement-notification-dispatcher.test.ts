@@ -144,8 +144,8 @@ describe("ReplacementNotificationDispatcher", () => {
                         telegramId: "999",
                         payload: {
                             ...pendingRow.payload,
-                            requesterDisplayName: "Петренко Олена",
-                            candidateDisplayName: "Іваненко Марія",
+                            requesterDisplayName: "Петренко Олена Іванівна",
+                            candidateDisplayName: "Іваненко Марія Петрівна",
                             outcome: "confirmed" as const,
                         },
                     },
@@ -161,7 +161,10 @@ describe("ReplacementNotificationDispatcher", () => {
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         expect(sendMessage.mock.calls[0]![0]).toBe(555);
-        expect(sendMessage.mock.calls[0]![1]).toMatch(/Replacement confirmed/u);
+        expect(sendMessage.mock.calls[0]![1]).toMatch(/^<b>Replacement confirmed<\/b>/u);
+        // Фамилия и имя без отчества, без смайла в заголовке.
+        expect(sendMessage.mock.calls[0]![1]).toContain("Петренко Олена → Іваненко Марія");
+        expect(sendMessage.mock.calls[0]![1]).not.toMatch(/Іванівна|Петрівна|\p{Extended_Pictographic}/u);
         expect(markDelivered).toHaveBeenCalledWith("n-owner-1");
         expect(result).toEqual({ delivered: 1, failed: 0 });
     });
