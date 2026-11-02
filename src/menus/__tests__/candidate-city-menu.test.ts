@@ -18,14 +18,15 @@ vi.mock("@grammyjs/menu", () => ({
     },
 }));
 
-const { findAllCities, findByCity, persistCandidate, handleNoVacancies } = vi.hoisted(() => ({
+const { findAllCities, findByCity, findCityUkLabels, persistCandidate, handleNoVacancies } = vi.hoisted(() => ({
+    findCityUkLabels: vi.fn(),
     findAllCities: vi.fn(),
     findByCity: vi.fn(),
     persistCandidate: vi.fn(),
     handleNoVacancies: vi.fn(),
 }));
 
-vi.mock("../../repositories/location-repository.js", () => ({ locationRepository: { findAllCities, findByCity } }));
+vi.mock("../../repositories/location-repository.js", () => ({ locationRepository: { findAllCities, findByCity, findCityUkLabels } }));
 vi.mock("../../repositories/candidate-repository.js", () => ({ candidateRepository: {} }));
 vi.mock("../../utils/screen-manager.js", () => ({ ScreenManager: { renderScreen: vi.fn(), goBack: vi.fn() } }));
 vi.mock("../../utils/menu-registry.js", () => ({ menuRegistry: { register: vi.fn() } }));
@@ -48,6 +49,8 @@ describe("candidate-city menu", () => {
     beforeEach(() => {
         findAllCities.mockReset();
         findByCity.mockReset();
+        findCityUkLabels.mockReset();
+        findCityUkLabels.mockResolvedValue(new Map());
         persistCandidate.mockReset();
         handleNoVacancies.mockReset();
     });
@@ -69,5 +72,21 @@ describe("candidate-city menu", () => {
         expect(ctx.session.candidateData.city).toBe("Zaporizhzhia");
         expect(persistCandidate).toHaveBeenCalledWith(ctx, { city: "Zaporizhzhia", locationId: null, additionalLocationIds: [] });
         expect(handleNoVacancies).toHaveBeenCalledWith(ctx, "Zaporizhzhia");
+    });
+
+    it("підпис міста береться зі довідника, у сесію пишеться канонічне значення", async () => {
+        await import("../candidate.js");
+        const render = dynamics.get("candidate-city")!;
+        findAllCities.mockResolvedValue(["Dnipro"]);
+        findCityUkLabels.mockResolvedValue(new Map([["Dnipro", "Дніпро"]]));
+        findByCity.mockResolvedValue([]);
+
+        const { range, buttons } = fakeRange();
+        await render({}, range);
+        expect(buttons.map((b) => b.label)).toEqual(["Дніпро", "Назад"]);
+
+        const ctx: any = { session: { candidateData: {} } };
+        await buttons[0]!.handler!(ctx);
+        expect(ctx.session.candidateData.city).toBe("Dnipro");
     });
 });

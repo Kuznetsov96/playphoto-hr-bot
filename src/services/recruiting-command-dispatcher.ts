@@ -585,7 +585,7 @@ export class RecruitingCommandDispatcher {
             });
         }
 
-        const label = escapeHtml(`${formatLocation(location, "in-city")}, ${formatCityUk(location.city)}`);
+        const label = escapeHtml(`${formatLocation(location, "in-city")}, ${formatCityUk(location.city, location.cityUk)}`);
         const text = isInTeamRegister(candidate.status, candidate.currentStep)
             ? CANDIDATE_TEXTS["candidate-location-changed-in-team"](label)
             : CANDIDATE_TEXTS["candidate-location-changed"](label);

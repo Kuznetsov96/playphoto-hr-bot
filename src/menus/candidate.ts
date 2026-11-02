@@ -150,10 +150,11 @@ menuRegistry.register(candidateCityMenu);
 
 candidateCityMenu.dynamic(async (ctx, range) => {
     const cities = await locationRepository.findAllCities(true, true);
+    const cityUkLabels = await locationRepository.findCityUkLabels();
     cities.forEach((city, i) => {
         // Підпис — українською, значення в сесії й базі — канонічне
         // латинське (аудит 01.10.2026, погоджено власником).
-        range.text(formatCityUk(city), async (ctx) => {
+        range.text(formatCityUk(city, cityUkLabels.get(city)), async (ctx) => {
             const { persistCandidate, questionnaireClosed } = await import("../modules/candidate/handlers/index.js");
             if (await questionnaireClosed(ctx)) return;
             ctx.session.candidateData.city = city;

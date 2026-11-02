@@ -375,6 +375,8 @@ model Location {
   branch                 String?
   city                   String
   address                String?
+  /// Українська назва міста зі знімка вебаппу (довідник міст). null — міста там немає.
+  cityUk                 String?
   npRef                  String? // Nova Poshta Department/Postomat Ref
   npAddressRef           String? // Nova Poshta Address Ref (for courier delivery)
   neededCount            Int                  @default(0)

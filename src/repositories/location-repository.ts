@@ -24,6 +24,8 @@ const byCityCache = new TtlCache<Location[]>(LOCATION_CACHE_TTL_MS);
  * запитів findAllActive, скільки було тапів. Той самий TTL і той самий clear() у update().
  */
 const activeCache = new TtlCache<Location[]>(LOCATION_CACHE_TTL_MS);
+/** Місто (Location.city) → українська назва зі знімка вебаппу; той самий TTL і clear() у update(). */
+const cityUkCache = new TtlCache<Map<string, string>>(LOCATION_CACHE_TTL_MS);
 
 export class LocationRepository {
     async findAll(): Promise<Location[]> {
@@ -75,6 +77,26 @@ export class LocationRepository {
 
                 return { ...l, fopId, hasAcquiring };
             });
+        });
+    }
+
+    /**
+     * Українські назви міст для того, що читає кандидатка. Ключ — `Location.city`
+     * (канонічне значення в сесії й базі), значення — `cityUk` зі знімка. Міста без
+     * назви в мапу не потрапляють: формат тоді падає на статичну карту.
+     */
+    async findCityUkLabels(): Promise<Map<string, string>> {
+        return cityUkCache.get("cityUk", async () => {
+            const rows = await prisma.location.findMany({
+                where: { cityUk: { not: null } },
+                select: { city: true, cityUk: true },
+            });
+            const labels = new Map<string, string>();
+            for (const row of rows) {
+                const label = row.cityUk?.trim();
+                if (label) labels.set(row.city, label);
+            }
+            return labels;
         });
     }
 
@@ -190,6 +212,7 @@ export class LocationRepository {
         citiesCache.clear();
         byCityCache.clear();
         activeCache.clear();
+        cityUkCache.clear();
         return updated;
     }
     async countCandidatesByCity(city: string, status: any, extraWhere: any = {}): Promise<number> {

@@ -437,4 +437,13 @@ describe("AwsBusinessSyncService — location pay", () => {
         expect(data).not.toHaveProperty("pay");
         expect(data).not.toHaveProperty("address");
     });
+
+    it("writes cityUk from the snapshot, null included", async () => {
+        expect((await syncWithLocation({ cityUk: "Дніпро" }))).toMatchObject({ cityUk: "Дніпро" });
+        expect((await syncWithLocation({ cityUk: null }))).toHaveProperty("cityUk", null);
+    });
+
+    it("does not touch cityUk when an older webapp omits it", async () => {
+        expect(await syncWithLocation({})).not.toHaveProperty("cityUk");
+    });
 });

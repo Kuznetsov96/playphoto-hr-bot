@@ -9,7 +9,7 @@ describe("formatCityUk", () => {
     });
 
     it("канонические значения показываются по-украински", () => {
-        expect(["Kyiv", "Lviv", "Zaporizhzhia", "Kolomyya", "Khmelnytskyi", "Cherkasy", "Rivne", "Sambir", "Sheptytskyi", "Kharkiv", "Chortkiv", "Ternopil"].map(formatCityUk))
+        expect(["Kyiv", "Lviv", "Zaporizhzhia", "Kolomyya", "Khmelnytskyi", "Cherkasy", "Rivne", "Sambir", "Sheptytskyi", "Kharkiv", "Chortkiv", "Ternopil"].map((city) => formatCityUk(city)))
             .toEqual(["Київ", "Львів", "Запоріжжя", "Коломия", "Хмельницький", "Черкаси", "Рівне", "Самбір", "Шептицький", "Харків", "Чортків", "Тернопіль"]);
     });
 
@@ -17,5 +17,17 @@ describe("formatCityUk", () => {
         expect(formatCityUk("Kolomyia")).toBe("Коломия");
         expect(formatCityUk("Львів")).toBe("Львів");
         expect(formatCityUk("Odesa")).toBe("Odesa");
+    });
+
+    it("назва зі довідника має пріоритет над статичною картою", () => {
+        expect(formatCityUk("Dnipro", "Дніпро")).toBe("Дніпро");
+        expect(formatCityUk("Kyiv", "Київ")).toBe("Київ");
+    });
+
+    it("без назви зі довідника — статична карта як страховка", () => {
+        expect(formatCityUk("Dnipro", null)).toBe("Dnipro");
+        expect(formatCityUk("Kolomia", undefined)).toBe("Kolomia");
+        expect(formatCityUk("Kolomyia", null)).toBe("Коломия");
+        expect(formatCityUk("Dnipro", "  ")).toBe("Dnipro");
     });
 });

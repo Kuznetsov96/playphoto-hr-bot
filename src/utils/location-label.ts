@@ -85,8 +85,14 @@ const CITY_LABELS_UK: Record<string, string> = {
     "Ternopil": "Тернопіль",
 };
 
-/** Канонічне (або будь-яке відоме CITY_MAP) значення міста → українська назва; невідоме — як є. */
-export function formatCityUk(city: string): string {
+/**
+ * Канонічне (або будь-яке відоме CITY_MAP) значення міста → українська назва.
+ * Спершу назва зі знімка вебаппу (`cityUk`, довідник міст), потім статична карта як
+ * страховка; невідоме — як є.
+ */
+export function formatCityUk(city: string, cityUk?: string | null): string {
+    const fromDirectory = cityUk?.trim();
+    if (fromDirectory) return fromDirectory;
     return CITY_LABELS_UK[normalizeCity(city)] ?? city;
 }
 

@@ -60,4 +60,17 @@ describe("locationRepository — закриті точки", () => {
         const repository = await freshRepository();
         expect((await repository.findByCityAdmin("Lviv")).map(row => row.id)).toEqual(["lviv-closed", "lviv-2"]);
     });
+
+    it("findCityUkLabels() віддає місто → назву лише для непорожніх cityUk", async () => {
+        findMany.mockReset();
+        findMany.mockResolvedValue([
+            { city: "Dnipro", cityUk: "Дніпро" },
+            { city: "Kyiv", cityUk: null },
+        ]);
+        const repository = await freshRepository();
+        expect(await repository.findCityUkLabels()).toEqual(new Map([["Dnipro", "Дніпро"]]));
+        expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+            where: { cityUk: { not: null } },
+        }));
+    });
 });
