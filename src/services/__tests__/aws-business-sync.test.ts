@@ -148,8 +148,31 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         // 486213976 has no User row at all — "not checked yet", not "unreachable" — so it must
         // be left out of the payload entirely rather than sent with any found value.
         expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
-            { telegramId: "486213975", found: true, username: "ivan_petrov" },
-            { telegramId: "486213977", found: true },
+            { telegramId: "486213975", found: true, username: "ivan_petrov", supportTopicUrl: null },
+            { telegramId: "486213977", found: true, supportTopicUrl: null },
+        ]);
+    });
+
+    it("sends the support topic link for a user with a thread and explicit null without one", async () => {
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([
+            { telegramId: "486213975" },
+            { telegramId: "486213976" },
+            { telegramId: "486213977" },
+        ]));
+        prismaMock.user.findMany.mockResolvedValue([
+            { telegramId: 486213975n, username: null, botBlockedAt: null, supportThread: { chatId: -1001234567890n, topicId: 42 } },
+            { telegramId: 486213976n, username: null, botBlockedAt: null, supportThread: null },
+            // Чат без префікса -100 — як його будує topicLink.
+            { telegramId: 486213977n, username: null, botBlockedAt: null, supportThread: { chatId: -555n, topicId: 7 } },
+        ]);
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
+            { telegramId: "486213975", found: true, supportTopicUrl: "https://t.me/c/1234567890/42" },
+            { telegramId: "486213976", found: true, supportTopicUrl: null },
+            { telegramId: "486213977", found: true, supportTopicUrl: "https://t.me/c/555/7" },
         ]);
     });
 
@@ -175,7 +198,7 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         expect(firstChunk).toHaveLength(500);
         expect(secondChunk).toHaveLength(1);
         expect([...(firstChunk ?? []), ...(secondChunk ?? [])]).toEqual(
-            employees.map((employee) => ({ telegramId: employee.telegramId, found: true })),
+            employees.map((employee) => ({ telegramId: employee.telegramId, found: true, supportTopicUrl: null })),
         );
     });
 

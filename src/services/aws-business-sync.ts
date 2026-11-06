@@ -9,6 +9,7 @@ import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
 import { withSerializableRetry } from "../utils/serializable-retry.js";
+import { topicLink } from "./support-thread-service.js";
 import {
     awsBusinessClient,
     type AwsBusinessSnapshot,
@@ -636,11 +637,23 @@ export class AwsBusinessSyncService {
             const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
             const knownUsers = await prisma.user.findMany({
                 where: { telegramId: { in: snapshotTelegramIds } },
-                select: { telegramId: true, username: true, botBlockedAt: true },
+                select: {
+                    telegramId: true,
+                    username: true,
+                    botBlockedAt: true,
+                    supportThread: { select: { chatId: true, topicId: true } },
+                },
             });
             const known = new Map(knownUsers.map((user) => [
                 user.telegramId.toString(),
-                { username: user.username, reachable: user.botBlockedAt === null },
+                {
+                    username: user.username,
+                    reachable: user.botBlockedAt === null,
+                    // Архівна тема — усе ще тема цієї людини, тож посилання йде й для неї.
+                    supportTopicUrl: user.supportThread
+                        ? topicLink(user.supportThread.chatId, user.supportThread.topicId)
+                        : null,
+                },
             ]));
             const links = snapshot.employees.flatMap((employee) => {
                 const user = known.get(employee.telegramId);
@@ -649,6 +662,8 @@ export class AwsBusinessSyncService {
                     telegramId: employee.telegramId,
                     found: user.reachable,
                     ...(user.username ? { username: user.username } : {}),
+                    // Явний null вебапп трактує як «очистити», відсутнє поле — «не чіпати».
+                    supportTopicUrl: user.supportTopicUrl,
                 }];
             });
             for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
