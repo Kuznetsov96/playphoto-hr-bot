@@ -176,6 +176,38 @@ describe("AwsBusinessSyncService — reportTelegramLinks", () => {
         ]);
     });
 
+    it("retries a chunk without supportTopicUrl on HTTP 400, warning once", async () => {
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        prismaMock.user.findMany.mockResolvedValue([
+            { telegramId: 486213975n, username: "ivan_petrov", botBlockedAt: null, supportThread: { chatId: -1001n, topicId: 2 } },
+        ]);
+        awsBusinessClientMock.reportTelegramLinks
+            .mockRejectedValueOnce(Object.assign(new Error("bad request"), { status: 400 }))
+            .mockResolvedValueOnce({ updated: 1 });
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledTimes(2);
+        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenNthCalledWith(2, [
+            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+        ]);
+        expect(loggerMock.warn).toHaveBeenCalledWith("telegram-links: webapp rejected supportTopicUrl, sent without it");
+    });
+
+    it("does not retry on a non-400 error", async () => {
+        awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
+        prismaMock.user.findMany.mockResolvedValue([
+            { telegramId: 486213975n, username: null, botBlockedAt: null, supportThread: null },
+        ]);
+        awsBusinessClientMock.reportTelegramLinks.mockRejectedValue(Object.assign(new Error("boom"), { status: 500 }));
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+
+        await new AwsBusinessSyncService().syncAll();
+
+        expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledTimes(1);
+    });
+
     it("chunks at 500 entries and the chunks reproduce the input exactly", async () => {
         const employees = Array.from({ length: 501 }, (_, index) => ({
             telegramId: String(100000000 + index),

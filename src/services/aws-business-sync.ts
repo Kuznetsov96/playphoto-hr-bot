@@ -666,9 +666,24 @@ export class AwsBusinessSyncService {
                     supportTopicUrl: user.supportTopicUrl,
                 }];
             });
+            // Бот може викотитися раніше за вебапп: старий вебапп відбиває невідоме поле
+            // з HTTP 400. Тоді шматок іде ще раз без supportTopicUrl (ніки доїдуть),
+            // а попередження — одне на прохід.
+            let warnedWithoutTopicUrl = false;
             for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
                 const chunk = links.slice(index, index + TELEGRAM_LINKS_CHUNK_SIZE);
-                await awsBusinessClient.reportTelegramLinks(chunk);
+                try {
+                    await awsBusinessClient.reportTelegramLinks(chunk);
+                } catch (error) {
+                    if ((error as { status?: unknown } | null)?.status !== 400) throw error;
+                    if (!warnedWithoutTopicUrl) {
+                        warnedWithoutTopicUrl = true;
+                        logger.warn("telegram-links: webapp rejected supportTopicUrl, sent without it");
+                    }
+                    await awsBusinessClient.reportTelegramLinks(
+                        chunk.map(({ supportTopicUrl: _omitted, ...rest }) => rest),
+                    );
+                }
             }
         } catch (error) {
             logger.warn({ err: error }, "could not report telegram links");
