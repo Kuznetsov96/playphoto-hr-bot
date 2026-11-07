@@ -9,6 +9,7 @@ import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
 import { withSerializableRetry } from "../utils/serializable-retry.js";
+import { topicLink } from "./support-thread-service.js";
 import {
     awsBusinessClient,
     type AwsBusinessSnapshot,
@@ -636,11 +637,23 @@ export class AwsBusinessSyncService {
             const snapshotTelegramIds = snapshot.employees.map((employee) => BigInt(employee.telegramId));
             const knownUsers = await prisma.user.findMany({
                 where: { telegramId: { in: snapshotTelegramIds } },
-                select: { telegramId: true, username: true, botBlockedAt: true },
+                select: {
+                    telegramId: true,
+                    username: true,
+                    botBlockedAt: true,
+                    supportThread: { select: { chatId: true, topicId: true } },
+                },
             });
             const known = new Map(knownUsers.map((user) => [
                 user.telegramId.toString(),
-                { username: user.username, reachable: user.botBlockedAt === null },
+                {
+                    username: user.username,
+                    reachable: user.botBlockedAt === null,
+                    // Архівна тема — усе ще тема цієї людини, тож посилання йде й для неї.
+                    supportTopicUrl: user.supportThread
+                        ? topicLink(user.supportThread.chatId, user.supportThread.topicId)
+                        : null,
+                },
             ]));
             const links = snapshot.employees.flatMap((employee) => {
                 const user = known.get(employee.telegramId);
@@ -649,11 +662,28 @@ export class AwsBusinessSyncService {
                     telegramId: employee.telegramId,
                     found: user.reachable,
                     ...(user.username ? { username: user.username } : {}),
+                    // Явний null вебапп трактує як «очистити», відсутнє поле — «не чіпати».
+                    supportTopicUrl: user.supportTopicUrl,
                 }];
             });
+            // Бот може викотитися раніше за вебапп: старий вебапп відбиває невідоме поле
+            // з HTTP 400. Тоді шматок іде ще раз без supportTopicUrl (ніки доїдуть),
+            // а попередження — одне на прохід.
+            let warnedWithoutTopicUrl = false;
             for (let index = 0; index < links.length; index += TELEGRAM_LINKS_CHUNK_SIZE) {
                 const chunk = links.slice(index, index + TELEGRAM_LINKS_CHUNK_SIZE);
-                await awsBusinessClient.reportTelegramLinks(chunk);
+                try {
+                    await awsBusinessClient.reportTelegramLinks(chunk);
+                } catch (error) {
+                    if ((error as { status?: unknown } | null)?.status !== 400) throw error;
+                    if (!warnedWithoutTopicUrl) {
+                        warnedWithoutTopicUrl = true;
+                        logger.warn("telegram-links: webapp rejected supportTopicUrl, sent without it");
+                    }
+                    await awsBusinessClient.reportTelegramLinks(
+                        chunk.map(({ supportTopicUrl: _omitted, ...rest }) => rest),
+                    );
+                }
             }
         } catch (error) {
             logger.warn({ err: error }, "could not report telegram links");

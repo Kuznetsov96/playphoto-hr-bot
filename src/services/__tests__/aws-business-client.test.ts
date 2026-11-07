@@ -206,7 +206,7 @@ describe("AwsBusinessClient", () => {
         const { AwsBusinessClient } = await import("../aws-business-client.js");
 
         const result = await new AwsBusinessClient().reportTelegramLinks([
-            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+            { telegramId: "486213975", found: true, username: "ivan_petrov", supportTopicUrl: "https://t.me/c/1/2" },
         ]);
 
         expect(fetch).toHaveBeenCalledWith(
@@ -221,7 +221,7 @@ describe("AwsBusinessClient", () => {
         const call = vi.mocked(fetch).mock.calls.at(0);
         const requestInit = call?.[1];
         expect(JSON.parse(requestInit?.body as string)).toEqual({
-            links: [{ telegramId: "486213975", found: true, username: "ivan_petrov" }],
+            links: [{ telegramId: "486213975", found: true, username: "ivan_petrov", supportTopicUrl: "https://t.me/c/1/2" }],
         });
         expect(result).toEqual({ updated: 1 });
     });

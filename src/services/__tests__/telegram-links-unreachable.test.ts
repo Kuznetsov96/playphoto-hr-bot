@@ -130,7 +130,7 @@ describe("telegram link reporting", () => {
         await new AwsBusinessSyncService().syncAll();
 
         expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
-            { telegramId: "486213975", found: false, username: "ivan_petrov" },
+            { telegramId: "486213975", found: false, username: "ivan_petrov", supportTopicUrl: null },
         ]);
     });
 
@@ -144,7 +144,7 @@ describe("telegram link reporting", () => {
         await new AwsBusinessSyncService().syncAll();
 
         expect(awsBusinessClientMock.reportTelegramLinks).toHaveBeenCalledWith([
-            { telegramId: "486213975", found: true, username: "ivan_petrov" },
+            { telegramId: "486213975", found: true, username: "ivan_petrov", supportTopicUrl: null },
         ]);
     });
 
@@ -174,6 +174,6 @@ describe("telegram link reporting", () => {
             Array<{ telegramId: string; found: boolean }>,
         ];
         expect(payload.find((link) => link.telegramId === "486213999")).toBeUndefined();
-        expect(payload).toEqual([{ telegramId: "486213975", found: true, username: "ivan_petrov" }]);
+        expect(payload).toEqual([{ telegramId: "486213975", found: true, username: "ivan_petrov", supportTopicUrl: null }]);
     });
 });

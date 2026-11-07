@@ -1534,7 +1534,7 @@ export class AwsBusinessClient {
      * failures rather than let them interrupt a sync.
      */
     async reportTelegramLinks(
-        links: Array<{ telegramId: string; found: boolean; username?: string }>
+        links: Array<{ telegramId: string; found: boolean; username?: string; supportTopicUrl?: string | null }>
     ): Promise<{ updated: number }> {
         return this.request("/telegram-links", {
             method: "POST",
