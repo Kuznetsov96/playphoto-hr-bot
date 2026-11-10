@@ -143,6 +143,16 @@ describe("candidate free message outside the questionnaire", () => {
             expect(showCandidateStatus).not.toHaveBeenCalled();
         });
 
+        it("помилка повернення — лог і звичайне «передали команді»", async () => {
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockRejectedValue(new Error("boom"));
+
+            await run(makeCtx({ text: "привіт" }, "idle"));
+
+            expect(startScreening).not.toHaveBeenCalled();
+            expect(sendMessage.mock.calls[0]?.[1]).toBe(CANDIDATE_TEXTS["candidate-message-forwarded"]);
+        });
+
         it("якщо повернення не потрібне — звичайне «передали команді»", async () => {
             findByTelegramId.mockResolvedValue(blocker);
             returnBlockedCandidateIfNeeded.mockResolvedValue(null);

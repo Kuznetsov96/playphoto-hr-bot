@@ -92,6 +92,15 @@ describe("/start от BLOCKER", () => {
         expect(showCandidateStatus).not.toHaveBeenCalled();
     });
 
+    it("ошибка возврата — лог и прежний экран статуса без welcomeBack", async () => {
+        returnBlockedCandidateIfNeeded.mockRejectedValue(new Error("boom"));
+
+        await start();
+
+        expect(startScreening).not.toHaveBeenCalled();
+        expect(showCandidateStatus).toHaveBeenCalledWith(expect.anything(), blocker, undefined);
+    });
+
     it("не BLOCKER — возврат не вызывается, статус без welcomeBack", async () => {
         const active = { id: "c1", status: "SCREENING", user: { id: "u1" } };
         findWithProfilesByTelegramId.mockResolvedValue({ id: "u1", candidate: active });

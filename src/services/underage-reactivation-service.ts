@@ -47,8 +47,18 @@ function hasOpenCandidateLocation(candidate: UnderageReactivationCandidate): boo
     return (location.neededCount ?? 0) > 0;
 }
 
+/**
+ * Лише REJECTED: джоб днів народження та booking-service викликають це для
+ * будь-якого статусу, BLOCKER-а вони торкатись не повинні. Повернення з BLOCKER
+ * іде через getUnderageDecisionIgnoringStatus (blocker-return-service).
+ */
 export function getUnderageReactivationDecision(candidate: UnderageReactivationCandidate): UnderageReactivationDecision | null {
-    if (candidate.status !== CandidateStatus.REJECTED && candidate.status !== CandidateStatus.BLOCKER) return null;
+    if (candidate.status !== CandidateStatus.REJECTED) return null;
+    return getUnderageDecisionIgnoringStatus(candidate);
+}
+
+/** Та сама логіка без перевірки статусу: викликач сам відповідає за те, що статус дозволений. */
+export function getUnderageDecisionIgnoringStatus(candidate: UnderageReactivationCandidate): UnderageReactivationDecision | null {
     if (candidate.hrDecision !== "REJECTED_SYSTEM_UNDERAGE") return null;
     if (candidate.gender !== "female") return null;
     if (!candidate.birthDate) return null;

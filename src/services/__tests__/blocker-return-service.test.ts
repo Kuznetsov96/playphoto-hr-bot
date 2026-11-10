@@ -47,10 +47,8 @@ describe("getBlockerReturnDecision", () => {
         });
     });
 
-    it.each([FunnelStep.TRAINING, FunnelStep.FIRST_SHIFT])("%s -> ACCEPTED", (currentStep) => {
-        const d = getBlockerReturnDecision({ ...full, currentStep });
-        expect(d?.mode).toBe("ACCEPTED");
-        expect(d?.patch).not.toHaveProperty("interviewInvitedAt");
+    it.each([FunnelStep.TRAINING, FunnelStep.FIRST_SHIFT])("%s без hrDecision -> null (ручний розбір, hrDecision не вигадуємо)", (currentStep) => {
+        expect(getBlockerReturnDecision({ ...full, currentStep })).toBeNull();
     });
 
     it.each(["REJECTED", "AGE_LIMIT", "NOSHOW"])("%s -> REJECTED без hrDecision в patch", (hrDecision) => {
@@ -66,10 +64,15 @@ describe("getBlockerReturnDecision", () => {
         });
     });
 
-    it("REJECTED_SYSTEM_UNDERAGE, вік уже підходить -> UNDERAGE", () => {
+    it("REJECTED_SYSTEM_UNDERAGE, вік уже підходить -> внутрішній режим underage", () => {
         const d = getBlockerReturnDecision({ ...full, hrDecision: "REJECTED_SYSTEM_UNDERAGE" });
-        expect(d?.mode).toBe("UNDERAGE");
+        expect(d?.mode).toBe("READY_FOR_INTERVIEW");
         expect(d?.patch).toMatchObject({ hrDecision: null, status: CandidateStatus.SCREENING });
+    });
+
+    it("REJECTED_SYSTEM_UNDERAGE з незаповненою анкетою -> RESUME_SCREENING", () => {
+        const d = getBlockerReturnDecision({ ...full, hrDecision: "REJECTED_SYSTEM_UNDERAGE", appearance: null, source: null });
+        expect(d?.mode).toBe("RESUME_SCREENING");
     });
 
     it("REJECTED_SYSTEM_UNDERAGE, досі неповнолітня -> REJECTED", () => {

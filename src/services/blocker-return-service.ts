@@ -3,12 +3,12 @@ import { candidateRepository, type CandidateWithRelations } from "../repositorie
 import { logAuditEvent, logBusinessEvent } from "../core/log-events.js";
 import {
     decideScreeningPlacement,
-    getUnderageReactivationDecision,
+    getUnderageDecisionIgnoringStatus,
     type UnderageReactivationCandidate,
     type UnderageReactivationMode,
 } from "./underage-reactivation-service.js";
 
-export type BlockerReturnMode = UnderageReactivationMode | "INTERVIEW_WAITLIST" | "REJECTED" | "ACCEPTED" | "UNDERAGE";
+export type BlockerReturnMode = UnderageReactivationMode | "INTERVIEW_WAITLIST" | "REJECTED" | "ACCEPTED";
 
 export type BlockerReturnCandidate = UnderageReactivationCandidate & { currentStep?: FunnelStep | null };
 
@@ -35,8 +35,10 @@ export function getBlockerReturnDecision(candidate: BlockerReturnCandidate): Blo
     const hrDecision = candidate.hrDecision ?? null;
 
     if (hrDecision === "REJECTED_SYSTEM_UNDERAGE") {
-        const underage = getUnderageReactivationDecision(candidate);
-        if (underage) return { mode: "UNDERAGE", patch: underage.patch };
+        const underage = getUnderageDecisionIgnoringStatus(candidate);
+        // Внутрішній режим (RESUME_SCREENING тощо), щоб обидві точки входу
+        // однаково розпочинали анкету.
+        if (underage) return underage;
         return { mode: "REJECTED", patch: { status: CandidateStatus.REJECTED } };
     }
 
@@ -54,11 +56,10 @@ export function getBlockerReturnDecision(candidate: BlockerReturnCandidate): Blo
 
     if (hrDecision !== null) return null;
 
+    // TRAINING/FIRST_SHIFT без рішення HR: автоматично не рухаємо і hrDecision
+    // не вигадуємо — це лишається ручним розбором.
     if (candidate.currentStep === FunnelStep.TRAINING || candidate.currentStep === FunnelStep.FIRST_SHIFT) {
-        return {
-            mode: "ACCEPTED",
-            patch: { status: CandidateStatus.MENTOR_MANUAL, hrDecision: "ACCEPTED", ...LOSS_RESET },
-        };
+        return null;
     }
 
     if (candidate.currentStep === FunnelStep.INTERVIEW) {
@@ -84,7 +85,14 @@ export async function returnBlockedCandidateIfNeeded(
     const decision = getBlockerReturnDecision(candidate);
     if (!decision) return null;
 
-    const updatedCandidate = await candidateRepository.update(candidate.id, decision.patch, tx);
+    // Умовний запис: якщо статус уже змінили (HR, паралельний апдейт), не повертаємо.
+    const updatedCandidate = await candidateRepository.updateIfStatus(
+        candidate.id,
+        CandidateStatus.BLOCKER,
+        decision.patch,
+        tx
+    );
+    if (!updatedCandidate) return null;
     const telegramId = candidate.user?.telegramId ?? updatedCandidate.user?.telegramId;
     const event = {
         event: "candidate.blocker_returned",

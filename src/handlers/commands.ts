@@ -353,7 +353,12 @@ commandHandlers.command("start", async (ctx) => {
             let welcomeBack = false;
             if (candidate.status === CandidateStatus.BLOCKER) {
                 const { returnBlockedCandidateIfNeeded } = await import("../services/blocker-return-service.js");
-                const blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "start_command");
+                let blockerReturn: Awaited<ReturnType<typeof returnBlockedCandidateIfNeeded>> = null;
+                try {
+                    blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "start_command");
+                } catch (err) {
+                    logger.error({ err, candidateId: candidate.id }, "Blocker return failed in /start");
+                }
                 if (blockerReturn) {
                     candidate = blockerReturn.candidate;
                     // Отказ показываем обычным экраном, без «З поверненням!».

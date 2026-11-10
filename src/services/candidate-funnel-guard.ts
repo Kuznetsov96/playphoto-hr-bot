@@ -135,8 +135,24 @@ function isRecoverableUnderageRejection(state: CandidateFunnelSnapshot): boolean
     return state.status === CandidateStatus.REJECTED && state.hrDecision === "REJECTED_SYSTEM_UNDERAGE";
 }
 
+/**
+ * Повернення з BLOCKER (blocker-return-service): кандидатка написала сама, тож
+ * бот знову доставляє. BLOCKER — це стан «повідомлення не доходили», а не крок
+ * воронки, тому повертаємо лише на кроки, куди вона потрапила б без блокування.
+ * REJECTED дозволений загалом.
+ */
+function isBlockerReturnSource(oldState: CandidateFunnelSnapshot, nextStatus: CandidateStatus): boolean {
+    return oldState.status === CandidateStatus.BLOCKER && ([
+        CandidateStatus.SCREENING,
+        CandidateStatus.MANUAL_REVIEW,
+        CandidateStatus.WAITLIST_HR,
+        CandidateStatus.MENTOR_MANUAL,
+    ] as CandidateStatus[]).includes(nextStatus);
+}
+
 function allowsTransition(oldState: CandidateFunnelSnapshot, nextStatus: CandidateStatus): boolean {
     if (oldState.status === nextStatus) return true;
+    if (isBlockerReturnSource(oldState, nextStatus)) return true;
 
     switch (nextStatus) {
         case CandidateStatus.SCREENING:

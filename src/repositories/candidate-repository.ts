@@ -470,6 +470,27 @@ export class CandidateRepository {
         });
     }
 
+    /**
+     * Оновлення лише якщо статус досі expectedStatus. Рядок блокується
+     * (SELECT … FOR UPDATE) і перечитується в транзакції; guard, штампи та
+     * зеркалування лишаються в update().
+     */
+    async updateIfStatus(
+        id: string,
+        expectedStatus: CandidateStatus,
+        data: Prisma.CandidateUpdateInput,
+        tx?: Prisma.TransactionClient
+    ): Promise<CandidateWithRelations | null> {
+        const run = async (client: Prisma.TransactionClient) => {
+            const rows = await client.$queryRaw<Array<{ status: CandidateStatus }>>`
+                SELECT "status" FROM "Candidate" WHERE "id" = ${id} FOR UPDATE
+            `;
+            if (!rows[0] || rows[0].status !== expectedStatus) return null;
+            return this.update(id, data, client);
+        };
+        return tx ? run(tx) : prisma.$transaction(run);
+    }
+
     async update(id: string, data: Prisma.CandidateUpdateInput, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
         const client = tx || prisma;
         const oldCandidate = await this.getFunnelSnapshot(client, id);

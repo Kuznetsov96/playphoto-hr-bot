@@ -12,6 +12,7 @@ import { shouldRouteMessageToPrivateRoleFlows } from "../../utils/message-routin
 import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 import { isMirroredCandidateMessage } from "../../middleware/recruiting-incoming.js";
 import { redis } from "../../core/redis.js";
+import logger from "../../core/logger.js";
 
 const FORWARDED_ACK_TTL_SECONDS = 3 * 60 * 60;
 
@@ -50,7 +51,12 @@ candidateModule.on("message", async (ctx, next) => {
         // Повідомлення вже дзеркалиться в вебапп (recruiting-incoming), тут лише
         // повертаємо на крок воронки замість «передали команді».
         const { returnBlockedCandidateIfNeeded } = await import("../../services/blocker-return-service.js");
-        const blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "free_text");
+        let blockerReturn: Awaited<ReturnType<typeof returnBlockedCandidateIfNeeded>> = null;
+        try {
+            blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "free_text");
+        } catch (err) {
+            logger.error({ err, candidateId: candidate.id }, "Blocker return failed on free text");
+        }
         if (blockerReturn) {
             if (blockerReturn.mode === "RESUME_SCREENING") {
                 const { startScreening, candidateDataFromRecord } = await import("./handlers/index.js");
