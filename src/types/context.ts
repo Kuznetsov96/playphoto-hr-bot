@@ -172,7 +172,7 @@ export interface SessionData {
         step?: string;
         replyingToUserId?: string;
         ticketFilter?: string;
-        preferredTarget?: "HR" | "MENTOR" | "RECOVERY";
+        preferredTarget?: "HR" | "MENTOR";
         entryReason?: "RETURNED_AFTER_BOT_BLOCK";
     };
 

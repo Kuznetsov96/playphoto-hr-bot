@@ -112,7 +112,6 @@ const envSchema = z.object({
 
     // Chats
     SUPPORT_CHAT_ID: z.string().min(1, "SUPPORT_CHAT_ID is missing"),
-    RECOVERY_CHAT_ID: z.string().default("-1003873088973"),
     LEADS_CHAT_ID: z.string().optional(),
     TEAM_HUB_CHAT_ID: z.string().min(1, "TEAM_HUB_CHAT_ID is missing"),
     TEAM_CHANNEL_ID: z.string().min(1, "TEAM_CHANNEL_ID is missing"),
@@ -202,7 +201,6 @@ export const OPENAI_API_KEY = env.OPENAI_API_KEY || "";
 export const OPENAI_VISION_MODEL = env.OPENAI_VISION_MODEL || "gpt-5-mini";
 
 export const SUPPORT_CHAT_ID = parseInt(env.SUPPORT_CHAT_ID);
-export const RECOVERY_CHAT_ID = parseInt(env.RECOVERY_CHAT_ID);
 
 // Spreadsheets
 export const SPREADSHEET_ID_TECH_CASH = env.SPREADSHEET_ID_TECH_CASH;
@@ -301,7 +299,6 @@ export const TEAM_CHATS = {
     SUPPORT: parseInt(env.SUPPORT_CHAT_ID),
     CHANNEL: parseInt(env.TEAM_CHANNEL_ID),
     LOGISTICS: env.LOGISTICS_TOPIC_ID ? parseInt(env.LOGISTICS_TOPIC_ID) : undefined,
-    RECOVERY: RECOVERY_CHAT_ID
 };
 
 /** Map of Ukrainian city names (from sheet headers) → DB city values (Ukrainian) */

@@ -75,7 +75,6 @@ jobs:
         BOT_TOKEN: "123456:ABC-DEF"
         # Mandatory Chat IDs
         SUPPORT_CHAT_ID: "-10012345678"
-        RECOVERY_CHAT_ID: "-10012345678"
         LEADS_CHAT_ID: "-10012345678"
         TEAM_HUB_CHAT_ID: "-10012345678"
         TEAM_CHANNEL_ID: "-10012345678"
@@ -153,19 +152,11 @@ jobs:
     - name: 📦 Prepare deploy artifacts
       env:
         DOCKER_ENV: ${{ secrets.DOCKER_ENV }}
-        RECOVERY_CHAT_ID: ${{ secrets.RECOVERY_CHAT_ID }}
         SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
       run: |
         REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
         echo "REPO_LC=$REPO_LC" >> "$GITHUB_ENV"
         echo "$DOCKER_ENV" > .env
-        if [ -n "$RECOVERY_CHAT_ID" ]; then
-          if grep -q '^RECOVERY_CHAT_ID=' .env; then
-            sed -i "s|^RECOVERY_CHAT_ID=.*|RECOVERY_CHAT_ID=$RECOVERY_CHAT_ID|" .env
-          else
-            printf '\nRECOVERY_CHAT_ID=%s\n' "$RECOVERY_CHAT_ID" >> .env
-          fi
-        fi
         echo "$SA_JSON" > google-service-account.json
 
     - name: 📂 Copy configs to server

@@ -11,30 +11,8 @@ import { formatLocation } from "./location-label.js";
 import { canScheduleInterview, hasInterviewStarted, isQuestionnaireOpen } from "./screening-state.js";
 import { buildBookedInterviewKeyboard } from "./interview-booking-keyboard.js";
 
-function getCandidateAge(birthDate?: Date | string | null): number | null {
-    if (!birthDate) return null;
-
-    const parsedBirthDate = birthDate instanceof Date ? birthDate : new Date(birthDate);
-    if (Number.isNaN(parsedBirthDate.getTime())) return null;
-
-    const today = new Date();
-    let age = today.getFullYear() - parsedBirthDate.getFullYear();
-    const monthDelta = today.getMonth() - parsedBirthDate.getMonth();
-
-    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < parsedBirthDate.getDate())) {
-        age -= 1;
-    }
-
-    return age;
-}
-
 function hasBlockedDeliveryReason(candidate: any): boolean {
     return candidate.status === CandidateStatus.BLOCKER || candidate.candidateDecision?.includes("Бот заблоковано") === true;
-}
-
-function isRecoveryEligibleCandidate(candidate: any): boolean {
-    const age = getCandidateAge(candidate.birthDate);
-    return candidate.gender === "female" && age !== null && age >= 17 && age <= 26 && hasBlockedDeliveryReason(candidate);
 }
 
 /**
@@ -94,7 +72,6 @@ export async function showCandidateStatus(
     let text = "";
     let kb = new InlineKeyboard();
     const canContactStaff = candidate.gender !== "male";
-    const canUseRecovery = isRecoveryEligibleCandidate(candidate);
 
     // Dashboard logic: Show info for Accepted and beyond
     const isAcceptedOrBeyond = [
@@ -239,18 +216,11 @@ export async function showCandidateStatus(
 
         case CandidateStatus.REJECTED:
             text = selectRejectedStatusText(candidate);
-            if (canUseRecovery) {
-                text += "\n\nРаніше наші повідомлення не доходили до вас у боті. Якщо хочете відновити зв’язок із командою — напишіть нам.";
-                kb.text("Написати нам", "contact_recovery");
-            }
             break;
 
         case CandidateStatus.BLOCKER:
-            text = `<b>Зв’язок із ботом відновлено</b>\n\nРаніше наші повідомлення не доходили до вас, тому ми зупинили сповіщення, щоб не турбувати даремно.`;
-            if (canUseRecovery) {
-                text += "\n\nЩоб відновити контакт із командою або поставити запитання — натисніть кнопку нижче.";
-                kb.text("Написати нам", "contact_recovery");
-            }
+            text = CANDIDATE_TEXTS["candidate-default-status"]();
+            kb.text("Написати нам", "contact_hr");
             break;
 
         default:

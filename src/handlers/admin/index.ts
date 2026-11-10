@@ -157,7 +157,6 @@ const protectedAdminCallbacks = adminProtected.filter(c => c.has("callback_query
     c.callbackQuery.data.startsWith("admin-") ||
     c.callbackQuery.data.startsWith("view_") ||
     c.callbackQuery.data.startsWith("close_topic_") ||
-    c.callbackQuery.data.startsWith("recovery_reopen_") ||
     c.callbackQuery.data.startsWith("forward_to_kuznetsov_") ||
     c.callbackQuery.data.startsWith("back_to_") ||
     c.callbackQuery.data.startsWith("ticket_") ||

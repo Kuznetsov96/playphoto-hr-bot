@@ -212,7 +212,6 @@ jobs:
       NODE_ENV: test
       BOT_TOKEN: "123456:ABC-DEF"
       SUPPORT_CHAT_ID: -10012345678
-      RECOVERY_CHAT_ID: -10012345678
       TEAM_HUB_CHAT_ID: -10012345678
       TEAM_CHANNEL_ID: -10012345678
       ADMIN_IDS: 12345678
@@ -337,7 +336,6 @@ jobs:
         env:
           DOCKER_ENV: ${{ secrets.DOCKER_ENV }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          RECOVERY_CHAT_ID: ${{ secrets.RECOVERY_CHAT_ID }}
         run: |
           umask 077
           printf '%s' "$DOCKER_ENV" > "${RUNNER_TEMP}/docker.env"
@@ -355,11 +353,9 @@ jobs:
             --slurpfile current "${RUNNER_TEMP}/current.json" \
             --rawfile dockerEnv "${RUNNER_TEMP}/docker.env" \
             --rawfile googleServiceAccountJson "${RUNNER_TEMP}/google.json" \
-            --arg recoveryChatId "$RECOVERY_CHAT_ID" \
             '($current[0] // {}) + {
               dockerEnv: $dockerEnv,
-              googleServiceAccountJson: $googleServiceAccountJson,
-              recoveryChatId: $recoveryChatId
+              googleServiceAccountJson: $googleServiceAccountJson
             }' > "${RUNNER_TEMP}/next.json"
           aws secretsmanager put-secret-value \
             --secret-id "$RUNTIME_SECRET_ID" \
