@@ -45,6 +45,25 @@ candidateModule.on("message", async (ctx, next) => {
         return;
     }
 
+    if (candidate?.status === "BLOCKER") {
+        // Повернення з BLOCKER: вона написала сама — значить, бот знову доставляє.
+        // Повідомлення вже дзеркалиться в вебапп (recruiting-incoming), тут лише
+        // повертаємо на крок воронки замість «передали команді».
+        const { returnBlockedCandidateIfNeeded } = await import("../../services/blocker-return-service.js");
+        const blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "free_text");
+        if (blockerReturn) {
+            if (blockerReturn.mode === "RESUME_SCREENING") {
+                const { startScreening, candidateDataFromRecord } = await import("./handlers/index.js");
+                ctx.session.candidateData = candidateDataFromRecord(blockerReturn.candidate);
+                await startScreening(ctx);
+                return;
+            }
+            const { showCandidateStatus } = await import("../../utils/candidate-ui.js");
+            await showCandidateStatus(ctx, blockerReturn.candidate, { welcomeBack: true });
+            return;
+        }
+    }
+
     if (candidate) {
         // Повідомлення пішло в тред HR — кажемо про це, не частіше разу на
         // FORWARDED_ACK_TTL_SECONDS, щоб не встрявати в живу переписку

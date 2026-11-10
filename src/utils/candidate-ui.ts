@@ -85,7 +85,11 @@ async function getJobDetailsText(candidate: any): Promise<string | null> {
     return buildJobDetailsText(location);
 }
 
-export async function showCandidateStatus(ctx: MyContext, candidate: any) {
+export async function showCandidateStatus(
+    ctx: MyContext,
+    candidate: any,
+    options?: { welcomeBack?: boolean },
+) {
     const status = candidate.status;
     let text = "";
     let kb = new InlineKeyboard();
@@ -253,6 +257,8 @@ export async function showCandidateStatus(ctx: MyContext, candidate: any) {
             text = CANDIDATE_TEXTS["candidate-default-status"]();
             break;
     }
+
+    if (options?.welcomeBack) text = `${CANDIDATE_TEXTS["candidate-welcome-back"]}\n\n${text}`;
 
     await ScreenManager.renderScreen(ctx, text, kb, true);
 }

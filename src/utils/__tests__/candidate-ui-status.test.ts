@@ -152,6 +152,37 @@ describe("showCandidateStatus", () => {
         expect(renderScreen.mock.calls[0]![1]).toContain("локація <b>Volkland (Шевчик)</b>");
         expect(renderScreen.mock.calls[1]![1]).toBe("<b>Анкету розглянуто</b>\n\nЗапрошуємо вас на онлайн-співбесіду.\n\nОберіть зручний час:");
     });
+
+    it("welcomeBack: «З поверненням!» перед екраном, кнопка «Написати нам» лишається", async () => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+        const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
+
+        await showCandidateStatus({} as any, {
+            status: "WAITLIST_HR", gender: "female", currentStep: "INTERVIEW", isWaitlisted: true,
+        }, { welcomeBack: true });
+
+        const [, text, kb] = renderScreen.mock.calls[0]!;
+        expect(text.startsWith(CANDIDATE_TEXTS["candidate-welcome-back"])).toBe(true);
+        expect(buttons(kb)).toContain("Написати нам");
+    });
+
+    it("без welcomeBack префікса немає", async () => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+        const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
+
+        await showCandidateStatus({} as any, { status: "WAITLIST_HR", gender: "female", currentStep: "INTERVIEW" });
+
+        expect(renderScreen.mock.calls[0]![1]).not.toContain(CANDIDATE_TEXTS["candidate-welcome-back"]);
+    });
+
+    it.each(["WAITLIST_HR", "SCREENING", "MENTOR_MANUAL", "MANUAL_REVIEW", "READY_FOR_INTERVIEW"])(
+        "статус %s не містить «не доходили»",
+        async (status) => {
+            const { showCandidateStatus } = await import("../candidate-ui.js");
+            await showCandidateStatus({} as any, { status, gender: "female", currentStep: "INTERVIEW" }, { welcomeBack: true });
+            expect(renderScreen.mock.calls[0]![1]).not.toContain("не доходили");
+        },
+    );
 });
 
 describe("selectRejectedStatusText: экран /start после отказа по причине", () => {
@@ -203,4 +234,5 @@ describe("selectRejectedStatusText: экран /start после отказа п
         expect(text.startsWith(CANDIDATE_TEXTS["candidate-rejected"])).toBe(true);
         expect(buttons(kb)).toContain("Написати нам");
     });
+
 });
