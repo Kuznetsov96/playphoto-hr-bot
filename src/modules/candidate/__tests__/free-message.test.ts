@@ -123,6 +123,16 @@ describe("candidate free message outside the questionnaire", () => {
             expect(sendMessage).not.toHaveBeenCalled();
         });
 
+        it("режим REJECTED — екран відмови без welcomeBack", async () => {
+            const returned = { id: "cand-1", status: "REJECTED", hrDecision: "REJECTED" };
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: returned, mode: "REJECTED" });
+
+            await run(makeCtx({ text: "Привіт" }, "idle"));
+
+            expect(showCandidateStatus).toHaveBeenCalledWith(expect.anything(), returned, undefined);
+        });
+
         it("RESUME_SCREENING — знову питання анкети", async () => {
             findByTelegramId.mockResolvedValue(blocker);
             returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: { id: "cand-1", status: "SCREENING" }, mode: "RESUME_SCREENING" });

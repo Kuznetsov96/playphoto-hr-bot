@@ -356,7 +356,8 @@ commandHandlers.command("start", async (ctx) => {
                 const blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "start_command");
                 if (blockerReturn) {
                     candidate = blockerReturn.candidate;
-                    welcomeBack = true;
+                    // Отказ показываем обычным экраном, без «З поверненням!».
+                    welcomeBack = blockerReturn.mode !== "REJECTED";
 
                     if (blockerReturn.mode === "RESUME_SCREENING") {
                         ctx.session.candidateData = candidateDataFromRecord(candidate);

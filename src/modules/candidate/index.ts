@@ -59,7 +59,11 @@ candidateModule.on("message", async (ctx, next) => {
                 return;
             }
             const { showCandidateStatus } = await import("../../utils/candidate-ui.js");
-            await showCandidateStatus(ctx, blockerReturn.candidate, { welcomeBack: true });
+            await showCandidateStatus(
+                ctx,
+                blockerReturn.candidate,
+                blockerReturn.mode === "REJECTED" ? undefined : { welcomeBack: true },
+            );
             return;
         }
     }

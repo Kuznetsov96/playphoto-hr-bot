@@ -72,6 +72,15 @@ describe("/start от BLOCKER", () => {
         expect(startScreening).not.toHaveBeenCalled();
     });
 
+    it("режим REJECTED — обычный экран отказа без welcomeBack", async () => {
+        const returned = { id: "c1", status: "REJECTED", hrDecision: "REJECTED" };
+        returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: returned, mode: "REJECTED" });
+
+        await start();
+
+        expect(showCandidateStatus).toHaveBeenCalledWith(expect.anything(), returned, undefined);
+    });
+
     it("RESUME_SCREENING запускает анкету, как у underage", async () => {
         const returned = { id: "c1", status: "SCREENING" };
         returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: returned, mode: "RESUME_SCREENING" });
