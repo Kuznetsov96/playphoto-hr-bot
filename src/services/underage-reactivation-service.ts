@@ -48,7 +48,7 @@ function hasOpenCandidateLocation(candidate: UnderageReactivationCandidate): boo
 }
 
 export function getUnderageReactivationDecision(candidate: UnderageReactivationCandidate): UnderageReactivationDecision | null {
-    if (candidate.status !== CandidateStatus.REJECTED) return null;
+    if (candidate.status !== CandidateStatus.REJECTED && candidate.status !== CandidateStatus.BLOCKER) return null;
     if (candidate.hrDecision !== "REJECTED_SYSTEM_UNDERAGE") return null;
     if (candidate.gender !== "female") return null;
     if (!candidate.birthDate) return null;
@@ -66,6 +66,14 @@ export function getUnderageReactivationDecision(candidate: UnderageReactivationC
         hasUnreadMessage: false,
     } satisfies Prisma.CandidateUpdateInput;
 
+    return decideScreeningPlacement(candidate, basePatch);
+}
+
+/** Куди поставити кандидатку з заповненою/незаповненою анкетою: спільний хвіст рішень про повернення. */
+export function decideScreeningPlacement(
+    candidate: UnderageReactivationCandidate,
+    basePatch: Prisma.CandidateUpdateInput
+): UnderageReactivationDecision {
     if (!isScreeningComplete(candidate)) {
         return {
             mode: "RESUME_SCREENING",
