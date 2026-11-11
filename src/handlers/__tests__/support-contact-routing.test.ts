@@ -10,14 +10,20 @@ const createTimelineEvent = vi.fn();
 const logBusinessEvent = vi.fn();
 const redisSet = vi.fn();
 const redisEval = vi.fn();
+const findWithStaffProfileByTelegramId = vi.fn();
+const callbackHandlers = new Map<string, (ctx: any) => Promise<void>>();
 
 vi.mock("grammy", () => ({
     Bot: class { },
     Composer: class {
-        callbackQuery() { return this; }
+        callbackQuery(name: string, handler: (ctx: any) => Promise<void>) {
+            callbackHandlers.set(name, handler);
+            return this;
+        }
     },
     InlineKeyboard: class {
         text() { return this; }
+        danger() { return this; }
     }
 }));
 
@@ -29,7 +35,7 @@ vi.mock("../../repositories/candidate-repository.js", () => ({
 }));
 
 vi.mock("../../repositories/user-repository.js", () => ({
-    userRepository: {}
+    userRepository: { findWithStaffProfileByTelegramId }
 }));
 
 vi.mock("../../repositories/support-repository.js", () => ({
@@ -54,11 +60,10 @@ vi.mock("../../repositories/timeline-repository.js", () => ({
 }));
 
 vi.mock("../../config.js", () => ({
-    RECOVERY_CHAT_ID: -1003873088973,
     MENTOR_IDS: [333],
     HR_IDS: [222],
     ADMIN_IDS: [111],
-    TEAM_CHATS: { SUPPORT: -100123, RECOVERY: -1003873088973 },
+    TEAM_CHATS: { SUPPORT: -100123 },
 }));
 
 vi.mock("../../core/logger.js", () => ({
@@ -87,7 +92,7 @@ vi.mock("../admin/utils.js", () => ({
     escapeHtml: (value: string) => value,
 }));
 
-describe("candidate recovery support routing", () => {
+describe("candidate support routing", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         redisSet.mockResolvedValue("OK");
@@ -118,141 +123,48 @@ describe("candidate recovery support routing", () => {
         });
     });
 
-    it("routes returned-after-block messages to a recovery forum topic", async () => {
-        const { handleSupportMessage } = await import("../support.js");
-
+    it("contact_recovery из старых сообщений открывает обычный поток HR, без форум-топика", async () => {
+        await import("../support.js");
+        findWithStaffProfileByTelegramId.mockResolvedValue(null);
         const ctx = {
             from: { id: 555 },
-            chat: { id: 555 },
-            message: { message_id: 77, text: "Привіт, хочу відновити контакт" },
             update: { update_id: 1 },
-            session: {
-                step: "support_chat",
-                supportData: {
-                    preferredTarget: "RECOVERY",
-                    entryReason: "RETURNED_AFTER_BOT_BLOCK",
-                }
-            },
-            api: {
-                createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 987 }),
-                sendMessage: vi.fn().mockResolvedValue({}),
-                copyMessage: vi.fn().mockResolvedValue({}),
-            },
+            session: { step: "idle" },
+            answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
             reply: vi.fn().mockResolvedValue({}),
+            api: { createForumTopic: vi.fn(), sendMessage: vi.fn() },
         } as any;
 
-        const handled = await handleSupportMessage(ctx);
+        await callbackHandlers.get("contact_recovery")!(ctx);
 
-        expect(handled).toBe(true);
-        expect(ctx.api.createForumTopic).toHaveBeenCalledWith(
-            -1003873088973,
-            expect.stringContaining("RECOVERY")
+        expect(ctx.session.step).toBe("support_chat");
+        expect(ctx.session.supportData).toEqual({ preferredTarget: "HR" });
+        expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
+        expect(logBusinessEvent).toHaveBeenCalledWith(
+            expect.objectContaining({ event: "candidate.support.started", stage: "HR", result: "started" }),
         );
-        expect(ctx.api.sendMessage).toHaveBeenCalledWith(
-            -1003873088973,
-            expect.stringContaining("Recovery Case"),
-            expect.objectContaining({
-                parse_mode: "HTML",
-                message_thread_id: 987,
-            })
-        );
-        expect(createOutgoingTopic).toHaveBeenCalledWith(expect.objectContaining({
-            chatId: BigInt(-1003873088973),
-            topicId: 987,
-            userId: "user-1",
-        }));
-        expect(ctx.api.copyMessage).toHaveBeenCalledWith(-1003873088973, 555, 77, {
-            message_thread_id: 987,
-        });
-        expect(createTimelineEvent).toHaveBeenCalledWith(
-            "user-1",
-            "MESSAGE",
-            "USER",
-            "Привіт, хочу відновити контакт",
-            expect.objectContaining({
-                category: "Recovery",
-                entryReason: "RETURNED_AFTER_BOT_BLOCK",
-            })
-        );
-        expect(ctx.session.supportData.preferredTarget).toBeUndefined();
-        expect(ctx.session.supportData.entryReason).toBeUndefined();
+        expect(ctx.api.createForumTopic).not.toHaveBeenCalled();
+        expect(ctx.reply).toHaveBeenCalledOnce();
     });
 
-    it("preserves rich candidate messages when routing them to recovery", async () => {
-        const { handleSupportMessage } = await import("../support.js");
-
-        const ctx = {
-            from: { id: 555 },
-            chat: { id: 555 },
-            message: {
-                message_id: 78,
-                rich_message: {
-                    blocks: [{
-                        type: "paragraph",
-                        text: ["Потрібна ", { type: "bold", text: "допомога" }],
-                    }],
-                },
-            },
-            update: { update_id: 2 },
-            session: {
-                step: "support_chat",
-                supportData: {
-                    preferredTarget: "RECOVERY",
-                    entryReason: "RETURNED_AFTER_BOT_BLOCK",
-                },
-            },
-            api: {
-                createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 987 }),
-                sendMessage: vi.fn().mockResolvedValue({}),
-                copyMessage: vi.fn().mockResolvedValue({}),
-            },
-            reply: vi.fn().mockResolvedValue({}),
-        } as any;
-
-        const handled = await handleSupportMessage(ctx);
-
-        expect(handled).toBe(true);
-        expect(ctx.api.copyMessage).toHaveBeenCalledWith(-1003873088973, 555, 78, {
-            message_thread_id: 987,
-        });
-        expect(createTimelineEvent).toHaveBeenCalledWith(
-            "user-1",
-            "MESSAGE",
-            "USER",
-            "Rich message: Потрібна допомога",
-            expect.objectContaining({ category: "Recovery" }),
-        );
-    });
-
-    it("does not acknowledge a recovery message when Telegram delivery fails", async () => {
+    it("вернувшаяся BLOCKER-кандидатка пишет в HR: веб-зеркало, без форум-топика и без «Не вдалося»", async () => {
         const { handleSupportMessage } = await import("../support.js");
         const reply = vi.fn().mockResolvedValue({});
         const ctx = {
             from: { id: 555 },
             chat: { id: 555 },
-            message: { message_id: 79, text: "Повторна спроба" },
-            update: { update_id: 3 },
-            session: {
-                step: "support_chat",
-                supportData: {
-                    preferredTarget: "RECOVERY",
-                    entryReason: "RETURNED_AFTER_BOT_BLOCK",
-                },
-            },
-            api: {
-                createForumTopic: vi.fn().mockResolvedValue({ message_thread_id: 987 }),
-                sendMessage: vi.fn().mockResolvedValue({}),
-                copyMessage: vi.fn().mockRejectedValue(new Error("Telegram unavailable")),
-            },
+            message: { message_id: 77, text: "Привіт, хочу відновити контакт" },
+            update: { update_id: 2 },
+            session: { step: "support_chat", supportData: { preferredTarget: "HR" } },
+            api: { createForumTopic: vi.fn(), sendMessage: vi.fn(), copyMessage: vi.fn() },
             reply,
         } as any;
 
         expect(await handleSupportMessage(ctx)).toBe(true);
-        expect(reply).toHaveBeenCalledOnce();
-        expect(reply).toHaveBeenCalledWith(expect.stringContaining("Не вдалося надіслати повідомлення"));
-        expect(ctx.session.step).toBe("support_chat");
-        expect(messageCreate).not.toHaveBeenCalled();
-        expect(logBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({ result: "failure" }));
+        expect(ctx.api.createForumTopic).not.toHaveBeenCalled();
+        expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining("Повідомлення надіслано"));
+        expect(messageCreate).toHaveBeenCalled();
     });
 
     it("keeps mentor support open and reports failure when the admin DM fails", async () => {

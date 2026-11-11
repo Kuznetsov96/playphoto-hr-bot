@@ -3,7 +3,7 @@ import { STAFF_TEXTS } from "../../../constants/staff-texts.js";
 import logger from "../../../core/logger.js";
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../../../types/context.js";
-import { RECOVERY_CHAT_ID, SUPPORT_CHAT_ID, SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../../../config.js";
+import { SUPPORT_CHAT_ID, SUPPORT_THREADS_ENABLED, TEAM_CHATS } from "../../../config.js";
 import { userRepository } from "../../../repositories/user-repository.js";
 import { supportRepository } from "../../../repositories/support-repository.js";
 import { staffRepository } from "../../../repositories/staff-repository.js";
@@ -47,7 +47,6 @@ adminSupportCallbacks
             /^ticket_close_\d+$/.test(ctx.callbackQuery.data) ||
             /^task_proof_close_[a-zA-Z0-9]+$/.test(ctx.callbackQuery.data) ||
             /^close_topic_\d+$/.test(ctx.callbackQuery.data) ||
-            /^recovery_reopen_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
             /^ticket_force_close_\d+$/.test(ctx.callbackQuery.data) ||
             /^onboard_pass_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
             /^onboard_fail_[a-zA-Z0-9_\-]+_\d+$/.test(ctx.callbackQuery.data) ||
@@ -415,40 +414,6 @@ staffSupportHandlers.callbackQuery(/^close_topic_(\d+)$/, async (ctx) => {
     } catch (e: any) {
         logger.error({ err: e, topicId }, "Support outgoing topic close failed");
         await ctx.answerCallbackQuery(`❌ Error: ${e.message}`);
-    }
-});
-
-staffSupportHandlers.callbackQuery(/^recovery_reopen_([a-zA-Z0-9_\-]+)_(\d+)$/, async (ctx) => {
-    const candidateId = ctx.match[1]!;
-    const topicId = Number(ctx.match[2]);
-
-    try {
-        const candidate = await candidateRepository.reopenRecoveryCandidate(candidateId);
-
-        await ctx.api.sendMessage(Number(candidate.user.telegramId),
-            "✅ <b>Анкету повернуто в чергу HR.</b>\n\nМи знову розглядаємо твій профіль. Коли буде наступний крок, напишемо тобі тут.",
-            { parse_mode: "HTML" }
-        ).catch(() => { });
-
-        await ctx.reply(
-            `✅ Candidate moved to <b>WAITLIST_HR</b>.`,
-            { parse_mode: "HTML", message_thread_id: topicId }
-        );
-
-        if (ctx.callbackQuery.message) {
-            await ctx.editMessageReplyMarkup({
-                reply_markup: new InlineKeyboard().text("Close Recovery", `close_topic_${topicId}`)
-            }).catch(() => { });
-        }
-
-        await ctx.answerCallbackQuery("Candidate reopened to WAITLIST_HR");
-    } catch (e: any) {
-        await ctx.answerCallbackQuery({
-            text: e.message === "CANDIDATE_NOT_RECOVERY_ELIGIBLE"
-                ? "This candidate cannot be reopened from recovery"
-                : `Error: ${e.message}`,
-            show_alert: true,
-        }).catch(() => { });
     }
 });
 
@@ -1485,7 +1450,7 @@ export async function handleStaffMessage(ctx: MyContext, bot: Bot<MyContext>): P
  * Handles messages in the Support Group (Admins replying to Staff)
  */
 async function _handleSupportGroupMessage(ctx: MyContext, bot: Bot<MyContext>): Promise<boolean> {
-    const allowedTopicChats = [Number(TEAM_CHATS.SUPPORT), Number(RECOVERY_CHAT_ID)];
+    const allowedTopicChats = [Number(TEAM_CHATS.SUPPORT)];
     if (!allowedTopicChats.includes(Number(ctx.chat?.id))) return false;
     if (!ctx.message?.message_thread_id) return false; // Must be in a topic
 

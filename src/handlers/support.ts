@@ -1,11 +1,9 @@
 import { Bot, Composer, InlineKeyboard } from "grammy";
 import type { MyContext } from "../types/context.js";
-import { CandidateStatus } from "@prisma/client";
 import { candidateRepository } from "../repositories/candidate-repository.js";
 import { userRepository } from "../repositories/user-repository.js";
 import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
-import { escapeHtml } from "./admin/utils.js";
 import { getRichMessagePlainText } from "../utils/rich-message.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { renderCandidateMessageForAdmin } from "../utils/candidate-admin-message.js";
@@ -18,85 +16,13 @@ function clearSupportRouteData(ctx: MyContext) {
     delete ctx.session.supportData.entryReason;
 }
 
-function getCandidateAge(birthDate?: Date | string | null): number | null {
-    if (!birthDate) return null;
-
-    const parsedBirthDate = birthDate instanceof Date ? birthDate : new Date(birthDate);
-    if (Number.isNaN(parsedBirthDate.getTime())) return null;
-
-    const today = new Date();
-    let age = today.getFullYear() - parsedBirthDate.getFullYear();
-    const monthDelta = today.getMonth() - parsedBirthDate.getMonth();
-
-    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < parsedBirthDate.getDate())) {
-        age -= 1;
-    }
-
-    return age;
-}
-
-function hasBlockedDeliveryReason(candidate: Awaited<ReturnType<typeof candidateRepository.findByTelegramId>>) {
-    return candidate?.status === CandidateStatus.BLOCKER || candidate?.candidateDecision?.includes("Бот заблоковано") === true;
-}
-
-function isRecoveryEligible(candidate: Awaited<ReturnType<typeof candidateRepository.findByTelegramId>>) {
-    const age = getCandidateAge(candidate?.birthDate);
-    return candidate?.gender === "female" && age !== null && age >= 17 && age <= 26 && hasBlockedDeliveryReason(candidate);
-}
-
-async function ensureRecoveryTopic(ctx: MyContext, candidate: NonNullable<Awaited<ReturnType<typeof candidateRepository.findByTelegramId>>>) {
-    const { RECOVERY_CHAT_ID } = await import("../config.js");
-    const { supportRepository } = await import("../repositories/support-repository.js");
-
-    const { supportConversationService } = await import("../services/support-conversation-service.js");
-    return supportConversationService.withUserLock(candidate.user.id, async () => {
-        const existingTopic = await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id);
-        if (existingTopic && Number(existingTopic.chatId) === RECOVERY_CHAT_ID) {
-            return existingTopic;
-        }
-
-        const surname = (candidate.fullName || "Candidate").trim().split(/\s+/)[0] || "Candidate";
-        const locationLabel = candidate.location?.name || candidate.city || "No location";
-        const topic = await ctx.api.createForumTopic(RECOVERY_CHAT_ID, `🛟 RECOVERY | ${surname} | ${locationLabel}`);
-        const topicId = topic.message_thread_id;
-        const topicKeyboard = new InlineKeyboard()
-            .text("Reopen to WAITLIST_HR", `recovery_reopen_${candidate.id}_${topicId}`)
-            .text("Close Recovery", `close_topic_${topicId}`);
-
-        const usernameLabel = candidate.user.username
-            ? `@${escapeHtml(candidate.user.username)}`
-            : "not set";
-
-        const infoCard =
-            `🛟 <b>Recovery Case</b>\n` +
-            `👤 <b>Candidate:</b> ${escapeHtml(candidate.fullName || "Candidate")}\n` +
-            `🔗 <b>Username:</b> ${usernameLabel}\n` +
-            `📍 <b>Location:</b> ${escapeHtml(locationLabel)}\n` +
-            `📊 <b>Current Status:</b> ${escapeHtml(candidate.status)}\n` +
-            `📝 <b>Delivery Issue:</b> ${escapeHtml(candidate.candidateDecision || "Bot delivery was previously blocked")}`;
-
-        await ctx.api.sendMessage(RECOVERY_CHAT_ID, infoCard, {
-            parse_mode: "HTML",
-            message_thread_id: topicId,
-            reply_markup: topicKeyboard,
-        });
-
-        return supportRepository.createOutgoingTopic({
-            chatId: BigInt(RECOVERY_CHAT_ID),
-            topicId,
-            staffName: candidate.fullName || "Candidate",
-            userId: candidate.user.id,
-        });
-    });
-}
-
 // --- CALLBACKS ---
-async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR" | "RECOVERY") {
+async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR") {
     const telegramId = ctx.from?.id;
     if (!telegramId) return;
 
     const user = await userRepository.findWithStaffProfileByTelegramId(BigInt(telegramId));
-    if (user?.staffProfile?.isActive && preferredTarget !== "RECOVERY") {
+    if (user?.staffProfile?.isActive) {
         const { startSupportFlow: startStaffSupportFlow } = await import("../modules/staff/handlers/menu.js");
         await startStaffSupportFlow(ctx);
         return;
@@ -108,12 +34,7 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
         return;
     }
 
-    if (preferredTarget === "RECOVERY") {
-        if (!isRecoveryEligible(candidate)) {
-            await ctx.answerCallbackQuery("Ця опція недоступна для цього профілю.");
-            return;
-        }
-    } else if (candidate.gender === "male") {
+    if (candidate.gender === "male") {
         await ctx.answerCallbackQuery("Ця опція недоступна для цього профілю.");
         return;
     }
@@ -122,7 +43,6 @@ async function startSupportFlow(ctx: MyContext, preferredTarget: "HR" | "MENTOR"
     ctx.session.supportData = {
         ...(ctx.session.supportData || {}),
         preferredTarget,
-        ...(preferredTarget === "RECOVERY" ? { entryReason: "RETURNED_AFTER_BOT_BLOCK" as const } : {}),
     };
     await ctx.answerCallbackQuery();
     logBusinessEvent({
@@ -151,8 +71,9 @@ supportHandlers.callbackQuery("contact_hr", async (ctx) => {
     await startSupportFlow(ctx, "HR");
 });
 
+// Старі повідомлення містять кнопку contact_recovery: відкриваємо звичайний потік HR.
 supportHandlers.callbackQuery("contact_recovery", async (ctx) => {
-    await startSupportFlow(ctx, "RECOVERY");
+    await startSupportFlow(ctx, "HR");
 });
 
 // END SUPPORT FLOW
@@ -274,7 +195,6 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
             'AWAITING_FIRST_SHIFT'
         ].includes(candidate.status);
         const isMentorOwnedFlow = step === "support_chat" && preferredTarget === "MENTOR";
-        const isRecoveryFlow = step === "support_chat" && preferredTarget === "RECOVERY";
 
         const isSetupStage = [
             'NDA', 'KNOWLEDGE_TEST', 'STAGING_SETUP', 'OFFLINE_STAGING',
@@ -467,75 +387,6 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         const activeTicket = await supportRepository.findActiveTicketByUser(candidate.user.id);
         const activeOutgoingTopic = !activeTicket ? await supportRepository.findActiveOutgoingTopicByUser(candidate.user.id) : null;
 
-        if (isRecoveryFlow) {
-            const payload = getCandidateSupportPayload(ctx);
-            const topic = activeOutgoingTopic && Number(activeOutgoingTopic.chatId) === TEAM_CHATS.RECOVERY
-                ? activeOutgoingTopic
-                : await ensureRecoveryTopic(ctx, candidate);
-
-            try {
-                await ctx.api.copyMessage(Number(topic.chatId), ctx.chat!.id, ctx.message!.message_id, {
-                    message_thread_id: topic.topicId
-                });
-            } catch (e) {
-                logger.error({ err: e, candidateId: candidate.id, topicId: topic.topicId }, "Failed to forward recovery message");
-                logBusinessEvent({
-                    event: "candidate.support.message_sent",
-                    correlationId: ctx.correlationId,
-                    updateId: ctx.update.update_id,
-                    telegramId,
-                    candidateId: candidate.id,
-                    actorType: "candidate",
-                    stage: "RECOVERY",
-                    result: "failure",
-                    module: "support",
-                    safeContext: { routing: "recovery_topic", topicId: topic.topicId, chatId: String(topic.chatId) }
-                });
-                await ctx.reply("Не вдалося надіслати повідомлення. Спробуйте ще раз трохи пізніше.");
-                return true;
-            }
-
-            try {
-                const { messageRepository } = await import("../repositories/message-repository.js");
-                const { timelineRepository } = await import("../repositories/timeline-repository.js");
-
-                await messageRepository.create({
-                    candidate: { connect: { id: candidate.id } },
-                    sender: "USER",
-                    scope: "HR",
-                    content: payload.content,
-                    photoId: payload.media
-                });
-
-                await timelineRepository.createEvent(candidate.user.id, 'MESSAGE', 'USER', payload.content, {
-                    category: "Recovery",
-                    entryReason,
-                    outgoingTopicId: topic.id,
-                });
-                await candidateRepository.update(candidate.id, { hasUnreadMessage: true });
-            } catch (e) {
-                logger.error({ err: e, candidateId: candidate.id }, "Failed to log recovery message");
-            }
-
-            logBusinessEvent({
-                event: "candidate.support.message_sent",
-                correlationId: ctx.correlationId,
-                updateId: ctx.update.update_id,
-                telegramId,
-                candidateId: candidate.id,
-                actorType: "candidate",
-                stage: "RECOVERY",
-                result: "success",
-                module: "support",
-                safeContext: { routing: "recovery_topic", topicId: topic.topicId, chatId: String(topic.chatId) }
-            });
-
-            ctx.session.step = "idle";
-            clearSupportRouteData(ctx);
-            await ctx.reply("Повідомлення надіслано. Ми відповімо найближчим часом.");
-            return true;
-        }
-
         // If they already have an active TOPIC in Support group, just forward there
         if ((activeTicket && activeTicket.topicId) || activeOutgoingTopic) {
             const topicId = activeTicket?.topicId || activeOutgoingTopic?.topicId;
@@ -672,19 +523,6 @@ export async function handleSupportMessage(ctx: MyContext): Promise<boolean> {
         if (targetAdminIds.length === 0) {
             await ctx.reply("Зараз нікого немає на зв’язку. Спробуйте, будь ласка, трохи пізніше.");
             return true;
-        }
-
-        if (isRecoveryFlow) {
-            // Прим.: этот блок фактически недостижим — ветка isRecoveryFlow
-            // выше (пересылка в recovery-топик) всегда возвращает true раньше,
-            // чем выполнение доходит сюда. Оставлено как объявленная
-            // маршрутизация на случай, если контроль-флоу выше изменится;
-            // HR больше не участвует как получатель по умолчанию — при
-            // отсутствии ADMIN_IDS сообщение уходит в лог как failure ниже
-            // по функции (result: "failure" + ctx.reply "Не вдалося доставити"),
-            // а не пропадает молча.
-            categoryLabel = "Admin (Recovery)";
-            targetAdminIds = ADMIN_IDS.length > 0 ? [ADMIN_IDS[0]!] : [];
         }
 
         const adminMsgText = renderCandidateMessageForAdmin({

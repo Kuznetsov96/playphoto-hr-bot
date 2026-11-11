@@ -12,6 +12,7 @@ import { shouldRouteMessageToPrivateRoleFlows } from "../../utils/message-routin
 import { CANDIDATE_TEXTS } from "../../constants/candidate-texts.js";
 import { isMirroredCandidateMessage } from "../../middleware/recruiting-incoming.js";
 import { redis } from "../../core/redis.js";
+import logger from "../../core/logger.js";
 
 const FORWARDED_ACK_TTL_SECONDS = 3 * 60 * 60;
 
@@ -43,6 +44,34 @@ candidateModule.on("message", async (ctx, next) => {
         const { startScreening } = await import("./handlers/index.js");
         await startScreening(ctx);
         return;
+    }
+
+    if (candidate?.status === "BLOCKER") {
+        // Повернення з BLOCKER: вона написала сама — значить, бот знову доставляє.
+        // Повідомлення вже дзеркалиться в вебапп (recruiting-incoming), тут лише
+        // повертаємо на крок воронки замість «передали команді».
+        const { returnBlockedCandidateIfNeeded } = await import("../../services/blocker-return-service.js");
+        let blockerReturn: Awaited<ReturnType<typeof returnBlockedCandidateIfNeeded>> = null;
+        try {
+            blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "free_text");
+        } catch (err) {
+            logger.error({ err, candidateId: candidate.id }, "Blocker return failed on free text");
+        }
+        if (blockerReturn) {
+            if (blockerReturn.mode === "RESUME_SCREENING") {
+                const { startScreening, candidateDataFromRecord } = await import("./handlers/index.js");
+                ctx.session.candidateData = candidateDataFromRecord(blockerReturn.candidate);
+                await startScreening(ctx);
+                return;
+            }
+            const { showCandidateStatus } = await import("../../utils/candidate-ui.js");
+            await showCandidateStatus(
+                ctx,
+                blockerReturn.candidate,
+                blockerReturn.mode === "REJECTED" ? undefined : { welcomeBack: true },
+            );
+            return;
+        }
     }
 
     if (candidate) {

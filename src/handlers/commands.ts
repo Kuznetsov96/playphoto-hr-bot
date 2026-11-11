@@ -188,7 +188,7 @@ commandHandlers.command("start", async (ctx) => {
         delete ctx.session.supportData?.replyingToUserId;
 
         // Clear bot-blocked flag (user unblocked bot and pressed /start)
-        const clearedBlockedUsers = await prisma.user.updateMany({
+        await prisma.user.updateMany({
             where: { telegramId: BigInt(userId), botBlockedAt: { not: null } },
             data: { botBlockedAt: null }
         }).catch(() => ({ count: 0 }));
@@ -350,21 +350,26 @@ commandHandlers.command("start", async (ctx) => {
                 }
             }
 
-            if (candidate.status === CandidateStatus.BLOCKER && clearedBlockedUsers.count > 0) {
-                logBusinessEvent({
-                    event: "candidate.recovery.started",
-                    telegramId: userId,
-                    actorType: "candidate",
-                    actorRole: "candidate",
-                    result: "success",
-                    module: "commands",
-                    operation: "start",
-                    updateId: ctx.update.update_id,
-                    userId: user?.id,
-                    candidateId: candidate.id,
-                    stage: candidate.status,
-                    safeContext: { source: "bot_unblocked_and_started" },
-                });
+            let welcomeBack = false;
+            if (candidate.status === CandidateStatus.BLOCKER) {
+                const { returnBlockedCandidateIfNeeded } = await import("../services/blocker-return-service.js");
+                let blockerReturn: Awaited<ReturnType<typeof returnBlockedCandidateIfNeeded>> = null;
+                try {
+                    blockerReturn = await returnBlockedCandidateIfNeeded(candidate, "start_command");
+                } catch (err) {
+                    logger.error({ err, candidateId: candidate.id }, "Blocker return failed in /start");
+                }
+                if (blockerReturn) {
+                    candidate = blockerReturn.candidate;
+                    // Отказ показываем обычным экраном, без «З поверненням!».
+                    welcomeBack = blockerReturn.mode !== "REJECTED";
+
+                    if (blockerReturn.mode === "RESUME_SCREENING") {
+                        ctx.session.candidateData = candidateDataFromRecord(candidate);
+                        await startScreening(ctx);
+                        return;
+                    }
+                }
             }
             logBusinessEvent({
                 event: "user.start_routed",
@@ -381,7 +386,7 @@ commandHandlers.command("start", async (ctx) => {
                 safeContext: { targetHub: "CANDIDATE_STATUS" },
             });
             const { showCandidateStatus } = await import("../utils/candidate-ui.js");
-            await showCandidateStatus(ctx, candidate);
+            await showCandidateStatus(ctx, candidate, welcomeBack ? { welcomeBack: true } : undefined);
             return;
         } else {
             logBusinessEvent({

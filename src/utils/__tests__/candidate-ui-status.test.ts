@@ -152,6 +152,37 @@ describe("showCandidateStatus", () => {
         expect(renderScreen.mock.calls[0]![1]).toContain("локація <b>Volkland (Шевчик)</b>");
         expect(renderScreen.mock.calls[1]![1]).toBe("<b>Анкету розглянуто</b>\n\nЗапрошуємо вас на онлайн-співбесіду.\n\nОберіть зручний час:");
     });
+
+    it("welcomeBack: «З поверненням!» перед екраном, кнопка «Написати нам» лишається", async () => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+        const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
+
+        await showCandidateStatus({} as any, {
+            status: "WAITLIST_HR", gender: "female", currentStep: "INTERVIEW", isWaitlisted: true,
+        }, { welcomeBack: true });
+
+        const [, text, kb] = renderScreen.mock.calls[0]!;
+        expect(text.startsWith(CANDIDATE_TEXTS["candidate-welcome-back"])).toBe(true);
+        expect(buttons(kb)).toContain("Написати нам");
+    });
+
+    it("без welcomeBack префікса немає", async () => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+        const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
+
+        await showCandidateStatus({} as any, { status: "WAITLIST_HR", gender: "female", currentStep: "INTERVIEW" });
+
+        expect(renderScreen.mock.calls[0]![1]).not.toContain(CANDIDATE_TEXTS["candidate-welcome-back"]);
+    });
+
+    it.each(["WAITLIST_HR", "SCREENING", "MENTOR_MANUAL", "MANUAL_REVIEW", "READY_FOR_INTERVIEW"])(
+        "статус %s не містить «не доходили»",
+        async (status) => {
+            const { showCandidateStatus } = await import("../candidate-ui.js");
+            await showCandidateStatus({} as any, { status, gender: "female", currentStep: "INTERVIEW" }, { welcomeBack: true });
+            expect(renderScreen.mock.calls[0]![1]).not.toContain("не доходили");
+        },
+    );
 });
 
 describe("selectRejectedStatusText: экран /start после отказа по причине", () => {
@@ -187,7 +218,7 @@ describe("selectRejectedStatusText: экран /start после отказа п
         expect(selectRejectedStatusText({ status: "REJECTED", hrDecision: "NOSHOW", candidateDecision: null })).toBe(CANDIDATE_TEXTS["candidate-rejected"]);
     });
 
-    it("«Бот заблоковано» — не её решение: общий отказ и кнопка восстановления остаются", async () => {
+    it("«Бот заблоковано» — не её решение: обычный общий отказ, без слов про восстановление и без кнопки", async () => {
         const { showCandidateStatus } = await import("../candidate-ui.js");
         const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
         renderScreen.mockReset();
@@ -200,7 +231,21 @@ describe("selectRejectedStatusText: экран /start после отказа п
         });
 
         const [, text, kb] = renderScreen.mock.calls[0]!;
-        expect(text.startsWith(CANDIDATE_TEXTS["candidate-rejected"])).toBe(true);
-        expect(buttons(kb)).toContain("Написати нам");
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-rejected"]);
+        expect(buttons(kb)).toEqual([]);
     });
+
+    it("BLOCKER, которую ещё не вернули, — обычный статус и «Написати нам» через contact_hr", async () => {
+        const { showCandidateStatus } = await import("../candidate-ui.js");
+        const { CANDIDATE_TEXTS } = await import("../../constants/candidate-texts.js");
+        renderScreen.mockReset();
+
+        await showCandidateStatus({} as any, { status: "BLOCKER", gender: "female" });
+
+        const [, text, kb] = renderScreen.mock.calls[0]!;
+        expect(text).toBe(CANDIDATE_TEXTS["candidate-default-status"]());
+        expect(buttons(kb)).toEqual(["Написати нам"]);
+        expect(JSON.stringify(kb)).not.toContain("contact_recovery");
+    });
+
 });

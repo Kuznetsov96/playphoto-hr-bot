@@ -20,7 +20,11 @@ vi.mock("../../../middleware/recruiting-incoming.js", () => ({
 }));
 
 const startScreening = vi.fn();
-vi.mock("../handlers/index.js", () => ({ candidateHandlers: new Composer(), startScreening }));
+vi.mock("../handlers/index.js", () => ({
+    candidateHandlers: new Composer(),
+    startScreening,
+    candidateDataFromRecord: (c: unknown) => ({ from: c }),
+}));
 
 vi.mock("../../../menus/candidate.js", () => ({
     candidateGenderMenu: new Composer(),
@@ -29,6 +33,9 @@ vi.mock("../../../menus/candidate.js", () => ({
     candidateAppearanceMenu: new Composer(),
     candidateSourceMenu: new Composer(),
 }));
+
+const returnBlockedCandidateIfNeeded = vi.fn();
+vi.mock("../../../services/blocker-return-service.js", () => ({ returnBlockedCandidateIfNeeded }));
 
 const showCandidateStatus = vi.fn();
 vi.mock("../../../utils/candidate-ui.js", () => ({ showCandidateStatus }));
@@ -99,5 +106,60 @@ describe("candidate free message outside the questionnaire", () => {
 
         expect(sendMessage.mock.calls[0]?.[1]).toBe(CANDIDATE_TEXTS["candidate-error-unknown-message"]);
         expect(showCandidateStatus).toHaveBeenCalled();
+    });
+
+    describe("BLOCKER", () => {
+        const blocker = { id: "cand-1", status: "BLOCKER", currentStep: "INTERVIEW" };
+
+        it("вертає на крок воронки: екран статусу з welcomeBack, без «передали команді»", async () => {
+            const returned = { id: "cand-1", status: "WAITLIST_HR" };
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: returned, mode: "INTERVIEW_WAITLIST" });
+
+            await run(makeCtx({ text: "Анкета" }, "idle"));
+
+            expect(returnBlockedCandidateIfNeeded).toHaveBeenCalledWith(blocker, "free_text");
+            expect(showCandidateStatus).toHaveBeenCalledWith(expect.anything(), returned, { welcomeBack: true });
+            expect(sendMessage).not.toHaveBeenCalled();
+        });
+
+        it("режим REJECTED — екран відмови без welcomeBack", async () => {
+            const returned = { id: "cand-1", status: "REJECTED", hrDecision: "REJECTED" };
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: returned, mode: "REJECTED" });
+
+            await run(makeCtx({ text: "Привіт" }, "idle"));
+
+            expect(showCandidateStatus).toHaveBeenCalledWith(expect.anything(), returned, undefined);
+        });
+
+        it("RESUME_SCREENING — знову питання анкети", async () => {
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockResolvedValue({ candidate: { id: "cand-1", status: "SCREENING" }, mode: "RESUME_SCREENING" });
+
+            await run(makeCtx({ text: "привіт" }, "idle"));
+
+            expect(startScreening).toHaveBeenCalledTimes(1);
+            expect(showCandidateStatus).not.toHaveBeenCalled();
+        });
+
+        it("помилка повернення — лог і звичайне «передали команді»", async () => {
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockRejectedValue(new Error("boom"));
+
+            await run(makeCtx({ text: "привіт" }, "idle"));
+
+            expect(startScreening).not.toHaveBeenCalled();
+            expect(sendMessage.mock.calls[0]?.[1]).toBe(CANDIDATE_TEXTS["candidate-message-forwarded"]);
+        });
+
+        it("якщо повернення не потрібне — звичайне «передали команді»", async () => {
+            findByTelegramId.mockResolvedValue(blocker);
+            returnBlockedCandidateIfNeeded.mockResolvedValue(null);
+
+            await run(makeCtx({ text: "привіт" }, "idle"));
+
+            expect(sendMessage.mock.calls[0]?.[1]).toBe(CANDIDATE_TEXTS["candidate-message-forwarded"]);
+        });
     });
 });

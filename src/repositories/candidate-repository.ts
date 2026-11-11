@@ -470,6 +470,27 @@ export class CandidateRepository {
         });
     }
 
+    /**
+     * Оновлення лише якщо статус досі expectedStatus. Рядок блокується
+     * (SELECT … FOR UPDATE) і перечитується в транзакції; guard, штампи та
+     * зеркалування лишаються в update().
+     */
+    async updateIfStatus(
+        id: string,
+        expectedStatus: CandidateStatus,
+        data: Prisma.CandidateUpdateInput,
+        tx?: Prisma.TransactionClient
+    ): Promise<CandidateWithRelations | null> {
+        const run = async (client: Prisma.TransactionClient) => {
+            const rows = await client.$queryRaw<Array<{ status: CandidateStatus }>>`
+                SELECT "status" FROM "Candidate" WHERE "id" = ${id} FOR UPDATE
+            `;
+            if (!rows[0] || rows[0].status !== expectedStatus) return null;
+            return this.update(id, data, client);
+        };
+        return tx ? run(tx) : prisma.$transaction(run);
+    }
+
     async update(id: string, data: Prisma.CandidateUpdateInput, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
         const client = tx || prisma;
         const oldCandidate = await this.getFunnelSnapshot(client, id);
@@ -668,98 +689,6 @@ export class CandidateRepository {
                 fromStep: oldCandidate.currentStep,
                 toStep: candidate.currentStep,
                 previousDecision: oldCandidate.hrDecision,
-            },
-        });
-
-        if (candidate.user?.telegramId) {
-            import("../services/access-service.js").then(({ accessService }) => {
-                accessService.syncUserAccess(candidate.user.telegramId).catch(() => { });
-            }).catch(() => { });
-        }
-
-        this.mirrorCandidate(candidate.id, tx);
-
-        return candidate;
-    }
-
-    async reopenRecoveryCandidate(id: string, tx?: Prisma.TransactionClient): Promise<CandidateWithRelations> {
-        const client = tx || prisma;
-        const oldCandidate = await this.findById(id, tx);
-
-        if (!oldCandidate) {
-            throw new Error(`Candidate ${id} not found`);
-        }
-
-        const isRecoveryRejected = oldCandidate.status === CandidateStatus.REJECTED && oldCandidate.candidateDecision?.includes("Бот заблоковано");
-        const isRecoveryBlocker = oldCandidate.status === CandidateStatus.BLOCKER;
-
-        if (!isRecoveryRejected && !isRecoveryBlocker) {
-            throw new Error("CANDIDATE_NOT_RECOVERY_ELIGIBLE");
-        }
-
-        const candidate = await client.candidate.update({
-            where: { id },
-            data: {
-                status: CandidateStatus.WAITLIST_HR,
-                hrDecision: null,
-                candidateDecision: null,
-                lossStage: null,
-                lossReason: null,
-                lostAt: null,
-                notificationSent: false,
-                currentStep: FunnelStep.INTERVIEW,
-                isWaitlisted: true,
-                statusChangedAt: new Date(),
-                // Мимо touchPipeline — отметку ставим сами: по ней сверка
-                // дзеркала бачить, що вебапп ще не підтвердив цей стан.
-                pipelineTouchedAt: new Date(),
-            },
-            include: CANDIDATE_RELATIONS
-        }) as unknown as CandidateWithRelations;
-
-        logger.info({
-            event: "candidate.reopened_from_recovery",
-            candidateId: id,
-            name: candidate.fullName,
-            changes: {
-                status: { from: oldCandidate.status, to: candidate.status },
-                candidateDecision: { from: oldCandidate.candidateDecision, to: candidate.candidateDecision },
-            }
-        }, "📋 Candidate reopened from recovery");
-
-        logBusinessEvent({
-            event: "candidate.transition.reopened_recovery",
-            candidateId: id,
-            telegramId: candidate.user?.telegramId,
-            actorType: "system",
-            actorRole: "system",
-            stage: candidate.status,
-            result: "success",
-            module: "candidate-repository",
-            operation: "reopenRecoveryCandidate",
-            safeContext: {
-                fromStatus: oldCandidate.status,
-                toStatus: candidate.status,
-                fromStep: oldCandidate.currentStep,
-                toStep: candidate.currentStep,
-            },
-        });
-
-        logAuditEvent({
-            event: "candidate.reopened_from_recovery",
-            candidateId: id,
-            telegramId: candidate.user?.telegramId,
-            actorType: "system",
-            actorRole: "system",
-            stage: candidate.status,
-            result: "success",
-            module: "candidate-repository",
-            operation: "reopenRecoveryCandidate",
-            safeContext: {
-                fromStatus: oldCandidate.status,
-                toStatus: candidate.status,
-                fromStep: oldCandidate.currentStep,
-                toStep: candidate.currentStep,
             },
         });
 

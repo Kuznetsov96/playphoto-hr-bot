@@ -42,6 +42,7 @@ export const CANDIDATE_TEXTS = {
             : "";
         return `${echo}${error}\n\nНапишіть ім’я та прізвище ще раз.`;
     },
+    "candidate-welcome-back": "З поверненням!",
     "candidate-greeting-nicetomeet": () => `Приємно познайомитись!\n\nЩоб підібрати зручну локацію, дайте відповідь на кілька питань.`,
 
     /**
