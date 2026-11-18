@@ -50,15 +50,56 @@ describe("telegramBlocklist", () => {
         expect(findMany).toHaveBeenCalledTimes(1);
     });
 
-    it("returns false and retries next time when the read fails", async () => {
-        findMany.mockRejectedValueOnce(new Error("db down"));
-        await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(false);
-        expect(telegramBlocklist.isLoaded()).toBe(false);
-        expect(error).toHaveBeenCalled();
-        findMany.mockResolvedValueOnce([{ telegramId: 7n }]);
-        await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(true);
-        expect(findMany).toHaveBeenCalledTimes(2);
-        expect(telegramBlocklist.has(7)).toBe(true);
+    it("returns false and retries after the backoff when the read fails", async () => {
+        vi.useFakeTimers();
+        try {
+            findMany.mockRejectedValueOnce(new Error("db down"));
+            await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(false);
+            expect(telegramBlocklist.isLoaded()).toBe(false);
+            expect(error).toHaveBeenCalled();
+            vi.advanceTimersByTime(5_000);
+            findMany.mockResolvedValueOnce([{ telegramId: 7n }]);
+            await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(true);
+            expect(findMany).toHaveBeenCalledTimes(2);
+            expect(telegramBlocklist.has(7)).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not query again within 5s after a failure, queries after 5s", async () => {
+        vi.useFakeTimers();
+        try {
+            findMany.mockRejectedValue(new Error("db down"));
+            await telegramBlocklist.ensureLoaded();
+            vi.advanceTimersByTime(4_999);
+            await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(false);
+            expect(findMany).toHaveBeenCalledTimes(1);
+            vi.advanceTimersByTime(1);
+            await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(false);
+            expect(findMany).toHaveBeenCalledTimes(2);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("shares one query between parallel ensureLoaded calls", async () => {
+        findMany.mockResolvedValueOnce([{ telegramId: 3n }]);
+        const results = await Promise.all(Array.from({ length: 10 }, () => telegramBlocklist.ensureLoaded()));
+        expect(results.every(Boolean)).toBe(true);
+        expect(findMany).toHaveBeenCalledTimes(1);
+        expect(telegramBlocklist.has(3n)).toBe(true);
+    });
+
+    it("a replaceAll committed during the first read wins over the stale rows", async () => {
+        let release!: (rows: { telegramId: bigint }[]) => void;
+        findMany.mockReturnValueOnce(new Promise(resolve => (release = resolve)));
+        const pending = telegramBlocklist.ensureLoaded();
+        await telegramBlocklist.replaceAll([2n]);
+        release([{ telegramId: 1n }]);
+        await expect(pending).resolves.toBe(true);
+        expect(telegramBlocklist.has(2n)).toBe(true);
+        expect(telegramBlocklist.has(1n)).toBe(false);
     });
 
     it("keeps ids above 2^53 exact", async () => {

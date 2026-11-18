@@ -51,7 +51,7 @@ function transactionStub() {
     };
 }
 
-const blocklistMock = { replaceAll: vi.fn() };
+const blocklistMock = vi.hoisted(() => ({ replaceAll: vi.fn() }));
 vi.mock("../telegram-blocklist.js", () => ({ telegramBlocklist: blocklistMock }));
 
 const prismaMock = {
