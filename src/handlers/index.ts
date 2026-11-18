@@ -28,7 +28,6 @@ import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { extractFirstName } from "../utils/string-utils.js";
 import { slotBuilderHandlers } from "./slot-builder.js";
 import { leadsHandlers } from "./leads.js";
-import { blockShield } from "../middleware/block-shield.js";
 import { buildSignedCallback, readCallbackPayload } from "../utils/signed-callback.js";
 import { ScreenManager } from "../utils/screen-manager.js";
 import { escapeHtml } from "./admin/utils.js";
@@ -60,7 +59,6 @@ import {
 export const handlers = new Composer<MyContext>();
 
 // 1. GLOBAL SHIELDS (Highest Priority)
-handlers.use(blockShield);
 
 handlers.use(async (ctx, next) => {
     // logger.info(`🔍 [DEBUG] Handlers Entry: ${ctx.update.update_id}`);

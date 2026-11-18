@@ -191,7 +191,6 @@ export class AwsBusinessSyncService {
             duplicateTelegramIds: [],
             deactivationCandidates: [],
             teamMapping: {},
-            blocklistRes: { success: true, count: 0, source: "AWS", error: undefined },
         };
     }
 
@@ -537,11 +536,7 @@ export class AwsBusinessSyncService {
                         username: employee.telegramUsername,
                         firstName: employee.firstName,
                         lastName: employee.lastName,
-                        // isBlocked ставив лише старий синк чорного списку з таблиці, у
-                        // режимі вебаппа його ніхто не знімає: людина, яку заблокували до
-                        // переходу й знову найняли у вебаппі, отримувала від бота лише
-                        // «System Maintenance». Активна у вебаппі — не заблокована в боті.
-                        ...(employee.status === "ACTIVE" ? { role: Role.STAFF, isBlocked: false } : {}),
+                        ...(employee.status === "ACTIVE" ? { role: Role.STAFF } : {}),
                     },
                     select: { id: true },
                 });
