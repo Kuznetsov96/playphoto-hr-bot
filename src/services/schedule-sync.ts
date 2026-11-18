@@ -17,6 +17,7 @@ import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { parseScheduleHeaderDate, parseScheduleMonth } from "../utils/schedule-sheet-date.js";
 import { awsBusinessSyncService } from "./aws-business-sync.js";
+import { installBlocklistOutgoingGuard } from "./telegram-blocklist-outgoing.js";
 
 interface TeamMember {
     fullName: string;
@@ -1190,6 +1191,7 @@ export class ScheduleSyncService {
         try {
             const { replacementService } = await import("./replacement-service.js");
             const bot = new Bot(process.env.BOT_TOKEN!);
+            installBlocklistOutgoingGuard(bot.api);
             await replacementService.reconcileRequestsChangedBySchedule(bot.api);
         } catch (err) {
             logger.warn({ err }, "Replacement requests schedule-sync reconciliation failed");

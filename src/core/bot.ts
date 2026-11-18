@@ -17,6 +17,7 @@ import { sanitizeCallbackData } from "./log-sanitizer.js";
 import { getErrorScreenTexts } from "../utils/error-screen-texts.js";
 
 import type { MyContext } from "../types/context.js";
+import { installBlocklistOutgoingGuard } from "../services/telegram-blocklist-outgoing.js";
 
 if (!BOT_TOKEN) {
     throw new Error("BOT_TOKEN is not defined in .env");
@@ -32,6 +33,8 @@ accessService.setApi(bot.api);
 bot.api.config.use(autoRetry());
 // Keep outgoing sendMessage/editMessageText classic; rich output is explicit.
 bot.api.config.use(chatLogTransformer);
+// Останнім: пізніший transformer викликається першим, заблокований виклик не доходить до chatLog/autoRetry.
+installBlocklistOutgoingGuard(bot.api);
 
 // --- BLOCKLIST GATE (перед усім: заблоковані не потрапляють ні в чергу, ні в лог) ---
 bot.use(telegramBlocklistGate);

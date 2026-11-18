@@ -19,6 +19,7 @@ import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
 import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
 import { buildMiniAppUrl } from "./training-review.js";
+import { installBlocklistOutgoingGuard } from "./telegram-blocklist-outgoing.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -1176,6 +1177,7 @@ export const hrService = {
         const botToken = process.env.BOT_TOKEN;
         if (botToken) {
             const bot = new Bot(botToken);
+            installBlocklistOutgoingGuard(bot.api);
             await cleanupUserSessionMessages(bot as any, Number(cand.user.telegramId));
         }
 
