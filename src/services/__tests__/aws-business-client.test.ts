@@ -85,6 +85,41 @@ describe("AwsBusinessClient", () => {
         }));
     });
 
+    describe("blockedTelegramIds", () => {
+        const base = {
+            schemaVersion: 1,
+            generatedAt: "2026-08-08T12:00:00.000Z",
+            completeEmployeeSnapshot: true,
+            completeLocationSnapshot: true,
+            scheduleWindow: { from: "2026-08-01", to: "2026-08-31" },
+            locations: [],
+            employees: [],
+            shifts: [],
+        };
+        async function parse(extra: Record<string, unknown>) {
+            vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ...base, ...extra }), { status: 200 }));
+            const { AwsBusinessClient } = await import("../aws-business-client.js");
+            return new AwsBusinessClient().snapshot("2026-08-01", "2026-08-31");
+        }
+
+        it("parses a snapshot without the field", async () => {
+            expect((await parse({})).blockedTelegramIds).toBeUndefined();
+        });
+
+        it("parses string ids, including ones above 2^53", async () => {
+            expect((await parse({ blockedTelegramIds: ["838713502", "9007199254740993"] })).blockedTelegramIds)
+                .toEqual(["838713502", "9007199254740993"]);
+        });
+
+        it("rejects a negative id string", async () => {
+            await expect(parse({ blockedTelegramIds: ["-1"] })).rejects.toThrow();
+        });
+
+        it("rejects a numeric id", async () => {
+            await expect(parse({ blockedTelegramIds: [838713502] })).rejects.toThrow();
+        });
+    });
+
     it("rejects an incomplete or malformed response", async () => {
         vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
             schemaVersion: 1,

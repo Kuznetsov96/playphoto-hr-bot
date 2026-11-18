@@ -9,6 +9,7 @@ import { logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { findShiftLocationLabelCollisions } from "../utils/logistics-formatters.js";
 import { AWS_BUSINESS_SYNC_INTERVAL_MS } from "../config.js";
 import { withSerializableRetry } from "../utils/serializable-retry.js";
+import { telegramBlocklist } from "./telegram-blocklist.js";
 import { topicLink } from "./support-thread-service.js";
 import {
     awsBusinessClient,
@@ -88,6 +89,8 @@ interface SyncResult {
     shiftsCreated: number;
     shiftsUpdated: number;
     shiftsDeleted: number;
+    /** Скільки ID у копії списку після заміни; немає, якщо снимок без поля або заміна не вдалась. */
+    blockedTelegramIds?: number;
 }
 
 
@@ -237,6 +240,15 @@ export class AwsBusinessSyncService {
             ...employeeResult,
             ...shiftResult,
         };
+        // Збій списку не повинен ламати графік: синк вже зроблено.
+        if (snapshot.blockedTelegramIds !== undefined) {
+            try {
+                const { after } = await telegramBlocklist.replaceAll(snapshot.blockedTelegramIds.map(id => BigInt(id)));
+                result.blockedTelegramIds = after;
+            } catch (error) {
+                logger.error({ err: error }, "failed to apply blockedTelegramIds from the snapshot");
+            }
+        }
         this.lastResult = result;
         await prisma.systemState.upsert({
             where: { key: LAST_SYNC_STATE_KEY },

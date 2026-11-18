@@ -299,6 +299,8 @@ const snapshotSchema = z.object({
     locations: z.array(locationSchema),
     employees: z.array(employeeSchema),
     shifts: z.array(shiftSchema),
+    // Optional: відсутнє поле означає «не чіпати копію списку», а не «список порожній».
+    blockedTelegramIds: z.array(z.string().regex(/^\d+$/u)).optional(),
 }).strict();
 
 const employeeScheduleSchema = z.object({
