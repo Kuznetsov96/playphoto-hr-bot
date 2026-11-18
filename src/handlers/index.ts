@@ -58,7 +58,7 @@ import {
 
 export const handlers = new Composer<MyContext>();
 
-// 1. GLOBAL SHIELDS (Highest Priority)
+// 1. Pass-through debug entry (the Telegram-ID blocklist gate lives in core/bot.ts)
 
 handlers.use(async (ctx, next) => {
     // logger.info(`🔍 [DEBUG] Handlers Entry: ${ctx.update.update_id}`);

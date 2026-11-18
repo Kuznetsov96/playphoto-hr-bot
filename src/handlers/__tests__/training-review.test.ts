@@ -425,7 +425,7 @@ describe("registration order", () => {
         expect(generic).toHaveBeenCalledTimes(1);
     });
 
-    it("handlers/index.ts registers training before every private-chat handler but the shields", async () => {
+    it("handlers/index.ts registers training before every private-chat handler but the debug pass-through", async () => {
         const { readFileSync } = await import("node:fs");
         const { fileURLToPath } = await import("node:url");
         const source = readFileSync(fileURLToPath(new URL("../index.ts", import.meta.url)), "utf8");
