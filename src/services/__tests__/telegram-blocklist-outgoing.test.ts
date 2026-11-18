@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -13,9 +13,12 @@ vi.mock("../telegram-blocklist.js", () => ({
     },
 }));
 vi.mock("../../core/audit-logger.js", () => ({ securityAudit: audit }));
+vi.mock("../../core/logger.js", () => ({
+    default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 import { Api } from "grammy";
-import { BlockedRecipientError, blocklistOutgoingTransformer, installBlocklistOutgoingGuard } from "../telegram-blocklist-outgoing.js";
+import { BlockedRecipientError, blocklistOutgoingTransformer, installBlocklistOutgoingGuard, isBlocklistedRecipientError } from "../telegram-blocklist-outgoing.js";
 import { isBotBlocked } from "../../utils/bot-blocked.js";
 
 const call = (payload: any, method = "sendMessage") => {
@@ -87,6 +90,54 @@ describe("blocklistOutgoingTransformer", () => {
     });
 });
 
+describe("audit rate limit and failure isolation", () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("audits once per telegramId per hour, again after the hour", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-11-18T10:00:00Z"));
+        state.blocked.add(555001);
+        const attempt = () => call({ chat_id: 555001, text: "x" }).run().catch(() => undefined);
+
+        await attempt();
+        await attempt();
+        await attempt();
+        expect(audit).toHaveBeenCalledTimes(1);
+
+        vi.setSystemTime(new Date("2026-11-18T10:59:00Z"));
+        await attempt();
+        expect(audit).toHaveBeenCalledTimes(1);
+
+        vi.setSystemTime(new Date("2026-11-18T11:00:01Z"));
+        await attempt();
+        expect(audit).toHaveBeenCalledTimes(2);
+    });
+
+    it("a different id is audited separately", async () => {
+        state.blocked.add(555002);
+        state.blocked.add(555003);
+        await call({ chat_id: 555002 }).run().catch(() => undefined);
+        await call({ chat_id: 555003 }).run().catch(() => undefined);
+        expect(audit).toHaveBeenCalledTimes(2);
+    });
+
+    it("audit failure never replaces BlockedRecipientError", async () => {
+        state.blocked.add(555004);
+        audit.mockImplementationOnce(() => { throw new Error("disk full"); });
+        const { prev, run } = call({ chat_id: 555004, text: "x" });
+        await expect(run()).rejects.toBeInstanceOf(BlockedRecipientError);
+        expect(prev).not.toHaveBeenCalled();
+    });
+});
+
+describe("isBlocklistedRecipientError", () => {
+    it("recognises only BlockedRecipientError", () => {
+        expect(isBlocklistedRecipientError(new BlockedRecipientError())).toBe(true);
+        expect(isBlocklistedRecipientError(new Error("Forbidden: bot was blocked by the user"))).toBe(false);
+        expect(isBlocklistedRecipientError(null)).toBe(false);
+    });
+});
+
 describe("install order (grammY: later config.use wraps earlier)", () => {
     it("guard installed last never reaches earlier transformers or the network", async () => {
         const api = new Api("123:test");
@@ -99,6 +150,24 @@ describe("install order (grammY: later config.use wraps earlier)", () => {
         await expect(api.sendMessage(838713502, "hi")).rejects.toBeInstanceOf(BlockedRecipientError);
         expect(reached).not.toHaveBeenCalled();
     });
+});
+
+describe("guard is the last config.use( for its instance", () => {
+    const cases = ["src/core/bot.ts", "src/workers/index.ts"];
+    for (const f of cases) {
+        it(f, () => {
+            const lines = readFileSync(resolve(process.cwd(), f), "utf8").split("\n");
+            const installs = lines.flatMap((l, i) => {
+                const m = l.match(/installBlocklistOutgoingGuard\((\w+)\.api\)/);
+                return m ? [{ i, v: m[1]! }] : [];
+            });
+            expect(installs.length).toBeGreaterThan(0);
+            for (const { i, v } of installs) {
+                const after = lines.slice(i + 1).filter(l => l.includes(`${v}.api.config.use(`));
+                expect(after, `config.use( after the guard for ${v} in ${f}`).toEqual([]);
+            }
+        });
+    }
 });
 
 describe("every new Bot( site installs the guard", () => {

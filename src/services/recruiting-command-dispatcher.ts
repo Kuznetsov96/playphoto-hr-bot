@@ -14,6 +14,7 @@ import { deliverPendingRecruitingMessages } from "./recruiting-message-delivery.
 import { ADMIN_IDS } from "../config.js";
 import { sendReviewCard } from "./training-review-card.js";
 import { parsePitchReviewPayload, readCandidateMessage, readTrainingMode } from "./training-review.js";
+import { isBlocklistedRecipientError } from "./telegram-blocklist-outgoing.js";
 
 export { describeCommandFailure } from "./recruiting-failure-reason.js";
 
@@ -430,8 +431,11 @@ export class RecruitingCommandDispatcher {
                         try {
                             await api.sendMessage(Number(candidate.user.telegramId), CANDIDATE_TEXTS["training-rejected"]());
                         } catch (error) {
-                            // Заблокировала бота — отказ всё равно фиксируем; прочее — ретрай команды.
-                            if (!isBotBlocked(error)) throw new Error("REJECT_NOT_SENT:send_failed");
+                            // Заблокировала бота или в списке запрещённых ID — отказ всё равно фиксируем
+                            // (без архивации BLOCKER); прочее — ретрай команды.
+                            if (!isBotBlocked(error) && !isBlocklistedRecipientError(error)) {
+                                throw new Error("REJECT_NOT_SENT:send_failed");
+                            }
                         }
                         await redis.set(sentKey, "1", "EX", TRAINING_REJECT_SENT_TTL_SECONDS);
                     }
@@ -599,7 +603,9 @@ export class RecruitingCommandDispatcher {
         } catch (error) {
             // Точка вже записана — повтор команди дошле лише повідомлення
             // (гілка alreadyThere && isRetry вище).
-            const reason = isBotBlocked(error) ? "bot_blocked" : "send_failed";
+            const reason = isBlocklistedRecipientError(error)
+                ? "RECIPIENT_BLOCKLISTED"
+                : isBotBlocked(error) ? "bot_blocked" : "send_failed";
             logBusinessEvent({
                 event: "bot.recruiting_commands.location_message_failed",
                 level: "warn",

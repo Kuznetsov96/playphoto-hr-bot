@@ -19,7 +19,7 @@ import { escapeHtml } from "../handlers/admin/utils.js";
 import { formatLocation } from "../utils/location-label.js";
 import { TRAINING_MINIAPP_BASE_URL } from "../config.js";
 import { buildMiniAppUrl } from "./training-review.js";
-import { installBlocklistOutgoingGuard } from "./telegram-blocklist-outgoing.js";
+import { installBlocklistOutgoingGuard, isBlocklistedRecipientError } from "./telegram-blocklist-outgoing.js";
 
 export const HR_INTERVIEW_WAITLIST_REASONS = {
     NO_SLOTS_AVAILABLE: "NO_SLOTS_AVAILABLE",
@@ -416,6 +416,12 @@ export const hrService = {
                 operation: "acceptAfterInterview",
             });
         } catch (sendErr) {
+            if (isBlocklistedRecipientError(sendErr)) {
+                // Статус уже записано; лист заборонено слати — вважаємо оброблено, без архівації BLOCKER.
+                await candidateRepository.update(candId, { notificationSent: true });
+                logger.info({ candidateId: cand.id }, "Candidate offer notification skipped: recipient on Telegram blocklist");
+                return true;
+            }
             if (isBotBlocked(sendErr)) {
                 await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
                 return true;
@@ -525,6 +531,12 @@ export const hrService = {
                 safeContext: { beforeMeeting },
             });
         } catch (sendErr) {
+            if (isBlocklistedRecipientError(sendErr)) {
+                // Статус уже записано; лист заборонено слати — вважаємо оброблено, без архівації BLOCKER.
+                await candidateRepository.update(candId, { notificationSent: true });
+                logger.info({ candidateId: cand.id }, "Candidate rejection notification skipped: recipient on Telegram blocklist");
+                return true;
+            }
             if (isBotBlocked(sendErr)) {
                 await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
                 return true;
@@ -566,7 +578,8 @@ export const hrService = {
 
             return true;
         } catch (e: any) {
-            if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+            if (isBlocklistedRecipientError(e)) logger.info({ candidateId: cand.id }, "Offer message skipped: recipient on Telegram blocklist");
+            else if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
             else logger.error({ err: e, candId }, "Failed to send offer message");
             return false;
         }
@@ -1286,6 +1299,7 @@ export const hrService = {
 
         let successCount = 0;
         for (const cand of candidates) {
+            let waitlistPatch: Record<string, unknown> | null = null;
             try {
                 // Лишається в пошуку часу, доки не запишеться: наступна пачка
                 // вікон сповістить її знову. interviewInvitedAt не ставимо —
@@ -1313,6 +1327,7 @@ export const hrService = {
                 // проходу. Якщо запис упаде після повідомлення, вона лишиться
                 // в черзі «до слота» й отримає «нові вікна» на кожен новий слот
                 // (01.10.2026 так було з 13 кандидатками за ранок).
+                waitlistPatch = patch;
                 const blocked = await candidateRepository.checkFunnelPatch(cand.id, patch);
                 if (blocked) {
                     logger.warn({ err: blocked, candidateId: cand.id, status: cand.status }, "notifyWaitlist: funnel refuses the update, nothing sent");
@@ -1327,7 +1342,11 @@ export const hrService = {
                 await candidateRepository.update(cand.id, patch);
                 successCount++;
             } catch (e: any) {
-                if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
+                if (isBlocklistedRecipientError(e)) {
+                    // Лист заборонено слати: без запису стану вона лишалась би в черзі й помилка йшла б щопроходу.
+                    if (waitlistPatch) await candidateRepository.update(cand.id, waitlistPatch as any).catch(() => { });
+                    logger.info({ candidateId: cand.id }, "Waitlist notice skipped: recipient on Telegram blocklist");
+                } else if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
                 else logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify HR waitlist candidate");
             }
         }

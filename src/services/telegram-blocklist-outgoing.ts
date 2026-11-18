@@ -1,4 +1,5 @@
 import type { Api, Transformer } from "grammy";
+import logger from "../core/logger.js";
 import { telegramBlocklist } from "./telegram-blocklist.js";
 
 /**
@@ -11,6 +12,29 @@ export class BlockedRecipientError extends Error {
         super("Recipient is on the Telegram blocklist");
         this.name = "BlockedRecipientError";
     }
+}
+
+/**
+ * Термінальний пропуск: адресат у списку заборонених. Вузли, що інакше повторюють спробу вічно
+ * (маркер «надіслано» ставиться лише після успіху), мають трактувати це як «оброблено».
+ * Це НЕ блокування бота користувачем: handleBlockedCandidate / BLOCKER сюди не маршрутизуємо.
+ */
+export function isBlocklistedRecipientError(err: unknown): boolean {
+    return err instanceof BlockedRecipientError || (err as { name?: unknown } | null)?.name === "BlockedRecipientError";
+}
+
+const AUDIT_INTERVAL_MS = 60 * 60 * 1000;
+/** telegramId -> час останнього аудиту; записи старші за годину прибираються при кожному записі. */
+const lastAuditedAt = new Map<number, number>();
+
+function shouldAudit(chatId: number): boolean {
+    const now = Date.now();
+    for (const [id, at] of lastAuditedAt) {
+        if (now - at >= AUDIT_INTERVAL_MS) lastAuditedAt.delete(id);
+    }
+    if (lastAuditedAt.has(chatId)) return false;
+    lastAuditedAt.set(chatId, now);
+    return true;
 }
 
 /** chat_id як додатне ціле (number або рядок цифр); групи, канали, @name -> null. */
@@ -35,16 +59,23 @@ export const blocklistOutgoingTransformer: Transformer = async (prev, method, pa
     }
 
     if (telegramBlocklist.has(chatId)) {
-        // Ліниво: audit-logger піднімає pino-файли при імпорті, а guard підключають модулі з моками logger.
-        const { securityAudit } = await import("../core/audit-logger.js");
-        securityAudit({
-            event: "security.blocked_recipient_skipped",
-            result: "failed",
-            actorType: "system",
-            telegramId: chatId,
-            entityType: "bot",
-            context: { method },
-        });
+        if (shouldAudit(chatId)) {
+            // Аудит не має права зламати контракт: заблокований виклик завжди кидає BlockedRecipientError.
+            try {
+                // Ліниво: audit-logger піднімає pino-файли при імпорті, а guard підключають модулі з моками logger.
+                const { securityAudit } = await import("../core/audit-logger.js");
+                securityAudit({
+                    event: "security.blocked_recipient_skipped",
+                    result: "failed",
+                    actorType: "system",
+                    telegramId: chatId,
+                    entityType: "bot",
+                    context: { method },
+                });
+            } catch (auditErr) {
+                logger.warn({ err: auditErr }, "telegram-blocklist-outgoing: audit failed");
+            }
+        }
         throw new BlockedRecipientError();
     }
     return prev(method, payload, signal);

@@ -13,6 +13,7 @@ import {
     type AwsReplacementNotification,
     type AwsReplacementNotificationPayload,
 } from "./aws-business-client.js";
+import { isBlocklistedRecipientError } from "./telegram-blocklist-outgoing.js";
 
 const MAX_FAILURE_REASON_LENGTH = 500;
 
@@ -263,6 +264,8 @@ function buildOwnerReviewKeyboard(payload: AwsReplacementNotificationPayload): I
  * rather than imported so the two outboxes never couple on a shared module.
  */
 export function toSafeFailureReason(error: unknown): string {
+    // Список заборонених ID: адресат недосяжний, як і заблокований бот (наявне нетермінальне значення).
+    if (isBlocklistedRecipientError(error)) return "TELEGRAM_RECIPIENT_UNREACHABLE";
     const description = error instanceof Error ? error.message : "";
     if (/blocked|deactivated|user is deactivated|bot was blocked/iu.test(description)) {
         return "TELEGRAM_RECIPIENT_UNREACHABLE";
