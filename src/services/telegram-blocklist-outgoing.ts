@@ -50,6 +50,8 @@ function positiveChatId(value: unknown): number | null {
 }
 
 export const blocklistOutgoingTransformer: Transformer = async (prev, method, payload, signal) => {
+    // Відкликання вже доставленого (revoke розсилки) має працювати і для пізніше заблокованого чату.
+    if (method === "deleteMessage" || method === "deleteMessages") return prev(method, payload, signal);
     const chatId = positiveChatId((payload as { chat_id?: unknown } | undefined)?.chat_id);
     if (chatId === null) return prev(method, payload, signal);
 

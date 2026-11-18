@@ -44,11 +44,12 @@ export const telegramBlocklist = {
                 lastFailureAt = Date.now();
                 logger.error({ err }, "telegram-blocklist: failed to load BlockedTelegramId");
                 return false;
-            } finally {
-                inFlight = null;
             }
         })();
         inFlight = attempt;
+        void attempt.finally(() => {
+            if (inFlight === attempt) inFlight = null;
+        });
         return attempt;
     },
 

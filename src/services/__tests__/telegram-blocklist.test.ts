@@ -134,4 +134,22 @@ describe("telegramBlocklist", () => {
         expect(telegramBlocklist.has(5n)).toBe(true);
         expect(telegramBlocklist.has(6n)).toBe(false);
     });
+
+    it("a synchronous findMany throw does not leave a settled promise in flight", async () => {
+        vi.useFakeTimers();
+        try {
+            findMany.mockImplementationOnce(() => {
+                throw new Error("sync boom");
+            });
+            await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(false);
+            expect(findMany).toHaveBeenCalledTimes(1);
+            vi.advanceTimersByTime(5_000);
+            findMany.mockResolvedValueOnce([{ telegramId: 7n }]);
+            await expect(telegramBlocklist.ensureLoaded()).resolves.toBe(true);
+            expect(findMany).toHaveBeenCalledTimes(2);
+            expect(telegramBlocklist.has(7n)).toBe(true);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });

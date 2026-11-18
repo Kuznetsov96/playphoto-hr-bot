@@ -1344,7 +1344,7 @@ export const hrService = {
             } catch (e: any) {
                 if (isBlocklistedRecipientError(e)) {
                     // Лист заборонено слати: без запису стану вона лишалась би в черзі й помилка йшла б щопроходу.
-                    if (waitlistPatch) await candidateRepository.update(cand.id, waitlistPatch as any).catch(() => { });
+                    if (waitlistPatch) await candidateRepository.update(cand.id, waitlistPatch as any).catch(err => logger.error({ err, candidateId: cand.id }, "waitlist patch for blocklisted recipient failed"));
                     logger.info({ candidateId: cand.id }, "Waitlist notice skipped: recipient on Telegram blocklist");
                 } else if (isBotBlocked(e)) await handleBlockedCandidate(api, cand.id, cand.fullName || "Candidate");
                 else logger.error({ err: e, userId: cand.user.telegramId }, "Failed to notify HR waitlist candidate");

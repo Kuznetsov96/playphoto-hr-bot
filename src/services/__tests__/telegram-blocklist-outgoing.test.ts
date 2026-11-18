@@ -47,6 +47,18 @@ describe("blocklistOutgoingTransformer", () => {
         expect(JSON.stringify(audit.mock.calls)).not.toContain("secret text");
     });
 
+    it("deleteMessage / deleteMessages to a blocked chat pass through, sendMessage stays blocked", async () => {
+        for (const method of ["deleteMessage", "deleteMessages"]) {
+            const { prev, run } = call({ chat_id: 838713502, message_id: 5 }, method);
+            await expect(run()).resolves.toBeDefined();
+            expect(prev).toHaveBeenCalledTimes(1);
+        }
+        expect(audit).not.toHaveBeenCalled();
+        const send = call({ chat_id: 838713502, text: "x" });
+        await expect(send.run()).rejects.toBeInstanceOf(BlockedRecipientError);
+        expect(send.prev).not.toHaveBeenCalled();
+    });
+
     it("string chat_id is blocked", async () => {
         const { prev, run } = call({ chat_id: "838713502", text: "x" });
         await expect(run()).rejects.toBeInstanceOf(BlockedRecipientError);
