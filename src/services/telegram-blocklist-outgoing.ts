@@ -60,7 +60,7 @@ export const blocklistOutgoingTransformer: Transformer = async (prev, method, pa
         return prev(method, payload, signal);
     }
 
-    if (telegramBlocklist.has(chatId)) {
+    if (telegramBlocklist.isBlocked(chatId)) {
         if (shouldAudit(chatId)) {
             // Аудит не має права зламати контракт: заблокований виклик завжди кидає BlockedRecipientError.
             try {

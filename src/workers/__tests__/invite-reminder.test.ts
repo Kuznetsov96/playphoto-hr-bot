@@ -7,9 +7,11 @@ vi.mock("@prisma/client", async (importOriginal) => {
     return { ...actual, PrismaClient: class { candidate = { findMany }; } };
 });
 vi.mock("../../core/logger.js", () => ({ default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+vi.mock("../../services/telegram-blocklist.js", () => ({ telegramBlocklist: {} }));
 vi.mock("../../core/log-events.js", () => ({ logBusinessEvent: vi.fn() }));
 vi.mock("../../repositories/candidate-repository.js", () => ({ candidateRepository: { update } }));
-vi.mock("../../utils/bot-blocked.js", () => ({ isBotBlocked: () => false, handleBlockedCandidate: vi.fn() }));
+const { handleBlockedCandidate } = vi.hoisted(() => ({ handleBlockedCandidate: vi.fn() }));
+vi.mock("../../utils/bot-blocked.js", () => ({ isBotBlocked: () => false, handleBlockedCandidate }));
 
 const HOUR = 60 * 60 * 1000;
 
@@ -50,6 +52,22 @@ describe("processInviteReminders", () => {
         await processInviteReminders(bot);
 
         expect(bot.api.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("получатель в блоклисте: отметка стоит, на следующем проходе не выбирается, не BLOCKER", async () => {
+        const { processInviteReminders } = await import("../invite-reminder.js");
+        const { BlockedRecipientError } = await import("../../services/telegram-blocklist-outgoing.js");
+        const bot = { api: { sendMessage: vi.fn().mockRejectedValue(new BlockedRecipientError()) } };
+        const row: any = invited(24.2);
+        findMany.mockResolvedValue([row]);
+        update.mockImplementation(async (_id: string, data: any) => Object.assign(row, data));
+
+        await processInviteReminders(bot);
+        expect(update).toHaveBeenCalledWith("c1", { interviewInviteReminderSentAt: expect.any(Date) });
+        expect(handleBlockedCandidate).not.toHaveBeenCalled();
+
+        await processInviteReminders(bot);
+        expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
     });
 
     it("через 48 часов возвращает в резерв, а не в поиск времени", async () => {

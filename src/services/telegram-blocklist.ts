@@ -1,5 +1,6 @@
 import prisma from "../db/core.js";
 import logger from "../core/logger.js";
+import { ADMIN_IDS } from "../config.js";
 
 /**
  * Копія списку заборонених Telegram ID. Рішення «блокувати чи ні» береться лише звідси.
@@ -20,6 +21,11 @@ export const telegramBlocklist = {
 
     has(id: number | bigint): boolean {
         return ids.has(typeof id === "bigint" ? id : BigInt(id));
+    },
+
+    /** Рішення «блокувати»: ID у списку і не адмін бота (адміни ніколи не блокуються). */
+    isBlocked(id: number | bigint): boolean {
+        return telegramBlocklist.has(id) && !ADMIN_IDS.includes(Number(id));
     },
 
     /**
@@ -64,6 +70,10 @@ export const telegramBlocklist = {
                 });
             }
         });
+        const adminIds = unique.filter(id => ADMIN_IDS.includes(Number(id)));
+        if (adminIds.length > 0) {
+            logger.warn({ adminIds: adminIds.map(String) }, "telegram-blocklist: admin ids in the list are ignored by the gate");
+        }
         const before = ids.size;
         ids = new Set(unique);
         loaded = true;

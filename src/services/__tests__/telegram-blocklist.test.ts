@@ -5,6 +5,7 @@ const deleteMany = vi.fn();
 const createMany = vi.fn();
 const transaction = vi.fn();
 const error = vi.fn();
+const warn = vi.fn();
 
 vi.mock("../../db/core.js", () => ({
     default: {
@@ -12,8 +13,9 @@ vi.mock("../../db/core.js", () => ({
         $transaction: transaction,
     },
 }));
+vi.mock("../../config.js", () => ({ ADMIN_IDS: [111] }));
 vi.mock("../../core/logger.js", () => ({
-    default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error },
+    default: { debug: vi.fn(), info: vi.fn(), warn, error },
 }));
 
 let telegramBlocklist: (typeof import("../telegram-blocklist.js"))["telegramBlocklist"];
@@ -41,6 +43,19 @@ describe("telegramBlocklist", () => {
         expect(telegramBlocklist.isLoaded()).toBe(true);
         expect(telegramBlocklist.has(5560739103)).toBe(true);
         expect(telegramBlocklist.has(1n)).toBe(false);
+    });
+
+    it("isBlocked: ordinary id blocked, bot admin never blocked, one warn per replaceAll", async () => {
+        await telegramBlocklist.replaceAll([5560739103n, 111n]);
+        expect(telegramBlocklist.isBlocked(5560739103)).toBe(true);
+        expect(telegramBlocklist.isBlocked(111)).toBe(false);
+        expect(telegramBlocklist.isBlocked(111n)).toBe(false);
+        expect(telegramBlocklist.has(111)).toBe(true);
+        expect(createMany).toHaveBeenCalledWith({ data: [{ telegramId: 5560739103n }, { telegramId: 111n }], skipDuplicates: true });
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]![0]).toEqual({ adminIds: ["111"] });
+        await telegramBlocklist.replaceAll([5560739103n]);
+        expect(warn).toHaveBeenCalledTimes(1);
     });
 
     it("does not hit the database again after a successful load", async () => {

@@ -16,7 +16,7 @@ export async function telegramBlocklistGate(ctx: MyContext, next: NextFunction):
         return await next();
     }
 
-    if (!telegramBlocklist.has(from.id)) return await next();
+    if (!telegramBlocklist.isBlocked(from.id)) return await next();
 
     if (ctx.callbackQuery) {
         try {

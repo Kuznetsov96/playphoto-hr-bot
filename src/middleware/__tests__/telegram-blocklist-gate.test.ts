@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const bl = vi.hoisted(() => ({ isLoaded: vi.fn(), has: vi.fn(), ensureLoaded: vi.fn() }));
+const bl = vi.hoisted(() => ({ isLoaded: vi.fn(), isBlocked: vi.fn(), ensureLoaded: vi.fn() }));
 const securityAudit = vi.hoisted(() => vi.fn());
 
 vi.mock("../../services/telegram-blocklist.js", () => ({ telegramBlocklist: bl }));
@@ -24,7 +24,7 @@ describe("telegramBlocklistGate", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         bl.isLoaded.mockReturnValue(true);
-        bl.has.mockReturnValue(true);
+        bl.isBlocked.mockReturnValue(true);
         bl.ensureLoaded.mockResolvedValue(true);
     });
 
@@ -65,7 +65,7 @@ describe("telegramBlocklistGate", () => {
     });
 
     it("passes a non-blocked user through", async () => {
-        bl.has.mockReturnValue(false);
+        bl.isBlocked.mockReturnValue(false);
         const next = vi.fn();
         await telegramBlocklistGate(makeCtx({ message: { text: "hi" } }), next);
         expect(next).toHaveBeenCalledTimes(1);
@@ -78,7 +78,7 @@ describe("telegramBlocklistGate", () => {
         const next = vi.fn();
         await telegramBlocklistGate(makeCtx({ message: { text: "hi" } }), next);
         expect(bl.ensureLoaded).toHaveBeenCalledTimes(1);
-        expect(bl.has).not.toHaveBeenCalled();
+        expect(bl.isBlocked).not.toHaveBeenCalled();
         expect(next).toHaveBeenCalledTimes(1);
     });
 
@@ -94,7 +94,7 @@ describe("telegramBlocklistGate", () => {
         const next = vi.fn();
         await telegramBlocklistGate(makeCtx({ channel_post: {} }, null), next);
         expect(next).toHaveBeenCalledTimes(1);
-        expect(bl.has).not.toHaveBeenCalled();
+        expect(bl.isBlocked).not.toHaveBeenCalled();
     });
 
     it("is registered in bot.ts before sequentialize, chat logger and recruiting middleware", () => {

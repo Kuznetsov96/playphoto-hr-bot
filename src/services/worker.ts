@@ -1400,6 +1400,14 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                 await taskService.markReminderSent(task.id);
             }
         } catch (e) {
+            if (isBlocklistedRecipientError(e)) {
+                // Терминально: без отметки напоминание уходит в каждый тик окна.
+                await taskService.markReminderSent(task.id).catch(markErr => {
+                    logger.error({ err: markErr, taskId: task.id }, "Failed to mark task reminder handled");
+                });
+                logger.info({ taskId: task.id }, "Task deadline reminder skipped: recipient on Telegram blocklist");
+                continue;
+            }
             logger.error({ err: e, taskId: task.id }, "Task deadline reminder delivery failed");
         }
     }

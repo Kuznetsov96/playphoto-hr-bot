@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
     decisionRows: [] as any[],
     interviewSlots: [] as any[],
+    tasks: [] as any[],
 }));
 
 const candidateUpdate = vi.fn(async (id: string, data: any) => {
@@ -70,9 +71,10 @@ vi.mock("../interview-slot-waitlist.js", () => ({ notifyWaitlistAboutNewSlots: v
 vi.mock("../task-service.js", () => ({
     taskService: {
         getStaffForMorningDigest: vi.fn().mockResolvedValue([]),
-        getTasksNearingDeadline: vi.fn().mockResolvedValue([]),
+        getTasksNearingDeadline: vi.fn(async () => state.tasks.filter(t => !t.reminderSent)),
         getOverdueTasks: vi.fn().mockResolvedValue([]),
         markDigestSent: vi.fn(),
+        markReminderSent: vi.fn(async (id: string) => { const t = state.tasks.find(x => x.id === id); if (t) t.reminderSent = true; }),
     },
 }));
 
@@ -125,6 +127,21 @@ describe("worker: recipient on the Telegram blocklist is terminal", () => {
         expect(updateInterviewSlot).toHaveBeenCalledWith("slot-1", { reminded6h: true });
         expect(archiveBlockedCandidate).not.toHaveBeenCalled();
         expect(logBusinessEvent).not.toHaveBeenCalledWith(expect.objectContaining({ level: "error" }));
+
+        await runOneTick(bot);
+        expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("task deadline reminder: markReminderSent called, not selected again", async () => {
+        const { taskService } = await import("../task-service.js");
+        const d = new Date(Date.now() + 30 * 60_000);
+        const hhmm = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+        state.tasks = [{ id: "t1", reminderSent: false, deadlineTime: hhmm, taskText: "x", staff: { user: { telegramId: 838713502n } } }];
+        const bot = { api: { sendMessage: vi.fn().mockRejectedValue(new BlockedRecipientError()) } };
+
+        await runOneTick(bot);
+        expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);
+        expect(taskService.markReminderSent).toHaveBeenCalledWith("t1");
 
         await runOneTick(bot);
         expect(bot.api.sendMessage).toHaveBeenCalledTimes(1);

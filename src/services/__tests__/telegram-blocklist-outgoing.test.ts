@@ -8,7 +8,7 @@ const audit = vi.hoisted(() => vi.fn());
 vi.mock("../telegram-blocklist.js", () => ({
     telegramBlocklist: {
         isLoaded: () => state.loaded,
-        has: (id: number | bigint) => state.blocked.has(Number(id)),
+        isBlocked: (id: number | bigint) => state.blocked.has(Number(id)) && Number(id) !== 111,
         ensureLoaded: async () => state.ensure,
     },
 }));
@@ -33,6 +33,17 @@ beforeEach(() => {
 });
 
 describe("blocklistOutgoingTransformer", () => {
+    it("bot admin in the list: outgoing call goes through", async () => {
+        state.blocked.add(111);
+        try {
+            const { prev, run } = call({ chat_id: 111, text: "hi" });
+            await run();
+            expect(prev).toHaveBeenCalledTimes(1);
+        } finally {
+            state.blocked.delete(111);
+        }
+    });
+
     it("blocked chat_id: prev not called, BlockedRecipientError, not isBotBlocked, no text in audit", async () => {
         const { prev, run } = call({ chat_id: 838713502, text: "secret text" });
         const err = await run().catch(e => e);
