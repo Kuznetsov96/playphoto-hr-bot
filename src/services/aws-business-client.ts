@@ -134,6 +134,13 @@ export const locationSchema = z.object({
      * — старий бекенд, збережене в боті не чіпаємо; null — умов не задано.
      */
     pay: locationPaySchema.nullable().optional(),
+    /**
+     * Посилання «на мапі» в анкеті кандидатки. Правда — картка точки у вебаппі
+     * (те саме поле, що йде на сайт). Optional, бо бот викочується раніше за вебапп,
+     * а схема .strict(): відсутнє поле — старий вебапп, збережене не чіпаємо;
+     * null — посилання в картці немає.
+     */
+    mapsUrl: z.string().nullable().optional(),
 }).strict();
 
 const assignmentSchema = z.object({

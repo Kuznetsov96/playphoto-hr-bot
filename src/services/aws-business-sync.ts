@@ -408,6 +408,7 @@ export class AwsBusinessSyncService {
                             city: location.city,
                             ...(location.address === undefined ? {} : { address: location.address }),
             ...(location.cityUk === undefined ? {} : { cityUk: location.cityUk }),
+                            ...(location.mapsUrl === undefined ? {} : { googleMapsLink: location.mapsUrl }),
                             isHidden: false,
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.
@@ -426,6 +427,7 @@ export class AwsBusinessSyncService {
                             city: location.city,
                             ...(location.address === undefined ? {} : { address: location.address }),
             ...(location.cityUk === undefined ? {} : { cityUk: location.cityUk }),
+                            ...(location.mapsUrl === undefined ? {} : { googleMapsLink: location.mapsUrl }),
                             isHidden: false,
                             // Решение владельца из вебаппа; исторически правилось руками в
                             // админке бота, теперь снимок — источник истины.

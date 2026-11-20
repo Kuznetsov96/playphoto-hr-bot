@@ -116,3 +116,20 @@ describe("locationSchema: дані блоку «Твоя робота»", () => 
         expect(() => locationSchema.parse({ ...baseLocation, pay: { weekdayPercent: 25 } })).toThrow();
     });
 });
+
+/**
+ * Посилання «на мапі» в анкеті. Правда — картка точки у вебаппі (Location.publicMapsUrl),
+ * бот лише переносить. Optional, бо бот викочується раніше за вебапп, а схема .strict().
+ */
+describe("locationSchema.mapsUrl", () => {
+    it("старий вебапп без поля — undefined, посилання в боті не чіпаємо", () => {
+        expect(locationSchema.parse(baseLocation).mapsUrl).toBeUndefined();
+    });
+
+    it("приймає посилання й явний null", () => {
+        const url = "https://maps.app.goo.gl/KoKPu6ZDqgEfdshX8";
+
+        expect(locationSchema.parse({ ...baseLocation, mapsUrl: url }).mapsUrl).toBe(url);
+        expect(locationSchema.parse({ ...baseLocation, mapsUrl: null }).mapsUrl).toBeNull();
+    });
+});
