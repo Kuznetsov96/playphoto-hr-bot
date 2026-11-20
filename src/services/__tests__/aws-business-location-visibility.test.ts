@@ -132,4 +132,12 @@ describe("locationSchema.mapsUrl", () => {
         expect(locationSchema.parse({ ...baseLocation, mapsUrl: url }).mapsUrl).toBe(url);
         expect(locationSchema.parse({ ...baseLocation, mapsUrl: null }).mapsUrl).toBeNull();
     });
+
+    it("чуже посилання стає null, а знімок не падає", () => {
+        for (const url of ["javascript:alert(1)", "https://evil.example/maps", "http://maps.app.goo.gl/x"]) {
+            expect(locationSchema.parse({ ...baseLocation, mapsUrl: url }).mapsUrl).toBeNull();
+        }
+        const search = "https://www.google.com/maps/search/?api=1&query=%D0%9A%D0%B8%D1%97%D0%B2";
+        expect(locationSchema.parse({ ...baseLocation, mapsUrl: search }).mapsUrl).toBe(search);
+    });
 });

@@ -140,8 +140,20 @@ export const locationSchema = z.object({
      * а схема .strict(): відсутнє поле — старий вебапп, збережене не чіпаємо;
      * null — посилання в картці немає.
      */
-    mapsUrl: z.string().nullable().optional(),
+    mapsUrl: z.string().nullable().optional().transform((url) => (url == null || isMapsUrl(url) ? url : null)),
 }).strict();
+
+/**
+ * Лише https Google Maps — те саме правило, що в картці вебаппа (public-site-fields.ts).
+ * Інше посилання стає null, а не помилкою: схема .strict(), і падіння розбору зупинило б
+ * синк усього знімка разом із графіком.
+ */
+const MAPS_URL_PATTERN =
+    /^https:\/\/(maps\.app\.goo\.gl\/[A-Za-z0-9_-]{1,64}(\?[A-Za-z0-9_=&-]{1,64})?|(www\.)?google\.com\/maps\/[^\s"'<>\\\p{Cc}]{1,450})$/u;
+
+function isMapsUrl(url: string): boolean {
+    return url.length <= 500 && MAPS_URL_PATTERN.test(url);
+}
 
 const assignmentSchema = z.object({
     type: z.enum(["PERMANENT", "TEMPORARY"]),
