@@ -374,6 +374,23 @@ describe("RecruitingCommandDispatcher: немые owner-команды", () => {
         expect(ackApplied).toHaveBeenCalled();
     });
 
+    it("REJECT с меткой: адресат в списке запрещённых — всё равно REJECTED и синк доступа, без BLOCKER", async () => {
+        const { BlockedRecipientError } = await import("../telegram-blocklist-outgoing.js");
+        const api = makeApi();
+        api.sendMessage.mockRejectedValue(new BlockedRecipientError());
+        findByTelegramId.mockResolvedValue(localCandidate("MENTOR_MANUAL"));
+        listPending.mockResolvedValue({ items: [command({ kind: "REJECT", payload: { candidateMessage: "TRAINING_REJECTED" } })] });
+
+        await new RecruitingCommandDispatcher().runOnce(api as never);
+
+        expect(update).toHaveBeenCalledTimes(1);
+        expect(update).toHaveBeenCalledWith("cand-1", { status: "REJECTED", hrDecision: "REJECTED" });
+        expect(update).not.toHaveBeenCalledWith("cand-1", expect.objectContaining({ status: "BLOCKER" }));
+        expect(syncUserAccess).toHaveBeenCalledWith(1164289764n, "HR Rejected");
+        expect(ackApplied).toHaveBeenCalled();
+        expect(ackFailed).not.toHaveBeenCalled();
+    });
+
     it("REJECT с меткой: иная ошибка отправки — статус не меняется, команда на ретрай", async () => {
         const api = makeApi();
         api.sendMessage.mockRejectedValue(new Error("ETIMEDOUT"));

@@ -51,6 +51,9 @@ function transactionStub() {
     };
 }
 
+const blocklistMock = vi.hoisted(() => ({ replaceAll: vi.fn() }));
+vi.mock("../telegram-blocklist.js", () => ({ telegramBlocklist: blocklistMock }));
+
 const prismaMock = {
     staffProfile: {
         count: vi.fn().mockResolvedValue(0),
@@ -402,9 +405,8 @@ describe("AwsBusinessSyncService — legacy bot block", () => {
         prismaMock.systemState.upsert.mockResolvedValue(undefined);
     });
 
-    // isBlocked ставив лише старий синк чорного списку; у режимі вебаппа його ніхто
-    // не знімав, і знову найнята людина бачила від бота тільки «System Maintenance».
-    it("unblocks an employee the web app has active", async () => {
+    // Блокування тепер живе в BlockedTelegramId; синк співробітників User.isBlocked не чіпає.
+    it("does not touch the legacy isBlocked flag for an active employee", async () => {
         const transaction = transactionStub();
         prismaMock.$transaction.mockImplementation(((callback: (tx: unknown) => unknown) => callback(transaction)) as never);
         awsBusinessClientMock.snapshot.mockResolvedValue(snapshot([{ telegramId: "486213975" }]));
@@ -412,9 +414,9 @@ describe("AwsBusinessSyncService — legacy bot block", () => {
 
         await new AwsBusinessSyncService().syncAll();
 
-        expect(transaction.user.upsert).toHaveBeenCalledWith(expect.objectContaining({
-            update: expect.objectContaining({ isBlocked: false }),
-        }));
+        const call = transaction.user.upsert.mock.calls[0]![0] as { update: Record<string, unknown> };
+        expect(call.update).toEqual(expect.objectContaining({ role: "STAFF" }));
+        expect(call.update).not.toHaveProperty("isBlocked");
     });
 });
 
@@ -501,6 +503,17 @@ describe("AwsBusinessSyncService — location pay", () => {
     it("does not touch cityUk when an older webapp omits it", async () => {
         expect(await syncWithLocation({})).not.toHaveProperty("cityUk");
     });
+
+    it("writes the map link from the webapp card into googleMapsLink, null included", async () => {
+        const url = "https://maps.app.goo.gl/KoKPu6ZDqgEfdshX8";
+
+        expect(await syncWithLocation({ mapsUrl: url })).toHaveProperty("googleMapsLink", url);
+        expect(await syncWithLocation({ mapsUrl: null })).toHaveProperty("googleMapsLink", null);
+    });
+
+    it("does not touch googleMapsLink when an older webapp omits it", async () => {
+        expect(await syncWithLocation({})).not.toHaveProperty("googleMapsLink");
+    });
 });
 
 describe("AwsBusinessSyncService — конфлікт серіалізації", () => {
@@ -533,5 +546,69 @@ describe("AwsBusinessSyncService — конфлікт серіалізації",
 
         expect(syncUserAccess).toHaveBeenCalledTimes(1);
         expect(syncUserAccess.mock.calls[0]?.[0]).toBe(555n);
+    });
+});
+
+describe("AwsBusinessSyncService — blockedTelegramIds", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        prismaMock.staffProfile.count.mockResolvedValue(0);
+        prismaMock.staffProfile.findMany.mockResolvedValue([]);
+        prismaMock.user.findMany.mockResolvedValue([]);
+        prismaMock.systemState.upsert.mockResolvedValue(undefined);
+        prismaMock.$transaction.mockImplementation((callback: (tx: ReturnType<typeof transactionStub>) => unknown) =>
+            callback(transactionStub()));
+        awsBusinessClientMock.reportTelegramLinks.mockResolvedValue({ updated: 0 });
+        blocklistMock.replaceAll.mockImplementation(async (ids: bigint[]) => ({ before: 0, after: ids.length }));
+    });
+
+    async function run(blockedTelegramIds?: string[]) {
+        awsBusinessClientMock.snapshot.mockResolvedValue({
+            ...snapshot([{ telegramId: "486213975" }]),
+            ...(blockedTelegramIds === undefined ? {} : { blockedTelegramIds }),
+        });
+        const { AwsBusinessSyncService } = await import("../aws-business-sync.js");
+        return new AwsBusinessSyncService().syncAll();
+    }
+
+    it("replaces the list with bigint ids and reports the count", async () => {
+        const result = await run(["838713502", "8523647505"]);
+
+        expect(blocklistMock.replaceAll).toHaveBeenCalledWith([838713502n, 8523647505n]);
+        expect(result.blockedTelegramIds).toBe(2);
+    });
+
+    it("keeps precision for ids above 2^53", async () => {
+        await run(["9007199254740993"]);
+
+        expect(blocklistMock.replaceAll).toHaveBeenCalledWith([9007199254740993n]);
+    });
+
+    it("does not touch the list when the snapshot has no field", async () => {
+        const result = await run();
+
+        expect(blocklistMock.replaceAll).not.toHaveBeenCalled();
+        expect(result).not.toHaveProperty("blockedTelegramIds");
+    });
+
+    it("clears the list for an empty array", async () => {
+        const result = await run([]);
+
+        expect(blocklistMock.replaceAll).toHaveBeenCalledWith([]);
+        expect(result.blockedTelegramIds).toBe(0);
+    });
+
+    it("finishes the sync and logs when replaceAll throws", async () => {
+        blocklistMock.replaceAll.mockRejectedValue(new Error("db down"));
+
+        const result = await run(["838713502"]);
+
+        expect(result.generatedAt).toBe("2026-08-10T12:00:00.000Z");
+        expect(result).not.toHaveProperty("blockedTelegramIds");
+        expect(prismaMock.systemState.upsert).toHaveBeenCalled();
+        expect(loggerMock.error).toHaveBeenCalledWith(
+            expect.objectContaining({ err: expect.any(Error) }),
+            expect.any(String),
+        );
     });
 });

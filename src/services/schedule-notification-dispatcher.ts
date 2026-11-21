@@ -28,6 +28,7 @@ import {
     type AwsScheduleNotification,
     type AwsScheduleNotificationShiftSnapshot
 } from "./aws-business-client.js";
+import { isBlocklistedRecipientError } from "./telegram-blocklist-outgoing.js";
 
 const LEASE_KEY = "worker:schedule-notification-dispatcher:lease";
 const LEASE_TTL_MS = 5 * 60 * 1000;
@@ -465,6 +466,8 @@ export function buildDeliveryKeyboard(group: ScheduleNotificationDeliveryGroup):
  * Never carries a phone number, a name, or a raw payload.
  */
 export function toSafeFailureReason(error: unknown): string {
+    // Список заборонених ID: адресат недосяжний, як і заблокований бот (наявне нетермінальне значення).
+    if (isBlocklistedRecipientError(error)) return "TELEGRAM_RECIPIENT_UNREACHABLE";
     const description = error instanceof Error ? error.message : "";
     if (/blocked|deactivated|user is deactivated|bot was blocked/iu.test(description)) {
         return "TELEGRAM_RECIPIENT_UNREACHABLE";

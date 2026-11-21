@@ -6,6 +6,7 @@ import {
     undoOpenShiftAcceptanceAsCandidate,
     undoReplacementAcceptanceAsCandidate,
     OPEN_SHIFT_UNDO_CALLBACK_CODE,
+    toSafeFailureReason,
 } from "../replacement-notification-dispatcher.js";
 
 const pendingRow = {
@@ -1020,5 +1021,12 @@ describe("OFFER wording follows the candidate's stated availability", () => {
 
         expect(text).not.toContain("зайнят");
         expect(text).toContain("Smile Park");
+    });
+});
+
+describe("toSafeFailureReason, blocklisted recipient", () => {
+    it("maps BlockedRecipientError onto the existing unreachable code", async () => {
+        const { BlockedRecipientError } = await import("../telegram-blocklist-outgoing.js");
+        expect(toSafeFailureReason(new BlockedRecipientError())).toBe("TELEGRAM_RECIPIENT_UNREACHABLE");
     });
 });

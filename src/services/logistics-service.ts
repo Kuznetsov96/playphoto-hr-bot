@@ -21,8 +21,10 @@ import { parcelCanonicalReadService, type CanonicalParcel } from './parcel-canon
 import { isoDayOfWeekInKyiv } from '../utils/location-opening-hours.js';
 import { deliveredEntryData, kyivShiftDateRange } from './parcel-followup-rules.js';
 import { parcelFollowupService } from './parcel-followup-service.js';
+import { installBlocklistOutgoingGuard } from "./telegram-blocklist-outgoing.js";
 
 const bot = new Bot(BOT_TOKEN);
+installBlocklistOutgoingGuard(bot.api);
 
 type LogisticsSupportIssueType = 'NO_SHIFT' | 'REJECTED' | 'DELAYED' | 'SHIPMENT_LOCKED' | 'MANUAL_PROXY';
 

@@ -116,3 +116,28 @@ describe("locationSchema: дані блоку «Твоя робота»", () => 
         expect(() => locationSchema.parse({ ...baseLocation, pay: { weekdayPercent: 25 } })).toThrow();
     });
 });
+
+/**
+ * Посилання «на мапі» в анкеті. Правда — картка точки у вебаппі (Location.publicMapsUrl),
+ * бот лише переносить. Optional, бо бот викочується раніше за вебапп, а схема .strict().
+ */
+describe("locationSchema.mapsUrl", () => {
+    it("старий вебапп без поля — undefined, посилання в боті не чіпаємо", () => {
+        expect(locationSchema.parse(baseLocation).mapsUrl).toBeUndefined();
+    });
+
+    it("приймає посилання й явний null", () => {
+        const url = "https://maps.app.goo.gl/KoKPu6ZDqgEfdshX8";
+
+        expect(locationSchema.parse({ ...baseLocation, mapsUrl: url }).mapsUrl).toBe(url);
+        expect(locationSchema.parse({ ...baseLocation, mapsUrl: null }).mapsUrl).toBeNull();
+    });
+
+    it("чуже посилання стає null, а знімок не падає", () => {
+        for (const url of ["javascript:alert(1)", "https://evil.example/maps", "http://maps.app.goo.gl/x"]) {
+            expect(locationSchema.parse({ ...baseLocation, mapsUrl: url }).mapsUrl).toBeNull();
+        }
+        const search = "https://www.google.com/maps/search/?api=1&query=%D0%9A%D0%B8%D1%97%D0%B2";
+        expect(locationSchema.parse({ ...baseLocation, mapsUrl: search }).mapsUrl).toBe(search);
+    });
+});

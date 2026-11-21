@@ -271,6 +271,29 @@ describe('hrService', () => {
             }));
         });
 
+        it('blocklisted recipient: offer skipped silently, notificationSent set, no BLOCKER archive', async () => {
+            const { BlockedRecipientError } = await import('../telegram-blocklist-outgoing.js');
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+            vi.mocked(candidateRepository.update).mockClear();
+            api.sendMessage.mockRejectedValue(new BlockedRecipientError());
+
+            await expect(hrService.acceptAfterInterview(api, 'cand1')).resolves.toBe(true);
+
+            expect(candidateRepository.update).toHaveBeenLastCalledWith('cand1', { notificationSent: true });
+            expect(candidateRepository.update).not.toHaveBeenCalledWith('cand1', expect.objectContaining({ status: CandidateStatus.BLOCKER }));
+        });
+
+        it('sendOffer, blocklisted recipient: returns false quietly, no BLOCKER archive', async () => {
+            const { BlockedRecipientError } = await import('../telegram-blocklist-outgoing.js');
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, notificationSent: false } as any);
+            vi.mocked(candidateRepository.update).mockClear();
+            api.sendMessage.mockRejectedValue(new BlockedRecipientError());
+
+            await expect(hrService.sendOffer(api, 'cand1')).resolves.toBe(false);
+
+            expect(candidateRepository.update).not.toHaveBeenCalledWith('cand1', expect.objectContaining({ status: CandidateStatus.BLOCKER }));
+        });
+
         it('send failure: the command fails with a code', async () => {
             vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
             api.sendMessage.mockRejectedValue(new Error('ETIMEDOUT'));
@@ -333,6 +356,18 @@ describe('hrService', () => {
 
             expect(bookingService.cancelInterviewSlot).not.toHaveBeenCalled();
             expect(api.sendMessage).toHaveBeenCalledWith(123, CANDIDATE_TEXTS['worker-offer-rejected'], { parse_mode: 'HTML' });
+        });
+
+        it('blocklisted recipient: rejection letter skipped silently, notificationSent set, no BLOCKER archive', async () => {
+            const { BlockedRecipientError } = await import('../telegram-blocklist-outgoing.js');
+            vi.mocked(candidateRepository.findById).mockResolvedValue({ ...base, status: CandidateStatus.INTERVIEW_COMPLETED } as any);
+            vi.mocked(candidateRepository.update).mockClear();
+            api.sendMessage.mockRejectedValue(new BlockedRecipientError());
+
+            await expect(hrService.rejectAfterInterview(api, 'cand1')).resolves.toBe(true);
+
+            expect(candidateRepository.update).toHaveBeenLastCalledWith('cand1', { notificationSent: true });
+            expect(candidateRepository.update).not.toHaveBeenCalledWith('cand1', expect.objectContaining({ status: CandidateStatus.BLOCKER }));
         });
 
         it('send failure: status stays REJECTED, the command fails with a code', async () => {
@@ -566,6 +601,22 @@ describe('hrService', () => {
             expect(count).toBe(0);
             expect(api.sendMessage).not.toHaveBeenCalled();
             expect(candidateRepository.update).not.toHaveBeenCalled();
+        });
+
+        it('адресат у списку заборонених: стан пишеться (вона виходить із черги), BLOCKER не ставиться', async () => {
+            const { BlockedRecipientError } = await import('../telegram-blocklist-outgoing.js');
+            vi.mocked(candidateRepository.findByStatusWithUser).mockResolvedValue([
+                { id: 'cand-bl', fullName: 'Test', user: { telegramId: 777 } }
+            ] as any);
+            vi.mocked(candidateRepository.update).mockReset().mockResolvedValue({} as any);
+            const api = { sendMessage: vi.fn().mockRejectedValue(new BlockedRecipientError()) };
+
+            const count = await hrService.notifyWaitlist(api);
+
+            expect(count).toBe(0);
+            expect(candidateRepository.update).toHaveBeenCalledTimes(1);
+            expect(candidateRepository.update).toHaveBeenCalledWith('cand-bl', expect.objectContaining({ interviewWaitlistedAt: expect.any(Date) }));
+            expect(candidateRepository.update).not.toHaveBeenCalledWith('cand-bl', expect.objectContaining({ status: CandidateStatus.BLOCKER }));
         });
 
         it('залишок materialsSent зі старого флоу скидається тим самим записом', async () => {

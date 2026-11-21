@@ -4,6 +4,7 @@ import logger from "../core/logger.js";
 import { logBusinessEvent } from "../core/log-events.js";
 import { CANDIDATE_TEXTS } from "../constants/candidate-texts.js";
 import { candidateRepository } from "../repositories/candidate-repository.js";
+import { isBlocklistedRecipientError } from "../services/telegram-blocklist-outgoing.js";
 import { isBotBlocked, handleBlockedCandidate } from "../utils/bot-blocked.js";
 import { formatKyivWeekdayDateTime } from "../utils/kyiv-date-label.js";
 
@@ -99,7 +100,11 @@ export async function processInviteReminders(bot: any) {
                     await candidateRepository.update(cand.id, { interviewInviteReminderSentAt: new Date() });
                     pingCount += 1;
                 } catch (e: any) {
-                    if (isBotBlocked(e)) {
+                    if (isBlocklistedRecipientError(e)) {
+                        // Терминально: отметка как при успехе, иначе берётся каждый тик. Не BLOCKER.
+                        await candidateRepository.update(cand.id, { interviewInviteReminderSentAt: new Date() });
+                        logger.info({ candidateId: cand.id }, "Invite reminder skipped: recipient on Telegram blocklist");
+                    } else if (isBotBlocked(e)) {
                         await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     }
                 }

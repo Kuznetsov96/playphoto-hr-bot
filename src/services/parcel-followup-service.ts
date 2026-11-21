@@ -15,8 +15,10 @@ import {
     kyivShiftDateRange,
     selectOverdueAlert,
 } from "./parcel-followup-rules.js";
+import { installBlocklistOutgoingGuard } from "./telegram-blocklist-outgoing.js";
 
 const bot = new Bot(BOT_TOKEN);
+installBlocklistOutgoingGuard(bot.api);
 
 const responsibleStaffInclude = {
     responsibleStaff: { include: { user: { select: { firstName: true, lastName: true, username: true } } } },

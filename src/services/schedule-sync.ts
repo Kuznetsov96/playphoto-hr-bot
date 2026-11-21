@@ -17,6 +17,7 @@ import logger from "../core/logger.js";
 import { logAuditEvent, logBusinessEvent, logSecurityEvent } from "../core/log-events.js";
 import { parseScheduleHeaderDate, parseScheduleMonth } from "../utils/schedule-sheet-date.js";
 import { awsBusinessSyncService } from "./aws-business-sync.js";
+import { installBlocklistOutgoingGuard } from "./telegram-blocklist-outgoing.js";
 
 interface TeamMember {
     fullName: string;
@@ -616,102 +617,6 @@ export class ScheduleSyncService {
     }
 
     /**
-     * Syncs blocked users from Blocklist sheet
-     */
-    async syncBlocklist() {
-        this.ensureSheets();
-        try {
-            const res = await this.sheets.spreadsheets.values.get({
-                spreadsheetId: SPREADSHEET_ID_TEAM,
-                range: "'Blocklist'!A2:A1000" // Assume Column A has Telegram IDs
-            });
-
-            const rows = res.data.values;
-            const blockedIds = new Set<bigint>();
-
-            if (rows) {
-                rows.forEach((row: any[]) => {
-                    const id = this.parseTelegramId(String(row[0] || ""));
-                    if (id) blockedIds.add(id);
-                });
-            }
-
-            logSecurityEvent({
-                event: "security.blocklist.sync_started",
-                actorType: "system",
-                actorRole: "system",
-                result: "pending",
-                module: "schedule-sync",
-                operation: "syncBlocklist",
-                safeContext: {
-                    blockedCount: blockedIds.size,
-                },
-            });
-
-            // 1. Mark new users as blocked or update existing ones
-            for (const tgId of blockedIds) {
-                await (userRepository as any).upsert({
-                    where: { telegramId: tgId },
-                    update: { isBlocked: true },
-                    create: {
-                        telegramId: tgId,
-                        username: `Blocked_${tgId}`,
-                        firstName: "Blocked",
-                        lastName: "User",
-                        isBlocked: true
-                    }
-                });
-            }
-
-            // 2. Optional: Unblock users who were removed from the sheet
-            const currentlyBlockedInDb = await userRepository.findBlocked();
-
-            for (const user of currentlyBlockedInDb) {
-                if (!blockedIds.has(user.telegramId)) {
-                    await (userRepository as any).update(user.id, { isBlocked: false });
-                    logSecurityEvent({
-                        event: "security.blocklist.user_unblocked",
-                        telegramId: user.telegramId,
-                        userId: user.id,
-                        actorType: "system",
-                        actorRole: "system",
-                        result: "success",
-                        module: "schedule-sync",
-                        operation: "syncBlocklist",
-                    });
-                }
-            }
-
-            logSecurityEvent({
-                event: "security.blocklist.sync_completed",
-                actorType: "system",
-                actorRole: "system",
-                result: "success",
-                module: "schedule-sync",
-                operation: "syncBlocklist",
-                safeContext: {
-                    blockedCount: blockedIds.size,
-                },
-            });
-            return { success: true, count: blockedIds.size };
-        } catch (e: any) {
-            logger.error({ err: e }, "Blocklist synchronization failed");
-            logSecurityEvent({
-                event: "security.blocklist.sync_failed",
-                level: "error",
-                actorType: "system",
-                actorRole: "system",
-                result: "failed",
-                reasonCode: "BLOCKLIST_SYNC_FAILED",
-                module: "schedule-sync",
-                operation: "syncBlocklist",
-                error: e,
-            });
-            return { success: false, error: e.message };
-        }
-    }
-
-    /**
      * Syncs team members from Google Sheet to Database
      */
     async syncTeam(api?: Api) {
@@ -719,7 +624,6 @@ export class ScheduleSyncService {
             return awsBusinessSyncService.syncTeam(api);
         }
         this.ensureSheets();
-        const blocklistRes = await this.syncBlocklist();
         await this.fixLocations();
 
         // Get count of active staff BEFORE
@@ -993,10 +897,7 @@ export class ScheduleSyncService {
                         });
                     }
 
-                    // Also ensure they are not blocked if they are working
-                    if (isActive) {
-                        await (userRepository as any).update(user.id, { isBlocked: false });
-                    } else {
+                    if (!isActive) {
                         await workShiftRepository.deleteManyForStaffSince(profile.id, todayKyiv);
                         await pendingReplyRepository.updateMany({
                             userId: telegramId,
@@ -1094,7 +995,6 @@ export class ScheduleSyncService {
                 unknownStatusRows,
                 duplicateTelegramIds: analysis.duplicateTelegramIds.length,
                 deactivationCandidates: analysis.deactivationCandidates.length,
-                blocklistSyncSuccess: blocklistRes.success,
             },
         });
 
@@ -1110,8 +1010,7 @@ export class ScheduleSyncService {
             unknownStatusRows,
             duplicateTelegramIds: analysis.duplicateTelegramIds,
             deactivationCandidates: analysis.deactivationCandidates,
-            teamMapping: teamMappingForSchedule,
-            blocklistRes
+            teamMapping: teamMappingForSchedule
         };
     }
 
@@ -1292,6 +1191,7 @@ export class ScheduleSyncService {
         try {
             const { replacementService } = await import("./replacement-service.js");
             const bot = new Bot(process.env.BOT_TOKEN!);
+            installBlocklistOutgoingGuard(bot.api);
             await replacementService.reconcileRequestsChangedBySchedule(bot.api);
         } catch (err) {
             logger.warn({ err }, "Replacement requests schedule-sync reconciliation failed");

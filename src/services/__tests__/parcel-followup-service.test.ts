@@ -10,7 +10,7 @@ const shiftFindMany = vi.fn();
 vi.mock("grammy", async (importOriginal) => {
     const actual = await importOriginal<typeof import("grammy")>();
     class Bot {
-        api = { sendMessage: (...a: unknown[]) => sendMessage(...a) };
+        api = { config: { use: () => undefined }, sendMessage: (...a: unknown[]) => sendMessage(...a) };
     }
     return { ...actual, Bot };
 });

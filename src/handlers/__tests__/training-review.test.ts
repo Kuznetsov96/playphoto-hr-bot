@@ -425,7 +425,7 @@ describe("registration order", () => {
         expect(generic).toHaveBeenCalledTimes(1);
     });
 
-    it("handlers/index.ts registers training before every private-chat handler but the shields", async () => {
+    it("handlers/index.ts registers training before every private-chat handler but the debug pass-through", async () => {
         const { readFileSync } = await import("node:fs");
         const { fileURLToPath } = await import("node:url");
         const source = readFileSync(fileURLToPath(new URL("../index.ts", import.meta.url)), "utf8");
@@ -433,9 +433,9 @@ describe("registration order", () => {
         expect(training).toBeGreaterThan(-1);
         const registrations = [...source.matchAll(/^handlers\.(use|on|callbackQuery|command|hears)\(/gmu)].map((m) => m.index ?? -1);
         const before = registrations.filter((index) => index < training);
-        // До обучения — только blockShield и сквозной debug-проход (оба зовут next()).
-        expect(before).toHaveLength(2);
-        expect(source.slice(before[0], before[0]! + 40)).toContain("handlers.use(blockShield)");
+        // До обучения — только сквозной debug-проход (зовёт next()); блок-список живёт в core/bot.ts.
+        expect(before).toHaveLength(1);
+        expect(source.slice(before[0], before[0]! + 40)).toContain("handlers.use(async (ctx, next)");
         expect(source.indexOf("handlers.use(preferencesHandlers)")).toBeGreaterThan(training);
     });
 });

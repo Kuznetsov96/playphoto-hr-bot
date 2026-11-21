@@ -689,6 +689,11 @@ describe("toSafeFailureReason", () => {
         expect(toSafeFailureReason(new Error("The operation was aborted"))).toBe("TELEGRAM_DELIVERY_TIMEOUT");
     });
 
+    it("maps a blocklisted recipient onto the existing unreachable code", async () => {
+        const { BlockedRecipientError } = await import("../telegram-blocklist-outgoing.js");
+        expect(toSafeFailureReason(new BlockedRecipientError())).toBe("TELEGRAM_RECIPIENT_UNREACHABLE");
+    });
+
     it("never echoes personal data from an unrecognised error", () => {
         const reason = toSafeFailureReason(new Error("failed for Олена Петренко +380671234567"));
 

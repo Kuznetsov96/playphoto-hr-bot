@@ -8,6 +8,7 @@ import { autoRetry } from '@grammyjs/auto-retry';
 import process from 'process';
 import { sendDailyIncomeReport } from '../services/finance-report.js';
 import { logBusinessEvent } from '../core/log-events.js';
+import { installBlocklistOutgoingGuard } from "../services/telegram-blocklist-outgoing.js";
 
 const connection = redis;
 
@@ -25,6 +26,7 @@ export const startWorkers = () => {
         logger.info({ jobId: job.id, name: job.name }, 'Processing job');
         if (job.name === 'replacement-dispatch-wave') {
             const bot = new Bot(process.env.BOT_TOKEN!);
+            installBlocklistOutgoingGuard(bot.api);
             const { replacementService } = await import('../services/replacement-service.js');
             await replacementService.dispatchNextWave(bot.api, job.data.requestId);
         }
@@ -47,6 +49,7 @@ export const startWorkers = () => {
             // autoRetry, как в core/bot.ts: 429 на большой рассылке ждёт retry_after, а не валит доставки.
             const broadcastBot = new Bot(process.env.BOT_TOKEN!);
             broadcastBot.api.config.use(autoRetry());
+            installBlocklistOutgoingGuard(broadcastBot.api);
             await broadcastService.processBroadcast(job.data, broadcastBot.api);
             logger.info({ jobId: job.id }, '✅ Broadcast job done');
         } catch (e) {
@@ -61,6 +64,7 @@ export const startWorkers = () => {
         // Actually sendDailyIncomeReport takes (bot: Bot<MyContext>).
         // Constructing a new Bot instance is cheap.
         const bot = new Bot(process.env.BOT_TOKEN!);
+        installBlocklistOutgoingGuard(bot.api);
 
         logger.info({ jobId: job.id, name: job.name }, 'Processing report');
 

@@ -17,13 +17,11 @@ import { describe, expect, it, vi } from "vitest";
 
 const awsSyncSchedule = vi.fn().mockResolvedValue({ success: true, count: 0, source: "AWS" });
 const awsSyncTeam = vi.fn().mockResolvedValue({ success: true, count: 0, source: "AWS" });
-const awsSyncBlocklist = vi.fn().mockResolvedValue({ success: true, count: 0, source: "AWS" });
 
 vi.mock("../aws-business-sync.js", () => ({
     awsBusinessSyncService: {
         syncSchedule: awsSyncSchedule,
         syncTeam: awsSyncTeam,
-        syncBlocklist: awsSyncBlocklist,
         syncAll: vi.fn(),
         startLoop: vi.fn(),
     },

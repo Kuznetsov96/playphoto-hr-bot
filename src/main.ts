@@ -32,6 +32,7 @@ import { webhookService } from "./services/webhook-service.js";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 import { ADMIN_IDS, BUSINESS_DATA_SOURCE, SUPPORT_THREADS_ENABLED } from "./config.js";
 import { awsBusinessSyncService } from "./services/aws-business-sync.js";
+import { telegramBlocklist } from "./services/telegram-blocklist.js";
 import { reconcileKnownChats } from "./services/known-chat-reconciler.js";
 
 let runner: RunnerHandle | undefined;
@@ -225,6 +226,11 @@ async function bootstrap() {
             .catch((error) => {
                 logger.error({ err: error }, "known-chat-reconciler: startup sweep failed");
             });
+
+        // Список заборонених ID вантажимо до першого апдейта. Збій не блокує старт:
+        // гейт сам пробує знову на кожному апдейті й до успіху пропускає з логом.
+        const blocklistLoaded = await telegramBlocklist.ensureLoaded();
+        logger.info({ blocklistLoaded }, "telegram-blocklist: startup load");
 
         // Start the bot with runner for parallel processing
         runner = run(bot, {

@@ -35,6 +35,7 @@ import { formatLocation } from "../utils/location-label.js";
 import { ADMIN_TEXTS } from "../constants/admin-texts.js";
 import { surnameAndName } from "../utils/person-name.js";
 import { formatShiftLocationLabel } from "../utils/logistics-formatters.js";
+import { isBlocklistedRecipientError } from "./telegram-blocklist-outgoing.js";
 
 
 /**
@@ -139,7 +140,14 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 },
                             });
                         } catch (sendErr: any) {
-                            if (isBotBlocked(sendErr)) {
+                            if (isBlocklistedRecipientError(sendErr)) {
+                                // Терминально: маркер ставим как при успехе, иначе выборка notificationSent:false вечно вернёт её.
+                                await candidateRepository.update(cand.id, {
+                                    status: CandidateStatus.MENTOR_MANUAL,
+                                    notificationSent: true
+                                });
+                                logger.info({ candidateId: cand.id }, "Candidate offer notification skipped: recipient on Telegram blocklist");
+                            } else if (isBotBlocked(sendErr)) {
                                 await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                             } else {
                                 logger.error({ err: sendErr, candidateId: cand.id }, "Candidate offer notification delivery failed");
@@ -187,7 +195,13 @@ export async function startWorker(bot: Bot<MyContext>) {
                                 },
                             });
                         } catch (sendErr) {
-                            if (isBotBlocked(sendErr)) {
+                            if (isBlocklistedRecipientError(sendErr)) {
+                                await candidateRepository.update(cand.id, {
+                                    status: CandidateStatus.REJECTED,
+                                    notificationSent: true
+                                });
+                                logger.info({ candidateId: cand.id }, "Candidate rejection notification skipped: recipient on Telegram blocklist");
+                            } else if (isBotBlocked(sendErr)) {
                                 await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                             } else {
                                 logger.error({ err: sendErr, candidateId: cand.id }, "Candidate rejection notification delivery failed");
@@ -249,7 +263,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                         },
                     });
                 } catch (e: any) {
-                    if (isBotBlocked(e) && slot.candidate) {
+                    if (isBlocklistedRecipientError(e)) {
+                        await interviewRepository.updateSlot(slot.id, { reminded6h: true });
+                        logger.info({ candidateId: slot.candidate?.id, slotId: slot.id }, "6h interview reminder skipped: recipient on Telegram blocklist");
+                    } else if (isBotBlocked(e) && slot.candidate) {
                         await handleBlockedCandidate(bot.api, slot.candidate.id, slot.candidate.fullName || "Candidate");
                     } else {
                         logger.error({ err: e, candidateId: slot.candidate?.id, slotId: slot.id }, "Failed to send 6h interview reminder");
@@ -309,7 +326,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                         },
                     });
                 } catch (e: any) {
-                    if (isBotBlocked(e) && slot.candidate) {
+                    if (isBlocklistedRecipientError(e)) {
+                        await interviewRepository.updateSlot(slot.id, { reminded10m: true });
+                        logger.info({ candidateId: slot.candidate?.id, slotId: slot.id }, "10m interview reminder skipped: recipient on Telegram blocklist");
+                    } else if (isBotBlocked(e) && slot.candidate) {
                         await handleBlockedCandidate(bot.api, slot.candidate.id, slot.candidate.fullName || "Candidate");
                     } else {
                         logBusinessEvent({
@@ -376,7 +396,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e: any) {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
                     const isDiscovery = !!slot.candidateDiscovery;
-                    if (isBotBlocked(e) && cand) {
+                    if (isBlocklistedRecipientError(e)) {
+                        await trainingRepository.updateSlot(slot.id, { reminded6h: true });
+                        logger.info({ candidateId: cand?.id, slotId: slot.id }, "Training reminder skipped: recipient on Telegram blocklist");
+                    } else if (isBotBlocked(e) && cand) {
                         await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     } else {
                         logBusinessEvent({
@@ -461,7 +484,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                 } catch (e: any) {
                     const cand = (slot.candidate || slot.candidateDiscovery)!;
                     const isDiscovery = !!slot.candidateDiscovery;
-                    if (isBotBlocked(e) && cand) {
+                    if (isBlocklistedRecipientError(e)) {
+                        await trainingRepository.updateSlot(slot.id, { reminded10m: true });
+                        logger.info({ candidateId: cand?.id, slotId: slot.id }, "Training reminder skipped: recipient on Telegram blocklist");
+                    } else if (isBotBlocked(e) && cand) {
                         await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                     } else {
                         logBusinessEvent({
@@ -540,7 +566,10 @@ export async function startWorker(bot: Bot<MyContext>) {
                             },
                         );
                     } catch (e: any) {
-                        if (isBotBlocked(e)) {
+                        if (isBlocklistedRecipientError(e)) {
+                            // Маркер remindedCompletion ставится ниже в любом случае.
+                            logger.info({ candidateId: cand.id }, "Meeting-completed notice skipped: recipient on Telegram blocklist");
+                        } else if (isBotBlocked(e)) {
                             await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                         } else {
                             logger.warn({ err: e, candidateId: cand.id }, "Meeting-completed notice to candidate failed");
@@ -1330,6 +1359,14 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
 
                 await taskService.markDigestSent(s.id);
             } catch (e) {
+                if (isBlocklistedRecipientError(e)) {
+                    // Терминально: дайджест отмечен отправленным, иначе её берёт каждый тик окна 8:00-9:00.
+                    await taskService.markDigestSent(staff.id).catch(markErr => {
+                        logger.error({ err: markErr, staffId: staff.id }, "Failed to mark morning digest handled");
+                    });
+                    logger.info({ staffId: staff.id }, "Staff morning digest skipped: recipient on Telegram blocklist");
+                    continue;
+                }
                 logger.error({ err: e, staffId: staff.id }, "Staff morning digest delivery failed");
             }
         }
@@ -1363,6 +1400,14 @@ async function processTaskAutomations(bot: Bot<MyContext>) {
                 await taskService.markReminderSent(task.id);
             }
         } catch (e) {
+            if (isBlocklistedRecipientError(e)) {
+                // Терминально: без отметки напоминание уходит в каждый тик окна.
+                await taskService.markReminderSent(task.id).catch(markErr => {
+                    logger.error({ err: markErr, taskId: task.id }, "Failed to mark task reminder handled");
+                });
+                logger.info({ taskId: task.id }, "Task deadline reminder skipped: recipient on Telegram blocklist");
+                continue;
+            }
             logger.error({ err: e, taskId: task.id }, "Task deadline reminder delivery failed");
         }
     }
@@ -1593,7 +1638,13 @@ async function processAbandonedApplications(bot: Bot<MyContext>) {
                     operation: "processAbandonedApplications",
                 });
             } catch (e: any) {
-                if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
+                if (isBlocklistedRecipientError(e)) {
+                    await prisma.candidate.update({
+                        where: { id: cand.id },
+                        data: { screeningReminderSentAt: new Date() },
+                    });
+                    logger.info({ candidateId: cand.id }, "Candidate screening reminder skipped: recipient on Telegram blocklist");
+                } else if (isBotBlocked(e)) await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                 else {
                     logger.warn({ err: e, telegramId: cand.user.telegramId }, "Candidate screening reminder delivery failed");
                     logBusinessEvent({
@@ -1922,7 +1973,9 @@ async function processLegacyAgeLimitCandidates(bot: Bot<MyContext>) {
             try {
                 await bot.api.sendMessage(Number(cand.user.telegramId), finalText, { parse_mode: "HTML" });
             } catch (e: any) {
-                if (isBotBlocked(e)) {
+                if (isBlocklistedRecipientError(e)) {
+                    logger.info({ candidateId: cand.id }, "Legacy age-limit message skipped: recipient on Telegram blocklist");
+                } else if (isBotBlocked(e)) {
                     await handleBlockedCandidate(bot.api, cand.id, cand.fullName || "Candidate");
                 } else {
                     logger.warn({ err: e, candidateId: cand.id }, "Legacy age-limit cleanup message delivery failed");

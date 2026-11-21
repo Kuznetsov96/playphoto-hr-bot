@@ -4,6 +4,7 @@ import { lazySession } from "./session.js";
 import { BOT_TOKEN } from "../config.js";
 import { createRateLimitMiddleware } from "../middleware/rate-limit.js";
 import { chatLoggerMiddleware, chatLogTransformer } from "../middleware/chat-logger.js";
+import { telegramBlocklistGate } from "../middleware/telegram-blocklist-gate.js";
 import { recruitingIncomingMiddleware } from "../middleware/recruiting-incoming.js";
 import { richMessageInputMiddleware } from "../middleware/rich-message.js";
 import { autoRetry } from "@grammyjs/auto-retry";
@@ -16,6 +17,7 @@ import { sanitizeCallbackData } from "./log-sanitizer.js";
 import { getErrorScreenTexts } from "../utils/error-screen-texts.js";
 
 import type { MyContext } from "../types/context.js";
+import { installBlocklistOutgoingGuard } from "../services/telegram-blocklist-outgoing.js";
 
 if (!BOT_TOKEN) {
     throw new Error("BOT_TOKEN is not defined in .env");
@@ -31,6 +33,11 @@ accessService.setApi(bot.api);
 bot.api.config.use(autoRetry());
 // Keep outgoing sendMessage/editMessageText classic; rich output is explicit.
 bot.api.config.use(chatLogTransformer);
+// Останнім: пізніший transformer викликається першим, заблокований виклик не доходить до chatLog/autoRetry.
+installBlocklistOutgoingGuard(bot.api);
+
+// --- BLOCKLIST GATE (перед усім: заблоковані не потрапляють ні в чергу, ні в лог) ---
+bot.use(telegramBlocklistGate);
 
 // --- SESSION ---
 bot.use(sequentialize((ctx) => {
