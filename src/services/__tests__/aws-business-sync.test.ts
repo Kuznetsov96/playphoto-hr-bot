@@ -503,6 +503,17 @@ describe("AwsBusinessSyncService — location pay", () => {
     it("does not touch cityUk when an older webapp omits it", async () => {
         expect(await syncWithLocation({})).not.toHaveProperty("cityUk");
     });
+
+    it("writes the map link from the webapp card into googleMapsLink, null included", async () => {
+        const url = "https://maps.app.goo.gl/KoKPu6ZDqgEfdshX8";
+
+        expect(await syncWithLocation({ mapsUrl: url })).toHaveProperty("googleMapsLink", url);
+        expect(await syncWithLocation({ mapsUrl: null })).toHaveProperty("googleMapsLink", null);
+    });
+
+    it("does not touch googleMapsLink when an older webapp omits it", async () => {
+        expect(await syncWithLocation({})).not.toHaveProperty("googleMapsLink");
+    });
 });
 
 describe("AwsBusinessSyncService — конфлікт серіалізації", () => {
