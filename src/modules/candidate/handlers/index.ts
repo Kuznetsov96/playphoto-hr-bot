@@ -1,6 +1,6 @@
 import type { MyContext } from "../../../types/context.js";
 import { formatCityUk, formatLocation } from "../../../utils/location-label.js";
-import { escapeHtml } from "../../../handlers/admin/utils.js";
+import { buildLocationSelectionText } from "../../../utils/candidate-address.js";
 import { CANDIDATE_TEXTS } from "../../../constants/candidate-texts.js";
 import { Composer, InlineKeyboard } from "grammy";
 import { z } from "zod";
@@ -271,13 +271,11 @@ export async function renderLocationSelectionContent(ctx: MyContext) {
     const { locationRepository } = ctx.di;
     const locations = await locationRepository.findByCity(city, true);
 
-    let text = CANDIDATE_TEXTS["candidate-ask-location-multiple"] + "\n\n";
-    locations.forEach((l: any, i: number) => {
-        const street = (l.address?.split(',')[1]?.trim() || l.address || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const nameEscaped = escapeHtml(formatLocation(l, "in-city"));
-        const maps = l.googleMapsLink ? ` (<a href="${escapeHtml(l.googleMapsLink).replace(/"/g, "&quot;")}">на мапі</a>)` : "";
-        text += `${i + 1}. <b>${nameEscaped}</b>\n<i>${street}</i>${maps}\n\n`;
-    });
+    const text = buildLocationSelectionText(
+        CANDIDATE_TEXTS["candidate-ask-location-multiple"],
+        locations,
+        (l) => formatLocation(l, "in-city"),
+    );
 
     return { text, kb: "candidate-location" };
 }
